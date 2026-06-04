@@ -1,0 +1,28 @@
+# Env files
+.env
+.env.local
+guest-app/.env
+admin-app/.env
+api/.env
+
+# Build outputs
+dist/
+node_modules/
+.vercel/
+
+# Legacy (renamed to project/)
+.project/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
