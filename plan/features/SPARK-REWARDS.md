@@ -126,20 +126,30 @@ These are documented here for awareness. Define before starting Phase 2:
 
 ## Edge Cases & States
 
-- [ ] Guest books anonymously then registers — link booking by email match
-- [ ] Member books while logged in but uses different email — no auto-link; manual link by front desk
-- [ ] Google account email differs from booking email — prompt to confirm linkage
-- [ ] Member account disabled — redirect to contact page with explanation
+- [ ] **Guest books anonymously then registers with same email** — on registration, query `bookings` where `guestEmail == member.email`, update all matching bookings with `memberId`; all previous stays immediately appear in My Stays
+- [ ] Member books while logged in but uses different email — no auto-link; manual link by front desk from Member detail drawer
+- [ ] Google account email differs from booking email — after sign-in, prompt: "We found bookings under a different email. Would you like to link them?" with the booking email pre-filled — guest confirms to trigger the email-match link
+- [ ] Member account disabled — redirect to `/contact` with message: "Your account has been disabled. Please contact us."
 - [ ] Delete account request — delete `members/{uid}`, anonymize linked bookings (remove personal data), revoke Firebase Auth — per RA 10173 right to erasure
-- [ ] Duplicate email: guest tries to register with email already used by another member — Firebase Auth handles, show friendly error
+
+**Account linking — email conflict between Google and email/password:**
+- [ ] Guest signs up with email/password first, then later tries Google Sign-In with the same email → Firebase throws `auth/account-exists-with-different-credential`
+- [ ] On this error: show message "An account with this email already exists. Sign in with your password first, then you can link Google to your account."
+- [ ] After successful email/password sign-in: show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider
+- [ ] Once linked: guest can sign in with either Google or email/password going forward
+- [ ] Guest signs up with Google first, then tries email/password sign-in with the same email → Firebase throws `auth/account-exists-with-different-credential`
+- [ ] On this error: show message "This email is linked to a Google account. Sign in with Google instead." with a Google Sign-In button
+- [ ] All booking linkage by email applies regardless of auth provider — the email is the identity anchor, not the provider
 
 ## Manual QA
 
 - [ ] Google Sign-In creates member account and profile
 - [ ] Email/password signup creates member account
 - [ ] Post-booking registration prompt appears on Step 4 for non-members
-- [ ] Past bookings linked to member account on registration (by email)
+- [ ] Past bookings linked to member account on registration (by email) — My Stays shows previous anonymous bookings immediately after sign-up
 - [ ] My Stays shows correct booking history
+- [ ] Email/password account + Google Sign-In same email → account linking prompt shown, both providers work after linking
+- [ ] Google account + email/password same email → directed to Google Sign-In with friendly message
 - [ ] My Rewards shows points balance (0 for new members)
 - [ ] Early check-in request reaches front desk
 - [ ] Admin member list shows all members with correct data
