@@ -22,5 +22,6 @@
       "@spark-inn/shared": ["../shared/index.ts"]
     }
   },
-  "include": ["src", "../hotel.config.ts", "../shared"]
+  "include": ["src", "../hotel.config.ts", "../shared"],
+  "exclude": ["../shared/__tests__"]
 }
