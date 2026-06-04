@@ -5,7 +5,9 @@
 
 ## Overview
 
-"Spark Essentials" is a mini in-room shop accessible from the guest intercom page. Guests scan the room QR code, browse available items, and place an order for delivery to their room. Only accessible via QR — not from the public website directly. Orders are linked to the guest's room and active booking.
+"Spark Essentials" is the Spark Inn deployment name for the in-room shop feature. The display name shown to guests in the UI is always `config.storeName` — never hardcoded. For Spark Inn: "Spark Essentials". For other hotel deployments: whatever is set in their `hotel.config.ts`.
+
+The store is accessible from the guest intercom page via QR scan. Guests browse available items and place orders for delivery to their room. Only accessible via QR — not from the public website directly. Orders are linked to the guest's room and active booking.
 
 ---
 

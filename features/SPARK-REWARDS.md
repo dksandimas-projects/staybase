@@ -41,7 +41,7 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 - [ ] Homepage CTA — "Join Spark Rewards" link in navbar and/or footer
 
 ### Data & Logic Checklist
-- [ ] On registration: create `members/{uid}` with `isMember: true`, `memberSince: now`, `rewardsPoints: 0`, `tier: "standard"` (placeholder), `memberNumber: "SR-XXXXX"` (generated server-side via `/api/members/register` — sequential, zero-padded 5 digits)
+- [ ] On registration: create `members/{uid}` with `isMember: true`, `memberSince: now`, `rewardsPoints: 0`, `tier: "standard"` (placeholder), `memberNumber: "{config.memberNumberPrefix}-XXXXX"` (generated server-side via `/api/members/register` — sequential, zero-padded 5 digits)
 - [ ] Link past bookings by email: on registration, query `bookings` where `guestEmail == member.email` — update those bookings with `memberId` field
 - [ ] If guest registered post-booking: link the just-completed booking to their new member account
 
@@ -56,7 +56,7 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 - [ ] **Spark Rewards Card** — card-style display showing:
   - [ ] Hotel logo
   - [ ] Member full name
-  - [ ] Rewards number: `SR-XXXXX` (zero-padded 5 digits, e.g. `SR-00042`)
+  - [ ] Rewards number: `{config.memberNumberPrefix}-XXXXX` (zero-padded 5 digits, e.g. `SR-00042` for Spark Inn)
   - [ ] Member since date
   - [ ] Current points balance + tier label (Phase 1: "Standard Member")
   - [ ] Card design uses `config.colors.primary` as accent — branded per hotel

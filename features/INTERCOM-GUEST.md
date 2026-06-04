@@ -22,7 +22,7 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 - [ ] Unread indicator — subtle pulse when new front desk message arrives
 - [ ] Mobile-first layout — full-screen chat on mobile (375px)
 - [ ] "spark inn" branding in chat header — warm, not clinical
-- [ ] "Shop" tab alongside chat — switches to Spark Essentials store panel (see `features/STORE-GUEST.md`)
+- [ ] "Shop" tab alongside chat — tab label is `config.storeName`; switches to store panel (see `features/STORE-GUEST.md`)
 - [ ] Store tab hidden if `settings/storeConfig.isEnabled` is false
 - [ ] **"Call Front Desk" button** — shown in chat header; initiates a WebRTC voice call to the front desk
   - [ ] Button label: "Call Front Desk" with a phone icon

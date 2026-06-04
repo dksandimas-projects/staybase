@@ -57,7 +57,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [ ] `guestIdPhotoUrl` stored on booking document — viewable only by staff/admin
   - [ ] Stored at `bookings/{bookingId}/guest-id/{filename}` in Firebase Storage (staff-only read rule)
 - [ ] **Spark Rewards — Points Redemption panel** — shown in drawer when booking status is `confirmed`, `checked-in`, or `checked-out` AND `booking.memberId` is set
-  - [ ] Member info row: member name, `memberNumber` (SR-XXXXX), current points balance
+  - [ ] Member info row: member name, `memberNumber` (e.g. `SR-00042` — prefix from `config.memberNumberPrefix`), current points balance
   - [ ] If `booking.pointsRedeemed > 0` — show read-only summary: "X pts redeemed = ₱Y deducted" with an undo button (admin only)
   - [ ] If no points redeemed yet — show "Redeem Points" form:
     - [ ] Points input — number field labeled "Points to redeem"

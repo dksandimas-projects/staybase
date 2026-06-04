@@ -50,7 +50,9 @@ HotelConfig {
   brandPromise: string
 
   // Booking
-  bookingRefPrefix: string  // e.g. "SI" → generates "SI-20260601-001"
+  bookingRefPrefix: string        // e.g. "SI" → generates "SI-20260601-001"
+  memberNumberPrefix: string      // e.g. "SR" → generates "SR-00042"
+  storeName: string               // e.g. "Spark Essentials" — shown in store UI, emails, receipts
 
   // Colors
   colors: {
@@ -150,6 +152,8 @@ tagline: "Where comfort is felt, care is intentional, and every stay is consiste
 brandPromise: "Peaceful, consistent stay where guests feel warmth of genuine, intentional hospitality."
 
 bookingRefPrefix: "SI"
+memberNumberPrefix: "SR"
+storeName: "Spark Essentials"
 
 colors:
   primary: "#EA8A1A"
@@ -229,6 +233,8 @@ supportEmail: "sparkinn.reservations@gmail.com"
 - **Currency** — all price displays use `config.currencySymbol` + `config.locale` for number formatting
 - **Dates** — all date displays use `config.dateFormat` and `config.timezone`
 - **Booking ref** — format is `{bookingRefPrefix}-{YYYYMMDD}-{NNN}`
+- **Member number** — format is `{memberNumberPrefix}-{NNNNN}` (zero-padded 5 digits)
+- **Store name** — all store UI labels, the intercom "Shop" tab title, emails, and receipts use `config.storeName`
 - **Page titles** — `<title>{pageTitle} | {pageName}</title>` on every page
 - **Open Graph** — `og:title`, `og:description`, `og:image` populated from config
 - **Analytics** — GA4 script injected only if `analyticsId` is non-empty
@@ -303,6 +309,8 @@ Create `settings/hotelConfig`, `settings/websiteContent` (with privacy policy, c
 - [ ] Google Analytics ID (optional)
 - [ ] WhatsApp number (optional)
 - [ ] Booking reference prefix (2–4 letters)
+- [ ] Member number prefix (2–4 letters, e.g. "SR")
+- [ ] Store name (e.g. "Spark Essentials", "Blue Sky Store")
 
 ---
 

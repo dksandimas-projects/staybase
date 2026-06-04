@@ -5,7 +5,7 @@
 
 ## Overview
 
-The admin-side of Spark Essentials. Front desk staff manage the product catalog (add, edit, remove items, set stock), view and process orders, update order statuses, and handle store-related billing at checkout. Reports cover sales, revenue, and stock. Accessible to both Front Desk and Admin roles.
+The admin-side of the in-room store feature (named "Spark Essentials" for Spark Inn — display name is always `config.storeName`). Front desk staff manage the product catalog, view and process orders, update order statuses, and handle store billing at checkout. Reports cover sales, revenue, and stock. Accessible to both Front Desk and Admin roles.
 
 ---
 

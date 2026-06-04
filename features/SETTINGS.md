@@ -134,7 +134,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 ---
 
-### 10. Store (Spark Essentials)
+### 10. Store (`config.storeName` — "Spark Essentials" for Spark Inn)
 
 - [ ] Enable/disable store globally — toggle
 - [ ] Product catalog management — see `features/STORE-MANAGEMENT.md §Catalog Management` for full checklist
