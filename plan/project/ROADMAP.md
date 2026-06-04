@@ -33,7 +33,7 @@
 
 ### Brand Config
 - ✅ `hotel.config.ts` created with full Spark Inn config
-- 🔄 `public/brand/` folders created in both apps with Spark Inn assets
+- ✅ `public/brand/` folders created in both apps with Spark Inn assets
 - ✅ Tailwind config reads colors + fonts from `hotel.config.ts`
 - ✅ Apollo font loading via `@font-face` in both `index.html` files
 - ✅ Inter loaded via Google Fonts in both `index.html` files
