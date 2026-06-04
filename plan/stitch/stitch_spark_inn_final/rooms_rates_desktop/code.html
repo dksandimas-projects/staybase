@@ -1,0 +1,414 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Rooms &amp; Rates - spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Apollo:wght@400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                            "primary-fixed": "#ffdcc0",
+                            "status-amber-bg": "#FFFBEB",
+                            "secondary": "#575e70",
+                            "on-tertiary-fixed": "#1d1b19",
+                            "on-secondary-fixed-variant": "#404758",
+                            "primary-hover": "#C4720E",
+                            "secondary-fixed-dim": "#c0c6db",
+                            "on-surface": "#1b1b1b",
+                            "inverse-primary": "#ffb876",
+                            "surface-tint": "#8d4f00",
+                            "on-primary-fixed-variant": "#6b3b00",
+                            "status-purple-bg": "#F5F3FF",
+                            "surface-bright": "#f9f9f9",
+                            "status-gray-bg": "#F3F4F6",
+                            "page-bg": "#F9FAFB",
+                            "background": "#f9f9f9",
+                            "primary": "#8d4f00",
+                            "on-primary-container": "#562e00",
+                            "status-amber-text": "#D97706",
+                            "on-background": "#1b1b1b",
+                            "secondary-container": "#d9dff5",
+                            "status-gray-text": "#6B7280",
+                            "surface-container-high": "#e8e8e8",
+                            "status-red-text": "#DC2626",
+                            "error": "#ba1a1a",
+                            "tertiary": "#605e5a",
+                            "outline": "#877363",
+                            "on-surface-variant": "#544335",
+                            "surface-dim": "#dadada",
+                            "on-secondary-container": "#5c6274",
+                            "on-tertiary": "#ffffff",
+                            "status-blue-text": "#2563EB",
+                            "surface": "#f9f9f9",
+                            "on-primary": "#ffffff",
+                            "inverse-on-surface": "#f1f1f1",
+                            "border-standard": "#E5E7EB",
+                            "tertiary-fixed-dim": "#cac6c1",
+                            "status-red-bg": "#FEF2F2",
+                            "on-error": "#ffffff",
+                            "tertiary-container": "#a4a19d",
+                            "primary-light": "#FEF3E2",
+                            "surface-variant": "#e2e2e2",
+                            "primary-fixed-dim": "#ffb876",
+                            "error-container": "#ffdad6",
+                            "status-green-bg": "#F0FDF4",
+                            "on-error-container": "#93000a",
+                            "inverse-surface": "#303030",
+                            "outline-variant": "#dac2af",
+                            "on-secondary": "#ffffff",
+                            "on-tertiary-container": "#393835",
+                            "surface-container-highest": "#e2e2e2",
+                            "surface-container": "#eeeeee",
+                            "tertiary-fixed": "#e6e2dd",
+                            "status-purple-text": "#7C3AED",
+                            "on-secondary-fixed": "#141b2b",
+                            "on-tertiary-fixed-variant": "#484643",
+                            "text-secondary": "#4B5563",
+                            "status-green-text": "#16A34A",
+                            "status-blue-bg": "#EFF6FF",
+                            "surface-container-lowest": "#ffffff",
+                            "surface-container-low": "#f3f3f3",
+                            "on-primary-fixed": "#2d1600",
+                            "primary-container": "#ea8a1a",
+                            "secondary-fixed": "#dce2f7"
+                    },
+                    "borderRadius": {
+                            "DEFAULT": "0.25rem",
+                            "lg": "0.5rem",
+                            "xl": "0.75rem",
+                            "full": "9999px"
+                    },
+                    "spacing": {
+                            "touch-target-min": "44px",
+                            "max-width-booking": "600px",
+                            "max-width-auth": "460px",
+                            "sidebar-width": "240px",
+                            "drawer-width": "480px",
+                            "unit": "8px"
+                    },
+                    "fontFamily": {
+                            "body-lg": [
+                                    "Inter"
+                            ],
+                            "h2": [
+                                    "Apollo"
+                            ],
+                            "label-md": [
+                                    "Inter"
+                            ],
+                            "h1-mobile": [
+                                    "Apollo"
+                            ],
+                            "label-sm": [
+                                    "Inter"
+                            ],
+                            "display-hero": [
+                                    "Apollo"
+                            ],
+                            "h4": [
+                                    "Inter"
+                            ],
+                            "h1": [
+                                    "Apollo"
+                            ],
+                            "display-hero-mobile": [
+                                    "Apollo"
+                            ],
+                            "body-sm": [
+                                    "Inter"
+                            ],
+                            "h3": [
+                                    "Inter"
+                            ]
+                    },
+                    "fontSize": {
+                            "body-lg": [
+                                    "16px",
+                                    {
+                                            "lineHeight": "1.6",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "h2": [
+                                    "32px",
+                                    {
+                                            "lineHeight": "1.3",
+                                            "letterSpacing": "0.05em",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "label-md": [
+                                    "13px",
+                                    {
+                                            "lineHeight": "1.2",
+                                            "fontWeight": "500"
+                                    }
+                            ],
+                            "h1-mobile": [
+                                    "28px",
+                                    {
+                                            "lineHeight": "1.3",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "label-sm": [
+                                    "12px",
+                                    {
+                                            "lineHeight": "1.2",
+                                            "fontWeight": "500"
+                                    }
+                            ],
+                            "display-hero": [
+                                    "72px",
+                                    {
+                                            "lineHeight": "1.1",
+                                            "letterSpacing": "0.05em",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "h4": [
+                                    "18px",
+                                    {
+                                            "lineHeight": "1.4",
+                                            "fontWeight": "600"
+                                    }
+                            ],
+                            "h1": [
+                                    "40px",
+                                    {
+                                            "lineHeight": "1.2",
+                                            "letterSpacing": "0.05em",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "display-hero-mobile": [
+                                    "44px",
+                                    {
+                                            "lineHeight": "1.2",
+                                            "letterSpacing": "0.05em",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "body-sm": [
+                                    "14px",
+                                    {
+                                            "lineHeight": "1.5",
+                                            "fontWeight": "400"
+                                    }
+                            ],
+                            "h3": [
+                                    "24px",
+                                    {
+                                            "lineHeight": "1.4",
+                                            "fontWeight": "600"
+                                    }
+                            ]
+                    }
+            },
+                },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .apollo-font { font-family: 'Apollo', serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex flex-col">
+<!-- TopAppBar -->
+<header class="bg-surface-container-lowest/80 backdrop-blur-md dark:bg-inverse-surface/80 text-primary dark:text-inverse-primary fixed top-0 w-full z-50 bg-transparent">
+<div class="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto w-full">
+<div class="flex items-center gap-4">
+<button aria-label="Menu" class="hover:text-primary-hover transition-colors duration-200 Active: opacity-80 scale-95 transition-all text-on-surface-variant dark:text-on-surface-variant p-2 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">menu</span>
+</button>
+<div class="font-h3 text-h3 lowercase tracking-tighter text-on-background dark:text-inverse-on-surface">
+                    spark inn
+                </div>
+</div>
+<div class="hidden md:flex gap-8 items-center font-body-sm text-body-sm">
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Home</a>
+<a class="text-primary font-bold hover:text-primary-hover transition-colors duration-200" href="#">Rooms</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Experience</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Contact</a>
+</div>
+<div>
+<button class="bg-primary-container text-on-background hover:bg-primary-hover hover:text-white px-6 h-touch-target-min rounded-DEFAULT font-label-md text-label-md transition-colors duration-200 flex items-center justify-center">
+                    Book Now
+                </button>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-grow pt-24 pb-16 px-6 max-w-7xl mx-auto w-full flex flex-col md:flex-row gap-8">
+<!-- Sidebar Filters -->
+<aside class="w-full md:w-sidebar-width flex-shrink-0">
+<div class="sticky top-28 bg-surface-container-lowest rounded-lg p-6 shadow-sm border border-border-standard">
+<h2 class="font-h4 text-h4 text-on-surface mb-6">Filter By</h2>
+<!-- Dates -->
+<div class="mb-6">
+<label class="block font-label-sm text-label-sm text-text-secondary mb-2 uppercase tracking-wide">Dates</label>
+<div class="flex gap-2">
+<div class="relative flex-1">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-sm">calendar_today</span>
+<input class="w-full pl-9 pr-3 h-10 rounded-DEFAULT border-border-standard focus:border-primary-container focus:ring-1 focus:ring-primary-container text-body-sm bg-surface-bright" placeholder="Check-in" type="text">
+</div>
+<div class="relative flex-1">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-sm">calendar_today</span>
+<input class="w-full pl-9 pr-3 h-10 rounded-DEFAULT border-border-standard focus:border-primary-container focus:ring-1 focus:ring-primary-container text-body-sm bg-surface-bright" placeholder="Check-out" type="text">
+</div>
+</div>
+</div>
+<!-- Guests -->
+<div class="mb-6">
+<label class="block font-label-sm text-label-sm text-text-secondary mb-2 uppercase tracking-wide">Guests</label>
+<div class="flex items-center justify-between border border-border-standard rounded-DEFAULT bg-surface-bright p-1">
+<button class="w-8 h-8 flex items-center justify-center text-text-secondary hover:bg-surface-variant rounded-sm transition-colors"><span class="material-symbols-outlined text-sm">remove</span></button>
+<span class="font-body-sm text-body-sm text-on-surface">2 Adults</span>
+<button class="w-8 h-8 flex items-center justify-center text-text-secondary hover:bg-surface-variant rounded-sm transition-colors"><span class="material-symbols-outlined text-sm">add</span></button>
+</div>
+</div>
+<!-- Room Type -->
+<div class="mb-8">
+<label class="block font-label-sm text-label-sm text-text-secondary mb-3 uppercase tracking-wide">Room Type</label>
+<div class="space-y-3">
+<label class="flex items-center gap-3 cursor-pointer group">
+<div class="w-5 h-5 rounded border border-border-standard bg-surface-bright flex items-center justify-center group-hover:border-primary-container transition-colors">
+<span class="material-symbols-outlined text-xs text-transparent" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface">All Types</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<div class="w-5 h-5 rounded border-2 border-primary-container bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-xs text-white" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface">Deluxe Suites</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<div class="w-5 h-5 rounded border border-border-standard bg-surface-bright flex items-center justify-center group-hover:border-primary-container transition-colors">
+<span class="material-symbols-outlined text-xs text-transparent" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<span class="font-body-sm text-body-sm text-on-surface">Villas</span>
+</label>
+</div>
+</div>
+<button class="w-full bg-surface-variant text-on-surface hover:bg-surface-dim h-touch-target-min rounded-DEFAULT font-label-md text-label-md transition-colors duration-200">
+                    Reset Filters
+                </button>
+</div>
+</aside>
+<!-- Room Listing Canvas -->
+<section class="flex-grow">
+<h1 class="font-h1 text-h1 text-on-surface mb-2">Rooms &amp; Rates</h1>
+<p class="font-body-lg text-body-lg text-text-secondary mb-8">Discover your perfect sanctuary in Bohol.</p>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+<!-- Room Card 1 -->
+<article class="bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-border-standard group flex flex-col">
+<div class="relative h-64 overflow-hidden">
+<img alt="Deluxe Ocean Suite" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" data-alt="A luxurious hotel suite bedroom bathed in warm, soft natural light streaming through large windows. The room features a king-sized bed with pristine white linens and subtle earthy-toned throw pillows. The design aesthetic is warm minimal, reflecting a high-end boutique resort in Bohol with natural wood accents and a serene, calming atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAlYxteTw0OgysmK9fzZRQgE2_6XZ5nKAwP_mO-BTKiO4TGP_73Vqxv6s008fMfPlcpWdYSS7XxQjMD9zD0cwmed-ekMkStVT6QHnigTrKykpB3e8_RxywR2-RH4qhixnSq2QoakLz-wS05MfreYJ4dKWJ6wxVzsTJafOkSbmJVH3BA4VASIE1vRqn8DMo_oDcRLi2LRVT29oOhtYxQZT7C6eV88UrJRjsrqjjoWjD5JPufE2Y48dT_yXP9KxONoHkkpfc3RWR425b-">
+<div class="absolute top-4 left-4">
+<span class="bg-status-green-bg text-status-green-text font-label-sm text-label-sm px-3 py-1.5 rounded-full inline-flex items-center gap-1 border border-status-green-text/20 backdrop-blur-sm">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                                Available
+                            </span>
+</div>
+</div>
+<div class="p-6 flex flex-col flex-grow">
+<div class="flex justify-between items-start mb-4">
+<div>
+<h3 class="font-h3 text-h3 text-on-surface mb-1">Deluxe Ocean Suite</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Spacious suite with panoramic views of the sea, featuring a private balcony and a deep soaking tub.</p>
+</div>
+</div>
+<div class="flex gap-4 mb-6 py-4 border-y border-surface-variant">
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">king_bed</span>
+<span class="font-label-sm text-label-sm">1 King</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">group</span>
+<span class="font-label-sm text-label-sm">Up to 2</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">wifi</span>
+<span class="font-label-sm text-label-sm">Free Wi-Fi</span>
+</div>
+</div>
+<div class="mt-auto flex items-center justify-between">
+<div>
+<div class="font-label-sm text-label-sm text-text-secondary line-through">₱12,500</div>
+<div class="font-h4 text-h4 text-on-surface">₱10,000 <span class="font-body-sm text-body-sm text-text-secondary font-normal">/ night</span></div>
+</div>
+<button class="bg-primary-container text-on-background hover:bg-primary-hover hover:text-white px-6 h-touch-target-min rounded-DEFAULT font-label-md text-label-md transition-colors duration-200">
+                                Book Now
+                            </button>
+</div>
+</div>
+</article>
+<!-- Room Card 2 -->
+<article class="bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-border-standard group flex flex-col">
+<div class="relative h-64 overflow-hidden">
+<img alt="Garden Villa" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" data-alt="An elegant, modern hotel bathroom featuring a large freestanding white soaking tub as the centerpiece. The walls are covered in neutral-toned textured stone, creating a spa-like sanctuary. Soft, diffused lighting highlights the clean lines and warm minimalist aesthetic of this premium boutique resort setting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCJNP3jIR--zEzJ-jIVSLxuU0974o8T8rLGSE95lSPuatymPeDKUa24MU9JpzLwCGbGyN0XBizgmMXrjEys2nInoO9QCiFmPrpQI5zQzcmwKcopUMCtgw__JvzYIjvThkB0KuHuQNfS73rXBzf6mOHJCwTfkIJpG2UjFWFJ4onxto6uBw5YwOEufDxAKE9ufqX5MESm2S-3TwxE-YTsgcsGzYOHiE58ivUv1RgVsPOY2hB_NTbCX8UOBJPlAh0AJIKlNrEGq_rV6-lD">
+<div class="absolute top-4 left-4">
+<span class="bg-status-amber-bg text-status-amber-text font-label-sm text-label-sm px-3 py-1.5 rounded-full inline-flex items-center gap-1 border border-status-amber-text/20 backdrop-blur-sm">
+<span class="material-symbols-outlined text-[14px]">schedule</span>
+                                2 Left
+                            </span>
+</div>
+</div>
+<div class="p-6 flex flex-col flex-grow">
+<div class="flex justify-between items-start mb-4">
+<div>
+<h3 class="font-h3 text-h3 text-on-surface mb-1">Garden Villa</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">A secluded villa nestled in tropical foliage, offering ultimate privacy and an outdoor rain shower.</p>
+</div>
+</div>
+<div class="flex gap-4 mb-6 py-4 border-y border-surface-variant">
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">king_bed</span>
+<span class="font-label-sm text-label-sm">1 King</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">group</span>
+<span class="font-label-sm text-label-sm">Up to 3</span>
+</div>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px]">pool</span>
+<span class="font-label-sm text-label-sm">Plunge Pool</span>
+</div>
+</div>
+<div class="mt-auto flex items-center justify-between">
+<div>
+<div class="font-h4 text-h4 text-on-surface">₱15,000 <span class="font-body-sm text-body-sm text-text-secondary font-normal">/ night</span></div>
+</div>
+<button class="bg-primary-container text-on-background hover:bg-primary-hover hover:text-white px-6 h-touch-target-min rounded-DEFAULT font-label-md text-label-md transition-colors duration-200">
+                                Book Now
+                            </button>
+</div>
+</div>
+</article>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="bg-inverse-surface dark:bg-surface-container-lowest text-white dark:text-on-surface w-full relative bottom-0 bg-inverse-surface mt-auto">
+<div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 max-w-7xl mx-auto">
+<div class="font-h2 text-h2 lowercase text-white mb-6 md:mb-0">
+                spark inn
+            </div>
+<nav class="flex flex-wrap justify-center gap-6 font-body-sm text-body-sm">
+<a class="text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Rooms</a>
+<a class="text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">About Us</a>
+<a class="text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Contact</a>
+<a class="text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Privacy Policy</a>
+</nav>
+<div class="font-body-sm text-body-sm text-tertiary-fixed-dim mt-6 md:mt-0">
+                © 2024 spark inn. All rights reserved.
+            </div>
+</div>
+</footer>
+</body></html>

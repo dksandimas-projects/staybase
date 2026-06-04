@@ -1,0 +1,250 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+<title>spark inn - Select Room</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Georgia'), local('Times New Roman'), serif; /* Fallback since Apollo isn't a standard Google font */
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary": "#605e5a",
+                        "surface-tint": "#8d4f00",
+                        "status-blue-text": "#2563EB",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "surface-bright": "#f9f9f9",
+                        "secondary-container": "#d9dff5",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "on-error": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "primary-hover": "#C4720E",
+                        "status-green-bg": "#F0FDF4",
+                        "on-primary-fixed": "#2d1600",
+                        "primary": "#8d4f00",
+                        "status-blue-bg": "#EFF6FF",
+                        "status-purple-text": "#7C3AED",
+                        "inverse-on-surface": "#f1f1f1",
+                        "background": "#f9f9f9",
+                        "text-secondary": "#4B5563",
+                        "error-container": "#ffdad6",
+                        "status-red-text": "#DC2626",
+                        "error": "#ba1a1a",
+                        "inverse-primary": "#ffb876",
+                        "page-bg": "#F9FAFB",
+                        "surface-container-low": "#f3f3f3",
+                        "primary-fixed": "#ffdcc0",
+                        "surface": "#f9f9f9",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "outline": "#877363",
+                        "on-surface": "#1b1b1b",
+                        "primary-container": "#ea8a1a",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-background": "#1b1b1b",
+                        "border-standard": "#E5E7EB",
+                        "surface-container": "#eeeeee",
+                        "surface-dim": "#dadada",
+                        "on-surface-variant": "#544335",
+                        "surface-container-highest": "#e2e2e2",
+                        "on-secondary-container": "#5c6274",
+                        "status-red-bg": "#FEF2F2",
+                        "status-amber-bg": "#FFFBEB",
+                        "secondary": "#575e70",
+                        "secondary-fixed": "#dce2f7",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-tertiary": "#ffffff",
+                        "outline-variant": "#dac2af",
+                        "on-secondary-fixed": "#141b2b",
+                        "status-green-text": "#16A34A",
+                        "status-amber-text": "#D97706",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-gray-bg": "#F3F4F6",
+                        "surface-container-high": "#e8e8e8",
+                        "tertiary-fixed": "#e6e2dd",
+                        "inverse-surface": "#303030",
+                        "on-tertiary-container": "#393835",
+                        "on-primary-container": "#562e00",
+                        "status-purple-bg": "#F5F3FF",
+                        "on-error-container": "#93000a",
+                        "tertiary-container": "#a4a19d",
+                        "surface-variant": "#e2e2e2",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "primary-light": "#FEF3E2",
+                        "status-gray-text": "#6B7280"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "max-width-booking": "600px",
+                        "max-width-auth": "460px",
+                        "sidebar-width": "240px",
+                        "drawer-width": "480px",
+                        "touch-target-min": "44px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Inter"],
+                        "h2": ["Apollo"],
+                        "label-md": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "h1": ["Apollo"],
+                        "h3": ["Inter"],
+                        "h4": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "display-hero": ["Apollo"],
+                        "display-hero-mobile": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-lg text-body-lg antialiased pb-24 md:pb-0">
+<!-- Top Navigation for Linear Flow -->
+<header class="bg-surface-container-lowest/90 backdrop-blur-md sticky top-0 z-50 px-4 py-4 flex items-center justify-between shadow-sm">
+<button aria-label="Go back" class="h-touch-target-min w-touch-target-min flex items-center justify-center rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-on-surface" data-icon="arrow_back">arrow_back</span>
+</button>
+<div class="font-h3 text-h3 lowercase tracking-tighter text-on-background">spark inn</div>
+<div class="w-touch-target-min"></div> <!-- Spacer for centering -->
+</header>
+<main class="max-w-max-width-booking mx-auto px-4 pt-6 pb-8">
+<!-- Step Indicator -->
+<div class="mb-8">
+<div class="flex items-center justify-between mb-2">
+<span class="font-label-md text-label-md text-primary-container">Step 1 of 4</span>
+<span class="font-label-sm text-label-sm text-text-secondary">Select Room</span>
+</div>
+<div class="flex gap-2 w-full h-1.5 rounded-full overflow-hidden bg-surface-container">
+<div class="w-1/4 h-full bg-primary-container rounded-full"></div>
+<div class="w-1/4 h-full"></div>
+<div class="w-1/4 h-full"></div>
+<div class="w-1/4 h-full"></div>
+</div>
+</div>
+<!-- Sticky Date/Guest Summary (simulated sticky behavior within booking flow) -->
+<section class="bg-surface-container-lowest rounded-xl p-4 shadow-sm border border-border-standard mb-8 flex flex-col gap-4">
+<h1 class="font-h1-mobile text-h1-mobile text-on-background">Your Stay</h1>
+<div class="flex flex-col gap-3">
+<div class="flex justify-between items-center bg-surface p-3 rounded-lg border border-border-standard">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-text-secondary" data-icon="calendar_month">calendar_month</span>
+<div>
+<div class="font-label-md text-label-md text-on-surface">Oct 12 - Oct 15, 2024</div>
+<div class="font-body-sm text-body-sm text-text-secondary">3 Nights</div>
+</div>
+</div>
+<button aria-label="Edit dates" class="font-label-sm text-label-sm text-primary underline">Edit</button>
+</div>
+<div class="flex justify-between items-center bg-surface p-3 rounded-lg border border-border-standard">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-text-secondary" data-icon="group">group</span>
+<div class="font-label-md text-label-md text-on-surface">2 Adults, 0 Children</div>
+</div>
+<button aria-label="Edit guests" class="font-label-sm text-label-sm text-primary underline">Edit</button>
+</div>
+</div>
+</section>
+<!-- Room Selection -->
+<h2 class="font-h2 text-h2 mb-4 text-on-background">Available Rooms</h2>
+<div class="flex flex-col gap-6">
+<!-- Room Card 1 -->
+<article class="bg-surface-container-lowest rounded-[12px] shadow-sm border border-border-standard overflow-hidden flex flex-col">
+<div class="relative h-48 w-full">
+<img alt="Deluxe Queen Room" class="w-full h-full object-cover" data-alt="A serene, minimalist boutique hotel room featuring a queen-sized bed with crisp white linens. Sunlight streams through large windows, highlighting warm wood tones and a soft, neutral palette of beiges and creams. The atmosphere is tranquil and luxurious, aligned with a warm minimal aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCKpGScOXnivIhSB0M9CcKlO9wmLCthcShYTeXbisClsrmQheVgxSrOHCOxKRuX_1Ez6oA2L0bnfOwbKt5CFRctsiI-xliYHs8iFe8EmyMOig62LmnVqNUHOmKoe6SdDFrugWlNWymGdlm6ZbtM2iD8B22JX9exFIlSDJWJh478T3RNeo1s2ZEteOy7RcezIE4an-P-KGfggGWrjFVIw3n5qaqC1A0MWfBzWKIE3XuHSn5X_jE5n7QZeQScjibi4l2uzLpegLnQtjk5">
+<div class="absolute top-3 left-3 bg-surface-container-lowest/90 backdrop-blur px-3 py-1 rounded-full font-label-sm text-label-sm text-on-surface shadow-sm">
+                        Popular Choice
+                    </div>
+</div>
+<div class="p-4 flex flex-col gap-4">
+<div>
+<h3 class="font-h3 text-h3 text-on-background mb-1">Deluxe Queen Suite</h3>
+<p class="font-body-sm text-body-sm text-text-secondary flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]" data-icon="square_foot">square_foot</span> 32 sqm
+                            <span class="mx-1">•</span>
+<span class="material-symbols-outlined text-[16px]" data-icon="bed">bed</span> 1 Queen Bed
+                        </p>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">
+                        A peaceful retreat designed for comfort, featuring natural light, premium amenities, and serene minimal decor.
+                    </p>
+<div class="border-t border-border-standard pt-4 mt-2">
+<div class="flex flex-col gap-3">
+<!-- Rate Option 1 -->
+<label class="flex items-start gap-3 p-3 rounded-lg border-2 border-primary-container bg-primary-light/30 cursor-pointer transition-colors relative">
+<input checked="" class="mt-1 h-5 w-5 text-primary-container border-border-standard focus:ring-primary-container" name="room1_rate" type="radio" value="room_only">
+<div class="flex-1">
+<div class="flex justify-between items-center mb-1">
+<span class="font-label-md text-label-md text-on-surface">Room Only</span>
+<span class="font-h4 text-h4 text-on-surface">$120 <span class="font-body-sm text-body-sm font-normal text-text-secondary">/night</span></span>
+</div>
+<div class="font-body-sm text-body-sm text-text-secondary">Total: $360 for 3 nights</div>
+</div>
+</label>
+<!-- Rate Option 2 -->
+<label class="flex items-start gap-3 p-3 rounded-lg border border-border-standard hover:border-outline-variant cursor-pointer transition-colors">
+<input class="mt-1 h-5 w-5 text-primary-container border-border-standard focus:ring-primary-container" name="room1_rate" type="radio" value="breakfast">
+<div class="flex-1">
+<div class="flex justify-between items-center mb-1">
+<span class="font-label-md text-label-md text-on-surface">Room + Breakfast</span>
+<span class="font-h4 text-h4 text-on-surface">$145 <span class="font-body-sm text-body-sm font-normal text-text-secondary">/night</span></span>
+</div>
+<div class="font-body-sm text-body-sm text-status-green-text flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]" data-icon="check">check</span> Includes daily local breakfast
+                                    </div>
+</div>
+</label>
+</div>
+</div>
+</div>
+</article>
+</div>
+</main>
+<!-- Sticky Bottom CTA -->
+<div class="fixed bottom-0 left-0 w-full bg-surface-container-lowest border-t border-border-standard p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-40">
+<div class="max-w-max-width-booking mx-auto flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm text-text-secondary">Total (3 Nights)</span>
+<span class="font-h3 text-h3 text-on-background">$360</span>
+</div>
+<button class="bg-primary-container hover:bg-primary-hover text-on-primary font-label-md text-label-md px-6 py-3 h-touch-target-min rounded-[8px] transition-colors flex items-center justify-center gap-2">
+                Continue to Step 2
+                <span class="material-symbols-outlined text-[18px]" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+</body></html>

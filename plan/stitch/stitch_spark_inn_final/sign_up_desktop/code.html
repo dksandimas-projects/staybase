@@ -1,0 +1,254 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Placeholder for specific brand font */
+        }
+        
+        body {
+            background-color: #FDF8F3; /* Specifically requested warm white */
+            font-family: 'Inter', sans-serif;
+        }
+
+        .font-apollo { font-family: 'Apollo', serif; }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(229, 231, 235, 0.5);
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "primary-fixed": "#ffdcc0",
+                      "primary": "#8d4f00",
+                      "status-blue-bg": "#EFF6FF",
+                      "secondary-container": "#d9dff5",
+                      "inverse-primary": "#ffb876",
+                      "surface-variant": "#e2e2e2",
+                      "outline": "#877363",
+                      "secondary-fixed": "#dce2f7",
+                      "primary-light": "#FEF3E2",
+                      "on-tertiary": "#ffffff",
+                      "tertiary": "#605e5a",
+                      "status-amber-text": "#D97706",
+                      "on-primary-fixed": "#2d1600",
+                      "error-container": "#ffdad6",
+                      "primary-hover": "#C4720E",
+                      "page-bg": "#F9FAFB",
+                      "on-secondary-container": "#5c6274",
+                      "primary-container": "#ea8a1a",
+                      "status-purple-bg": "#F5F3FF",
+                      "surface-container-low": "#f3f3f3",
+                      "status-amber-bg": "#FFFBEB",
+                      "primary-fixed-dim": "#ffb876",
+                      "status-gray-bg": "#F3F4F6",
+                      "inverse-surface": "#303030",
+                      "border-standard": "#E5E7EB",
+                      "surface-dim": "#dadada",
+                      "on-surface-variant": "#544335",
+                      "status-gray-text": "#6B7280",
+                      "status-red-bg": "#FEF2F2",
+                      "outline-variant": "#dac2af",
+                      "status-green-text": "#16A34A",
+                      "on-surface": "#1b1b1b",
+                      "surface-tint": "#8d4f00",
+                      "text-secondary": "#4B5563",
+                      "on-primary": "#ffffff",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "status-red-text": "#DC2626",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "on-secondary-fixed-variant": "#404758",
+                      "error": "#ba1a1a",
+                      "on-background": "#1b1b1b",
+                      "background": "#f9f9f9",
+                      "on-error-container": "#93000a",
+                      "tertiary-fixed": "#e6e2dd",
+                      "tertiary-container": "#a4a19d",
+                      "status-green-bg": "#F0FDF4",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "surface-bright": "#f9f9f9",
+                      "status-blue-text": "#2563EB",
+                      "on-error": "#ffffff",
+                      "surface-container-high": "#e8e8e8",
+                      "surface": "#f9f9f9",
+                      "on-secondary-fixed": "#141b2b",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "inverse-on-surface": "#f1f1f1",
+                      "secondary": "#575e70",
+                      "on-secondary": "#ffffff",
+                      "on-primary-container": "#562e00",
+                      "surface-container-highest": "#e2e2e2",
+                      "surface-container": "#eeeeee",
+                      "status-purple-text": "#7C3AED",
+                      "surface-container-lowest": "#ffffff",
+                      "on-tertiary-container": "#393835"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "max-width-booking": "600px",
+                      "max-width-auth": "460px",
+                      "unit": "8px",
+                      "touch-target-min": "44px",
+                      "sidebar-width": "240px",
+                      "drawer-width": "480px"
+              },
+              "fontFamily": {
+                      "h2": ["Apollo", "serif"],
+                      "h1": ["Apollo", "serif"],
+                      "body-lg": ["Inter", "sans-serif"],
+                      "h4": ["Inter", "sans-serif"],
+                      "h3": ["Inter", "sans-serif"],
+                      "label-sm": ["Inter", "sans-serif"],
+                      "body-sm": ["Inter", "sans-serif"],
+                      "label-md": ["Inter", "sans-serif"]
+              },
+              "fontSize": {
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+              }
+            },
+          },
+        }
+      </script>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center relative overflow-hidden">
+<!-- Atmospheric Background Elements -->
+<div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary-light/30 rounded-full blur-[120px] pointer-events-none"></div>
+<div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary-fixed/20 rounded-full blur-[120px] pointer-events-none"></div>
+<!-- Main Auth Container -->
+<main class="w-full max-w-auth px-6 py-12 z-10">
+<!-- Logo Section -->
+<div class="flex flex-col items-center mb-10">
+<div class="mb-6 flex items-center justify-center">
+<img alt="spark inn logo" class="h-12 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_myPTHUrot8O5eNhb9vj6WKLqRbAEVyPVbpy48voDCgQXyZGUllNHtj040LSgZeHdpEZdWjEe3CueegPGn9bM5Na1HHudlMJKr4JJtOaWjet4xCaRySXGT8EmV7ay4MkBI1jJNj6zOGcIjE9MPx9_Hrc3tbkgpK7z5JlaJSWaYoW9GG14I7pCgtKCasye9HrjXXtav6CG2tJ-sgzawEPAyZ6tSDGzar4Zo-c-eAFLuzGQNCBp2PTSpNj__MhQL2cuHSKVMchuru1j">
+</div>
+<h1 class="font-h2 text-h2 text-on-surface text-center">Join Spark Rewards</h1>
+<p class="font-body-sm text-body-sm text-text-secondary mt-2 text-center">Experience boutique luxury with exclusive member benefits.</p>
+</div>
+<!-- Registration Card -->
+<section class="glass-card rounded-xl shadow-lg p-8 md:p-10">
+<form action="#" class="space-y-6" method="POST">
+<!-- Name Row -->
+<div class="grid grid-cols-2 gap-4">
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="first-name">First Name</label>
+<input class="h-touch-target-min w-full px-4 rounded-lg border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-sm text-body-sm bg-surface-container-lowest" id="first-name" name="first-name" placeholder="e.g. Maria" required="" type="text">
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="last-name">Last Name</label>
+<input class="h-touch-target-min w-full px-4 rounded-lg border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-sm text-body-sm bg-surface-container-lowest" id="last-name" name="last-name" placeholder="e.g. Santos" required="" type="text">
+</div>
+</div>
+<!-- Email -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="email">Email Address</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">mail</span>
+<input class="h-touch-target-min w-full pl-10 pr-4 rounded-lg border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-sm text-body-sm bg-surface-container-lowest" id="email" name="email" placeholder="you@example.com" required="" type="email">
+</div>
+</div>
+<!-- Password -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="password">Password</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">lock</span>
+<input class="h-touch-target-min w-full pl-10 pr-10 rounded-lg border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-sm text-body-sm bg-surface-container-lowest" id="password" name="password" placeholder="••••••••" required="" type="password">
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors" onclick="togglePassword('password')" type="button">
+<span class="material-symbols-outlined text-[20px]" id="eye-icon-password">visibility</span>
+</button>
+</div>
+</div>
+<!-- Confirm Password -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="confirm-password">Confirm Password</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">lock_reset</span>
+<input class="h-touch-target-min w-full pl-10 pr-10 rounded-lg border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-sm text-body-sm bg-surface-container-lowest" id="confirm-password" name="confirm-password" placeholder="••••••••" required="" type="password">
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors" onclick="togglePassword('confirm-password')" type="button">
+<span class="material-symbols-outlined text-[20px]" id="eye-icon-confirm-password">visibility</span>
+</button>
+</div>
+</div>
+<!-- Privacy Consent -->
+<div class="flex items-start gap-3 py-2">
+<input class="mt-1 w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" id="privacy-consent" name="privacy-consent" required="" type="checkbox">
+<label class="font-body-sm text-body-sm text-text-secondary cursor-pointer leading-tight" for="privacy-consent">
+                        I agree to the <a class="text-primary hover:underline font-medium" href="#">Privacy Policy</a> and <a class="text-primary hover:underline font-medium" href="#">Terms of Service</a>.
+                    </label>
+</div>
+<!-- Submit Button -->
+<button class="w-full h-touch-target-min bg-primary-container hover:bg-primary-hover text-white font-label-md text-label-md rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2" type="submit">
+                    Create Account
+                    <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</form>
+</section>
+<!-- Footer Link -->
+<div class="mt-8 text-center">
+<p class="font-body-sm text-body-sm text-text-secondary">
+                Already a member? 
+                <a class="text-primary font-semibold hover:text-primary-hover transition-colors ml-1 decoration-primary/30 decoration-2 underline-offset-4 hover:underline" href="/signin">Sign In</a>
+</p>
+</div>
+</main>
+<!-- Visual Polish: Decorative side elements -->
+<div class="hidden xl:block absolute left-12 top-1/2 -translate-y-1/2 space-y-24 opacity-20 select-none pointer-events-none">
+<div class="flex items-center gap-4 rotate-90 origin-left">
+<span class="h-[1px] w-32 bg-outline"></span>
+<span class="font-apollo text-label-md text-outline tracking-[0.3em] uppercase">Bohol, Philippines</span>
+</div>
+</div>
+<script>
+        function togglePassword(id) {
+            const input = document.getElementById(id);
+            const icon = document.getElementById('eye-icon-' + id);
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.textContent = 'visibility_off';
+            } else {
+                input.type = 'password';
+                icon.textContent = 'visibility';
+            }
+        }
+
+        // Lightweight entrance animation
+        document.addEventListener('DOMContentLoaded', () => {
+            const main = document.querySelector('main');
+            main.style.opacity = '0';
+            main.style.transform = 'translateY(20px)';
+            main.style.transition = 'opacity 0.8s ease-out, transform 0.8s ease-out';
+            
+            setTimeout(() => {
+                main.style.opacity = '1';
+                main.style.transform = 'translateY(0)';
+            }, 100);
+        });
+    </script>
+</body></html>

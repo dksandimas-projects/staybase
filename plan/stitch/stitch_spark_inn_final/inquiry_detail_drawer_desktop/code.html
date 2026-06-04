@@ -1,0 +1,342 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Fallback for demo purposes */
+        }
+        .font-apollo { font-family: 'Apollo', serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#404758",
+                        "primary-container": "#ea8a1a",
+                        "status-red-bg": "#FEF2F2",
+                        "status-green-bg": "#F0FDF4",
+                        "secondary-fixed": "#dce2f7",
+                        "surface-bright": "#f9f9f9",
+                        "surface-container": "#eeeeee",
+                        "on-primary-container": "#562e00",
+                        "on-error": "#ffffff",
+                        "surface-container-high": "#e8e8e8",
+                        "on-background": "#1b1b1b",
+                        "background": "#f9f9f9",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface": "#f9f9f9",
+                        "primary-hover": "#C4720E",
+                        "status-amber-text": "#D97706",
+                        "text-secondary": "#4B5563",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-surface": "#1b1b1b",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-light": "#FEF3E2",
+                        "on-secondary-container": "#5c6274",
+                        "inverse-primary": "#ffb876",
+                        "tertiary-container": "#a4a19d",
+                        "on-primary": "#ffffff",
+                        "secondary-container": "#d9dff5",
+                        "border-standard": "#E5E7EB",
+                        "outline-variant": "#dac2af",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "inverse-on-surface": "#f1f1f1",
+                        "surface-variant": "#e2e2e2",
+                        "status-purple-text": "#7C3AED",
+                        "status-green-text": "#16A34A",
+                        "surface-container-low": "#f3f3f3",
+                        "tertiary-fixed": "#e6e2dd",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-secondary": "#ffffff",
+                        "secondary": "#575e70",
+                        "surface-dim": "#dadada",
+                        "inverse-surface": "#303030",
+                        "error": "#ba1a1a",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "on-surface-variant": "#544335",
+                        "status-gray-text": "#6B7280",
+                        "on-error-container": "#93000a",
+                        "status-blue-text": "#2563EB",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-tertiary": "#ffffff",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-blue-bg": "#EFF6FF",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-red-text": "#DC2626",
+                        "error-container": "#ffdad6",
+                        "on-primary-fixed": "#2d1600",
+                        "tertiary": "#605e5a",
+                        "surface-tint": "#8d4f00",
+                        "outline": "#877363",
+                        "page-bg": "#F9FAFB",
+                        "primary": "#8d4f00",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-tertiary-container": "#393835",
+                        "primary-fixed": "#ffdcc0"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "sidebar-width": "240px",
+                        "touch-target-min": "44px",
+                        "max-width-auth": "460px",
+                        "drawer-width": "480px",
+                        "max-width-booking": "600px"
+                    },
+                    "fontFamily": {
+                        "h1": ["Apollo"],
+                        "h2": ["Apollo"],
+                        "h3": ["Inter"],
+                        "h4": ["Inter"],
+                        "label-md": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "body-lg": ["Inter"]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg font-label-md text-on-background min-h-screen flex overflow-hidden">
+<!-- Navigation Drawer (Shared Component Logic) -->
+<aside class="fixed left-0 top-0 h-screen w-[240px] bg-surface-container-lowest border-r border-border-standard flex flex-col py-4 z-40">
+<div class="px-6 mb-8">
+<span class="font-h2 text-h2 text-primary lowercase">spark inn</span>
+</div>
+<nav class="flex-1 space-y-1">
+<div class="bg-primary-container text-on-primary-container font-semibold rounded-lg mx-2 my-1 px-4 h-11 flex items-center gap-3 transition-all duration-200">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Dashboard</span>
+</div>
+<div class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg px-4 h-11 flex items-center gap-3 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>Bookings</span>
+</div>
+<div class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg px-4 h-11 flex items-center gap-3 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined">event_available</span>
+<span>Availability</span>
+</div>
+<div class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg px-4 h-11 flex items-center gap-3 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined">cleaning_services</span>
+<span>Housekeeping</span>
+</div>
+<div class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg px-4 h-11 flex items-center gap-3 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined">payments</span>
+<span>Finance</span>
+</div>
+<div class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg px-4 h-11 flex items-center gap-3 cursor-pointer transition-all duration-200 mt-auto">
+<span class="material-symbols-outlined">settings</span>
+<span>Settings</span>
+</div>
+</nav>
+</aside>
+<!-- Main Content (Corporate Inquiries List Placeholder) -->
+<main class="ml-[240px] flex-1 p-8 overflow-y-auto">
+<header class="flex justify-between items-center mb-8">
+<div>
+<h1 class="font-h1 text-h1 text-on-surface">Corporate Inquiries</h1>
+<p class="text-text-secondary font-body-sm">Manage group bookings and tech retreats.</p>
+</div>
+<button class="bg-primary hover:bg-primary-hover text-on-primary px-6 h-11 rounded-lg font-semibold flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined">add</span>
+                New Inquiry
+            </button>
+</header>
+<!-- Dummy List Backdrop -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl overflow-hidden opacity-40 select-none">
+<table class="w-full text-left">
+<thead class="bg-surface-container-low border-b border-border-standard">
+<tr>
+<th class="px-6 py-4 font-semibold text-label-md">Company</th>
+<th class="px-6 py-4 font-semibold text-label-md">Contact</th>
+<th class="px-6 py-4 font-semibold text-label-md">Date</th>
+<th class="px-6 py-4 font-semibold text-label-md">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard">
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-6 py-4 font-semibold">Acme Corp Tech Retreat</td>
+<td class="px-6 py-4 text-text-secondary">Sarah Jenkins</td>
+<td class="px-6 py-4 text-text-secondary">Oct 24, 2024</td>
+<td class="px-6 py-4">
+<span class="bg-status-blue-bg text-status-blue-text px-3 py-1 rounded-full text-label-sm">New Inquiry</span>
+</td>
+</tr>
+<!-- Repeat rows -->
+<tr class="bg-surface-container-low">
+<td class="px-6 py-4 font-semibold">Global Logistics Summit</td>
+<td class="px-6 py-4 text-text-secondary">Mark R.</td>
+<td class="px-6 py-4 text-text-secondary">Oct 22, 2024</td>
+<td class="px-6 py-4">
+<span class="bg-status-amber-bg text-status-amber-text px-3 py-1 rounded-full text-label-sm">Contacted</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</main>
+<!-- Inquiry Detail Drawer (D-03) -->
+<div class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex justify-end transition-opacity duration-300" id="drawer-overlay">
+<div class="w-full max-w-[480px] bg-surface-container-lowest h-full shadow-2xl flex flex-col animate-slide-in">
+<!-- Header -->
+<div class="h-16 flex justify-between items-center px-6 border-b border-border-standard">
+<span class="font-h3 text-h3 text-on-surface">Inquiry Details</span>
+<button class="w-10 h-10 rounded-full hover:bg-surface-container flex items-center justify-center transition-colors" onclick="document.getElementById('drawer-overlay').classList.add('hidden')">
+<span class="material-symbols-outlined text-text-secondary">close</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto p-6 space-y-8">
+<!-- Status & Dropdown -->
+<div class="flex flex-col gap-3">
+<label class="text-label-sm uppercase tracking-wider text-text-secondary">Current Status</label>
+<div class="relative group">
+<div class="flex items-center justify-between bg-status-blue-bg text-status-blue-text px-4 py-3 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-colors">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">info</span>
+<span class="font-semibold">New Inquiry</span>
+</div>
+<span class="material-symbols-outlined">expand_more</span>
+</div>
+</div>
+</div>
+<!-- Company Info -->
+<section>
+<h2 class="font-h2 text-h2 text-on-surface mb-2">Acme Corp Tech Retreat</h2>
+<div class="flex items-center gap-2 text-text-secondary font-body-sm mb-6">
+<span class="material-symbols-outlined text-[18px]">calendar_today</span>
+<span>Inquiry Date: Oct 24, 2024</span>
+</div>
+<div class="grid grid-cols-1 gap-4 bg-page-bg p-4 rounded-xl border border-border-standard">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center">
+<span class="material-symbols-outlined text-primary">person</span>
+</div>
+<div>
+<p class="text-label-sm text-text-secondary">Contact Name</p>
+<p class="font-semibold">Sarah Jenkins</p>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center">
+<span class="material-symbols-outlined text-primary">mail</span>
+</div>
+<div>
+<p class="text-label-sm text-text-secondary">Email Address</p>
+<p class="font-semibold">sarah@acmecorp.com</p>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-surface-container flex items-center justify-center">
+<span class="material-symbols-outlined text-primary">call</span>
+</div>
+<div>
+<p class="text-label-sm text-text-secondary">Phone Number</p>
+<p class="font-semibold">+1 (555) 019-8372</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Primary Actions -->
+<div class="grid grid-cols-2 gap-4">
+<button class="bg-primary-container text-on-primary-container h-unit*5.5 rounded-lg font-bold flex flex-col items-center justify-center p-4 hover:bg-primary-hover transition-colors shadow-sm text-center">
+<span class="material-symbols-outlined mb-1">key</span>
+<span class="text-label-sm">Generate Access Code</span>
+</button>
+<button class="border border-border-standard bg-surface-container-lowest text-on-surface h-unit*5.5 rounded-lg font-semibold flex flex-col items-center justify-center p-4 hover:bg-surface-container transition-colors shadow-sm text-center">
+<span class="material-symbols-outlined mb-1 text-primary">history</span>
+<span class="text-label-sm">View Company History</span>
+</button>
+</div>
+<!-- Activity Timeline -->
+<section class="space-y-6">
+<div class="flex items-center justify-between border-b border-border-standard pb-2">
+<h4 class="font-h4 text-h4 text-on-surface">Activity Timeline</h4>
+<span class="text-label-sm text-text-secondary">3 events</span>
+</div>
+<!-- Note Entry -->
+<div class="bg-surface-container-low p-4 rounded-xl space-y-3">
+<textarea class="w-full bg-surface-container-lowest border-border-standard rounded-lg p-3 text-body-sm focus:ring-2 focus:ring-primary-container focus:border-primary outline-none min-h-[100px] transition-all" placeholder="Add a private note or log an action..."></textarea>
+<div class="flex justify-end">
+<button class="bg-primary text-on-primary px-4 py-2 rounded-lg font-semibold text-label-md hover:bg-primary-hover transition-colors">
+                                Post Note
+                            </button>
+</div>
+</div>
+<!-- Feed -->
+<div class="space-y-6 relative ml-4">
+<!-- Line -->
+<div class="absolute left-[-17px] top-2 bottom-0 w-[2px] bg-border-standard"></div>
+<!-- Timeline Item 1 -->
+<div class="relative">
+<div class="absolute left-[-23px] top-1 w-3 h-3 rounded-full bg-status-blue-text ring-4 ring-surface-container-lowest"></div>
+<div class="flex flex-col">
+<span class="text-label-sm text-text-secondary">Oct 24, 14:20</span>
+<p class="font-semibold text-on-surface">Inquiry received</p>
+<p class="text-body-sm text-text-secondary mt-1">Automatic entry: System captured initial webform submission from Acme Corp website referral.</p>
+</div>
+</div>
+<!-- Timeline Item 2 -->
+<div class="relative">
+<div class="absolute left-[-23px] top-1 w-3 h-3 rounded-full bg-status-amber-text ring-4 ring-surface-container-lowest"></div>
+<div class="flex flex-col">
+<span class="text-label-sm text-text-secondary">Oct 24, 15:45</span>
+<p class="font-semibold text-on-surface">Email sent by Admin User</p>
+<p class="text-body-sm text-text-secondary mt-1">Sent welcome package and brochure for Executive Suite occupancy.</p>
+</div>
+</div>
+<!-- Timeline Item 3 -->
+<div class="relative">
+<div class="absolute left-[-23px] top-1 w-3 h-3 rounded-full bg-status-green-text ring-4 ring-surface-container-lowest"></div>
+<div class="flex flex-col">
+<span class="text-label-sm text-text-secondary">Oct 25, 09:12</span>
+<p class="font-semibold text-on-surface">Client replied</p>
+<p class="text-body-sm text-text-secondary mt-1 italic">"Thanks for the details. We'd like to proceed with the reservation for 12 employees."</p>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Footer Action -->
+<div class="p-6 border-t border-border-standard bg-surface-container-low">
+<button class="w-full h-12 border border-primary text-primary font-bold rounded-lg hover:bg-primary-light transition-colors">
+                    Close Inquiry
+                </button>
+</div>
+</div>
+</div>
+<style>
+        @keyframes slide-in {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+        .animate-slide-in {
+            animation: slide-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+    </style>
+<script>
+        // Simple click-away interaction
+        document.getElementById('drawer-overlay').addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.classList.add('hidden');
+            }
+        });
+    </script>
+</body></html>

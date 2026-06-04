@@ -1,0 +1,256 @@
+<!DOCTYPE html><html class="scroll-smooth" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Spark Rewards | Earn Every Stay</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/72138/ApolloMT.woff') format('woff');
+            font-weight: normal;
+            font-style: normal;
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(229, 231, 235, 0.5);
+        }
+
+        .scrolled-nav {
+            background-color: white !important;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "page-bg": "#F9FAFB",
+                        "text-secondary": "#4B5563",
+                        "primary-container": "#ea8a1a",
+                        "primary": "#8d4f00",
+                        "on-primary": "#ffffff",
+                        "primary-hover": "#C4720E",
+                        "border-standard": "#E5E7EB",
+                        "surface-container-lowest": "#ffffff",
+                        "inverse-surface": "#303030",
+                        "background": "#f9f9f9"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Inter"],
+                        "display-hero-mobile": ["Apollo"],
+                        "h1": ["Apollo"],
+                        "h2": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "h3": ["Inter"],
+                        "h4": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3"}],
+                        "h2-mobile": ["26px", {"lineHeight": "1.3"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface font-body-lg overflow-x-hidden">
+<!-- TopAppBar Section -->
+<header class="fixed top-0 w-full z-50 transition-all duration-300 flex justify-between items-center px-6 py-4 bg-transparent" id="main-nav">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="menu">menu</span>
+<span class="font-h3 text-h3 lowercase text-primary">spark inn</span>
+</div>
+<button class="bg-primary-container text-on-primary px-5 py-2 rounded-lg text-label-md font-semibold hover:bg-primary-hover transition-all active:scale-95 duration-200">
+            Join Now
+        </button>
+</header>
+<!-- Hero Section -->
+<section class="relative h-[795px] w-full flex flex-col justify-end pb-12 px-6 overflow-hidden">
+<div class="absolute inset-0 z-0 opacity-100 translate-y-0">
+<img class="w-full h-full object-cover" data-alt="A cinematic, high-impact scene of a luxury boutique hotel terrace in Bohol at golden hour. The soft amber sunlight filters through tropical foliage, casting long shadows over minimalist wooden furniture and a sparkling infinity pool. The mood is serene, upscale, and inviting, with a palette of warm oranges, earthy browns, and soft creams that define the Spark Inn brand aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBWI3wVuWHK0JVtfjBsMpyiFOdwPoZv04EBp2-g2NePhMeyzGLh569dT_tLcs30Pkukf0A9DJdhhEolMkFutxeA9u6ZRn7wqNFGqPoyOz8d33bv5amRQ6M9JuzFPDn3tPrR4sb3MASSSa1vTroEUvSucFQc8jv3tO4OftZglRwlDcCh5ayTBkq9aTgsnD1cIsy2wx4NEJrH6DFVmUWCoTUvkqE1BO34WgiDQGyF1o85YjKOgozJguqkI8ircmPiu9FvOq2qhdA1DT9B">
+<div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+</div>
+<div class="relative z-10 space-y-4 max-w-md opacity-100 translate-y-0">
+<h1 class="font-display-hero-mobile text-display-hero-mobile text-white">Earn Every Stay</h1>
+<p class="font-body-lg text-white/90 leading-relaxed">
+                Join Spark Rewards and unlock a world of exclusive benefits and heartfelt hospitality.
+            </p>
+<div class="flex flex-col gap-3 pt-4">
+<button class="bg-[#EA8A1A] text-white h-[44px] rounded-lg font-semibold w-full hover:bg-primary-hover transition-colors">
+                    Join Spark Rewards
+                </button>
+<button class="border border-white/50 text-white h-[44px] rounded-lg font-semibold w-full backdrop-blur-sm hover:bg-white/10 transition-colors">
+                    Sign In
+                </button>
+</div>
+</div>
+</section>
+<!-- How It Works Section -->
+<section class="py-20 px-6 bg-white">
+<div class="flex flex-col items-center text-center mb-12 opacity-100 translate-y-0">
+<h2 class="font-h2 text-h2-mobile text-primary mb-2">The Journey</h2>
+<div class="w-12 h-1 bg-primary-container rounded-full"></div>
+</div>
+<div class="space-y-12 relative opacity-100 translate-y-0">
+<!-- Connector Line -->
+<div class="absolute left-[21px] top-4 bottom-4 w-[2px] bg-status-gray-bg z-0"></div>
+<!-- Step 1 -->
+<div class="flex gap-6 relative z-10">
+<div class="flex-shrink-0 w-11 h-11 rounded-full bg-primary-light flex items-center justify-center border-2 border-primary-container shadow-sm">
+<span class="text-primary font-bold">1</span>
+</div>
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Join for free</h3>
+<p class="font-body-sm text-text-secondary mt-1">Create your account in seconds and step into a world of recognition.</p>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="flex gap-6 relative z-10">
+<div class="flex-shrink-0 w-11 h-11 rounded-full bg-primary-light flex items-center justify-center border-2 border-primary-container shadow-sm">
+<span class="text-primary font-bold">2</span>
+</div>
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Stay &amp; Earn</h3>
+<p class="font-body-sm text-text-secondary mt-1">Earn 10 points for every night spent with us across any of our boutique locations.</p>
+</div>
+</div>
+<!-- Step 3 -->
+<div class="flex gap-6 relative z-10">
+<div class="flex-shrink-0 w-11 h-11 rounded-full bg-primary-light flex items-center justify-center border-2 border-primary-container shadow-sm">
+<span class="text-primary font-bold">3</span>
+</div>
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Redeem &amp; Relax</h3>
+<p class="font-body-sm text-text-secondary mt-1">Use points for free nights, room upgrades, and local artisanal experiences.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Member Perks Grid -->
+<section class="py-20 px-6 bg-page-bg">
+<div class="mb-10 opacity-100 translate-y-0">
+<h2 class="font-h2 text-h2-mobile text-on-surface">Member Perks</h2>
+<p class="text-text-secondary font-body-sm mt-2">Elevating your experience from the moment you arrive.</p>
+</div>
+<div class="grid grid-cols-1 gap-4 opacity-100 translate-y-0">
+<!-- Perk 1 -->
+<div class="bg-white p-6 rounded-[12px] shadow-sm border border-border-standard flex items-start gap-4">
+<div class="bg-status-amber-bg p-3 rounded-xl">
+<span class="material-symbols-outlined text-status-amber-text" data-icon="sell">sell</span>
+</div>
+<div>
+<h4 class="font-h4 text-h4">Member-Only Rates</h4>
+<p class="text-body-sm text-text-secondary mt-1">Save up to 15% on every booking made directly through our app or site.</p>
+</div>
+</div>
+<!-- Perk 2 -->
+<div class="bg-white p-6 rounded-[12px] shadow-sm border border-border-standard flex items-start gap-4">
+<div class="bg-status-blue-bg p-3 rounded-xl">
+<span class="material-symbols-outlined text-status-blue-text" data-icon="schedule">schedule</span>
+</div>
+<div>
+<h4 class="font-h4 text-h4">Early Check-in</h4>
+<p class="text-body-sm text-text-secondary mt-1">Subject to availability, enjoy your room sooner to start your sanctuary experience.</p>
+</div>
+</div>
+<!-- Perk 3 -->
+<div class="bg-white p-6 rounded-[12px] shadow-sm border border-border-standard flex items-start gap-4">
+<div class="bg-status-green-bg p-3 rounded-xl">
+<span class="material-symbols-outlined text-status-green-text" data-icon="featured_seasonal_and_gifts">featured_seasonal_and_gifts</span>
+</div>
+<div>
+<h4 class="font-h4 text-h4">Welcome Gift</h4>
+<p class="text-body-sm text-text-secondary mt-1">A little something local, curated from Bohol's finest artisans, waiting in your room.</p>
+</div>
+</div>
+<!-- Perk 4 -->
+<div class="bg-white p-6 rounded-[12px] shadow-sm border border-border-standard flex items-start gap-4">
+<div class="bg-status-purple-bg p-3 rounded-xl">
+<span class="material-symbols-outlined text-status-purple-text" data-icon="notification_important">notification_important</span>
+</div>
+<div>
+<h4 class="font-h4 text-h4">Exclusive Offers</h4>
+<p class="text-body-sm text-text-secondary mt-1">First access to seasonal promotions and limited-time holiday escapes.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- CTA Banner -->
+<section class="mx-6 my-12 rounded-[12px] bg-[#EA8A1A] p-10 text-center space-y-6">
+<h2 class="font-h1-mobile text-white leading-tight">Start earning today.</h2>
+<p class="text-white/90 font-body-sm">Join the circle of Spark Rewards and transform every stay into a memory that pays back.</p>
+<button class="bg-white text-primary px-8 py-3 rounded-lg font-bold w-full active:scale-95 transition-transform">
+            Create Account
+        </button>
+</section>
+<!-- Footer Section -->
+<footer class="w-full border-t border-border-standard bg-surface-container-lowest flex flex-col items-center px-8 py-12 gap-6">
+<div class="font-h4 text-h4 lowercase text-primary">spark inn</div>
+<nav class="flex flex-wrap justify-center gap-x-6 gap-y-2">
+<a class="text-text-secondary font-body-sm hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">About</a>
+<a class="text-text-secondary font-body-sm hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Rooms</a>
+<a class="text-text-secondary font-body-sm hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Rewards</a>
+<a class="text-text-secondary font-body-sm hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Privacy</a>
+<a class="text-text-secondary font-body-sm hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Contact</a>
+</nav>
+<p class="text-text-secondary font-body-sm text-center">© 2024 spark inn. All rights reserved.</p>
+</footer>
+<script>
+        // Navbar scroll effect
+        const nav = document.getElementById('main-nav');
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 50) {
+                nav.classList.add('scrolled-nav');
+                nav.classList.remove('bg-transparent');
+            } else {
+                nav.classList.remove('scrolled-nav');
+                nav.classList.add('bg-transparent');
+            }
+        });
+
+        // Simple intersection observer for reveals
+        const observerOptions = {
+            threshold: 0.1
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('opacity-100', 'translate-y-0');
+                    entry.target.classList.remove('opacity-0', 'translate-y-4');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('section > div').forEach(el => {
+            el.classList.add('transition-all', 'duration-700', 'opacity-0', 'translate-y-4');
+            observer.observe(el);
+        });
+    </script>
+</body></html>

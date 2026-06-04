@@ -1,0 +1,355 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Staff Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "border-standard": "#E5E7EB",
+                        "surface-bright": "#f9f9f9",
+                        "on-tertiary-container": "#393835",
+                        "inverse-surface": "#303030",
+                        "surface-variant": "#e2e2e2",
+                        "surface-container-low": "#f3f3f3",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-error": "#ffffff",
+                        "secondary-container": "#d9dff5",
+                        "inverse-on-surface": "#f1f1f1",
+                        "background": "#f9f9f9",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-primary-fixed": "#2d1600",
+                        "primary-hover": "#C4720E",
+                        "surface-container": "#eeeeee",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-primary": "#ffffff",
+                        "status-gray-text": "#6B7280",
+                        "surface-tint": "#8d4f00",
+                        "primary-light": "#FEF3E2",
+                        "tertiary-fixed": "#e6e2dd",
+                        "status-red-text": "#DC2626",
+                        "surface-container-high": "#e8e8e8",
+                        "outline": "#877363",
+                        "surface": "#f9f9f9",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "inverse-primary": "#ffb876",
+                        "on-secondary": "#ffffff",
+                        "on-surface-variant": "#544335",
+                        "status-blue-text": "#2563EB",
+                        "status-green-text": "#16A34A",
+                        "text-secondary": "#4B5563",
+                        "secondary": "#575e70",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "secondary-fixed": "#dce2f7",
+                        "error-container": "#ffdad6",
+                        "status-gray-bg": "#F3F4F6",
+                        "tertiary-container": "#a4a19d",
+                        "page-bg": "#F9FAFB",
+                        "on-primary-container": "#562e00",
+                        "surface-dim": "#dadada",
+                        "on-secondary-container": "#5c6274",
+                        "primary-fixed": "#ffdcc0",
+                        "status-amber-text": "#D97706",
+                        "on-background": "#1b1b1b",
+                        "tertiary": "#605e5a",
+                        "status-red-bg": "#FEF2F2",
+                        "outline-variant": "#dac2af",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-amber-bg": "#FFFBEB",
+                        "surface-container-highest": "#e2e2e2",
+                        "error": "#ba1a1a",
+                        "status-purple-text": "#7C3AED",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-fixed": "#141b2b",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "on-error-container": "#93000a",
+                        "surface-container-lowest": "#ffffff",
+                        "primary-container": "#ea8a1a",
+                        "status-green-bg": "#F0FDF4",
+                        "primary": "#8d4f00",
+                        "on-surface": "#1b1b1b"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "touch-target-min": "44px",
+                        "sidebar-width": "240px",
+                        "max-width-booking": "600px",
+                        "max-width-auth": "460px",
+                        "drawer-width": "480px"
+                    },
+                    "fontFamily": {
+                        "h4": ["Inter", "sans-serif"],
+                        "h3": ["Inter", "sans-serif"],
+                        "label-sm": ["Inter", "sans-serif"],
+                        "body-lg": ["Inter", "sans-serif"],
+                        "h2": ["Inter", "sans-serif"],
+                        "body-sm": ["Inter", "sans-serif"],
+                        "display-hero": ["Inter", "sans-serif"],
+                        "h1-mobile": ["Inter", "sans-serif"],
+                        "h1": ["Inter", "sans-serif"],
+                        "label-md": ["Inter", "sans-serif"],
+                        "display-hero-mobile": ["Inter", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface font-body-sm h-screen flex overflow-hidden">
+<!-- SideNavBar (Shared Component) -->
+<nav class="fixed left-0 top-0 h-full w-sidebar-width bg-[#111827] border-r border-border-standard flex flex-col py-6 z-20">
+<div class="px-6 mb-8 flex flex-col items-center">
+<!-- Simulated Logo for styling purposes -->
+<div class="w-12 h-12 rounded-full bg-white mb-3 flex items-center justify-center overflow-hidden">
+<img alt="spark inn logo white" class="w-full h-full object-cover" data-alt="A clean, minimalist white circle containing abstract geometric shapes representing a boutique hotel brand in Bohol. The style is sharp and modern, suitable for a dark-mode sidebar header icon." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAxr3L2ZB1h5tKyC_8CqNUn5hjf2ixQuEBqIZ5NINu5wcBjJ2mR-9jIgR7sOtzsRSrX1cR_8cr9hFvH2pijiNeoO0_SOIGnkMmfwkdyoa_ski2QIh4S7xWjX9yddoo_pGp20t1_K-tq43dkvvqFmityIlFWdrZzGAQuRF-Ym3DRcHHxiz8IZ7qgEidydubv9R7yxQ4km1BHNnYtrMGMLaT2QCHq4XajvSRsJTaPa7NztPnV3xpYL4h8XRU5XtAmv3xPfszLfekMdbL-">
+</div>
+<h1 class="font-h2 text-h2 text-on-primary lowercase tracking-wide">spark inn</h1>
+<p class="font-label-sm text-label-sm text-secondary-fixed-dim mt-1">Admin Console</p>
+</div>
+<ul class="flex-1 space-y-1 w-full">
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">dashboard</span>
+                    Dashboard
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">calendar_today</span>
+                    Bookings
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">bed</span>
+                    Rooms
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">payments</span>
+                    Rates
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">analytics</span>
+                    Reports
+                </a>
+</li>
+<li>
+<a aria-current="page" class="flex items-center gap-3 px-4 py-3 text-primary border-l-4 border-primary bg-on-primary-fixed-variant/10 font-label-md text-label-md transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">business</span>
+                    Corporate
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">chat</span>
+                    Intercom
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">qr_code</span>
+                    QR Codes
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-weight="regular">group</span>
+                    Members
+                </a>
+</li>
+</ul>
+</nav>
+<!-- Main Content Area -->
+<div class="flex-1 flex flex-col ml-[240px] w-[calc(100%-240px)] bg-page-bg">
+<!-- TopAppBar (Shared Component) -->
+<header class="h-16 bg-surface-container-lowest dark:bg-inverse-surface border-b border-border-standard flex items-center justify-between px-8 w-full z-10 sticky top-0">
+<div class="flex items-center gap-4">
+<span class="font-h3 text-h3 text-on-surface lowercase">spark inn</span>
+</div>
+<div class="flex items-center gap-6">
+<!-- Search on right per JSON -->
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-status-gray-text">search</span>
+<input class="pl-10 pr-4 py-2 bg-surface-container-low border-transparent focus:border-primary-container focus:ring-0 rounded-lg text-body-sm w-64 h-[44px] transition-colors" placeholder="Search..." type="text">
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="w-[44px] h-[44px] flex items-center justify-center rounded-full hover:text-primary transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="w-[44px] h-[44px] flex items-center justify-center rounded-full hover:text-primary transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="w-[44px] h-[44px] rounded-full bg-surface-container overflow-hidden cursor-pointer active:opacity-80 ml-2">
+<img alt="Admin profile photo" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBp6R3Q4NkLTCu8WO9Eugl8rIVge1_8G2Xk4pNuEjunx2bQhXpcMvFbKrr0wLwqZ0gTW_3NedGG83BVi8296RBy_mWjzv0Kx1f09wFx0mNKazb6pYV2v19-2TfOqG2bkjGNE9UJEHR7EhaaIWvAAyo1B3dRs6aUl4oGNQOlRJ4ptem0RumxX4BqThnI4JQfdU6fHXq4-B0SfEya6ya3e7kv3ySJAj4ddw3ZHq4xneMwGAcHlX-GDjXaJ2Mq9envK3eaS6x4zGOxqI8-">
+</div>
+</div>
+</div>
+</header>
+<!-- Page Content -->
+<main class="flex-1 overflow-auto p-8">
+<!-- Header Section -->
+<div class="flex items-center justify-between mb-8">
+<div>
+<h2 class="font-h2 text-h2 text-on-surface">Staff Management</h2>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Manage employee access and roles.</p>
+</div>
+<button class="bg-primary-container hover:bg-primary-hover text-on-primary font-label-md text-label-md h-[44px] px-6 rounded-lg flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                    Add Staff
+                </button>
+</div>
+<!-- Filters & Search -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl p-4 mb-6 flex items-center gap-4">
+<div class="relative flex-1 max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-status-gray-text">search</span>
+<input class="w-full pl-10 pr-4 py-2 bg-surface-container-low border border-border-standard focus:border-primary-container focus:ring-0 rounded-lg text-body-sm h-[44px] transition-colors" placeholder="Search staff by name or email..." type="text">
+</div>
+<div class="relative w-48">
+<select class="w-full pl-4 pr-10 py-2 appearance-none bg-surface-container-low border border-border-standard focus:border-primary-container focus:ring-0 rounded-lg text-body-sm h-[44px] transition-colors text-on-surface">
+<option value="all">All Roles</option>
+<option value="admin">Admin</option>
+<option value="front-desk">Front Desk</option>
+<option value="housekeeping">Housekeeping</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-status-gray-text pointer-events-none">expand_more</span>
+</div>
+</div>
+<!-- Data Table -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-border-standard">
+<th class="font-label-sm text-label-sm text-text-secondary py-3 px-6 font-medium">Name</th>
+<th class="font-label-sm text-label-sm text-text-secondary py-3 px-6 font-medium">Email</th>
+<th class="font-label-sm text-label-sm text-text-secondary py-3 px-6 font-medium">Role</th>
+<th class="font-label-sm text-label-sm text-text-secondary py-3 px-6 font-medium">Join Date</th>
+<th class="font-label-sm text-label-sm text-text-secondary py-3 px-6 font-medium text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard">
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-status-blue-bg text-status-blue-text flex items-center justify-center font-label-md text-label-md font-semibold">
+                                    JS
+                                </div>
+<span class="font-body-sm text-body-sm font-medium text-on-surface">Jane Smith</span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-text-secondary">jane.smith@sparkinn.com</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-status-purple-bg text-status-purple-text">
+                                    Admin
+                                </span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-text-secondary">Oct 12, 2023</td>
+<td class="py-4 px-6 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded text-text-secondary hover:bg-surface-variant hover:text-primary transition-colors" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded text-text-secondary hover:bg-status-red-bg hover:text-status-red-text transition-colors" title="Deactivate">
+<span class="material-symbols-outlined text-[20px]">block</span>
+</button>
+</div>
+</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-status-green-bg text-status-green-text flex items-center justify-center font-label-md text-label-md font-semibold">
+                                    MD
+                                </div>
+<span class="font-body-sm text-body-sm font-medium text-on-surface">Mark Doe</span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-text-secondary">mark.doe@sparkinn.com</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-bg text-status-blue-text">
+                                    Front Desk
+                                </span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-text-secondary">Nov 05, 2023</td>
+<td class="py-4 px-6 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded text-text-secondary hover:bg-surface-variant hover:text-primary transition-colors" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded text-text-secondary hover:bg-status-red-bg hover:text-status-red-text transition-colors" title="Deactivate">
+<span class="material-symbols-outlined text-[20px]">block</span>
+</button>
+</div>
+</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-status-amber-bg text-status-amber-text flex items-center justify-center font-label-md text-label-md font-semibold">
+                                    AL
+                                </div>
+<span class="font-body-sm text-body-sm font-medium text-on-surface">Anna Lee</span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-text-secondary">anna.lee@sparkinn.com</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-status-blue-bg text-status-blue-text">
+                                    Front Desk
+                                </span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-text-secondary">Jan 15, 2024</td>
+<td class="py-4 px-6 text-right">
+<div class="flex items-center justify-end gap-2">
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded text-text-secondary hover:bg-surface-variant hover:text-primary transition-colors" title="Edit">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+</button>
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded text-text-secondary hover:bg-status-red-bg hover:text-status-red-text transition-colors" title="Deactivate">
+<span class="material-symbols-outlined text-[20px]">block</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+<!-- Pagination (Simple placeholder for admin UI) -->
+<div class="border-t border-border-standard bg-surface-container-lowest px-6 py-4 flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-text-secondary">Showing 1 to 3 of 3 staff members</span>
+<div class="flex gap-2">
+<button class="w-8 h-8 flex items-center justify-center rounded border border-border-standard text-status-gray-text cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined text-sm">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded border border-border-standard text-status-gray-text cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined text-sm">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

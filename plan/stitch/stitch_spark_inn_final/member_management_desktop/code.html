@@ -1,0 +1,443 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Member Management</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&amp;display=swap" rel="stylesheet"> <!-- Fallback for Apollo -->
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config -->
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-primary-container": "#562e00",
+                      "on-primary": "#ffffff",
+                      "surface-container-high": "#e8e8e8",
+                      "surface-bright": "#f9f9f9",
+                      "on-tertiary-container": "#393835",
+                      "secondary-container": "#d9dff5",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "status-red-bg": "#FEF2F2",
+                      "status-amber-bg": "#FFFBEB",
+                      "on-primary-fixed": "#2d1600",
+                      "on-secondary-fixed-variant": "#404758",
+                      "on-secondary-fixed": "#141b2b",
+                      "surface-container-low": "#f3f3f3",
+                      "tertiary-fixed": "#e6e2dd",
+                      "primary-fixed-dim": "#ffb876",
+                      "error-container": "#ffdad6",
+                      "text-secondary": "#4B5563",
+                      "status-blue-bg": "#EFF6FF",
+                      "status-purple-bg": "#F5F3FF",
+                      "on-secondary": "#ffffff",
+                      "status-blue-text": "#2563EB",
+                      "on-surface-variant": "#544335",
+                      "surface-dim": "#dadada",
+                      "status-gray-bg": "#F3F4F6",
+                      "on-tertiary": "#ffffff",
+                      "tertiary-container": "#a4a19d",
+                      "primary-fixed": "#ffdcc0",
+                      "background": "#f9f9f9",
+                      "secondary": "#575e70",
+                      "surface-container-highest": "#e2e2e2",
+                      "primary-hover": "#C4720E",
+                      "on-secondary-container": "#5c6274",
+                      "status-red-text": "#DC2626",
+                      "secondary-fixed": "#dce2f7",
+                      "status-gray-text": "#6B7280",
+                      "primary": "#8d4f00",
+                      "primary-light": "#FEF3E2",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "outline": "#877363",
+                      "tertiary": "#605e5a",
+                      "on-surface": "#1b1b1b",
+                      "inverse-surface": "#303030",
+                      "surface-container": "#eeeeee",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "status-green-text": "#16A34A",
+                      "error": "#ba1a1a",
+                      "outline-variant": "#dac2af",
+                      "surface-tint": "#8d4f00",
+                      "on-error": "#ffffff",
+                      "inverse-on-surface": "#f1f1f1",
+                      "page-bg": "#F9FAFB",
+                      "on-error-container": "#93000a",
+                      "inverse-primary": "#ffb876",
+                      "surface-container-lowest": "#ffffff",
+                      "border-standard": "#E5E7EB",
+                      "on-background": "#1b1b1b",
+                      "status-purple-text": "#7C3AED",
+                      "primary-container": "#ea8a1a",
+                      "surface-variant": "#e2e2e2",
+                      "status-green-bg": "#F0FDF4",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "status-amber-text": "#D97706",
+                      "surface": "#f9f9f9"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "max-width-auth": "460px",
+                      "max-width-booking": "600px",
+                      "drawer-width": "480px",
+                      "unit": "8px",
+                      "touch-target-min": "44px",
+                      "sidebar-width": "240px"
+              },
+              "fontFamily": {
+                      "label-md": ["Inter"],
+                      "h1": ["Playfair Display", "serif"],
+                      "display-hero": ["Playfair Display", "serif"],
+                      "h4": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "h2": ["Playfair Display", "serif"],
+                      "h3": ["Inter"],
+                      "label-sm": ["Inter"],
+                      "display-hero-mobile": ["Playfair Display", "serif"],
+                      "body-sm": ["Inter"],
+                      "h1-mobile": ["Playfair Display", "serif"]
+              },
+              "fontSize": {
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        /* Fallback mapping for custom font Apollo if not loaded, using Playfair for similar elegant serif feel */
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Playfair Display');
+        }
+        
+        /* Drawer Transition */
+        #drawer-overlay {
+            transition: opacity 0.3s ease;
+        }
+        #drawer {
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .drawer-open #drawer-overlay {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .drawer-open #drawer {
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body class="bg-page-bg font-body-sm text-body-sm text-on-surface antialiased">
+<!-- App Shell -->
+<div class="flex h-screen overflow-hidden">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full w-sidebar-width bg-[#111827] border-r border-border-standard flex flex-col py-6 z-20">
+<!-- Header/Logo -->
+<div class="px-6 mb-8 flex flex-col gap-1">
+<div class="font-h2 text-h2 text-on-primary lowercase tracking-tight">spark inn</div>
+<div class="font-label-sm text-label-sm text-secondary-fixed-dim">Admin Console</div>
+</div>
+<!-- Navigation Links -->
+<nav class="flex-1 overflow-y-auto">
+<ul class="flex flex-col font-label-md text-label-md">
+<!-- Inactive -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">calendar_today</span>
+<span>Bookings</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">bed</span>
+<span>Rooms</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">payments</span>
+<span>Rates</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span>Reports</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">business</span>
+<span>Corporate</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">chat</span>
+<span>Intercom</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">qr_code</span>
+<span>QR Codes</span>
+</a>
+</li>
+<!-- Active -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-primary border-l-4 border-primary bg-on-primary-fixed-variant/10 transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">group</span>
+<span>Members</span>
+</a>
+</li>
+</ul>
+</nav>
+</aside>
+<!-- TopAppBar -->
+<header class="fixed top-0 right-0 left-sidebar-width h-16 bg-surface-container-lowest dark:bg-inverse-surface border-b border-border-standard flex items-center justify-between px-8 z-10">
+<!-- Left aligned content (empty per search_on_right logic, but structured for future) -->
+<div></div>
+<!-- Right aligned actions -->
+<div class="flex items-center gap-6">
+<!-- Search -->
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-[20px]">search</span>
+<input class="pl-10 pr-4 py-2 border-none bg-surface-container-low rounded-lg focus:ring-2 focus:ring-primary-container focus:bg-surface-container-lowest transition-all text-body-sm w-64 placeholder:text-text-secondary" placeholder="Search everywhere..." type="text">
+</div>
+<!-- Icons -->
+<div class="flex items-center gap-4 text-on-surface-variant">
+<button class="hover:text-primary transition-colors cursor-pointer active:opacity-80 relative flex items-center justify-center w-8 h-8 rounded-full hover:bg-surface-container-low">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-1 right-1 w-2 h-2 bg-primary-container rounded-full"></span>
+</button>
+<button class="hover:text-primary transition-colors cursor-pointer active:opacity-80 flex items-center justify-center w-8 h-8 rounded-full hover:bg-surface-container-low">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</div>
+<!-- Avatar -->
+<button class="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container font-label-md flex items-center justify-center cursor-pointer active:opacity-80 shrink-0 border border-border-standard overflow-hidden">
+<img alt="Admin profile photo" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB-e8AzzAQGkvAnQ6o6zGf6NjFp8JGMLISUa-DhjQuYVQkNWJzA7zLjmqtg06wMqbMVW9cSh1XLIeqh0RThbBUjno4NZ7d4_lu7Rp7r0RegrFCpPIY_m4MFDYZjf6ViGTkEZIYU2SyvqZwDE6XEqA3MfwNt7uWSv9wDiJO6sUBHbKnFpM43-HOPg78jEQkRPb6u79cc4L26_h5YVR2a8QF6Lj_hCg4Pkf48USazpuvje3DNmqZY_QPj3t540ZNEf8LiSS415D4UFvSd">
+</button>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 ml-sidebar-width pt-16 h-full overflow-y-auto bg-[#FDF8F3]"> <!-- Warm White section bg -->
+<div class="p-8 max-w-7xl mx-auto space-y-8">
+<!-- Page Header -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+<h1 class="font-h2 text-h2 text-on-surface">Members</h1>
+<div class="flex items-center gap-4">
+<!-- Content Specific Search -->
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-[20px]">search</span>
+<input class="pl-10 pr-4 py-2 border border-border-standard rounded-lg bg-surface-container-lowest focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all h-touch-target-min min-w-[280px] font-body-sm" placeholder="Search by name or email..." type="text">
+</div>
+<!-- Primary Action -->
+<button class="flex items-center gap-2 bg-primary-container hover:bg-primary-hover text-on-primary font-label-md text-label-md px-6 rounded-lg h-touch-target-min transition-colors shadow-sm whitespace-nowrap">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                            Add Member
+                        </button>
+</div>
+</div>
+<!-- Data Table Container -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse min-w-[900px]">
+<thead>
+<tr class="bg-surface-container-low border-b border-border-standard font-label-sm text-label-sm text-text-secondary uppercase tracking-wider">
+<th class="px-6 py-4 font-medium">Member</th>
+<th class="px-6 py-4 font-medium">Email</th>
+<th class="px-6 py-4 font-medium">Join Date</th>
+<th class="px-6 py-4 font-medium text-right">Total Points</th>
+<th class="px-6 py-4 font-medium text-center">Total Stays</th>
+<th class="px-6 py-4 font-medium">Status</th>
+<th class="px-6 py-4 font-medium text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-on-surface divide-y divide-border-standard">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer" onclick="toggleDrawer(true)">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary-light text-primary flex items-center justify-center font-label-sm shrink-0">JD</div>
+<span class="font-medium">Julianne Doe</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">julianne.doe@example.com</td>
+<td class="px-6 py-4">Oct 12, 2023</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center justify-center bg-primary-light text-primary rounded-full px-3 py-1 font-label-sm min-w-[60px]">4,250</span>
+</td>
+<td class="px-6 py-4 text-center">12</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-status-green-bg text-status-green-text font-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-status-green-text"></span>
+                                            Active
+                                        </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center justify-center px-4 py-2 border border-border-standard rounded-lg font-label-sm text-label-sm text-on-surface hover:bg-surface-container-low transition-colors h-[36px] group-hover:border-primary-container group-hover:text-primary-container" onclick="event.stopPropagation(); toggleDrawer(true)">
+                                            View Details
+                                        </button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer" onclick="toggleDrawer(true)">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-surface-container-high text-secondary flex items-center justify-center font-label-sm shrink-0">MS</div>
+<span class="font-medium">Marcus Smith</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">m.smith@corporate.com</td>
+<td class="px-6 py-4">Jan 05, 2024</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center justify-center bg-primary-light text-primary rounded-full px-3 py-1 font-label-sm min-w-[60px]">800</span>
+</td>
+<td class="px-6 py-4 text-center">3</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-status-red-bg text-status-red-text font-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-status-red-text"></span>
+                                            Suspended
+                                        </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center justify-center px-4 py-2 border border-border-standard rounded-lg font-label-sm text-label-sm text-on-surface hover:bg-surface-container-low transition-colors h-[36px] group-hover:border-primary-container group-hover:text-primary-container" onclick="event.stopPropagation(); toggleDrawer(true)">
+                                            View Details
+                                        </button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer" onclick="toggleDrawer(true)">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary-light text-primary flex items-center justify-center font-label-sm shrink-0">ER</div>
+<span class="font-medium">Elena Rodriguez</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">elena.r@designstudio.net</td>
+<td class="px-6 py-4">Nov 28, 2023</td>
+<td class="px-6 py-4 text-right">
+<span class="inline-flex items-center justify-center bg-primary-light text-primary rounded-full px-3 py-1 font-label-sm min-w-[60px]">1,150</span>
+</td>
+<td class="px-6 py-4 text-center">5</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-status-green-bg text-status-green-text font-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-status-green-text"></span>
+                                            Active
+                                        </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="inline-flex items-center justify-center px-4 py-2 border border-border-standard rounded-lg font-label-sm text-label-sm text-on-surface hover:bg-surface-container-low transition-colors h-[36px] group-hover:border-primary-container group-hover:text-primary-container" onclick="event.stopPropagation(); toggleDrawer(true)">
+                                            View Details
+                                        </button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination (Static conceptual) -->
+<div class="border-t border-border-standard px-6 py-4 flex items-center justify-between bg-surface-container-lowest">
+<span class="text-text-secondary font-body-sm text-sm">Showing 1 to 3 of 156 entries</span>
+<div class="flex items-center gap-2">
+<button class="w-8 h-8 flex items-center justify-center rounded border border-border-standard text-text-secondary disabled:opacity-50" disabled="">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded bg-primary-container text-on-primary font-label-sm">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded border border-border-standard text-on-surface hover:bg-surface-container-low font-label-sm transition-colors">2</button>
+<button class="w-8 h-8 flex items-center justify-center rounded border border-border-standard text-on-surface hover:bg-surface-container-low font-label-sm transition-colors">3</button>
+<span class="text-text-secondary px-1">...</span>
+<button class="w-8 h-8 flex items-center justify-center rounded border border-border-standard text-on-surface hover:bg-surface-container-low transition-colors">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Member Detail Drawer (D-04 Placeholder logic) -->
+<div class="fixed inset-0 z-50 pointer-events-none" id="drawer-container">
+<!-- Backdrop -->
+<div class="absolute inset-0 bg-[#111827]/40 backdrop-blur-sm opacity-0 pointer-events-none" id="drawer-overlay" onclick="toggleDrawer(false)"></div>
+<!-- Drawer Panel -->
+<div class="absolute top-0 right-0 h-full w-drawer-width bg-surface-container-lowest shadow-2xl flex flex-col translate-x-full pointer-events-auto border-l border-border-standard" id="drawer">
+<!-- Drawer Header -->
+<div class="flex items-center justify-between px-6 py-5 border-b border-border-standard">
+<h2 class="font-h3 text-h3 text-on-surface">Member Details</h2>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container-low text-text-secondary transition-colors" onclick="toggleDrawer(false)">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<!-- Drawer Content Placeholder -->
+<div class="p-6 flex-1 overflow-y-auto">
+<div class="flex items-center gap-4 mb-8">
+<div class="w-16 h-16 rounded-full bg-primary-light text-primary flex items-center justify-center font-h3 text-xl shrink-0">JD</div>
+<div>
+<div class="font-h4 text-h4 text-on-surface mb-1">Julianne Doe</div>
+<div class="font-body-sm text-text-secondary">julianne.doe@example.com</div>
+</div>
+</div>
+<div class="space-y-6">
+<div class="p-4 bg-surface-bright rounded-xl border border-border-standard">
+<div class="font-label-sm text-text-secondary uppercase tracking-wide mb-2">Member Stats</div>
+<div class="grid grid-cols-2 gap-4">
+<div>
+<div class="font-body-sm text-text-secondary mb-1">Total Points</div>
+<div class="font-h4 text-primary">4,250</div>
+</div>
+<div>
+<div class="font-body-sm text-text-secondary mb-1">Total Stays</div>
+<div class="font-h4 text-on-surface">12</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+        function toggleDrawer(show) {
+            const container = document.getElementById('drawer-container');
+            if (show) {
+                container.classList.add('drawer-open');
+                // Prevent body scroll
+                document.body.style.overflow = 'hidden';
+            } else {
+                container.classList.remove('drawer-open');
+                // Restore body scroll
+                document.body.style.overflow = '';
+            }
+        }
+    </script>
+</body></html>

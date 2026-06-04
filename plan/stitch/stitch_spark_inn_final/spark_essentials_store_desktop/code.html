@@ -1,0 +1,307 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Spark Essentials</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Arial'); /* Placeholder, assuming Apollo is provided or similar to a serif/display font */
+            font-weight: 400;
+        }
+        body {
+            background-color: #FDF8F3; /* Warm White requested */
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "status-blue-bg": "#EFF6FF",
+                        "error-container": "#ffdad6",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "on-secondary": "#ffffff",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "primary-container": "#ea8a1a",
+                        "on-primary-container": "#562e00",
+                        "primary-fixed-dim": "#ffb876",
+                        "error": "#ba1a1a",
+                        "status-red-bg": "#FEF2F2",
+                        "surface-bright": "#f9f9f9",
+                        "tertiary-fixed": "#e6e2dd",
+                        "surface-variant": "#e2e2e2",
+                        "status-purple-text": "#7C3AED",
+                        "status-red-text": "#DC2626",
+                        "status-amber-bg": "#FFFBEB",
+                        "surface-container": "#eeeeee",
+                        "inverse-surface": "#303030",
+                        "inverse-primary": "#ffb876",
+                        "primary-fixed": "#ffdcc0",
+                        "status-green-bg": "#F0FDF4",
+                        "on-tertiary": "#ffffff",
+                        "secondary": "#575e70",
+                        "primary": "#8d4f00",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "outline-variant": "#dac2af",
+                        "on-surface": "#1b1b1b",
+                        "status-green-text": "#16A34A",
+                        "secondary-fixed": "#dce2f7",
+                        "on-surface-variant": "#544335",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-primary": "#ffffff",
+                        "text-secondary": "#4B5563",
+                        "primary-hover": "#C4720E",
+                        "page-bg": "#F9FAFB",
+                        "on-error": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "status-blue-text": "#2563EB",
+                        "on-secondary-fixed": "#141b2b",
+                        "secondary-container": "#d9dff5",
+                        "surface": "#f9f9f9",
+                        "on-tertiary-container": "#393835",
+                        "primary-light": "#FEF3E2",
+                        "surface-container-low": "#f3f3f3",
+                        "on-background": "#1b1b1b",
+                        "status-purple-bg": "#F5F3FF",
+                        "tertiary": "#605e5a",
+                        "inverse-on-surface": "#f1f1f1",
+                        "status-gray-text": "#6B7280",
+                        "outline": "#877363",
+                        "status-amber-text": "#D97706",
+                        "on-error-container": "#93000a",
+                        "on-primary-fixed": "#2d1600",
+                        "border-standard": "#E5E7EB",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "background": "#f9f9f9",
+                        "surface-dim": "#dadada",
+                        "surface-container-high": "#e8e8e8",
+                        "surface-tint": "#8d4f00",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-secondary-container": "#5c6274",
+                        "tertiary-container": "#a4a19d",
+                        "surface-container-highest": "#e2e2e2"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sidebar-width": "240px",
+                        "max-width-auth": "460px",
+                        "unit": "8px",
+                        "touch-target-min": "44px",
+                        "max-width-booking": "600px",
+                        "drawer-width": "480px"
+                    },
+                    "fontFamily": {
+                        "display-hero-mobile": ["Apollo"],
+                        "body-lg": ["Inter"],
+                        "h4": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "h3": ["Inter"],
+                        "h1": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "label-md": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "h2": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="text-on-surface antialiased flex flex-col min-h-screen">
+<!-- Top Navigation (Shared Component Integration) -->
+<nav class="fixed top-0 w-full z-50 bg-surface-container-lowest/80 backdrop-blur-md border-b border-border-standard">
+<div class="flex justify-between items-center px-6 py-4 max-w-[1440px] mx-auto w-full">
+<div class="flex items-center gap-4">
+<button class="flex items-center gap-2 text-on-surface-variant hover:text-primary transition-colors duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">arrow_back</span>
+<span class="font-body-sm text-body-sm">Back to Chat</span>
+</button>
+</div>
+<h1 class="font-h3 text-h3 lowercase tracking-tighter text-on-background">spark inn</h1>
+<div class="flex items-center">
+<button class="relative p-2 text-on-surface hover:text-primary transition-colors duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">shopping_bag</span>
+<span class="absolute top-1 right-1 bg-primary-container text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">3</span>
+</button>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-grow pt-24 px-6 pb-12 max-w-[1440px] mx-auto w-full flex gap-8">
+<!-- Left Column: Products -->
+<div class="flex-grow flex flex-col gap-8">
+<!-- Page Header -->
+<header>
+<h2 class="font-display-hero text-display-hero text-on-background mb-6">Spark Essentials</h2>
+<!-- Category Navigation -->
+<div class="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+<button class="px-6 py-2.5 rounded-full bg-primary-container text-white font-label-md text-label-md transition-colors whitespace-nowrap min-h-[touch-target-min]">All</button>
+<button class="px-6 py-2.5 rounded-full bg-surface-container-lowest border border-border-standard text-on-surface-variant hover:border-primary-container hover:text-primary transition-colors font-label-md text-label-md whitespace-nowrap min-h-[touch-target-min]">Snacks</button>
+<button class="px-6 py-2.5 rounded-full bg-surface-container-lowest border border-border-standard text-on-surface-variant hover:border-primary-container hover:text-primary transition-colors font-label-md text-label-md whitespace-nowrap min-h-[touch-target-min]">Drinks</button>
+<button class="px-6 py-2.5 rounded-full bg-surface-container-lowest border border-border-standard text-on-surface-variant hover:border-primary-container hover:text-primary transition-colors font-label-md text-label-md whitespace-nowrap min-h-[touch-target-min]">Souvenirs</button>
+</div>
+</header>
+<!-- Product Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+<!-- Product Card 1 -->
+<div class="bg-surface-container-lowest rounded-[12px] overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col">
+<div class="relative aspect-square overflow-hidden bg-surface-container">
+<img alt="Artisanal locally sourced dark chocolate bar with sea salt packaging. Soft natural lighting emphasizing the premium texture of the wrapper. Warm minimalist boutique hotel aesthetic with a light background. High quality, crisp details." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A premium artisanal dark chocolate bar with sea salt in elegant, minimalist packaging. It rests on a clean, light surface illuminated by soft, natural daylight. The warm minimalist aesthetic of a boutique hotel is evident in the refined presentation and subtle shadows. The color palette features rich earthy tones of the chocolate packaging contrasting with the pristine white background. High-resolution, crisp textures convey luxury and quality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDyFhmrwh9KKO4AUyOoeXmYlQJ1-0mn_aWr6MSrnCF5Z3j_C7GuouPAN6L94k_teDN-mcmmHCmDmLWpWVyhVYRHXCWHNRdr7IZnIWAmIukSSonC77N4O5I16Q9aXPPAMv1l4E89WAXlkHsteNA9vx_BUjrChXEPR4jTnQlUqdgnHN6S5t4s5giUpwXpHpN056FEmMQyWtoOopgCxTiE3rwRN2WItwf2q_bMOSXF81UqYhkCEaXqhffI7Pi21Aa6RBMC7uEZafUHmKv_">
+</div>
+<div class="p-4 flex flex-col flex-grow justify-between">
+<div>
+<h3 class="font-body-lg text-body-lg text-on-background mb-1">Local Artisan Chocolate</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">70% dark chocolate sourced from local farms.</p>
+</div>
+<div class="flex items-center justify-between mt-4">
+<span class="font-h4 text-h4 text-primary-container">$8.00</span>
+<button class="w-[44px] h-[44px] rounded-full bg-surface-container flex items-center justify-center text-on-surface hover:bg-primary-container hover:text-white transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 2 -->
+<div class="bg-surface-container-lowest rounded-[12px] overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col">
+<div class="relative aspect-square overflow-hidden bg-surface-container">
+<img alt="Sparkling water bottle with condensation on a light wooden table. Bright morning light filtering through a window. Premium warm minimalist hotel setting. Refreshing and clean aesthetic." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A sleek glass bottle of sparkling water with light condensation droplets, sitting on a smooth, pale wooden surface. Bright, diffused morning light casts soft shadows, creating a refreshing and clean atmosphere. The setting reflects a warm minimalist boutique hotel aesthetic, emphasizing simplicity and elegance. The color palette is bright and airy, with the clear glass and subtle reflections enhancing the premium feel." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCj4uRuZQAOksjqVDNbDWWTE428rUNjnkP0YCfBUA4ZOO_zkCXOto4-n4xw0ck3K3jyy9NE9vNm44RRgLqsDffeadXZXfuwVPS1Jcfndt-wG8ia7LjGtb5ixw3qFun1FcLVUZzUjF9MEeq2b-SlkQuwc8afOVQOXEkBzj4ZIIchQ_Wm42ZV0RFinCl7MPPhzknOhQueADgu4sMKMZ8ONHKakUIXKcFAnyKRJrCH8GxKo5Q8btSczBa79bs0hOPGOgOnRg3wSxYAwbHg">
+</div>
+<div class="p-4 flex flex-col flex-grow justify-between">
+<div>
+<h3 class="font-body-lg text-body-lg text-on-background mb-1">Sparkling Mineral Water</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Chilled 500ml sparkling water.</p>
+</div>
+<div class="flex items-center justify-between mt-4">
+<span class="font-h4 text-h4 text-primary-container">$4.50</span>
+<button class="w-[44px] h-[44px] rounded-full bg-surface-container flex items-center justify-center text-on-surface hover:bg-primary-container hover:text-white transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 3 -->
+<div class="bg-surface-container-lowest rounded-[12px] overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col">
+<div class="relative aspect-square overflow-hidden bg-surface-container">
+<img alt="Premium sleep mask and earplugs set on crisp white bed linens. Soft, calming bedroom lighting. Warm minimal luxury hotel room environment. Promoting rest and relaxation." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A luxurious silk sleep mask and a pair of premium earplugs delicately placed on crisp, pristine white hotel bed linens. The lighting is soft and calming, evoking a serene and restful atmosphere. The scene embodies a warm minimalist luxury hotel environment, focused on guest comfort and relaxation. The color palette is dominated by soft whites and gentle neutral tones, highlighting the high-quality textures of the fabric." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCC56DCCN09_n6S14Ap0sG9JljbP6HkV0GFD2JfXsFFad847q4yGMPrSD7Lzvlpxh87FieZYV2R2OcavAeAbUQnfqFjnz4TvwStyRMRYsIgBJ68ODnXDvdF-sTOaqt8UbyF--q02sSxmafB2jG5IwZBrB3mV0p_f654rnkzjjJzU7uvhaTDuf_mm-B02yKjoiN9Je57MA5J647lJaAkzUsDZ5US9qEqJP3mI0pDXaB7g95wMqwqjNvgdJqvg8toL_bgdo0_dBvz03CY">
+</div>
+<div class="p-4 flex flex-col flex-grow justify-between">
+<div>
+<h3 class="font-body-lg text-body-lg text-on-background mb-1">Deep Sleep Kit</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Silk eye mask and premium earplugs.</p>
+</div>
+<div class="flex items-center justify-between mt-4">
+<span class="font-h4 text-h4 text-primary-container">$15.00</span>
+<button class="w-[44px] h-[44px] rounded-full bg-surface-container flex items-center justify-center text-on-surface hover:bg-primary-container hover:text-white transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Product Card 4 -->
+<div class="bg-surface-container-lowest rounded-[12px] overflow-hidden shadow-sm hover:shadow-md transition-shadow group flex flex-col">
+<div class="relative aspect-square overflow-hidden bg-surface-container">
+<img alt="Gourmet mixed nuts in a small glass jar on a minimalist tray. Warm sunset lighting casting long shadows. High-end boutique hotel snack presentation. Natural and appetizing." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="A small, elegant glass jar filled with gourmet mixed nuts resting on a minimalist ceramic tray. Warm, golden hour lighting casts long, soft shadows across the scene, creating an inviting and appetizing mood. The presentation aligns perfectly with a high-end boutique hotel's warm minimalist aesthetic. The color palette features natural, earthy tones of the nuts contrasting subtly with the light, textured background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD93ZpSSBebuzEqZPJHaBo5gQku4jT4eCEP9UzJzk1XDxBJG09nFyRe0H4gg4ig6bXKVZWeBPug5Ftg8XJGfkZkmlk81T6kVC-USbhmr6KYYZVzyUQbYVO0fq9gJqUoZqKkJJ8LpwW6oAsIOhQPbWWs6YJNV7OfjYCubKaQXXrJCgc3Y8NwlgHnSiWZYnCR8gUnKV8T56LBpvs8lsjH5Bi8uR_OUfYqBkg7im6_gZ-5-MNii7UJ78_eohBTRhWxDJmU6iFmRd9zgr7O">
+</div>
+<div class="p-4 flex flex-col flex-grow justify-between">
+<div>
+<h3 class="font-body-lg text-body-lg text-on-background mb-1">Roasted Mixed Nuts</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Premium blend of almonds, cashews, and pecans.</p>
+</div>
+<div class="flex items-center justify-between mt-4">
+<span class="font-h4 text-h4 text-primary-container">$12.00</span>
+<button class="w-[44px] h-[44px] rounded-full bg-surface-container flex items-center justify-center text-on-surface hover:bg-primary-container hover:text-white transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">add</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Cart Sidebar (Desktop only) -->
+<aside class="hidden lg:flex flex-col w-[380px] flex-shrink-0">
+<div class="bg-surface-container-lowest rounded-[12px] p-6 shadow-sm sticky top-28 flex flex-col h-[calc(100vh-140px)]">
+<h3 class="font-h3 text-h3 text-on-background mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">shopping_cart</span>
+                    Your Order
+                </h3>
+<!-- Cart Items -->
+<div class="flex-grow overflow-y-auto pr-2 space-y-4">
+<!-- Cart Item 1 -->
+<div class="flex gap-4 items-center">
+<div class="w-16 h-16 rounded-[8px] overflow-hidden bg-surface-container flex-shrink-0">
+<img alt="Chocolate thumbnail" class="w-full h-full object-cover" data-alt="Thumbnail image of a dark chocolate bar." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBBzy6LFWGm6Xb4EGJ8xoLwbxmzn2tv2tXdTFaDZaDuo-tTValSuhAmZZwQ8UhS5PdxhWsFHSJUJ93phpFik7-r4ItlbsO_GCvhe6-NbLkpebuPX7KFvE0Y3udp6VKL7_I1_P5byVOr-IYMxFWMYaqYZencQNtD9co8SxIPiseHyIj-XkIKciGIFBH_9zA0O_-ei9xkdRsS8Hm3uF4j3UOlzl_joay5SWI9hBO1nkdIrS6zP-tAxFszObmH8iWTnByDcHARYVUDpOO">
+</div>
+<div class="flex-grow">
+<h4 class="font-label-md text-label-md text-on-background">Local Artisan Chocolate</h4>
+<div class="text-primary-container font-label-md text-label-md mt-1">$8.00</div>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-low rounded-full px-2 py-1">
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-[16px]">remove</span></button>
+<span class="font-label-md text-label-md w-4 text-center">2</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-[16px]">add</span></button>
+</div>
+</div>
+<!-- Cart Item 2 -->
+<div class="flex gap-4 items-center">
+<div class="w-16 h-16 rounded-[8px] overflow-hidden bg-surface-container flex-shrink-0">
+<img alt="Water thumbnail" class="w-full h-full object-cover" data-alt="Thumbnail image of sparkling water." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBeRVBZmviWz-QjCCAHEGW81BvRfRRNLfFTTq1zI-cvFbmt0kykGya3Q_b6YbtdCxbbPFI4XDSMmsbL851A3R9WZXPUKl20LKlgub8AoPhOoybrBIauCXB4M8Ls4uHk-Q_rsvwRbAJn52lQsS0o9I49VQim9kxnSLm1JO3S1dksez79PqXTdmglOSloktqDU0epX1k5orRAnXBJnQS4Y1My9VP1hpRMQbjJJoSprYOFLrmfitIcf9wSFwriQIUcsf0aXpEg-94njQdK">
+</div>
+<div class="flex-grow">
+<h4 class="font-label-md text-label-md text-on-background">Sparkling Mineral Water</h4>
+<div class="text-primary-container font-label-md text-label-md mt-1">$4.50</div>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-low rounded-full px-2 py-1">
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-[16px]">remove</span></button>
+<span class="font-label-md text-label-md w-4 text-center">1</span>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined text-[16px]">add</span></button>
+</div>
+</div>
+</div>
+<!-- Order Summary -->
+<div class="pt-6 border-t border-border-standard mt-6">
+<div class="flex justify-between mb-2">
+<span class="font-body-sm text-body-sm text-text-secondary">Subtotal</span>
+<span class="font-body-sm text-body-sm text-on-background">$20.50</span>
+</div>
+<div class="flex justify-between mb-4">
+<span class="font-body-sm text-body-sm text-text-secondary">Room Delivery</span>
+<span class="font-body-sm text-body-sm text-on-background">Free</span>
+</div>
+<div class="flex justify-between mb-6">
+<span class="font-h4 text-h4 text-on-background">Total</span>
+<span class="font-h4 text-h4 text-primary-container">$20.50</span>
+</div>
+<button class="w-full h-[touch-target-min] bg-primary-container hover:bg-primary-hover text-white rounded-[8px] font-label-md text-label-md transition-colors flex items-center justify-center">
+                        Place Order to Room
+                    </button>
+<p class="text-center font-label-sm text-label-sm text-text-secondary mt-3">Added to your final bill.</p>
+</div>
+</div>
+</aside>
+</main>
+</body></html>

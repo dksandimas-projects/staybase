@@ -1,0 +1,214 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Add Staff</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Using Inter for Apollo fallbacks since Apollo isn't a standard Google Font available here, 
+           but config explicitly sets Apollo for H1/H2. We'll use Inter as standard body/h3/h4 per config. */
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "status-red-text": "#DC2626",
+                        "outline-variant": "#dac2af",
+                        "surface": "#f9f9f9",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-secondary-fixed": "#141b2b",
+                        "on-secondary": "#ffffff",
+                        "primary-container": "#ea8a1a",
+                        "primary-light": "#FEF3E2",
+                        "surface-bright": "#f9f9f9",
+                        "status-amber-text": "#D97706",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "surface-container-low": "#f3f3f3",
+                        "surface-container-high": "#e8e8e8",
+                        "surface-tint": "#8d4f00",
+                        "on-surface-variant": "#544335",
+                        "outline": "#877363",
+                        "status-blue-text": "#2563EB",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-background": "#1b1b1b",
+                        "error-container": "#ffdad6",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-green-bg": "#F0FDF4",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "secondary-container": "#d9dff5",
+                        "secondary-fixed": "#dce2f7",
+                        "status-red-bg": "#FEF2F2",
+                        "status-gray-text": "#6B7280",
+                        "tertiary-container": "#a4a19d",
+                        "text-secondary": "#4B5563",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-purple-text": "#7C3AED",
+                        "status-green-text": "#16A34A",
+                        "primary": "#8d4f00",
+                        "on-surface": "#1b1b1b",
+                        "tertiary-fixed": "#e6e2dd",
+                        "surface-container": "#eeeeee",
+                        "on-tertiary-container": "#393835",
+                        "on-error-container": "#93000a",
+                        "on-secondary-container": "#5c6274",
+                        "secondary": "#575e70",
+                        "inverse-surface": "#303030",
+                        "inverse-primary": "#ffb876",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "border-standard": "#E5E7EB",
+                        "error": "#ba1a1a",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-primary-container": "#562e00",
+                        "primary-fixed": "#ffdcc0",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "background": "#f9f9f9",
+                        "on-primary-fixed": "#2d1600",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "inverse-on-surface": "#f1f1f1",
+                        "status-gray-bg": "#F3F4F6",
+                        "surface-variant": "#e2e2e2",
+                        "primary-fixed-dim": "#ffb876",
+                        "page-bg": "#F9FAFB",
+                        "primary-hover": "#C4720E",
+                        "on-tertiary": "#ffffff",
+                        "surface-dim": "#dadada",
+                        "tertiary": "#605e5a",
+                        "on-error": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "touch-target-min": "44px",
+                        "max-width-auth": "460px",
+                        "max-width-booking": "600px",
+                        "drawer-width": "480px",
+                        "unit": "8px",
+                        "sidebar-width": "240px"
+                    },
+                    "fontFamily": {
+                        "h4": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "h2": ["Apollo"],
+                        "display-hero-mobile": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "h3": ["Inter"],
+                        "h1": ["Apollo"],
+                        "label-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-low min-h-screen text-on-surface font-sans">
+<!-- Mock Background Content to demonstrate the overlay -->
+<div class="p-4 blur-[2px] opacity-60 pointer-events-none hidden md:block">
+<header class="flex justify-between items-center bg-surface-container-lowest px-6 h-16 border-b border-border-standard">
+<span class="font-h3 text-h3 text-primary lowercase font-bold">spark inn</span>
+</header>
+<main class="max-w-4xl mx-auto mt-8 p-6 bg-surface-container-lowest rounded-xl shadow-sm">
+<div class="h-8 bg-surface-container w-48 rounded mb-6"></div>
+<div class="space-y-4">
+<div class="h-16 bg-surface-container rounded"></div>
+<div class="h-16 bg-surface-container rounded"></div>
+<div class="h-16 bg-surface-container rounded"></div>
+</div>
+</main>
+</div>
+<!-- Modal Overlay Backdrop -->
+<div aria-modal="true" class="fixed inset-0 bg-on-background/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" role="dialog">
+<!-- Modal Container -->
+<!-- Note: Using rounded-xl as it's the closest token to 16px (12px) without breaking strict theme rules -->
+<div class="bg-surface-container-lowest rounded-xl w-full max-w-[max-width-auth] shadow-xl relative flex flex-col max-h-[795px]">
+<!-- Header -->
+<div class="flex items-center justify-between p-6 pb-2">
+<h2 class="font-h3 text-h3 text-on-surface">Add New Staff</h2>
+<button aria-label="Close modal" class="w-10 h-10 flex items-center justify-center rounded-full text-text-secondary hover:bg-surface-container-high transition-colors focus:outline-none focus:ring-2 focus:ring-primary-container">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+<!-- Body (Scrollable if needed on very small screens) -->
+<div class="p-6 pt-4 overflow-y-auto">
+<form class="space-y-5" id="addStaffForm">
+<!-- Full Name Input -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5" for="fullName">Full Name</label>
+<input class="w-full h-[touch-target-min] px-4 rounded-lg border border-border-standard bg-surface-container-lowest font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-shadow" id="fullName" placeholder="e.g. Maria Santos" type="text">
+</div>
+<!-- Email Input -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1.5" for="email">Email Address</label>
+<input class="w-full h-[touch-target-min] px-4 rounded-lg border border-border-standard bg-surface-container-lowest font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-shadow" id="email" placeholder="maria@sparkinn.com" type="email">
+</div>
+<!-- Role Selector (Custom Radio Group for better mobile touch targets) -->
+<div>
+<span class="block font-label-md text-label-md text-on-surface-variant mb-2">Role</span>
+<div class="flex gap-3">
+<label class="flex-1 relative cursor-pointer group">
+<input class="peer sr-only" name="role" type="radio" value="admin">
+<div class="h-[touch-target-min] flex items-center justify-center rounded-lg border border-border-standard text-text-secondary font-label-md text-label-md peer-checked:border-primary-container peer-checked:bg-primary-light peer-checked:text-primary transition-all duration-200 group-hover:border-primary-container/50">
+                                    Admin
+                                </div>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-primary opacity-0 peer-checked:opacity-100 transition-opacity" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</label>
+<label class="flex-1 relative cursor-pointer group">
+<input checked="" class="peer sr-only" name="role" type="radio" value="frontdesk">
+<div class="h-[touch-target-min] flex items-center justify-center rounded-lg border border-border-standard text-text-secondary font-label-md text-label-md peer-checked:border-primary-container peer-checked:bg-primary-light peer-checked:text-primary transition-all duration-200 group-hover:border-primary-container/50">
+                                    Front Desk
+                                </div>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[18px] text-primary opacity-0 peer-checked:opacity-100 transition-opacity" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</label>
+</div>
+</div>
+</form>
+</div>
+<!-- Footer / Actions -->
+<div class="p-6 pt-4 mt-auto">
+<div class="flex flex-col sm:flex-row gap-3">
+<button class="w-full sm:w-1/2 h-[touch-target-min] flex items-center justify-center rounded-lg border border-border-standard bg-surface-container-lowest text-text-secondary font-label-md text-label-md active:bg-surface-container-high transition-colors focus:outline-none focus:ring-2 focus:ring-border-standard" type="button">
+                        Cancel
+                    </button>
+<button class="w-full sm:w-1/2 h-[touch-target-min] flex items-center justify-center rounded-lg bg-primary-container text-on-primary-container font-label-md text-label-md hover:bg-primary-hover active:scale-[0.98] transition-all focus:outline-none focus:ring-2 focus:ring-primary-container focus:ring-offset-2" onclick="document.getElementById('addStaffForm').submit()" type="button">
+                        Add Staff
+                    </button>
+</div>
+</div>
+</div>
+</div>
+</body></html>

@@ -1,0 +1,265 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>My Rewards - Spark Inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Playfair+Display:ital,wght@0,400;0,600;1,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#93000a",
+                        "inverse-surface": "#303030",
+                        "status-green-bg": "#F0FDF4",
+                        "error-container": "#ffdad6",
+                        "outline-variant": "#dac2af",
+                        "tertiary-fixed": "#e6e2dd",
+                        "status-purple-text": "#7C3AED",
+                        "surface-container-highest": "#e2e2e2",
+                        "surface-container": "#eeeeee",
+                        "on-tertiary-container": "#393835",
+                        "on-secondary": "#ffffff",
+                        "text-secondary": "#4B5563",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#f3f3f3",
+                        "on-primary-fixed": "#2d1600",
+                        "status-blue-bg": "#EFF6FF",
+                        "status-green-text": "#16A34A",
+                        "secondary-fixed": "#dce2f7",
+                        "primary-container": "#ea8a1a",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-secondary-fixed-variant": "#404758",
+                        "status-amber-bg": "#FFFBEB",
+                        "secondary": "#575e70",
+                        "primary-fixed": "#ffdcc0",
+                        "on-surface": "#1b1b1b",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "primary-hover": "#C4720E",
+                        "inverse-primary": "#ffb876",
+                        "background": "#f9f9f9",
+                        "page-bg": "#F9FAFB",
+                        "surface-bright": "#f9f9f9",
+                        "status-gray-bg": "#F3F4F6",
+                        "status-purple-bg": "#F5F3FF",
+                        "surface-tint": "#8d4f00",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "secondary-container": "#d9dff5",
+                        "status-amber-text": "#D97706",
+                        "on-background": "#1b1b1b",
+                        "on-primary-container": "#562e00",
+                        "primary": "#8d4f00",
+                        "surface-dim": "#dadada",
+                        "on-secondary-container": "#5c6274",
+                        "on-surface-variant": "#544335",
+                        "outline": "#877363",
+                        "tertiary": "#605e5a",
+                        "surface-container-high": "#e8e8e8",
+                        "status-red-text": "#DC2626",
+                        "error": "#ba1a1a",
+                        "status-gray-text": "#6B7280",
+                        "inverse-on-surface": "#f1f1f1",
+                        "border-standard": "#E5E7EB",
+                        "on-primary": "#ffffff",
+                        "surface": "#f9f9f9",
+                        "status-blue-text": "#2563EB",
+                        "on-tertiary": "#ffffff",
+                        "primary-fixed-dim": "#ffb876",
+                        "surface-variant": "#e2e2e2",
+                        "tertiary-container": "#a4a19d",
+                        "primary-light": "#FEF3E2",
+                        "status-red-bg": "#FEF2F2",
+                        "on-error": "#ffffff",
+                        "tertiary-fixed-dim": "#cac6c1"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "max-width-booking": "600px",
+                        "touch-target-min": "44px",
+                        "unit": "8px",
+                        "sidebar-width": "240px",
+                        "drawer-width": "480px",
+                        "max-width-auth": "460px"
+                    },
+                    "fontFamily": {
+                        "label-md": ["Inter"],
+                        "h1-mobile": ["Playfair Display"],
+                        "label-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "h2": ["Playfair Display"],
+                        "display-hero": ["Playfair Display"],
+                        "h4": ["Inter"],
+                        "h1": ["Playfair Display"],
+                        "h3": ["Inter"],
+                        "display-hero-mobile": ["Playfair Display"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Fallback for Apollo to Playfair Display */
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Playfair Display');
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface min-h-screen flex flex-col font-body-sm pb-24 md:pb-0">
+<!-- Top Navigation (Mobile) -->
+<header class="bg-surface-container-lowest dark:bg-surface-container-low w-full sticky top-0 border-b border-border-standard dark:border-outline-variant flat no shadows flex justify-between items-center px-6 h-16 z-40 md:hidden">
+<button class="w-touch-target-min h-touch-target-min flex items-center justify-start text-on-surface-variant cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined text-h3 font-h3" data-icon="arrow_back">arrow_back</span>
+</button>
+<h1 class="font-h3 text-h3 text-primary dark:text-primary-fixed-dim lowercase tracking-tight">my rewards</h1>
+<div class="w-touch-target-min"></div> <!-- Spacer -->
+</header>
+<!-- Main Content -->
+<main class="flex-grow px-6 py-8 max-w-max-width-booking mx-auto w-full space-y-8">
+<!-- Points Balance Section -->
+<section class="bg-surface-container-lowest rounded-xl p-8 shadow-sm border border-border-standard flex flex-col items-center justify-center text-center relative overflow-hidden">
+<!-- Decorative background element -->
+<div class="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 bg-primary-light rounded-full opacity-50 blur-2xl pointer-events-none"></div>
+<h2 class="font-label-md text-label-md text-text-secondary uppercase tracking-widest mb-2">Available Points</h2>
+<div class="font-display-hero-mobile text-display-hero-mobile text-primary-container mb-6 relative">
+                2,480
+                <span class="absolute top-2 -right-6 text-xl material-symbols-outlined text-primary-container" data-icon="stars" data-weight="fill" style="font-variation-settings: 'FILL' 1;">stars</span>
+</div>
+<!-- Progress Indicator -->
+<div class="w-full max-w-[280px]">
+<div class="flex justify-between font-label-sm text-label-sm text-text-secondary mb-2">
+<span>Silver Tier</span>
+<span>Gold (3,000 pts)</span>
+</div>
+<div class="h-2 w-full bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-primary-container rounded-full w-[82%]"></div>
+</div>
+<p class="font-label-sm text-label-sm text-text-secondary mt-3">520 points to next tier</p>
+</div>
+</section>
+<!-- Points History Table -->
+<section class="space-y-4">
+<h3 class="font-h4 text-h4 text-on-surface">Recent Activity</h3>
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<!-- Transaction Item 1 -->
+<div class="flex items-center justify-between p-4 border-b border-border-standard last:border-0 hover:bg-surface-bright transition-colors">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-status-green-bg text-status-green-text flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined" data-icon="bed">bed</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface mb-0.5">Stay at Forest Canopy Loft</p>
+<p class="font-label-sm text-label-sm text-text-secondary">Oct 12, 2023</p>
+</div>
+</div>
+<div class="font-h4 text-h4 text-primary-container">
+                        +450
+                    </div>
+</div>
+<!-- Transaction Item 2 -->
+<div class="flex items-center justify-between p-4 border-b border-border-standard last:border-0 hover:bg-surface-bright transition-colors">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-status-gray-bg text-status-gray-text flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined" data-icon="redeem">redeem</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface mb-0.5">Spa Treatment Redemption</p>
+<p class="font-label-sm text-label-sm text-text-secondary">Sep 28, 2023</p>
+</div>
+</div>
+<div class="font-label-md text-label-md text-text-secondary">
+                        -1,000
+                    </div>
+</div>
+<!-- Transaction Item 3 -->
+<div class="flex items-center justify-between p-4 border-b border-border-standard last:border-0 hover:bg-surface-bright transition-colors">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-status-green-bg text-status-green-text flex items-center justify-center flex-shrink-0">
+<span class="material-symbols-outlined" data-icon="restaurant">restaurant</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-on-surface mb-0.5">Dining Experience</p>
+<p class="font-label-sm text-label-sm text-text-secondary">Sep 15, 2023</p>
+</div>
+</div>
+<div class="font-h4 text-h4 text-primary-container">
+                        +120
+                    </div>
+</div>
+</div>
+<!-- Empty State (Hidden by default, shown here for structure) -->
+<div class="hidden bg-surface-container-lowest rounded-xl border border-border-standard p-8 text-center flex flex-col items-center justify-center shadow-sm">
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mb-4">
+<span class="material-symbols-outlined text-3xl text-secondary" data-icon="loyalty">loyalty</span>
+</div>
+<h4 class="font-h4 text-h4 text-on-surface mb-2">No rewards yet</h4>
+<p class="font-body-sm text-body-sm text-text-secondary mb-6 max-w-[250px]">Book a stay to start earning points towards exclusive upgrades and local experiences.</p>
+<button class="bg-primary-container text-on-secondary font-label-md text-label-md h-touch-target-min px-6 rounded-lg hover:bg-primary-hover active:scale-95 transition-all">
+                     Explore Rooms
+                 </button>
+</div>
+</section>
+<!-- How to Redeem Section -->
+<section class="bg-primary-light rounded-xl p-6 border border-outline-variant/30">
+<h3 class="font-h4 text-h4 text-on-primary-container mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined" data-icon="info">info</span>
+                How to Redeem
+            </h3>
+<ul class="space-y-4">
+<li class="flex gap-3 items-start">
+<span class="material-symbols-outlined text-primary-container mt-0.5" data-icon="check_circle">check_circle</span>
+<div>
+<p class="font-label-md text-label-md text-on-primary-fixed mb-1">Room Upgrades</p>
+<p class="font-label-sm text-label-sm text-on-primary-fixed-variant">Apply points during checkout for instant upgrades to premium suites.</p>
+</div>
+</li>
+<li class="flex gap-3 items-start">
+<span class="material-symbols-outlined text-primary-container mt-0.5" data-icon="check_circle">check_circle</span>
+<div>
+<p class="font-label-md text-label-md text-on-primary-fixed mb-1">Local Experiences</p>
+<p class="font-label-sm text-label-sm text-on-primary-fixed-variant">Redeem points for exclusive guided tours, spa treatments, or dining at the front desk.</p>
+</div>
+</li>
+</ul>
+</section>
+</main>
+<!-- Bottom Navigation Bar (Mobile) -->
+<nav class="bg-surface-container-lowest dark:bg-surface-container-low fixed bottom-0 w-full z-50 md:hidden border-t border-border-standard shadow-lg flex justify-around items-center px-4 py-2">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-primary-light active:scale-95 transition-transform w-touch-target-min h-touch-target-min" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="search">search</span>
+<span class="font-label-sm text-label-sm">Explore</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-xl p-2 hover:bg-primary-light active:scale-95 transition-transform w-touch-target-min h-touch-target-min" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="luggage" data-weight="fill" style="font-variation-settings: 'FILL' 1;">luggage</span>
+<span class="font-label-sm text-label-sm">My Stays</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-primary-light active:scale-95 transition-transform w-touch-target-min h-touch-target-min" href="#">
+<span class="material-symbols-outlined mb-1" data-icon="person">person</span>
+<span class="font-label-sm text-label-sm">Profile</span>
+</a>
+</nav>
+</body></html>

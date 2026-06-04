@@ -1,0 +1,354 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Homepage</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary": "#605e5a",
+                      "surface-tint": "#8d4f00",
+                      "status-blue-text": "#2563EB",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "surface-bright": "#f9f9f9",
+                      "secondary-container": "#d9dff5",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "on-error": "#ffffff",
+                      "on-primary": "#ffffff",
+                      "primary-hover": "#C4720E",
+                      "status-green-bg": "#F0FDF4",
+                      "on-primary-fixed": "#2d1600",
+                      "primary": "#8d4f00",
+                      "status-blue-bg": "#EFF6FF",
+                      "status-purple-text": "#7C3AED",
+                      "inverse-on-surface": "#f1f1f1",
+                      "background": "#f9f9f9",
+                      "text-secondary": "#4B5563",
+                      "error-container": "#ffdad6",
+                      "status-red-text": "#DC2626",
+                      "error": "#ba1a1a",
+                      "inverse-primary": "#ffb876",
+                      "page-bg": "#F9FAFB",
+                      "surface-container-low": "#f3f3f3",
+                      "primary-fixed": "#ffdcc0",
+                      "surface": "#f9f9f9",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "outline": "#877363",
+                      "on-surface": "#1b1b1b",
+                      "primary-container": "#ea8a1a",
+                      "on-secondary-fixed-variant": "#404758",
+                      "on-background": "#1b1b1b",
+                      "border-standard": "#E5E7EB",
+                      "surface-container": "#eeeeee",
+                      "surface-dim": "#dadada",
+                      "on-surface-variant": "#544335",
+                      "surface-container-highest": "#e2e2e2",
+                      "on-secondary-container": "#5c6274",
+                      "status-red-bg": "#FEF2F2",
+                      "status-amber-bg": "#FFFBEB",
+                      "secondary": "#575e70",
+                      "secondary-fixed": "#dce2f7",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "on-tertiary": "#ffffff",
+                      "outline-variant": "#dac2af",
+                      "on-secondary-fixed": "#141b2b",
+                      "status-green-text": "#16A34A",
+                      "status-amber-text": "#D97706",
+                      "primary-fixed-dim": "#ffb876",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "status-gray-bg": "#F3F4F6",
+                      "surface-container-high": "#e8e8e8",
+                      "tertiary-fixed": "#e6e2dd",
+                      "inverse-surface": "#303030",
+                      "on-tertiary-container": "#393835",
+                      "on-primary-container": "#562e00",
+                      "status-purple-bg": "#F5F3FF",
+                      "on-error-container": "#93000a",
+                      "tertiary-container": "#a4a19d",
+                      "surface-variant": "#e2e2e2",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary": "#ffffff",
+                      "primary-light": "#FEF3E2",
+                      "status-gray-text": "#6B7280"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "8px",
+                      "max-width-booking": "600px",
+                      "max-width-auth": "460px",
+                      "sidebar-width": "240px",
+                      "drawer-width": "480px",
+                      "touch-target-min": "44px"
+              },
+              "fontFamily": {
+                      "body-lg": [
+                              "Inter", "sans-serif"
+                      ],
+                      "h2": [
+                              "Apollo", "serif"
+                      ],
+                      "label-md": [
+                              "Inter", "sans-serif"
+                      ],
+                      "label-sm": [
+                              "Inter", "sans-serif"
+                      ],
+                      "h1": [
+                              "Apollo", "serif"
+                      ],
+                      "h3": [
+                              "Inter", "sans-serif"
+                      ],
+                      "h4": [
+                              "Inter", "sans-serif"
+                      ],
+                      "h1-mobile": [
+                              "Apollo", "serif"
+                      ],
+                      "body-sm": [
+                              "Inter", "sans-serif"
+                      ],
+                      "display-hero": [
+                              "Apollo", "serif"
+                      ],
+                      "display-hero-mobile": [
+                              "Apollo", "serif"
+                      ]
+              },
+              "fontSize": {
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h2": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h1": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h3": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "h4": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "h1-mobile": [
+                              "28px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-hero": [
+                              "72px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-hero-mobile": [
+                              "44px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Times New Roman'), local('Georgia'), serif; /* Fallback for Apollo */
+        }
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+      </style>
+</head>
+<body class="bg-background text-on-background font-body-lg text-body-lg antialiased">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-transparent flex justify-between items-center px-6 py-4 max-w-7xl mx-auto">
+<button aria-label="Menu" class="h-touch-target-min w-touch-target-min flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-h3">menu</span>
+</button>
+<div class="flex-1 flex justify-center">
+<img alt="spark inn logo" class="h-8 object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA1oM87zUXIcYgQaccCxeOy7Cj8Zi917eF_o9DMN6xCS597fJKtK35MFbk7RMoxgs-M0VDVYtSvH8ppsZVtkFC-Y6fQO1MkazxUqGSWtDxLJCwshxzrm5vxCV5A-mWyvj8Hkct-OETEJL1_NXWp9Mz0LG5LOjd3q_V727EMP8L2rhh_DpXfx1riBOnHK-z0-LAiYYLkn9vDAU_icXtKX1Ax6co16h2YptERDMWgbljAIgxI1osfrnAIQ1IzsARFh-9YztktVW2-KFR3">
+</div>
+<button class="h-touch-target-min flex items-center justify-center text-white font-label-md text-label-md px-4 rounded hover:text-primary-hover transition-colors duration-200">
+            Book Now
+        </button>
+</header>
+<!-- Hero Section -->
+<section class="relative w-full h-[100svh] flex flex-col justify-center items-center text-center px-6" data-alt="A cinematic, wide-angle photograph of a serene, boutique luxury resort pool in Bohol at dusk. The water is perfectly still, reflecting soft, warm, minimal ambient lighting. Lush tropical greenery gently frames the edges, creating a sanctuary-like atmosphere. The overall mood is deeply relaxing and exclusive, with a dark, sophisticated overlay enhancing the warm orange undertones of the design system." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCTef7Kgv1QtQkGMUF3IjkJC-VCn1qzPu4wpvFbsZfXP9IJv_dhrx4JJo34Kuxb5ka-hagWW7LvX18wbAck93GBqVBjEn24s5FzC7mAt28gar-1qQn34heG8ehz4jsBY1iBDf5G9vmLwEbivs1ATFikNbWpY6Gjd7_RerEeeiF0pEo1vNo_X_ZFlRPCy9mO_AMQf01x7s0a-pMAG15CWDWwHA_AFNAFp3UqpV-rcx8B6AZY0-2II8F4vAwYUzvd-52h1OJ_fKdE96h2'); background-size: cover; background-position: center;">
+<div class="absolute inset-0 bg-black/40 z-0"></div> <!-- Dark overlay -->
+<div class="relative z-10 flex flex-col items-center gap-6 mt-20">
+<h1 class="font-display-hero-mobile text-display-hero-mobile text-white drop-shadow-md">Your sanctuary in Bohol</h1>
+<button class="bg-primary-container text-black font-label-md text-label-md h-touch-target-min px-8 rounded-lg shadow-lg hover:bg-primary-hover transition-colors">
+                Check Availability
+            </button>
+</div>
+</section>
+<!-- Availability Bar (Floating) -->
+<div class="relative z-20 -mt-16 px-4 max-w-sm mx-auto w-full">
+<div class="bg-surface-container-lowest rounded-xl shadow-lg p-4 flex flex-col gap-4">
+<div class="flex items-center justify-between border-b border-border-standard pb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-text-secondary">calendar_month</span>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-text-secondary">Check-in</span>
+<span class="font-body-sm text-body-sm text-on-surface">Oct 24</span>
+</div>
+</div>
+<div class="h-8 w-px bg-border-standard"></div>
+<div class="flex items-center gap-2">
+<div class="flex flex-col text-right">
+<span class="font-label-sm text-label-sm text-text-secondary">Check-out</span>
+<span class="font-body-sm text-body-sm text-on-surface">Oct 27</span>
+</div>
+</div>
+</div>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-text-secondary">person</span>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-text-secondary">Guests</span>
+<span class="font-body-sm text-body-sm text-on-surface">2 Adults</span>
+</div>
+</div>
+<button class="text-primary-container font-label-md text-label-md flex items-center h-touch-target-min hover:text-primary-hover transition-colors">
+                     Edit <span class="material-symbols-outlined text-sm ml-1">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Featured Rooms -->
+<section class="py-16 px-4 bg-background overflow-hidden">
+<div class="max-w-7xl mx-auto">
+<h2 class="font-h2 text-h2 mb-8 text-on-background px-2">Stay with us</h2>
+<!-- Horizontal Scroll Container -->
+<div class="flex overflow-x-auto gap-4 pb-8 snap-x snap-mandatory hide-scrollbar pl-2 pr-6">
+<!-- Room Card 1 -->
+<div class="min-w-[280px] max-w-[320px] bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden snap-center flex-shrink-0 flex flex-col">
+<div class="h-48 w-full bg-surface-variant relative" data-alt="A warm, minimal hotel room interior featuring a large, plush bed with crisp white linens. Soft, diffused natural light filters through sheer curtains, highlighting light wood accents and subtle earth tones. The space feels serene, luxurious, and inviting, embodying a boutique resort aesthetic in Bohol." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBfjCo0RxeTYwZIMHRi7nG4GiJzWWSaFP6aDG7pKc1U8YkjM9IakMjV5fNeQFbNWyKCvMBKoM4q5RGBEOmXJailrnJnTXhzqrDu8fV8RlrSs2w_z0pxfmGCIRRhBt1Pp8HkSwJOSIqtEe0Yxcs8y913fU-vkG1qGWqDr757P8jjva2Yh8dXPH4jtrrKT6rkkm92BhP0C-DCv7QzBlabxrwPtL1_6ZCFzvo2HTe_F0LzkTdr22ANSc5QcNDpX2Gbuk-JB7aFWDlfBA_r'); background-size: cover; background-position: center;">
+</div>
+<div class="p-5 flex flex-col flex-1 justify-between gap-4">
+<div>
+<h3 class="font-h3 text-h3 text-on-background mb-1">Deluxe King</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Spacious comfort with premium bedding and a private balcony overlooking the gardens.</p>
+</div>
+<div class="flex items-end justify-between mt-auto">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-text-secondary uppercase">From</span>
+<span class="font-h4 text-h4 text-on-background">₱ 8,500<span class="font-body-sm text-body-sm font-normal text-text-secondary"> /night</span></span>
+</div>
+<button class="bg-primary-container text-black font-label-md text-label-md h-touch-target-min px-4 rounded-lg hover:bg-primary-hover transition-colors">
+                                View
+                            </button>
+</div>
+</div>
+</div>
+<!-- Room Card 2 -->
+<div class="min-w-[280px] max-w-[320px] bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden snap-center flex-shrink-0 flex flex-col">
+<div class="h-48 w-full bg-surface-variant relative" data-alt="A tranquil, high-end resort suite interior showcasing a freestanding minimalist bathtub near a large window. Warm ambient light casts soft shadows across natural stone and light oak textures. The atmosphere is quiet, intimate, and embodies a warm minimal sanctuary aesthetic perfect for a relaxing getaway." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAykPEd36l2Pb0eZIGddEkYCYzfeugt0Rw6UW--Clop3-PiL-IKPW6UeeZHVt1yEJ4_AbUuu6VNsn99Gcef7T8CLMl7ji71nAoHjdClN7gb0nV_9PRxgjjRIVQ7379M0I0nKhiK-0AZg3e9FU8jvRRuEDd5KFHIQfcSwPUBcBx1kzGzpzoX6MUOnioru-SBF8LmbsQlTrM1vb9ZDZlsMXvwHYKdrxZH25cYbr-0j4wCLurlclTkQaQNiFuSZGJRcwaGEVO1-P0eW1Q7'); background-size: cover; background-position: center;">
+</div>
+<div class="p-5 flex flex-col flex-1 justify-between gap-4">
+<div>
+<h3 class="font-h3 text-h3 text-on-background mb-1">Pool Villa</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Ultimate privacy featuring a plunge pool and expansive outdoor lounging area.</p>
+</div>
+<div class="flex items-end justify-between mt-auto">
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-text-secondary uppercase">From</span>
+<span class="font-h4 text-h4 text-on-background">₱ 14,200<span class="font-body-sm text-body-sm font-normal text-text-secondary"> /night</span></span>
+</div>
+<button class="bg-primary-container text-black font-label-md text-label-md h-touch-target-min px-4 rounded-lg hover:bg-primary-hover transition-colors">
+                                View
+                            </button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Footer (Shared Component) -->
+<footer class="w-full relative bottom-0 bg-inverse-surface dark:bg-surface-container-lowest flex flex-col md:flex-row justify-between items-center px-8 py-12 max-w-7xl mx-auto">
+<div class="mb-6 md:mb-0 text-center md:text-left flex flex-col items-center md:items-start">
+<span class="font-h2 text-h2 lowercase text-white mb-4">spark inn</span>
+<p class="font-body-sm text-body-sm text-white dark:text-on-surface">© 2024 spark inn. All rights reserved.</p>
+</div>
+<nav class="flex flex-wrap justify-center gap-6">
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Rooms</a>
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">About Us</a>
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Contact</a>
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Privacy Policy</a>
+</nav>
+</footer>
+<style>
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .hide-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    </style>
+</body></html>

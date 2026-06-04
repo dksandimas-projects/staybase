@@ -1,0 +1,299 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/94165/Apollo-Regular.woff'); /* Placeholder for Apollo font */
+            font-weight: normal;
+            font-style: normal;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #E5E7EB;
+            border-radius: 10px;
+        }
+        .backdrop-blur-custom {
+            backdrop-filter: blur(12px);
+            background-color: rgba(27, 27, 27, 0.4);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "status-red-bg": "#FEF2F2",
+                      "on-background": "#1b1b1b",
+                      "status-red-text": "#DC2626",
+                      "text-secondary": "#4B5563",
+                      "status-blue-bg": "#EFF6FF",
+                      "status-gray-text": "#6B7280",
+                      "secondary-container": "#d9dff5",
+                      "error": "#ba1a1a",
+                      "surface-container-highest": "#e2e2e2",
+                      "surface-container-lowest": "#ffffff",
+                      "on-surface-variant": "#544335",
+                      "on-error": "#ffffff",
+                      "status-green-text": "#16A34A",
+                      "primary-hover": "#C4720E",
+                      "surface-tint": "#8d4f00",
+                      "on-tertiary-container": "#393835",
+                      "on-primary": "#ffffff",
+                      "status-purple-bg": "#F5F3FF",
+                      "on-secondary": "#ffffff",
+                      "status-amber-bg": "#FFFBEB",
+                      "inverse-surface": "#303030",
+                      "outline-variant": "#dac2af",
+                      "surface-dim": "#dadada",
+                      "inverse-on-surface": "#f1f1f1",
+                      "surface-container-low": "#f3f3f3",
+                      "status-purple-text": "#7C3AED",
+                      "border-standard": "#E5E7EB",
+                      "tertiary-container": "#a4a19d",
+                      "status-green-bg": "#F0FDF4",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "surface": "#f9f9f9",
+                      "inverse-primary": "#ffb876",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "on-error-container": "#93000a",
+                      "background": "#f9f9f9",
+                      "primary-fixed": "#ffdcc0",
+                      "primary": "#8d4f00",
+                      "on-primary-container": "#562e00",
+                      "tertiary-fixed": "#e6e2dd",
+                      "on-tertiary": "#ffffff",
+                      "page-bg": "#F9FAFB",
+                      "on-secondary-fixed": "#141b2b",
+                      "on-secondary-fixed-variant": "#404758",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "status-gray-bg": "#F3F4F6",
+                      "status-blue-text": "#2563EB",
+                      "primary-container": "#ea8a1a",
+                      "on-surface": "#1b1b1b",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "outline": "#877363",
+                      "surface-variant": "#e2e2e2",
+                      "secondary-fixed": "#dce2f7",
+                      "primary-light": "#FEF3E2",
+                      "error-container": "#ffdad6",
+                      "tertiary": "#605e5a",
+                      "primary-fixed-dim": "#ffb876",
+                      "surface-container": "#eeeeee",
+                      "secondary": "#575e70",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "on-secondary-container": "#5c6274",
+                      "surface-container-high": "#e8e8e8",
+                      "on-primary-fixed": "#2d1600",
+                      "surface-bright": "#f9f9f9",
+                      "status-amber-text": "#D97706"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "8px",
+                      "max-width-booking": "600px",
+                      "max-width-auth": "460px",
+                      "sidebar-width": "240px",
+                      "touch-target-min": "44px",
+                      "drawer-width": "480px"
+              },
+              "fontFamily": {
+                      "display-hero-mobile": ["Apollo", "serif"],
+                      "label-sm": ["Inter", "sans-serif"],
+                      "display-hero": ["Apollo", "serif"],
+                      "label-md": ["Inter", "sans-serif"],
+                      "h2": ["Apollo", "serif"],
+                      "h1": ["Apollo", "serif"],
+                      "body-lg": ["Inter", "sans-serif"],
+                      "h1-mobile": ["Apollo", "serif"],
+                      "body-sm": ["Inter", "sans-serif"],
+                      "h3": ["Inter", "sans-serif"],
+                      "h4": ["Inter", "sans-serif"]
+              }
+            }
+          }
+        }
+    </script>
+</head>
+<body class="bg-surface font-body-lg text-on-surface antialiased overflow-hidden">
+<!-- Modal Backdrop Overlay -->
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 backdrop-blur-custom">
+<!-- Modal Content Container -->
+<div class="bg-surface-container-lowest w-full max-w-7xl h-full max-h-[921px] rounded-xl shadow-2xl overflow-hidden flex flex-col relative animate-in fade-in zoom-in duration-300">
+<!-- Modal Header -->
+<header class="h-16 px-6 flex items-center justify-between border-b border-border-standard bg-surface-container-lowest z-10">
+<div class="flex items-center gap-2">
+<span class="font-display-hero text-h3 lowercase tracking-tighter text-on-surface">spark inn</span>
+</div>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container transition-colors active:scale-95" onclick="window.history.back()">
+<span class="material-symbols-outlined text-on-surface-variant">close</span>
+</button>
+</header>
+<!-- Main Split Layout -->
+<main class="flex-1 flex flex-col md:flex-row overflow-hidden">
+<!-- Left Panel: Gallery (60%) -->
+<section class="w-full md:w-[60%] h-64 md:h-auto relative group overflow-hidden bg-surface-dim">
+<div class="absolute inset-0">
+<img class="w-full h-full object-cover" data-alt="A breathtaking, high-resolution view of the Ocean View Suite at spark inn, showcasing a minimalist luxury bedroom with expansive floor-to-ceiling windows overlooking a serene turquoise ocean in Bohol. The room is flooded with soft, warm morning sunlight, highlighting crisp white linens, natural wood textures, and a sophisticated Spark Orange accent throw. The photography style is professional hospitality, emphasizing airy whitespace, clean lines, and a peaceful, sanctuary-like atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAn7Hpm32ir8HYLBbNE4EKoM9m9jV1i9jczDVbnK42-kdnEox8Bh15mva10UNUUO_Gf85gvZoyz5MhA75C_FPvdQh0EmSmV32svDjJ400Ng9RMcBJf-xeTVx3Nl0D2RqUxjQ9ULsoY774Jxb9WFXMoFmtU-a6oUz9nRXx7yUOtm8FGKsFtY9UbeT1axEkxIAMjICjH55do3bJsYv7Bv60ZE_4Z5F18uTt88y6Gv4C8FeEUq_-ZYXdml3ND5mrtPkIHJjl4-9m8pKaEB">
+</div>
+<!-- Thumbnail Navigation Overlay -->
+<div class="absolute bottom-6 left-6 right-6 flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+<div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-white cursor-pointer shadow-lg flex-shrink-0 transition-transform hover:scale-105">
+<img class="w-full h-full object-cover" data-alt="Detailed view of the Ocean View Suite bathroom featuring a freestanding stone bathtub, minimalist matte black fixtures, and organic bamboo accents. The space is illuminated by soft, diffused natural light, creating a spa-like boutique luxury experience within spark inn's warm minimalist design language." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCFZ0370cODSUI0S5WZu8_jJPjSoX_d5l27eQmZD1XHMOkeNVOlE-miXgumzxknCz3wYh7RjYACC8iag_7kSNrzCXyv3dAe5d7uZjb5ucGJWT6Lv2z8FavltMC6Pu1MHH4k0IaP0XyMk4qrq6cN3fXqt5Z2DpEzL7MbV5NvUY3XlDm4SFQYoKioYuoLNGkIRSghxPtQROx5vzpSR24tzlFy9dEYB77O6GHOvwzkBGpynpJ6rEj_eRMQh5HHtoncPseoK92Zz3vdtilt">
+</div>
+<div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-transparent cursor-pointer shadow-lg flex-shrink-0 opacity-80 hover:opacity-100 transition-all hover:scale-105">
+<img class="w-full h-full object-cover" data-alt="Interior shot of the Ocean View Suite private terrace at spark inn, featuring two modern rattan lounge chairs and a small marble-top table. The background shows the lush tropical greenery of Bohol merging with the blue horizon of the sea under a clear sky, maintaining the brand's commitment to high-end service and natural beauty." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCDpq19153qodCJvziL9euj8QIANh6udBB-5NvUmTQ2TmKsEJfnpgQ480SK9LrpBwiAQeao4OuTpGVps7BHJVT8vPm3DRE8aKaXpUyVG2QblOtDhbh_Syj_YFB_EpD712mF8tkw60SI9j1vyWHx6TyKSXMiCkP6baf3cFut2jBr1YGZk5Ip4U9tqyGkYG0FR3kGOwutr4FKzr7VtSVorVgbyy678pHRF-dacNDD_hForaVM0uOgyTlM23oBb3I4vN85S8XDQz6sgPqr">
+</div>
+<div class="w-20 h-20 rounded-lg overflow-hidden border-2 border-transparent cursor-pointer shadow-lg flex-shrink-0 opacity-80 hover:opacity-100 transition-all hover:scale-105">
+<img class="w-full h-full object-cover" data-alt="Wide angle shot of the Ocean View Suite living area at spark inn, demonstrating the efficiency-first layout with generous whitespace and premium furniture. A low-profile grey linen sofa sits on a hand-woven jute rug, accented by warm timber shelving and minimalist art pieces, all bathed in soft, inviting evening light." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBwbMmPVBFjICefqC_UlY0BBwlJfRwEGxE_BuDbI09KX-6stBBSfaCxoC8lqSoEP6S6V62AWUKJdeCOvWognx4rD6Vk3APaPoKBhbeCrl8BIrs2ULUOb-lcWKEfnA4-ZDbbcfv0cuwVfwTG1rEjODPAEDeYYESEIr6fY2Ch3am1Jy4nIi4HLW-6HtYmm2yh8nG1Dbr1iwABamNl5I7DAdNWyucFWP-UQ_5GOTcDWTMb2KCkTpCSZhCnmIvadYE2CmNnKvbJy6wagW2N">
+</div>
+</div>
+<!-- Gallery Controls -->
+<button class="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center hover:bg-white/40 transition-all active:scale-90">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button class="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/20 backdrop-blur-md text-white flex items-center justify-center hover:bg-white/40 transition-all active:scale-90">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</section>
+<!-- Right Panel: Content (40%) -->
+<section class="w-full md:w-[40%] flex flex-col bg-surface-container-lowest">
+<div class="flex-1 overflow-y-auto custom-scrollbar px-8 py-10">
+<!-- Headline Section -->
+<div class="mb-8">
+<p class="font-h1 text-h1 text-on-surface mb-2 tracking-tight">Ocean View Suite</p>
+<p class="font-display-hero italic text-h4 text-primary opacity-90">Warm Minimalist</p>
+</div>
+<!-- Description -->
+<div class="mb-10 space-y-4">
+<p class="font-body-lg text-text-secondary leading-relaxed">
+                                Experience the pinnacle of boutique luxury in our flagship Ocean View Suite. Designed with a sanctuary mindset, this room blends the raw beauty of Bohol's coastline with sophisticated, warm minimalist interiors. 
+                            </p>
+<p class="font-body-lg text-text-secondary leading-relaxed">
+                                Every element, from the hand-picked timber furnishings to the artisanal linen bedding, is curated to foster a sense of peace and unassuming elegance. Wake up to the rhythmic sound of waves and panoramic views of the horizon.
+                            </p>
+</div>
+<!-- Amenities Grid -->
+<div class="mb-10">
+<h4 class="font-h4 text-on-surface mb-6 uppercase tracking-widest text-label-sm border-b border-border-standard pb-2">Room Amenities</h4>
+<div class="grid grid-cols-2 gap-y-6 gap-x-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">king_bed</span>
+</div>
+<span class="font-label-md text-on-surface">King-size Bed</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">waves</span>
+</div>
+<span class="font-label-md text-on-surface">Ocean Front</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">wifi</span>
+</div>
+<span class="font-label-md text-on-surface">High-speed WiFi</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">ac_unit</span>
+</div>
+<span class="font-label-md text-on-surface">Climate Control</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">local_bar</span>
+</div>
+<span class="font-label-md text-on-surface">Artisan Minibar</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-light flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">shower</span>
+</div>
+<span class="font-label-md text-on-surface">Rain Shower</span>
+</div>
+</div>
+</div>
+<!-- Booking Card -->
+<div class="bg-surface-container-low rounded-xl p-6 border border-border-standard shadow-sm">
+<div class="space-y-4 mb-6">
+<!-- Option 1 -->
+<label class="flex items-center justify-between p-4 bg-surface-container-lowest rounded-lg border-2 border-primary cursor-pointer transition-all hover:shadow-md">
+<div class="flex items-center gap-3">
+<input checked="" class="w-5 h-5 text-primary focus:ring-primary border-outline" name="rate" type="radio">
+<div>
+<p class="font-h4 text-body-lg text-on-surface">Room Only</p>
+<p class="font-label-sm text-status-gray-text">Standard flexible rate</p>
+</div>
+</div>
+<div class="text-right">
+<p class="font-h3 text-primary">₱12,500</p>
+<p class="font-label-sm text-status-gray-text">/night</p>
+</div>
+</label>
+<!-- Option 2 -->
+<label class="flex items-center justify-between p-4 bg-surface-container-lowest rounded-lg border border-border-standard cursor-pointer transition-all hover:border-primary/50 hover:shadow-md">
+<div class="flex items-center gap-3">
+<input class="w-5 h-5 text-primary focus:ring-primary border-outline" name="rate" type="radio">
+<div>
+<p class="font-h4 text-body-lg text-on-surface">Room + Breakfast</p>
+<p class="font-label-sm text-status-gray-text">Artisan buffet included</p>
+</div>
+</div>
+<div class="text-right">
+<p class="font-h3 text-on-surface">₱14,200</p>
+<p class="font-label-sm text-status-gray-text">/night</p>
+</div>
+</label>
+</div>
+<!-- CTA -->
+<button class="w-full bg-primary-container text-white py-4 rounded-lg font-h4 flex items-center justify-center gap-2 hover:bg-primary-hover transition-all active:scale-95 shadow-md shadow-primary-container/20">
+<span>Book This Room</span>
+<span class="material-symbols-outlined">arrow_forward</span>
+</button>
+</div>
+</div>
+</section>
+</main>
+</div>
+</div>
+<!-- Background Elements (Simulating the App behind the modal) -->
+<div class="fixed inset-0 -z-10 bg-surface grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-12 opacity-40 grayscale pointer-events-none">
+<div class="aspect-[4/5] bg-surface-variant rounded-xl"></div>
+<div class="aspect-[4/5] bg-surface-variant rounded-xl"></div>
+<div class="aspect-[4/5] bg-surface-variant rounded-xl"></div>
+<div class="aspect-[4/5] bg-surface-variant rounded-xl"></div>
+<div class="aspect-[4/5] bg-surface-variant rounded-xl"></div>
+<div class="aspect-[4/5] bg-surface-variant rounded-xl"></div>
+</div>
+<script>
+        // Micro-interactions for gallery item selection
+        const thumbnails = document.querySelectorAll('.thumbnail-item');
+        thumbnails.forEach(thumb => {
+            thumb.addEventListener('click', () => {
+                thumbnails.forEach(t => t.classList.remove('border-white'));
+                thumbnails.forEach(t => t.classList.add('border-transparent', 'opacity-80'));
+                thumb.classList.remove('border-transparent', 'opacity-80');
+                thumb.classList.add('border-white', 'opacity-100');
+            });
+        });
+    </script>
+</body></html>

@@ -1,0 +1,372 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>My Rewards - Spark Inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Times New Roman'), local('Georgia'), serif; /* Fallback for Apollo serif */
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#93000a",
+                        "inverse-surface": "#303030",
+                        "status-green-bg": "#F0FDF4",
+                        "error-container": "#ffdad6",
+                        "outline-variant": "#dac2af",
+                        "tertiary-fixed": "#e6e2dd",
+                        "status-purple-text": "#7C3AED",
+                        "surface-container-highest": "#e2e2e2",
+                        "surface-container": "#eeeeee",
+                        "on-tertiary-container": "#393835",
+                        "on-secondary": "#ffffff",
+                        "text-secondary": "#4B5563",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#f3f3f3",
+                        "on-primary-fixed": "#2d1600",
+                        "status-blue-bg": "#EFF6FF",
+                        "status-green-text": "#16A34A",
+                        "secondary-fixed": "#dce2f7",
+                        "primary-container": "#ea8a1a",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-secondary-fixed-variant": "#404758",
+                        "status-amber-bg": "#FFFBEB",
+                        "secondary": "#575e70",
+                        "primary-fixed": "#ffdcc0",
+                        "on-surface": "#1b1b1b",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "primary-hover": "#C4720E",
+                        "inverse-primary": "#ffb876",
+                        "background": "#f9f9f9",
+                        "page-bg": "#F9FAFB",
+                        "surface-bright": "#f9f9f9",
+                        "status-gray-bg": "#F3F4F6",
+                        "status-purple-bg": "#F5F3FF",
+                        "surface-tint": "#8d4f00",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "secondary-container": "#d9dff5",
+                        "status-amber-text": "#D97706",
+                        "on-background": "#1b1b1b",
+                        "on-primary-container": "#562e00",
+                        "primary": "#8d4f00",
+                        "surface-dim": "#dadada",
+                        "on-secondary-container": "#5c6274",
+                        "on-surface-variant": "#544335",
+                        "outline": "#877363",
+                        "tertiary": "#605e5a",
+                        "surface-container-high": "#e8e8e8",
+                        "status-red-text": "#DC2626",
+                        "error": "#ba1a1a",
+                        "status-gray-text": "#6B7280",
+                        "inverse-on-surface": "#f1f1f1",
+                        "border-standard": "#E5E7EB",
+                        "on-primary": "#ffffff",
+                        "surface": "#f9f9f9",
+                        "status-blue-text": "#2563EB",
+                        "on-tertiary": "#ffffff",
+                        "primary-fixed-dim": "#ffb876",
+                        "surface-variant": "#e2e2e2",
+                        "tertiary-container": "#a4a19d",
+                        "primary-light": "#FEF3E2",
+                        "status-red-bg": "#FEF2F2",
+                        "on-error": "#ffffff",
+                        "tertiary-fixed-dim": "#cac6c1"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "max-width-booking": "600px",
+                        "touch-target-min": "44px",
+                        "unit": "8px",
+                        "sidebar-width": "240px",
+                        "drawer-width": "480px",
+                        "max-width-auth": "460px"
+                    },
+                    "fontFamily": {
+                        "label-md": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "label-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "h2": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "h4": ["Inter"],
+                        "h1": ["Apollo"],
+                        "h3": ["Inter"],
+                        "display-hero-mobile": ["Apollo"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface font-body-sm min-h-screen flex flex-col md:flex-row">
+<!-- TopAppBar (Web) -->
+<header class="hidden md:flex items-center justify-between px-8 w-full bg-surface-container-lowest dark:bg-inverse-surface border-b border-border-standard h-16 fixed top-0 right-0 left-sidebar-width z-10 flat no shadows">
+<div class="font-h3 text-h3 text-on-surface lowercase">
+            spark inn
+        </div>
+<div class="flex items-center gap-4">
+<button class="w-[44px] h-[44px] flex items-center justify-center text-on-surface-variant hover:text-primary transition-colors cursor-pointer active:opacity-80 rounded-full">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="w-[44px] h-[44px] flex items-center justify-center text-on-surface-variant hover:text-primary transition-colors cursor-pointer active:opacity-80 rounded-full">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-surface-variant overflow-hidden ml-2 border border-border-standard">
+<img alt="Guest profile photo" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBvjBIT_v7d3r6JywC6q1olg6VbDDr3qYIK4W6staY57nSyp1_bGUiKGgzycDOwX9pGITR-TMiGPQr0R3tmbz5L45mk0cqzJQaTCJTtyrEegV7skgj6i7AttGeSGab3Dh2RitO0vzAbupNz3Dz6osdw6FRd99AW8VEns0hyAwTESHnH23xtMo-mf1foQ5CTRCTcd02islolDP5FIwH9Dbtzm27t12KbYS2CJf0XFNCF7dsa3LBN771rIweUX3DGBUfQHXYUAASCLaNw">
+</div>
+</div>
+</header>
+<!-- SideNavBar (Guest/User Variant) -->
+<nav class="hidden md:flex flex-col h-full py-6 bg-[#111827] fixed left-0 top-0 w-sidebar-width border-r border-border-standard flat no shadows z-20">
+<div class="px-6 mb-8">
+<h1 class="font-h2 text-h2 text-on-primary lowercase mb-1">spark inn</h1>
+<p class="font-label-sm text-label-sm text-secondary-fixed-dim">Guest Portal</p>
+</div>
+<div class="flex flex-col gap-1 w-full mt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md h-[44px]" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+                Profile
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md h-[44px]" href="#">
+<span class="material-symbols-outlined" data-icon="bed">bed</span>
+                My Stays
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 text-primary border-l-4 border-primary bg-on-primary-fixed-variant/10 font-label-md text-label-md h-[44px]" href="#">
+<span class="material-symbols-outlined" data-icon="star">star</span>
+                My Rewards
+            </a>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 flex flex-col md:ml-sidebar-width md:mt-16 pt-6 pb-20 md:pb-12 px-6 md:px-12 w-full max-w-7xl mx-auto">
+<!-- Header Section -->
+<div class="mb-10">
+<h1 class="font-h1 text-h1 text-on-surface mb-2">My Rewards</h1>
+<p class="font-body-lg text-body-lg text-text-secondary">Track your points and unlock exclusive boutique experiences.</p>
+</div>
+<!-- Top Section: Bento Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
+<!-- Points Balance Card -->
+<div class="bg-surface-container-lowest rounded-xl p-8 border border-border-standard shadow-sm flex flex-col justify-between">
+<div>
+<h2 class="font-h4 text-h4 text-on-surface mb-1">Points Balance</h2>
+<p class="font-body-sm text-body-sm text-text-secondary mb-6">Available to redeem</p>
+</div>
+<div class="mt-auto">
+<div class="font-display-hero text-display-hero text-primary-container mb-2">2,480</div>
+<div class="flex items-center gap-2">
+<div class="w-full bg-surface-variant h-2 rounded-full overflow-hidden">
+<div class="bg-primary-container h-full rounded-full w-[60%]"></div>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary whitespace-nowrap">1,520 to Platinum</span>
+</div>
+</div>
+</div>
+<!-- Membership Status Card -->
+<div class="bg-surface-container-lowest rounded-xl p-8 border border-border-standard shadow-sm relative overflow-hidden group">
+<div class="absolute inset-0 bg-gradient-to-br from-surface-container-lowest to-surface-variant opacity-50 pointer-events-none"></div>
+<div class="relative z-10 flex flex-col h-full">
+<div class="flex justify-between items-start mb-6">
+<div>
+<h2 class="font-h4 text-h4 text-on-surface mb-1">Membership Status</h2>
+<p class="font-body-sm text-body-sm text-text-secondary">Current Tier</p>
+</div>
+<div class="px-4 py-1 bg-status-amber-bg text-status-amber-text rounded-full font-label-md text-label-md border border-outline-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="workspace_premium" data-weight="fill" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+                            Gold Member
+                        </div>
+</div>
+<div class="mt-auto">
+<p class="font-label-md text-label-md text-on-surface mb-3">Your Benefits:</p>
+<ul class="space-y-3">
+<li class="flex items-center gap-3 font-body-sm text-body-sm text-text-secondary">
+<span class="material-symbols-outlined text-primary-container" data-icon="check_circle">check_circle</span>
+                                Late checkout (2 PM)
+                            </li>
+<li class="flex items-center gap-3 font-body-sm text-body-sm text-text-secondary">
+<span class="material-symbols-outlined text-primary-container" data-icon="check_circle">check_circle</span>
+                                15% off spa services
+                            </li>
+<li class="flex items-center gap-3 font-body-sm text-body-sm text-text-secondary">
+<span class="material-symbols-outlined text-primary-container" data-icon="check_circle">check_circle</span>
+                                Complimentary breakfast
+                            </li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<!-- Redeem Points Section -->
+<div class="mb-12">
+<div class="flex items-center justify-between mb-6">
+<h2 class="font-h3 text-h3 text-on-surface">Redeem Points</h2>
+<a class="font-label-md text-label-md text-primary hover:text-primary-hover transition-colors flex items-center gap-1 min-h-[44px]" href="#">
+                    View all catalog
+                    <span class="material-symbols-outlined text-sm" data-icon="arrow_forward">arrow_forward</span>
+</a>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Redemption Item 1 -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden group hover:shadow-md transition-shadow">
+<div class="h-48 bg-surface-variant relative overflow-hidden" data-alt="A beautifully plated gourmet breakfast featuring fresh tropical fruits, pastries, and artisanal coffee served on a rustic wooden tray against crisp white hotel linens. The setting is bright and airy with warm morning light filtering through sheer curtains, evoking a relaxed, luxury resort morning. Colors are warm and natural, reflecting the warm minimalism brand aesthetic.">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCpHpURtPpm5lvuctscsBzEube5URypvF6LFZLAa6DJu0pD7Aoa2XsyWf0THKqpnF4tqTeLFn5em8TaM67PrXdeojvdx0m8CLmciUIbPh81h5wwn3LsEfA5HKZycXXUcFBpbaQ5ohfj8J5oGQkcJg_sKp2d0nvEBLLkJUt66d-jwlWym1yqR5tKTK9AbopJoOK7aDboAgVIyqreUjAVFJyIQN5hEK4bfxOuu2e9-mnk34xFp_SKKSDS0zRSIeaqa8GSgZKhsRgRAN0y')"></div>
+<div class="absolute top-4 right-4 bg-surface-container-lowest/90 backdrop-blur-sm px-3 py-1 rounded-full font-label-md text-label-md text-on-surface shadow-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="star" data-weight="fill" style="font-variation-settings: 'FILL' 1;">star</span>
+                            800 pts
+                        </div>
+</div>
+<div class="p-5">
+<h3 class="font-h4 text-h4 text-on-surface mb-2">Artisan Breakfast for Two</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mb-4 line-clamp-2">Start your day with a curated selection of local delicacies and premium coffee.</p>
+<button class="w-full bg-primary-container text-on-secondary hover:bg-primary-hover font-label-md text-label-md rounded-lg h-[44px] transition-colors flex items-center justify-center">
+                            Redeem Now
+                        </button>
+</div>
+</div>
+<!-- Redemption Item 2 -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden group hover:shadow-md transition-shadow">
+<div class="h-48 bg-surface-variant relative overflow-hidden" data-alt="A serene spa environment featuring soft, warm lighting, smooth massage stones, rolled plush white towels, and a subtle arrangement of tropical orchids. The atmosphere is calming, luxurious, and minimal. The color palette focuses on soft earthy tones, pristine whites, and gentle amber lighting to convey relaxation and upscale wellness.">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCKjXhwE5Bw7Hfv5pk68i3VDjAwF9_u8u_CC2k4r0xlzz595N4G10F_YBUtx0fWN-DNULzQe7AJ1PFpCf_qs039547-g-UbFlaLcA4K5CbSwN9PhvcJSawT5uWK_qs8YOmk6H80u4vUZqLS_NRDeqVLLWUkVGz4TYmIuBxbUKLrX17W0UCFqk2xeTJr_TMD20MqKNZKUHCU-JKWJ6TjimsPOxrhLrq4p8-KZFf24x-3T9Ez4RVFkWAC-gZ5C7O4JAIfcMUYKZ_F7_aK')"></div>
+<div class="absolute top-4 right-4 bg-surface-container-lowest/90 backdrop-blur-sm px-3 py-1 rounded-full font-label-md text-label-md text-on-surface shadow-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="star" data-weight="fill" style="font-variation-settings: 'FILL' 1;">star</span>
+                            1,200 pts
+                        </div>
+</div>
+<div class="p-5">
+<h3 class="font-h4 text-h4 text-on-surface mb-2">Signature Spa Massage</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mb-4 line-clamp-2">60-minute full body massage using locally sourced botanical oils.</p>
+<button class="w-full bg-primary-container text-on-secondary hover:bg-primary-hover font-label-md text-label-md rounded-lg h-[44px] transition-colors flex items-center justify-center">
+                            Redeem Now
+                        </button>
+</div>
+</div>
+<!-- Redemption Item 3 -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden group hover:shadow-md transition-shadow">
+<div class="h-48 bg-surface-variant relative overflow-hidden" data-alt="A beautifully styled boutique hotel room corner showing a plush king bed with high-thread-count white linens, natural wood textures, and a large window looking out onto lush tropical greenery. The light is soft and diffused, creating a sanctuary-like, warm minimal vibe. The aesthetic is clean, premium, and deeply relaxing.">
+<div class="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDcs307InNpqPzEDM5rWCjgJHJFOT7DwnviTjmA8QLvPMjVKc1A28YHVVVArj1Wrc8SZ2lUsX2X8rwYYRRtzG_WVoKDzCVKqquqiJPzpwfurb4VN9dD6Y9lU5JCNf-IdN69bdvx6Obev0iOWCKC-gKHujZbeL2hQu_jeYw8BV6bRsVboitU2EzsUnA0jTUN1QbGSadVphAbGFIGlrim7CHZZIeYzqvABGM3W8AvC0JVujh1CctcfaGsgpXJ63a-GPt7fOkKmIpji2CL')"></div>
+<div class="absolute top-4 right-4 bg-surface-container-lowest/90 backdrop-blur-sm px-3 py-1 rounded-full font-label-md text-label-md text-on-surface shadow-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="star" data-weight="fill" style="font-variation-settings: 'FILL' 1;">star</span>
+                            2,000 pts
+                        </div>
+</div>
+<div class="p-5">
+<h3 class="font-h4 text-h4 text-on-surface mb-2">Suite Upgrade</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mb-4 line-clamp-2">Elevate your next stay with a complimentary upgrade to a premium suite.</p>
+<button class="w-full border border-border-standard text-on-surface hover:border-primary-container hover:text-primary-container font-label-md text-label-md rounded-lg h-[44px] transition-colors flex items-center justify-center">
+                            Learn More
+                        </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Points History Table -->
+<div>
+<h2 class="font-h3 text-h3 text-on-surface mb-6">Recent Activity</h2>
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-border-standard bg-surface-container-low">
+<th class="py-4 px-6 font-label-md text-label-md text-text-secondary font-medium">Date</th>
+<th class="py-4 px-6 font-label-md text-label-md text-text-secondary font-medium">Activity</th>
+<th class="py-4 px-6 font-label-md text-label-md text-text-secondary font-medium">Status</th>
+<th class="py-4 px-6 font-label-md text-label-md text-text-secondary font-medium text-right">Points</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard">
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 font-body-sm text-body-sm text-on-surface">Oct 12, 2023</td>
+<td class="py-4 px-6">
+<div class="font-body-sm text-body-sm text-on-surface font-medium">Stay: Ocean View Suite</div>
+<div class="font-label-sm text-label-sm text-text-secondary mt-0.5">Booking #SI-9021</div>
+</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">
+                                        Completed
+                                    </span>
+</td>
+<td class="py-4 px-6 font-h4 text-h4 text-primary-container text-right">+450</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 font-body-sm text-body-sm text-on-surface">Sep 28, 2023</td>
+<td class="py-4 px-6">
+<div class="font-body-sm text-body-sm text-on-surface font-medium">Spa Service: Deep Tissue</div>
+<div class="font-label-sm text-label-sm text-text-secondary mt-0.5">In-house purchase</div>
+</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">
+                                        Completed
+                                    </span>
+</td>
+<td class="py-4 px-6 font-h4 text-h4 text-primary-container text-right">+120</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 font-body-sm text-body-sm text-on-surface">Aug 15, 2023</td>
+<td class="py-4 px-6">
+<div class="font-body-sm text-body-sm text-on-surface font-medium">Redemption: Late Checkout</div>
+<div class="font-label-sm text-label-sm text-text-secondary mt-0.5">Stay #SI-8842</div>
+</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-gray-bg text-status-gray-text border border-border-standard">
+                                        Redeemed
+                                    </span>
+</td>
+<td class="py-4 px-6 font-body-sm text-body-sm text-on-surface text-right">-200</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="py-4 px-6 font-body-sm text-body-sm text-on-surface">Jun 02, 2023</td>
+<td class="py-4 px-6">
+<div class="font-body-sm text-body-sm text-on-surface font-medium">Stay: Garden Deluxe</div>
+<div class="font-label-sm text-label-sm text-text-secondary mt-0.5">Booking #SI-7110</div>
+</td>
+<td class="py-4 px-6">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">
+                                        Completed
+                                    </span>
+</td>
+<td class="py-4 px-6 font-h4 text-h4 text-primary-container text-right">+380</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="px-6 py-4 border-t border-border-standard bg-surface-bright text-center">
+<button class="font-label-md text-label-md text-primary hover:text-primary-hover transition-colors min-h-[44px]">
+                        Load More Activity
+                    </button>
+</div>
+</div>
+</div>
+</main>
+</body></html>

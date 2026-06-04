@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>spark inn Admin - Booking Details</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Note: Placeholder for the premium Apollo font */
+        }
+        
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+
+        /* Custom scrollbar for high-density admin view */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
+
+        .drawer-shadow {
+            box-shadow: -10px 0 30px -5px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "border-standard": "#E5E7EB",
+                        "status-green-bg": "#F0FDF4",
+                        "primary-container": "#ea8a1a",
+                        "surface-container": "#eeeeee",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "tertiary-container": "#a4a19d",
+                        "on-primary-fixed": "#2d1600",
+                        "surface-variant": "#e2e2e2",
+                        "on-surface": "#1b1b1b",
+                        "error": "#ba1a1a",
+                        "on-secondary-fixed-variant": "#404758",
+                        "status-gray-bg": "#F3F4F6",
+                        "surface": "#f9f9f9",
+                        "surface-container-high": "#e8e8e8",
+                        "page-bg": "#F9FAFB",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-gray-text": "#6B7280",
+                        "status-purple-bg": "#F5F3FF",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "surface-container-low": "#f3f3f3",
+                        "on-primary-container": "#562e00",
+                        "on-secondary-fixed": "#141b2b",
+                        "on-secondary-container": "#5c6274",
+                        "text-secondary": "#4B5563",
+                        "primary-fixed": "#ffdcc0",
+                        "background": "#f9f9f9",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary": "#575e70",
+                        "tertiary-fixed": "#e6e2dd",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "surface-bright": "#f9f9f9",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "primary-hover": "#C4720E",
+                        "surface-tint": "#8d4f00",
+                        "inverse-on-surface": "#f1f1f1",
+                        "error-container": "#ffdad6",
+                        "secondary-container": "#d9dff5",
+                        "on-tertiary": "#ffffff",
+                        "status-red-text": "#DC2626",
+                        "status-blue-bg": "#EFF6FF",
+                        "secondary-fixed": "#dce2f7",
+                        "tertiary": "#605e5a",
+                        "on-error-container": "#93000a",
+                        "status-blue-text": "#2563EB",
+                        "status-purple-text": "#7C3AED",
+                        "on-surface-variant": "#544335",
+                        "primary-fixed-dim": "#ffb876",
+                        "surface-dim": "#dadada",
+                        "primary": "#8d4f00",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "primary-light": "#FEF3E2",
+                        "on-primary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-background": "#1b1b1b",
+                        "status-amber-bg": "#FFFBEB",
+                        "status-amber-text": "#D97706",
+                        "inverse-primary": "#ffb876",
+                        "on-error": "#ffffff",
+                        "status-red-bg": "#FEF2F2",
+                        "outline-variant": "#dac2af",
+                        "on-tertiary-container": "#393835",
+                        "status-green-text": "#16A34A",
+                        "outline": "#877363",
+                        "inverse-surface": "#303030"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sidebar-width": "240px",
+                        "max-width-booking": "600px",
+                        "max-width-auth": "460px",
+                        "touch-target-min": "44px",
+                        "drawer-width": "480px",
+                        "unit": "8px"
+                    },
+                    "fontFamily": {
+                        "h2": ["Apollo", "serif"],
+                        "display-hero": ["Apollo", "serif"],
+                        "body-sm": ["Inter", "sans-serif"],
+                        "body-lg": ["Inter", "sans-serif"],
+                        "label-md": ["Inter", "sans-serif"],
+                        "h4": ["Inter", "sans-serif"],
+                        "label-sm": ["Inter", "sans-serif"],
+                        "h1": ["Apollo", "serif"],
+                        "h3": ["Inter", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-page-bg font-body-sm text-on-surface flex min-h-screen overflow-hidden">
+<!-- SIDE NAVIGATION (From Shared Components) -->
+<aside class="fixed left-0 top-0 h-full w-[240px] bg-[#111827] flex flex-col h-screen py-6 px-4 z-50">
+<div class="mb-10 px-2">
+<h1 class="font-h3 text-h3 text-white lowercase">spark inn</h1>
+<p class="text-[10px] text-secondary-fixed-dim uppercase tracking-widest mt-1">Admin Portal</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white hover:bg-secondary-fixed-dim/10 transition-all rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-primary-container text-on-primary-container rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_month">calendar_month</span>
+<span>Bookings</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white hover:bg-secondary-fixed-dim/10 transition-all rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="bed">bed</span>
+<span>Rooms</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white hover:bg-secondary-fixed-dim/10 transition-all rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span>Guests</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white hover:bg-secondary-fixed-dim/10 transition-all rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="badge">badge</span>
+<span>Staff</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white hover:bg-secondary-fixed-dim/10 transition-all rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span>Reports</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-white/10 pt-4">
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white hover:bg-secondary-fixed-dim/10 transition-all rounded-lg font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+<span>Logout</span>
+</a>
+</div>
+</aside>
+<!-- TOP BAR (From Shared Components) -->
+<div class="ml-[240px] flex-1 flex flex-col">
+<header class="flex justify-between items-center px-6 w-full z-40 bg-white border-b border-border-standard h-16 sticky top-0">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-64">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-sm" data-icon="search">search</span>
+<input class="w-full bg-status-gray-bg border-none rounded-lg pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-primary-container/20" placeholder="Search bookings..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 text-text-secondary hover:bg-status-gray-bg rounded-full transition-colors"><span class="material-symbols-outlined" data-icon="notifications">notifications</span></button>
+<button class="p-2 text-text-secondary hover:bg-status-gray-bg rounded-full transition-colors"><span class="material-symbols-outlined" data-icon="help">help</span></button>
+<button class="p-2 text-text-secondary hover:bg-status-gray-bg rounded-full transition-colors"><span class="material-symbols-outlined" data-icon="settings">settings</span></button>
+<div class="h-8 w-8 rounded-full bg-primary-container/20 flex items-center justify-center overflow-hidden border border-border-standard">
+<img alt="Staff Profile Avatar" class="h-full w-full object-cover" data-alt="A professional headshot of a hotel manager in a well-lit modern office. The subject is wearing a crisp navy suit and smiling warmly. The lighting is bright and natural, reflecting a clean and professional corporate aesthetic with high-key whites and soft gray backgrounds." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDk6c54wXao3Yk0zST5o3ERvLCVPfOpL9rb1UCCYwo8hMWX3RaKZOsK2YeVDkNuZEqxa4Vr4nUXydIwREiDq2XsT2eFJzp6eoCmV8Kp3RX_W9Uxng2aPE2-V-rqe5au_NHJf-dMPaZqVxcqmAVxEuCT6oZbinKFeUMgTUp-I2WcaHirWdEtOw3oNuHush-eG48-9mU47nXmzNDytjs3Eu83Vcxq6kXbbnqhOr_jguv0p5It1AWWDM67r_Fj5QtLuBRiLNWB1BYUrfkE"/>
+</div>
+</div>
+</header>
+<!-- MAIN CONTENT AREA (The background table) -->
+<main class="p-8">
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="font-h1 text-h1 text-on-surface">Bookings</h2>
+<p class="text-text-secondary mt-1">Manage guest reservations and check-ins</p>
+</div>
+<button class="bg-primary-container hover:bg-primary-hover text-on-primary-container px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+                    New Booking
+                </button>
+</div>
+<!-- Fake Management Table (Background for Drawer context) -->
+<div class="bg-white rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<table class="w-full text-left">
+<thead class="bg-status-gray-bg border-b border-border-standard text-label-sm uppercase tracking-wider text-text-secondary">
+<tr>
+<th class="px-6 py-4">Guest</th>
+<th class="px-6 py-4">Room</th>
+<th class="px-6 py-4">Stay Dates</th>
+<th class="px-6 py-4">Status</th>
+<th class="px-6 py-4">Total</th>
+<th class="px-6 py-4 text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard">
+<tr class="bg-primary-light/30">
+<td class="px-6 py-4">
+<div class="font-medium">Elena Rodriguez</div>
+<div class="text-xs text-text-secondary">#SI-8821</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">Deluxe King 104</td>
+<td class="px-6 py-4 text-text-secondary">Oct 24 - Oct 27, 2023</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-status-green-bg text-status-green-text rounded-full text-[11px] font-bold uppercase">Confirmed</span>
+</td>
+<td class="px-6 py-4 font-medium">$1,245.00</td>
+<td class="px-6 py-4 text-right">
+<button class="text-primary hover:underline font-medium">Details</button>
+</td>
+</tr>
+<!-- More rows blurred/opacity reduced -->
+<tr class="opacity-50">
+<td class="px-6 py-4"><div class="font-medium">Marcus Chen</div><div class="text-xs">#SI-8819</div></td>
+<td class="px-6 py-4">Suite 302</td>
+<td class="px-6 py-4">Oct 25 - Oct 30</td>
+<td class="px-6 py-4"><span class="px-2 py-1 bg-status-blue-bg text-status-blue-text rounded-full text-[11px] font-bold uppercase">Checked In</span></td>
+<td class="px-6 py-4">$3,500.00</td>
+<td class="px-6 py-4 text-right"><span class="material-symbols-outlined text-text-secondary" data-icon="more_vert">more_vert</span></td>
+</tr>
+<tr class="opacity-50">
+<td class="px-6 py-4"><div class="font-medium">Sarah Miller</div><div class="text-xs">#SI-8815</div></td>
+<td class="px-6 py-4">Garden Twin 205</td>
+<td class="px-6 py-4">Oct 22 - Oct 24</td>
+<td class="px-6 py-4"><span class="px-2 py-1 bg-status-gray-bg text-status-gray-text rounded-full text-[11px] font-bold uppercase">Checked Out</span></td>
+<td class="px-6 py-4">$850.00</td>
+<td class="px-6 py-4 text-right"><span class="material-symbols-outlined text-text-secondary" data-icon="more_vert">more_vert</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+</main>
+</div>
+<!-- BOOKING DETAIL DRAWER (D-01) -->
+<!-- Backdrop -->
+<div class="fixed inset-0 bg-on-surface/40 backdrop-blur-sm z-[60] transition-opacity duration-300" id="drawer-backdrop"></div>
+<!-- Drawer Panel -->
+<div class="fixed right-0 top-0 h-full w-[480px] bg-white z-[70] flex flex-col drawer-shadow transform translate-x-0 transition-transform duration-300 ease-out" id="booking-drawer">
+<!-- Header -->
+<header class="p-6 border-b border-border-standard flex items-start justify-between">
+<div>
+<h2 class="font-h3 text-h3 text-on-surface">Booking Details</h2>
+<div class="flex items-center gap-2 mt-1">
+<span class="text-text-secondary font-medium">Ref #SI-8821</span>
+<span class="h-1 w-1 rounded-full bg-border-standard"></span>
+<span class="text-label-sm text-status-gray-text">Created: Oct 12, 10:45 AM</span>
+</div>
+</div>
+<button class="p-2 hover:bg-status-gray-bg rounded-full transition-colors text-text-secondary" onclick="toggleDrawer()">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</header>
+<!-- Status Bar -->
+<div class="bg-status-gray-bg/50 px-6 py-3 flex items-center justify-between gap-1">
+<button class="flex-1 py-1.5 px-1 text-[11px] font-bold uppercase rounded bg-white shadow-sm border border-primary-container text-primary flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="check_circle">check_circle</span>
+                Confirmed
+            </button>
+<button class="flex-1 py-1.5 px-1 text-[11px] font-bold uppercase rounded text-text-secondary hover:bg-white/50 transition-colors flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="login">login</span>
+                Check In
+            </button>
+<button class="flex-1 py-1.5 px-1 text-[11px] font-bold uppercase rounded text-text-secondary hover:bg-white/50 transition-colors flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="logout">logout</span>
+                Check Out
+            </button>
+<button class="flex-1 py-1.5 px-1 text-[11px] font-bold uppercase rounded text-text-secondary hover:bg-white/50 transition-colors flex flex-col items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="cancel">cancel</span>
+                Cancel
+            </button>
+</div>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8 pb-32">
+<!-- Guest Info -->
+<section>
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-h4 text-h4 text-on-surface">Guest Information</h3>
+<a class="text-status-blue-text text-label-sm font-semibold flex items-center gap-1 hover:underline" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="chat">chat</span>
+                        Intercom Chat
+                    </a>
+</div>
+<div class="grid grid-cols-2 gap-y-4 gap-x-6 p-4 rounded-xl border border-border-standard bg-white">
+<div class="col-span-2 flex items-center gap-3 mb-2">
+<div class="h-10 w-10 rounded-full bg-status-purple-bg text-status-purple-text flex items-center justify-center font-bold">ER</div>
+<div>
+<div class="font-bold text-on-surface">Elena Rodriguez</div>
+<div class="text-xs text-text-secondary">Loyalty Level: Gold</div>
+</div>
+</div>
+<div>
+<p class="text-[11px] text-text-secondary uppercase font-bold tracking-tight mb-1">Email Address</p>
+<p class="text-sm font-medium truncate">elena.rod@example.com</p>
+</div>
+<div>
+<p class="text-[11px] text-text-secondary uppercase font-bold tracking-tight mb-1">Phone Number</p>
+<p class="text-sm font-medium">+1 (555) 902-8831</p>
+</div>
+</div>
+</section>
+<!-- Stay Summary -->
+<section>
+<h3 class="font-h4 text-h4 text-on-surface mb-4">Stay Summary</h3>
+<div class="space-y-3">
+<div class="flex items-center gap-4 p-4 rounded-xl border border-border-standard">
+<div class="h-12 w-16 bg-surface-container rounded-lg overflow-hidden flex-shrink-0">
+<img alt="Deluxe King Room" class="h-full w-full object-cover" data-alt="A luxurious hotel room featuring a massive king-sized bed with plush white linens and several decorative pillows. The room has warm, wooden accents and soft ambient lighting from bedside lamps, creating a serene and premium atmosphere. Large floor-to-ceiling windows offer a soft-focus view of lush tropical greenery outside, embodying a sanctuary aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA2hq6RLDif2A1SA66-l8xQ5HXrOEO1Epg6Bz3rToQVZVuBg4PvW1taEB9i3-OBAeazS_HsjanIaF9l2zBiflEZf0JwU53sypAr1VMy2k-MRmGHuz2hBQ1zJR6Ohps85lePK_BHitT2HdmJP0eyIGNHmdrZEeKGUUE48vugC51-2Drfr_raFy-wUqms58mq5S2fcxo4EjHHxYMAyTv0W6psruS7BN4ExCCZ3-Slh2mbUA3gW6EGYhc7_X4oMaLf4vE61GBZAf8dCt8D"/>
+</div>
+<div class="flex-1">
+<div class="font-bold">Deluxe King 104</div>
+<div class="text-xs text-text-secondary">First Floor • Pool View</div>
+</div>
+<div class="text-right">
+<div class="text-xs font-bold uppercase text-text-secondary">Guests</div>
+<div class="font-medium">2 Adults</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-2">
+<div class="bg-status-gray-bg p-3 rounded-lg">
+<p class="text-[10px] text-text-secondary uppercase font-bold tracking-widest mb-1">Check-In</p>
+<p class="font-semibold">Thu, Oct 24, 2023</p>
+</div>
+<div class="bg-status-gray-bg p-3 rounded-lg">
+<p class="text-[10px] text-text-secondary uppercase font-bold tracking-widest mb-1">Check-Out</p>
+<p class="font-semibold">Sun, Oct 27, 2023</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Financial Breakdown -->
+<section>
+<h3 class="font-h4 text-h4 text-on-surface mb-4">Financial Breakdown</h3>
+<div class="border border-border-standard rounded-xl overflow-hidden">
+<table class="w-full text-sm">
+<tbody class="divide-y divide-border-standard">
+<tr>
+<td class="px-4 py-3 text-text-secondary">Room Rate (3 Nights x $350)</td>
+<td class="px-4 py-3 text-right font-medium">$1,050.00</td>
+</tr>
+<tr>
+<td class="px-4 py-3 text-text-secondary">Resort Fees</td>
+<td class="px-4 py-3 text-right font-medium">$75.00</td>
+</tr>
+<tr>
+<td class="px-4 py-3 text-text-secondary">Estimated Tax (12%)</td>
+<td class="px-4 py-3 text-right font-medium">$126.00</td>
+</tr>
+<tr>
+<td class="px-4 py-3 text-status-green-text">Early Booking Discount (-5%)</td>
+<td class="px-4 py-3 text-right text-status-green-text font-medium">-$52.50</td>
+</tr>
+<tr class="bg-status-gray-bg/30">
+<td class="px-4 py-4 font-bold text-on-surface">Total Amount</td>
+<td class="px-4 py-4 text-right font-bold text-lg text-primary">$1,245.00</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Payment Status -->
+<section>
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-h4 text-h4 text-on-surface">Payment</h3>
+<span class="px-3 py-1 bg-status-green-bg text-status-green-text rounded-full text-xs font-bold uppercase">Paid In Full</span>
+</div>
+<div class="p-4 rounded-xl border border-border-standard space-y-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="h-8 w-12 bg-status-gray-bg rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-text-secondary" data-icon="credit_card">credit_card</span>
+</div>
+<div>
+<p class="text-xs font-bold">Visa Ending in 4421</p>
+<p class="text-[10px] text-text-secondary">Processed via Stripe • Oct 12</p>
+</div>
+</div>
+<button class="text-primary text-xs font-bold border border-primary/20 px-3 py-1.5 rounded-lg hover:bg-primary/5 transition-colors">
+                            View Proof
+                        </button>
+</div>
+<div class="pt-4 border-t border-border-standard">
+<p class="text-[10px] text-text-secondary uppercase font-bold tracking-widest mb-3">Transaction History</p>
+<div class="space-y-3">
+<div class="flex justify-between items-center text-xs">
+<div class="flex items-center gap-2">
+<span class="h-1.5 w-1.5 rounded-full bg-status-green-text"></span>
+<span>Payment successful</span>
+</div>
+<span class="text-text-secondary">Oct 12, 10:46 AM</span>
+</div>
+<div class="flex justify-between items-center text-xs">
+<div class="flex items-center gap-2">
+<span class="h-1.5 w-1.5 rounded-full bg-status-amber-text"></span>
+<span>Authorization pending</span>
+</div>
+<span class="text-text-secondary">Oct 12, 10:45 AM</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Special Requests -->
+<section>
+<h3 class="font-h4 text-h4 text-on-surface mb-4">Special Requests</h3>
+<div class="relative">
+<textarea class="w-full rounded-xl border-border-standard bg-status-gray-bg/30 text-sm focus:ring-primary-container focus:border-primary-container p-4 min-h-[100px]" placeholder="Add guest notes here...">Late check-in requested (Approx 10 PM). Guest mentioned a birthday celebration—possible to arrange a small treat in-room?</textarea>
+<div class="absolute right-3 bottom-3 text-[10px] text-text-secondary">
+                        Last edited by Michael J.
+                    </div>
+</div>
+</section>
+</div>
+<!-- Footer Actions -->
+<footer class="absolute bottom-0 left-0 w-full p-6 bg-white border-t border-border-standard grid grid-cols-2 gap-4 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)]">
+<button class="bg-primary-container hover:bg-primary-hover text-on-primary-container font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-95 touch-target-min">
+<span class="material-symbols-outlined text-lg" data-icon="receipt_long">receipt_long</span>
+                Generate Receipt
+            </button>
+<button class="border border-error/30 text-error hover:bg-error/5 font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-all active:scale-95 touch-target-min">
+<span class="material-symbols-outlined text-lg" data-icon="delete">delete</span>
+                Cancel Booking
+            </button>
+</footer>
+</div>
+<!-- Lightbox/Modal Mockup (Hidden by default) -->
+<div class="fixed inset-0 bg-on-surface/90 z-[100] hidden items-center justify-center p-10" id="proof-lightbox">
+<div class="max-w-4xl w-full bg-white rounded-xl overflow-hidden relative">
+<button class="absolute top-4 right-4 text-on-surface bg-white/80 rounded-full p-2 hover:bg-white transition-colors" onclick="closeLightbox()">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+<div class="p-8">
+<h3 class="font-h3 text-h3 mb-6">Payment Proof - Receipt #8821-INV</h3>
+<div class="aspect-[4/5] bg-status-gray-bg rounded-lg flex items-center justify-center text-text-secondary">
+<!-- Placeholder for receipt image -->
+<p>Digital Receipt Content Displayed Here</p>
+</div>
+</div>
+</div>
+</div>
+<script>
+        function toggleDrawer() {
+            const drawer = document.getElementById('booking-drawer');
+            const backdrop = document.getElementById('drawer-backdrop');
+            
+            if (drawer.style.transform === 'translateX(0px)') {
+                drawer.style.transform = 'translateX(100%)';
+                backdrop.classList.add('opacity-0');
+                setTimeout(() => {
+                    backdrop.classList.add('pointer-events-none');
+                }, 300);
+            } else {
+                drawer.style.transform = 'translateX(0px)';
+                backdrop.classList.remove('opacity-0');
+                backdrop.classList.remove('pointer-events-none');
+            }
+        }
+
+        // Initially hidden behavior simulation
+        document.addEventListener('DOMContentLoaded', () => {
+            // Uncomment below if you want the drawer to slide in on load
+            // setTimeout(toggleDrawer, 500); 
+        });
+
+        // Toggle micro-interaction for status buttons
+        const statusButtons = document.querySelectorAll('.bg-status-gray-bg\\/50 button');
+        statusButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                statusButtons.forEach(b => {
+                    b.classList.remove('bg-white', 'shadow-sm', 'border', 'border-primary-container', 'text-primary');
+                    b.classList.add('text-text-secondary');
+                });
+                btn.classList.add('bg-white', 'shadow-sm', 'border', 'border-primary-container', 'text-primary');
+                btn.classList.remove('text-text-secondary');
+            });
+        });
+    </script>
+</body></html>

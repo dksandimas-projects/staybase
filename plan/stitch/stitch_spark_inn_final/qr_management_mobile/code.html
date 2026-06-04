@@ -1,0 +1,359 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>QR Management - spark inn</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed-dim": "#c0c6db",
+                        "inverse-surface": "#303030",
+                        "on-secondary-container": "#5c6274",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-secondary": "#ffffff",
+                        "tertiary-fixed": "#e6e2dd",
+                        "secondary": "#575e70",
+                        "surface-container-lowest": "#ffffff",
+                        "primary": "#8d4f00",
+                        "primary-fixed": "#ffdcc0",
+                        "status-purple-text": "#7C3AED",
+                        "surface-dim": "#dadada",
+                        "outline": "#877363",
+                        "border-standard": "#E5E7EB",
+                        "surface-container": "#eeeeee",
+                        "on-surface": "#1b1b1b",
+                        "surface-container-low": "#f3f3f3",
+                        "status-gray-text": "#6B7280",
+                        "on-background": "#1b1b1b",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "on-error-container": "#93000a",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-secondary-fixed": "#141b2b",
+                        "secondary-fixed": "#dce2f7",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-red-text": "#DC2626",
+                        "status-green-bg": "#F0FDF4",
+                        "primary-hover": "#C4720E",
+                        "outline-variant": "#dac2af",
+                        "on-tertiary": "#ffffff",
+                        "surface-container-highest": "#e2e2e2",
+                        "error": "#ba1a1a",
+                        "on-primary-container": "#562e00",
+                        "surface-tint": "#8d4f00",
+                        "on-secondary-fixed-variant": "#404758",
+                        "surface-variant": "#e2e2e2",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-surface-variant": "#544335",
+                        "secondary-container": "#d9dff5",
+                        "on-error": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "surface-bright": "#f9f9f9",
+                        "on-tertiary-container": "#393835",
+                        "on-primary-fixed": "#2d1600",
+                        "status-amber-text": "#D97706",
+                        "page-bg": "#F9FAFB",
+                        "primary-container": "#ea8a1a",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-green-text": "#16A34A",
+                        "error-container": "#ffdad6",
+                        "tertiary-container": "#a4a19d",
+                        "status-gray-bg": "#F3F4F6",
+                        "tertiary": "#605e5a",
+                        "background": "#f9f9f9",
+                        "surface-container-high": "#e8e8e8",
+                        "inverse-on-surface": "#f1f1f1",
+                        "status-blue-bg": "#EFF6FF",
+                        "text-secondary": "#4B5563",
+                        "status-red-bg": "#FEF2F2",
+                        "inverse-primary": "#ffb876",
+                        "status-blue-text": "#2563EB",
+                        "surface": "#f9f9f9",
+                        "primary-light": "#FEF3E2"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "max-width-auth": "460px",
+                        "unit": "8px",
+                        "max-width-booking": "600px",
+                        "drawer-width": "480px",
+                        "touch-target-min": "44px",
+                        "sidebar-width": "240px"
+                    },
+                    "fontFamily": {
+                        "display-hero-mobile": ["Apollo", "sans-serif"],
+                        "label-sm": ["Inter", "sans-serif"],
+                        "h3": ["Inter", "sans-serif"],
+                        "h4": ["Inter", "sans-serif"],
+                        "h1-mobile": ["Apollo", "sans-serif"],
+                        "h2": ["Apollo", "sans-serif"],
+                        "body-lg": ["Inter", "sans-serif"],
+                        "body-sm": ["Inter", "sans-serif"],
+                        "display-hero": ["Apollo", "sans-serif"],
+                        "h1": ["Apollo", "sans-serif"],
+                        "label-md": ["Inter", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Fallback for Apollo font if not loaded natively via @font-face */
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Georgia'), local('Times New Roman'), serif; /* Placeholder serif for premium feel */
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-page-bg text-on-surface font-body-sm text-body-sm min-h-screen flex flex-col md:flex-row antialiased">
+<!-- TopAppBar (Mobile & Shared Header Elements) -->
+<header class="bg-surface-container-lowest/80 backdrop-blur-md dark:bg-inverse-surface/80 text-primary dark:text-inverse-primary fixed top-0 w-full z-50 md:hidden flex justify-between items-center px-6 py-4 max-w-7xl mx-auto border-b border-border-standard md:border-none shadow-sm md:shadow-none">
+<button class="h-touch-target-min w-touch-target-min flex items-center justify-center text-primary hover:text-primary-hover transition-colors duration-200" id="mobile-menu-btn">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">menu</span>
+</button>
+<div class="font-h3 text-h3 md:font-h2 md:text-h2 lowercase tracking-tighter text-on-background dark:text-inverse-on-surface">
+            spark inn
+        </div>
+<button class="h-touch-target-min w-touch-target-min flex items-center justify-center text-primary hover:text-primary-hover transition-colors duration-200">
+<!-- Empty space to balance flex -->
+</button>
+</header>
+<!-- NavigationDrawer (Sidebar) -->
+<nav class="fixed left-0 top-0 h-full w-[240px] bg-inverse-surface dark:bg-surface-container-lowest flex flex-col py-8 border-r border-outline-variant z-[60] transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out md:relative md:z-auto" id="sidebar-drawer">
+<!-- Close button for mobile -->
+<div class="md:hidden flex justify-end px-4 mb-4">
+<button class="h-touch-target-min w-touch-target-min flex items-center justify-center text-primary-fixed dark:text-primary" id="close-menu-btn">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="px-6 mb-8 flex flex-col items-start gap-2">
+<div class="font-h3 text-h3 lowercase text-white">spark inn</div>
+<div class="font-label-sm text-label-sm text-secondary-fixed-dim">Admin Portal</div>
+</div>
+<ul class="flex flex-col gap-1 w-full font-body-lg text-body-lg">
+<li>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                    Dashboard
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+                    Bookings
+                </a>
+</li>
+<!-- Active State Navigation -->
+<li>
+<a class="flex items-center gap-3 text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 opacity-80 scale-95 transition-all" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">bed</span>
+                    Rooms
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">group</span>
+                    Guests
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+                    Settings
+                </a>
+</li>
+</ul>
+<div class="mt-auto px-6 flex items-center gap-3 text-secondary-fixed-dim">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center overflow-hidden">
+<span class="material-symbols-outlined text-sm">person</span>
+</div>
+<div class="font-label-sm text-label-sm">Admin User</div>
+</div>
+</nav>
+<!-- Overlay for mobile drawer -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden md:hidden transition-opacity" id="drawer-overlay"></div>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-screen overflow-y-auto w-full pt-[72px] md:pt-0">
+<div class="p-6 md:p-8 lg:px-12 max-w-[1440px] mx-auto w-full flex flex-col gap-8">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-standard pb-6">
+<div>
+<h1 class="font-h1-mobile text-h1-mobile md:font-h1 md:text-h1 text-on-surface">QR Management</h1>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Manage and generate intercom QR codes for all rooms.</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-primary-container text-on-surface font-label-md text-label-md h-[44px] px-6 rounded-lg inline-flex items-center justify-center gap-2 hover:bg-primary-hover transition-colors whitespace-nowrap shadow-sm">
+<span class="material-symbols-outlined text-[20px]">print</span>
+                        Print All
+                    </button>
+</div>
+</div>
+<!-- Toolbar: Search & Filter -->
+<div class="flex flex-col sm:flex-row items-center gap-4 bg-surface-container-lowest p-4 rounded-xl shadow-sm border border-border-standard">
+<div class="relative w-full sm:max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary">search</span>
+<input class="w-full h-[44px] pl-10 pr-4 bg-surface-bright border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all" placeholder="Search by room number or floor..." type="text">
+</div>
+<div class="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 hide-scrollbar">
+<button class="h-[36px] px-4 rounded-full border border-primary-container bg-primary-light text-primary font-label-sm text-label-sm whitespace-nowrap">All Rooms</button>
+<button class="h-[36px] px-4 rounded-full border border-border-standard text-text-secondary font-label-sm text-label-sm whitespace-nowrap hover:bg-surface-container transition-colors">Floor 1</button>
+<button class="h-[36px] px-4 rounded-full border border-border-standard text-text-secondary font-label-sm text-label-sm whitespace-nowrap hover:bg-surface-container transition-colors">Floor 2</button>
+</div>
+</div>
+<!-- Room Grid -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+<!-- Card 1 -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-5 flex flex-col gap-5 hover:shadow-md transition-shadow">
+<div class="flex justify-between items-center">
+<h3 class="font-h3 text-h3 text-on-surface">Room 101</h3>
+<span class="px-2 py-1 bg-status-green-bg text-status-green-text font-label-sm text-label-sm rounded-full">Active</span>
+</div>
+<div class="w-full aspect-square bg-surface-container-low rounded-lg flex items-center justify-center p-4 relative overflow-hidden group">
+<!-- Simulated QR Code Image -->
+<div class="w-full h-full bg-white flex items-center justify-center p-2 rounded shadow-sm relative z-10" data-alt="A clean, high-contrast, black and white square QR code graphic centered on a bright white background. The code pattern is complex and clearly defined, intended for digital scanning. The overall aesthetic is strictly functional, minimalist, and perfectly aligns with a modern tech-driven efficiency interface." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDCykxvmBkaelePLN3-sBalgjdLaMtMPe8dtr9E73u5fAagbNJJMbNN-epg9J6he6DbYHaymI0CCmNzc0EWuC2qA838xbshMN6_9_61lCT2oAG_SHtOiDLGS_BHWRHIl_EhGKGXH6Os97thQsCJ91Z2rjEVj1tEcrbDOUAWA0hiaSgTQK_c3T-J6KX0ZNWVBfe9AsckbVUY62VuE3O2mpVPg_nMx4cZHXgWamc1UxgsHh-JuWEuAsQcrmEiwMfUv_4qVOWDtkKSWuKm'); background-size: contain; background-position: center; background-repeat: no-repeat;">
+</div>
+</div>
+<div class="flex gap-3 w-full mt-auto">
+<button class="flex-1 h-[44px] rounded border border-border-standard text-text-secondary font-label-md text-label-md flex items-center justify-center gap-2 hover:border-primary-container hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                            Download
+                        </button>
+<button class="w-[44px] h-[44px] rounded border border-border-standard text-text-secondary flex items-center justify-center hover:border-primary-container hover:text-primary transition-colors" title="Regenerate QR">
+<span class="material-symbols-outlined text-[20px]">sync</span>
+</button>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-5 flex flex-col gap-5 hover:shadow-md transition-shadow">
+<div class="flex justify-between items-center">
+<h3 class="font-h3 text-h3 text-on-surface">Room 102</h3>
+<span class="px-2 py-1 bg-status-green-bg text-status-green-text font-label-sm text-label-sm rounded-full">Active</span>
+</div>
+<div class="w-full aspect-square bg-surface-container-low rounded-lg flex items-center justify-center p-4 relative overflow-hidden">
+<div class="w-full h-full bg-white flex items-center justify-center p-2 rounded shadow-sm relative z-10" data-alt="A sharp, standard black and white QR code matrix displayed prominently on a pristine white square card. The visual is purely utilitarian and scannable, representing a digital access key. The lighting is uniform, ensuring maximum legibility within a clean, efficiency-first dashboard environment." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBIvxY90hE6FjFEQWMZsCLcBsyGZVoqEsKTyJkVWRB-2Tp-qBDryxPsm8E5p_T5KODP8iKNEt_W4TE4jbGEnXbEx2Jo9YAkvU2cVQnpMqSaW7nD0880k10UDhjyBP8J2oY9Uh8L4MqI4ip-7b3UB1N-pFsFQV2sDoyocGAkS90-L93pGg8tve-ZG98Ak_QltbfiD_EK_gatFHQfQ0Jx8DeCPsEcN5wCSvvX27LkNkQHa-756R-OcTPaAst62xuVmf27dEh3ViD91Ur-'); background-size: contain; background-position: center; background-repeat: no-repeat;">
+</div>
+</div>
+<div class="flex gap-3 w-full mt-auto">
+<button class="flex-1 h-[44px] rounded border border-border-standard text-text-secondary font-label-md text-label-md flex items-center justify-center gap-2 hover:border-primary-container hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                            Download
+                        </button>
+<button class="w-[44px] h-[44px] rounded border border-border-standard text-text-secondary flex items-center justify-center hover:border-primary-container hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]">sync</span>
+</button>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-5 flex flex-col gap-5 hover:shadow-md transition-shadow">
+<div class="flex justify-between items-center">
+<h3 class="font-h3 text-h3 text-on-surface">Room 103</h3>
+<span class="px-2 py-1 bg-status-amber-bg text-status-amber-text font-label-sm text-label-sm rounded-full">Revoked</span>
+</div>
+<div class="w-full aspect-square bg-surface-container-low rounded-lg flex items-center justify-center p-4 relative overflow-hidden opacity-50 grayscale">
+<div class="w-full h-full bg-white flex items-center justify-center p-2 rounded shadow-sm relative z-10" data-alt="A faded, slightly blurred QR code graphic inside a square white container, indicating a disabled or revoked status. The overall tone is muted and grayed out, contrasting with active elements. The design language is minimal and clearly communicates an inactive state within a data-dense admin interface." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAqW835FcD1aF2Ssy4mw9PI-um4mNnqISL4BB0fUIBboDOSHu2dMFlWS5Opzytu7d37Fl_uVkUZg1IOovZGjK4ENlfcVbN9plxpbvG83xlVh7L7kwoYnjVkIdaX2S6ypB9GGQG3hizkx2MGoIghZDGYagna0sPXG_gEmG-lImytSBG_fb3g_HHdIi4e1a-6Xb46Bw7UCcMtFNLjTAlSjAbalmG7c1GmwVPjBxkcDe1rI1hADBin-300q3FMmZ0R_bWhGdIw5YcOBXad'); background-size: contain; background-position: center; background-repeat: no-repeat;">
+</div>
+<div class="absolute inset-0 flex items-center justify-center z-20">
+<span class="material-symbols-outlined text-[48px] text-text-secondary">block</span>
+</div>
+</div>
+<div class="flex gap-3 w-full mt-auto">
+<button class="flex-1 h-[44px] rounded border border-border-standard text-text-secondary font-label-md text-label-md flex items-center justify-center gap-2 hover:border-primary-container hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                            Download
+                        </button>
+<button class="w-[44px] h-[44px] rounded border border-primary-container text-primary flex items-center justify-center hover:bg-primary-light transition-colors bg-primary-light/50" title="Regenerate QR">
+<span class="material-symbols-outlined text-[20px]">sync</span>
+</button>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-5 flex flex-col gap-5 hover:shadow-md transition-shadow">
+<div class="flex justify-between items-center">
+<h3 class="font-h3 text-h3 text-on-surface">Room 104</h3>
+<span class="px-2 py-1 bg-status-green-bg text-status-green-text font-label-sm text-label-sm rounded-full">Active</span>
+</div>
+<div class="w-full aspect-square bg-surface-container-low rounded-lg flex items-center justify-center p-4 relative overflow-hidden">
+<div class="w-full h-full bg-white flex items-center justify-center p-2 rounded shadow-sm relative z-10" data-alt="A crisp, fully generated digital QR code matrix centered on a flat white background. The image is unadorned, emphasizing clarity and rapid scannability for mobile devices. It perfectly fits a structured, light-themed administrative dashboard prioritizing pure utility over decoration." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuD7a6JeQLby3FSnFGGaEdIoPHzYooLXF42FAqToSZO4swNRh2WuHCZPiQT8fM9LaJc8jWvj_uihXRaSyXpby91HhREhRQQTZdBtqtra-e8Pbf0cntAKaHseD5HMiGHIL2HE11rab-NfDP6Jfg_fEfwvuAmZej3tESNnaiVj4hDy44sXj6KFIbb9P5Ix6NyW-mUvaeNOhljcjeLRmjoNgqJQ1jeCGwGdTylMGq6-z9x5Wuct8mrAx7ZR7bUjKkReQXILHqtdz9zgCfC2'); background-size: contain; background-position: center; background-repeat: no-repeat;">
+</div>
+</div>
+<div class="flex gap-3 w-full mt-auto">
+<button class="flex-1 h-[44px] rounded border border-border-standard text-text-secondary font-label-md text-label-md flex items-center justify-center gap-2 hover:border-primary-container hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                            Download
+                        </button>
+<button class="w-[44px] h-[44px] rounded border border-border-standard text-text-secondary flex items-center justify-center hover:border-primary-container hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[20px]">sync</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Pagination (Optional UI element for grids) -->
+<div class="flex items-center justify-between border-t border-border-standard pt-6 mt-4">
+<p class="font-body-sm text-body-sm text-text-secondary">Showing 1 to 4 of 24 rooms</p>
+<div class="flex gap-2">
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded border border-border-standard text-text-secondary hover:bg-surface-container disabled:opacity-50"><span class="material-symbols-outlined text-[18px]">chevron_left</span></button>
+<button class="w-[36px] h-[36px] flex items-center justify-center rounded border border-border-standard text-text-secondary hover:bg-surface-container"><span class="material-symbols-outlined text-[18px]">chevron_right</span></button>
+</div>
+</div>
+</div>
+</main>
+<script>
+        // Simple drawer toggle logic
+        const menuBtn = document.getElementById('mobile-menu-btn');
+        const closeBtn = document.getElementById('close-menu-btn');
+        const drawer = document.getElementById('sidebar-drawer');
+        const overlay = document.getElementById('drawer-overlay');
+
+        function toggleDrawer() {
+            const isClosed = drawer.classList.contains('-translate-x-full');
+            if (isClosed) {
+                drawer.classList.remove('-translate-x-full');
+                overlay.classList.remove('hidden');
+                setTimeout(() => overlay.classList.add('opacity-100'), 10);
+            } else {
+                drawer.classList.add('-translate-x-full');
+                overlay.classList.remove('opacity-100');
+                setTimeout(() => overlay.classList.add('hidden'), 300);
+            }
+        }
+
+        menuBtn.addEventListener('click', toggleDrawer);
+        closeBtn.addEventListener('click', toggleDrawer);
+        overlay.addEventListener('click', toggleDrawer);
+    </script>
+</body></html>

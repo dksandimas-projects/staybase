@@ -1,0 +1,249 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Lost in Serenity | spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/11090/Apollo.woff') format('woff');
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .font-apollo {
+            font-family: 'Apollo', serif;
+        }
+        .bg-warm-white {
+            background-color: #FDF8F3;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-low": "#f3f3f3",
+                        "text-secondary": "#4B5563",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-red-text": "#DC2626",
+                        "inverse-primary": "#ffb876",
+                        "surface-container": "#eeeeee",
+                        "on-secondary-container": "#5c6274",
+                        "primary-light": "#FEF3E2",
+                        "primary-container": "#ea8a1a",
+                        "status-amber-text": "#D97706",
+                        "surface-container-high": "#e8e8e8",
+                        "status-red-bg": "#FEF2F2",
+                        "on-tertiary": "#ffffff",
+                        "on-surface-variant": "#544335",
+                        "on-background": "#1b1b1b",
+                        "error": "#ba1a1a",
+                        "surface": "#f9f9f9",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "surface-bright": "#f9f9f9",
+                        "status-gray-text": "#6B7280",
+                        "status-green-text": "#16A34A",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "background": "#f9f9f9",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "primary-hover": "#C4720E",
+                        "primary": "#8d4f00",
+                        "primary-fixed-dim": "#ffb876",
+                        "tertiary": "#605e5a",
+                        "surface-dim": "#dadada",
+                        "page-bg": "#F9FAFB",
+                        "tertiary-fixed": "#e6e2dd",
+                        "status-green-bg": "#F0FDF4",
+                        "status-purple-bg": "#F5F3FF",
+                        "secondary-fixed": "#dce2f7",
+                        "secondary": "#575e70",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-primary": "#ffffff",
+                        "inverse-surface": "#303030",
+                        "on-secondary": "#ffffff",
+                        "status-blue-text": "#2563EB",
+                        "status-amber-bg": "#FFFBEB",
+                        "secondary-container": "#d9dff5",
+                        "on-tertiary-container": "#393835",
+                        "on-secondary-fixed": "#141b2b",
+                        "status-gray-bg": "#F3F4F6",
+                        "surface-variant": "#e2e2e2",
+                        "outline": "#877363",
+                        "on-primary-fixed": "#2d1600",
+                        "status-purple-text": "#7C3AED",
+                        "tertiary-container": "#a4a19d",
+                        "on-error-container": "#93000a",
+                        "inverse-on-surface": "#f1f1f1",
+                        "status-blue-bg": "#EFF6FF",
+                        "surface-tint": "#8d4f00",
+                        "error-container": "#ffdad6",
+                        "border-standard": "#E5E7EB",
+                        "outline-variant": "#dac2af",
+                        "on-surface": "#1b1b1b",
+                        "on-primary-container": "#562e00",
+                        "on-error": "#ffffff",
+                        "surface-container-highest": "#e2e2e2",
+                        "primary-fixed": "#ffdcc0",
+                        "spark-orange": "#EA8A1A"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "8px",
+                        "xl": "12px",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "drawer-width": "480px",
+                        "unit": "8px",
+                        "max-width-auth": "460px",
+                        "touch-target-min": "44px",
+                        "max-width-booking": "600px",
+                        "sidebar-width": "240px"
+                    },
+                    "fontFamily": {
+                        "h1": ["Apollo"],
+                        "h1-mobile": ["Apollo"],
+                        "label-md": ["Inter"],
+                        "display-hero-mobile": ["Apollo"],
+                        "h4": ["Inter"],
+                        "display-hero": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "h2": ["Apollo"],
+                        "body-lg": ["Inter"],
+                        "h3": ["Inter"],
+                        "label-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-warm-white text-on-background min-h-screen flex flex-col">
+<!-- Top Navigation Bar -->
+<header class="w-full top-0 bg-surface border-b border-border-standard z-50">
+<div class="flex justify-between items-center w-full px-8 py-4 max-w-7xl mx-auto">
+<div class="text-h3 font-h3 lowercase text-on-background">spark inn</div>
+<nav class="hidden md:flex items-center space-x-8">
+<a class="font-body-lg text-body-lg text-text-secondary hover:text-primary transition-colors" href="#">Rooms</a>
+<a class="font-body-lg text-body-lg text-text-secondary hover:text-primary transition-colors" href="#">Amenities</a>
+<a class="font-body-lg text-body-lg text-text-secondary hover:text-primary transition-colors" href="#">Gallery</a>
+<a class="font-body-lg text-body-lg text-text-secondary hover:text-primary transition-colors" href="#">About</a>
+</nav>
+<button class="bg-spark-orange text-white px-6 py-2 rounded-lg font-label-md text-label-md hover:bg-primary-hover transition-colors shadow-sm active:scale-95">
+                Book Now
+            </button>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-grow flex items-center justify-center px-6 py-12 md:py-24">
+<div class="max-w-4xl w-full flex flex-col items-center text-center space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
+<!-- Visual Element -->
+<div class="relative w-full aspect-[21/9] md:aspect-[21/7] rounded-xl overflow-hidden shadow-sm">
+<img alt="Quiet corner" class="w-full h-full object-cover" data-alt="A serene and minimalist architectural photograph of a quiet corner in a luxury boutique hotel in Bohol. The scene features warm, sun-drenched concrete walls, a single elegant wooden chair, and a soft shadow cast by a tropical palm leaf. The lighting is bright and airy, emphasizing a high-end light-mode aesthetic with creamy whites and soft earth tones. The atmosphere is peaceful, evoking a sense of calm sanctuary and high-end serenity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBaA8-W7aOyCgu9udjDdR50uxHmxEGsY2zYiWU6akJHFeNks3Qss52bx15ay_Ggi2gh-22VeEEV5V9anMGMhpd_TU_VvpP5UCktypq7IIWCISFXzdE9_OHJah0G0sbkAq7tIP4oa0odxLpndwcvfylRcF-5w1UqJIXFmB2S3P97-nM5WiXgUzBeWMyRAPr4P8Pfu5EQvl7-0eumLDXZIpU09HRQWUjA67I2Aiv8TbWROd0l_29DV0DmmTjngYli_OLomJX0N3LJ4xVj">
+<div class="absolute inset-0 bg-gradient-to-t from-warm-white/40 to-transparent"></div>
+</div>
+<!-- Text Content -->
+<div class="space-y-6 max-w-2xl">
+<h1 class="font-h1 text-h1 md:text-display-hero font-apollo text-on-background leading-tight">
+                    Lost in Serenity
+                </h1>
+<p class="font-body-lg text-body-lg text-text-secondary leading-relaxed">
+                    The page you are looking for has drifted away, but the sanctuary is never far. Take a breath, and let us guide you back to the heart of the inn.
+                </p>
+</div>
+<!-- Primary Action -->
+<div class="flex flex-col sm:flex-row gap-4">
+<a class="inline-flex items-center justify-center px-8 py-3 bg-spark-orange text-white font-label-md text-label-md rounded-lg hover:bg-primary-hover transition-all shadow-md hover:shadow-lg active:scale-95 group" href="/">
+<span class="material-symbols-outlined mr-2" style="font-variation-settings: 'opsz' 20">home</span>
+                    Return Home
+                </a>
+<button class="inline-flex items-center justify-center px-8 py-3 border border-border-standard text-text-secondary font-label-md text-label-md rounded-lg hover:bg-surface-container-lowest transition-all active:scale-95" onclick="window.history.back()">
+                    Go Back
+                </button>
+</div>
+<!-- Helpful Links Cluster -->
+<div class="pt-8 border-t border-border-standard/50 w-full">
+<p class="text-label-sm font-label-sm text-text-secondary uppercase tracking-widest mb-6">Or explore our favorites</p>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<a class="p-4 bg-surface-container-lowest rounded-xl border border-border-standard hover:border-spark-orange/30 hover:shadow-sm transition-all group" href="#">
+<span class="material-symbols-outlined text-spark-orange mb-2 block">bed</span>
+<span class="font-label-md text-label-md text-on-background">Our Rooms</span>
+</a>
+<a class="p-4 bg-surface-container-lowest rounded-xl border border-border-standard hover:border-spark-orange/30 hover:shadow-sm transition-all group" href="#">
+<span class="material-symbols-outlined text-spark-orange mb-2 block">pool</span>
+<span class="font-label-md text-label-md text-on-background">Relaxation</span>
+</a>
+<a class="p-4 bg-surface-container-lowest rounded-xl border border-border-standard hover:border-spark-orange/30 hover:shadow-sm transition-all group" href="#">
+<span class="material-symbols-outlined text-spark-orange mb-2 block">restaurant</span>
+<span class="font-label-md text-label-md text-on-background">Dining</span>
+</a>
+<a class="p-4 bg-surface-container-lowest rounded-xl border border-border-standard hover:border-spark-orange/30 hover:shadow-sm transition-all group" href="#">
+<span class="material-symbols-outlined text-spark-orange mb-2 block">location_on</span>
+<span class="font-label-md text-label-md text-on-background">Contact</span>
+</a>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full py-12 px-8 bg-surface-container-low border-t border-border-standard">
+<div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+<div class="flex flex-col items-center md:items-start gap-2">
+<div class="text-h4 font-h4 lowercase text-on-background">spark inn</div>
+<p class="text-body-sm font-body-sm text-text-secondary">© 2024 spark inn. All rights reserved.</p>
+</div>
+<div class="flex flex-wrap justify-center gap-8">
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors" href="#">Home</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors" href="#">Rooms</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors" href="#">Contact</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors" href="#">Privacy Policy</a>
+</div>
+<div class="flex gap-4">
+<a class="w-10 h-10 flex items-center justify-center rounded-full bg-surface-container hover:bg-primary-light transition-colors" href="#">
+<span class="material-symbols-outlined text-text-secondary">share</span>
+</a>
+<a class="w-10 h-10 flex items-center justify-center rounded-full bg-surface-container hover:bg-primary-light transition-colors" href="#">
+<span class="material-symbols-outlined text-text-secondary">mail</span>
+</a>
+</div>
+</div>
+</footer>
+<script>
+        // Subtle mouse parallax effect for the hero image
+        document.addEventListener('mousemove', (e) => {
+            const moveX = (e.clientX - window.innerWidth / 2) * 0.005;
+            const moveY = (e.clientY - window.innerHeight / 2) * 0.005;
+            const image = document.querySelector('main img');
+            if (image) {
+                image.style.transform = `scale(1.05) translate(${moveX}px, ${moveY}px)`;
+            }
+        });
+
+        // Add fade-in classes logic (simple implementation)
+        window.addEventListener('load', () => {
+            document.querySelector('main').classList.add('opacity-100');
+        });
+    </script>
+</body></html>

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Room Management - spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Georgia'), local('Times New Roman'), serif; /* Fallback for local testing, assuming Apollo is a serif */
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-variant": "#e2e2e2",
+                      "surface-container-highest": "#e2e2e2",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "primary-light": "#FEF3E2",
+                      "tertiary": "#605e5a",
+                      "status-gray-bg": "#F3F4F6",
+                      "on-background": "#1b1b1b",
+                      "on-primary-fixed": "#2d1600",
+                      "surface-bright": "#f9f9f9",
+                      "on-secondary-fixed": "#141b2b",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "inverse-primary": "#ffb876",
+                      "page-bg": "#F9FAFB",
+                      "secondary-fixed": "#dce2f7",
+                      "status-purple-bg": "#F5F3FF",
+                      "on-surface-variant": "#544335",
+                      "status-green-text": "#16A34A",
+                      "primary-fixed-dim": "#ffb876",
+                      "border-standard": "#E5E7EB",
+                      "primary": "#8d4f00",
+                      "outline": "#877363",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "text-secondary": "#4B5563",
+                      "tertiary-container": "#a4a19d",
+                      "primary-container": "#ea8a1a",
+                      "on-primary-container": "#562e00",
+                      "inverse-on-surface": "#f1f1f1",
+                      "status-green-bg": "#F0FDF4",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "surface": "#f9f9f9",
+                      "secondary-container": "#d9dff5",
+                      "on-error-container": "#93000a",
+                      "status-blue-bg": "#EFF6FF",
+                      "on-secondary-fixed-variant": "#404758",
+                      "status-purple-text": "#7C3AED",
+                      "on-error": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "background": "#f9f9f9",
+                      "status-amber-bg": "#FFFBEB",
+                      "tertiary-fixed": "#e6e2dd",
+                      "surface-tint": "#8d4f00",
+                      "secondary": "#575e70",
+                      "surface-container": "#eeeeee",
+                      "surface-container-lowest": "#ffffff",
+                      "primary-fixed": "#ffdcc0",
+                      "on-tertiary-container": "#393835",
+                      "status-amber-text": "#D97706",
+                      "status-red-bg": "#FEF2F2",
+                      "on-secondary-container": "#5c6274",
+                      "surface-container-low": "#f3f3f3",
+                      "status-red-text": "#DC2626",
+                      "on-secondary": "#ffffff",
+                      "error": "#ba1a1a",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "on-surface": "#1b1b1b",
+                      "on-primary": "#ffffff",
+                      "inverse-surface": "#303030",
+                      "surface-container-high": "#e8e8e8",
+                      "outline-variant": "#dac2af",
+                      "status-blue-text": "#2563EB",
+                      "primary-hover": "#C4720E",
+                      "on-tertiary": "#ffffff",
+                      "surface-dim": "#dadada",
+                      "status-gray-text": "#6B7280"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "touch-target-min": "44px",
+                      "sidebar-width": "240px",
+                      "max-width-booking": "600px",
+                      "drawer-width": "480px",
+                      "max-width-auth": "460px",
+                      "unit": "8px"
+              },
+              "fontFamily": {
+                      "display-hero-mobile": [
+                              "Apollo"
+                      ],
+                      "h2": [
+                              "Apollo"
+                      ],
+                      "display-hero": [
+                              "Apollo"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "h1": [
+                              "Apollo"
+                      ],
+                      "label-md": [
+                              "Inter"
+                      ],
+                      "h1-mobile": [
+                              "Apollo"
+                      ],
+                      "label-sm": [
+                              "Inter"
+                      ],
+                      "h3": [
+                              "Inter"
+                      ],
+                      "h4": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "display-hero-mobile": [
+                              "44px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h2": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-hero": [
+                              "72px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h1": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h1-mobile": [
+                              "28px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h3": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "h4": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+</head>
+<body class="bg-page-bg text-on-surface font-body-lg min-h-screen flex">
+<!-- Sidebar Navigation Drawer -->
+<nav class="fixed left-0 top-0 h-full w-[240px] bg-inverse-surface dark:bg-surface-container-lowest text-primary-fixed dark:text-primary font-body-lg text-body-lg border-r border-outline-variant flex flex-col py-8 z-40">
+<div class="px-6 mb-8 flex items-center space-x-3">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary font-bold overflow-hidden" data-alt="A sophisticated, high-end professional headshot of an administrative professional in a warm, elegantly lit luxury hotel office setting. The person is dressed in modern, understated professional attire. The lighting is soft and inviting, emphasizing a warm minimal aesthetic with soft natural tones, deep blacks, and a subtle spark of orange in the background. The mood is calm, capable, and efficient.">
+<!-- Fallback to A if image fails or isn't used -->
+                A
+            </div>
+<div>
+<h2 class="font-h3 text-h3 lowercase text-white tracking-tighter">spark inn</h2>
+<p class="font-label-sm text-label-sm text-tertiary-fixed-dim">Admin Portal</p>
+</div>
+</div>
+<ul class="flex-1 space-y-2">
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>Bookings</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 Active: translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">bed</span>
+<span>Rooms</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">group</span>
+<span>Guests</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>Settings</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-[240px] p-8 max-w-7xl">
+<!-- Header Section -->
+<header class="flex justify-between items-end mb-8">
+<div>
+<h1 class="font-h2 text-h2 text-on-surface mb-1">Room Management</h1>
+<p class="font-body-lg text-body-lg text-text-secondary">Overview and status control for all properties.</p>
+</div>
+<button class="bg-primary-container text-on-primary-container hover:bg-primary-hover font-label-md text-label-md rounded-lg h-touch-target-min px-6 flex items-center space-x-2 transition-colors">
+<span class="material-symbols-outlined">add</span>
+<span>Add Room</span>
+</button>
+</header>
+<!-- Filter Bar -->
+<div class="bg-surface-container-lowest rounded-xl p-4 mb-6 border border-border-standard flex space-x-4">
+<div class="flex-1 relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary">search</span>
+<input class="w-full pl-10 pr-4 h-touch-target-min border border-border-standard rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent font-body-sm text-body-sm bg-surface-bright" placeholder="Search by room number or type..." type="text"/>
+</div>
+<div class="relative w-48">
+<select class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 appearance-none focus:outline-none focus:ring-2 focus:ring-primary-container font-body-sm text-body-sm bg-surface-bright text-on-surface">
+<option>All Statuses</option>
+<option>Available</option>
+<option>Occupied</option>
+<option>Blocked</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none">expand_more</span>
+</div>
+<div class="relative w-48">
+<select class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 appearance-none focus:outline-none focus:ring-2 focus:ring-primary-container font-body-sm text-body-sm bg-surface-bright text-on-surface">
+<option>All Housekeeping</option>
+<option>Clean</option>
+<option>Dirty</option>
+<option>In Progress</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none">expand_more</span>
+</div>
+</div>
+<!-- Room Table Container -->
+<div class="bg-surface-container-lowest rounded-[12px] border border-border-standard overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-bright border-b border-border-standard font-label-sm text-label-sm text-text-secondary uppercase tracking-wider">
+<th class="px-6 py-4 font-medium">Room</th>
+<th class="px-6 py-4 font-medium">Type</th>
+<th class="px-6 py-4 font-medium">Occupancy Status</th>
+<th class="px-6 py-4 font-medium">Housekeeping</th>
+<th class="px-6 py-4 font-medium text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard font-body-sm text-body-sm">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-container-low transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="font-h4 text-h4 text-on-surface">101</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">Deluxe King</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-green-bg text-status-green-text font-label-sm text-label-sm">
+                                Available
+                            </span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-green-bg text-status-green-text font-label-sm text-label-sm">
+                                Clean
+                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-text-secondary hover:text-primary-container transition-colors p-2 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined">edit</span>
+</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-container-low transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="font-h4 text-h4 text-on-surface">102</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">Standard Queen</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-red-bg text-status-red-text font-label-sm text-label-sm">
+                                Occupied
+                            </span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-red-bg text-status-red-text font-label-sm text-label-sm">
+                                Dirty
+                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-text-secondary hover:text-primary-container transition-colors p-2 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined">edit</span>
+</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-container-low transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="font-h4 text-h4 text-on-surface">201</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">Suite Ocean View</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-gray-bg text-status-gray-text font-label-sm text-label-sm">
+                                Blocked
+                            </span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-amber-bg text-status-amber-text font-label-sm text-label-sm">
+                                In Progress
+                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-text-secondary hover:text-primary-container transition-colors p-2 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined">edit</span>
+</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-container-low transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="font-h4 text-h4 text-on-surface">202</div>
+</td>
+<td class="px-6 py-4 text-text-secondary">Standard Queen</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-green-bg text-status-green-text font-label-sm text-label-sm">
+                                Available
+                            </span>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-3 py-1 rounded-full bg-status-red-bg text-status-red-text font-label-sm text-label-sm">
+                                Dirty
+                            </span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-text-secondary hover:text-primary-container transition-colors p-2 rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined">edit</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+<!-- Pagination (Implied) -->
+<div class="bg-surface-bright px-6 py-4 border-t border-border-standard flex items-center justify-between">
+<span class="font-body-sm text-body-sm text-text-secondary">Showing 1 to 4 of 42 rooms</span>
+<div class="flex space-x-2">
+<button class="px-3 py-1 border border-border-standard rounded font-label-sm text-label-sm text-text-secondary hover:bg-surface-variant disabled:opacity-50" disabled="">Prev</button>
+<button class="px-3 py-1 border border-border-standard rounded font-label-sm text-label-sm text-on-surface bg-surface-container-lowest">1</button>
+<button class="px-3 py-1 border border-border-standard rounded font-label-sm text-label-sm text-text-secondary hover:bg-surface-variant">2</button>
+<button class="px-3 py-1 border border-border-standard rounded font-label-sm text-label-sm text-text-secondary hover:bg-surface-variant">Next</button>
+</div>
+</div>
+</div>
+</main>
+</body></html>

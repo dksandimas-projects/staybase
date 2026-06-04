@@ -1,0 +1,259 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Guest Chat</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<!-- Assuming Apollo is not available on Google Fonts, falling back to a serif for display purposes if not locally installed, but we will specify it in Tailwind config -->
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config -->
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-container": "#d9dff5",
+                      "surface-bright": "#f9f9f9",
+                      "status-blue-text": "#2563EB",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "primary-fixed-dim": "#ffb876",
+                      "on-background": "#1b1b1b",
+                      "on-secondary-fixed-variant": "#404758",
+                      "surface-container-lowest": "#ffffff",
+                      "surface": "#f9f9f9",
+                      "secondary-fixed": "#dce2f7",
+                      "page-bg": "#F9FAFB",
+                      "status-purple-text": "#7C3AED",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "inverse-primary": "#ffb876",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "surface-container-high": "#e8e8e8",
+                      "inverse-on-surface": "#f1f1f1",
+                      "status-blue-bg": "#EFF6FF",
+                      "on-secondary-fixed": "#141b2b",
+                      "on-primary": "#ffffff",
+                      "status-gray-bg": "#F3F4F6",
+                      "inverse-surface": "#303030",
+                      "error-container": "#ffdad6",
+                      "primary-hover": "#C4720E",
+                      "status-green-text": "#16A34A",
+                      "surface-container-highest": "#e2e2e2",
+                      "surface-tint": "#8d4f00",
+                      "status-red-bg": "#FEF2F2",
+                      "on-error-container": "#93000a",
+                      "surface-container": "#eeeeee",
+                      "primary": "#8d4f00",
+                      "background": "#f9f9f9",
+                      "on-secondary": "#ffffff",
+                      "surface-variant": "#e2e2e2",
+                      "surface-dim": "#dadada",
+                      "status-purple-bg": "#F5F3FF",
+                      "outline": "#877363",
+                      "error": "#ba1a1a",
+                      "on-tertiary": "#ffffff",
+                      "tertiary": "#605e5a",
+                      "on-secondary-container": "#5c6274",
+                      "outline-variant": "#dac2af",
+                      "border-standard": "#E5E7EB",
+                      "text-secondary": "#4B5563",
+                      "primary-fixed": "#ffdcc0",
+                      "primary-light": "#FEF3E2",
+                      "status-green-bg": "#F0FDF4",
+                      "on-error": "#ffffff",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "status-red-text": "#DC2626",
+                      "secondary": "#575e70",
+                      "on-surface-variant": "#544335",
+                      "on-primary-fixed": "#2d1600",
+                      "status-amber-bg": "#FFFBEB",
+                      "on-tertiary-container": "#393835",
+                      "status-gray-text": "#6B7280",
+                      "on-surface": "#1b1b1b",
+                      "tertiary-fixed": "#e6e2dd",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "primary-container": "#ea8a1a",
+                      "on-primary-container": "#562e00",
+                      "status-amber-text": "#D97706",
+                      "tertiary-container": "#a4a19d",
+                      "surface-container-low": "#f3f3f3"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "8px",
+                      "sidebar-width": "240px",
+                      "touch-target-min": "44px",
+                      "drawer-width": "480px",
+                      "max-width-booking": "600px",
+                      "max-width-auth": "460px"
+              },
+              "fontFamily": {
+                      "h4": ["Inter"],
+                      "display-hero": ["Apollo", "Georgia", "serif"],
+                      "h2": ["Apollo", "Georgia", "serif"],
+                      "display-hero-mobile": ["Apollo", "Georgia", "serif"],
+                      "label-md": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "label-sm": ["Inter"],
+                      "body-sm": ["Inter"],
+                      "h3": ["Inter"],
+                      "h1-mobile": ["Apollo", "Georgia", "serif"],
+                      "h1": ["Apollo", "Georgia", "serif"]
+              },
+              "fontSize": {
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        /* Hide scrollbar for clean UI in quick requests */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+        
+        /* Mobile preview framing for desktop views */
+        @media (min-width: 640px) {
+            body {
+                display: flex;
+                justify-content: center;
+                background-color: #e5e7eb;
+            }
+            .mobile-frame {
+                width: 390px;
+                height: 844px;
+                max-height: 100vh;
+                background-color: #F9FAFB;
+                border-radius: 40px;
+                overflow: hidden;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                position: relative;
+                margin-top: 2rem;
+                margin-bottom: 2rem;
+            }
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-page-bg text-on-surface antialiased font-body-sm h-screen w-full flex flex-col m-0 p-0 overflow-hidden">
+<div class="mobile-frame flex flex-col h-full w-full mx-auto relative shadow-2xl">
+<!-- Header / TopAppBar -->
+<header class="bg-surface-container-lowest border-b border-border-standard flex justify-between items-center px-6 h-16 sticky top-0 z-50 shrink-0">
+<!-- Brand Logo -->
+<div class="font-h2 text-h2 text-primary lowercase tracking-tight">
+                spark inn
+            </div>
+<!-- Room Badge & Status -->
+<div class="flex items-center gap-2 bg-surface px-3 py-1.5 rounded-full border border-border-standard shadow-sm">
+<div class="w-2 h-2 rounded-full bg-status-green-text shadow-[0_0_8px_rgba(22,163,74,0.5)]"></div>
+<span class="font-label-md text-label-md text-on-surface">Room 104</span>
+</div>
+</header>
+<!-- Chat Canvas -->
+<main class="flex-1 overflow-y-auto px-4 py-6 space-y-6 bg-page-bg flex flex-col relative z-0" id="chat-container">
+<!-- Date Divider -->
+<div class="flex justify-center w-full">
+<span class="font-label-sm text-label-sm text-text-secondary bg-surface-container-low px-3 py-1 rounded-full border border-border-standard">Today</span>
+</div>
+<!-- Staff Message -->
+<div class="flex flex-col items-start w-full max-w-[85%]">
+<span class="font-label-sm text-label-sm text-text-secondary mb-1 ml-1">Concierge</span>
+<div class="bg-surface-container-lowest border border-border-standard rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm relative">
+<p class="font-body-lg text-body-lg text-on-surface">Good morning! How can we make your stay more comfortable today?</p>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary mt-1 ml-1">09:15 AM</span>
+</div>
+<!-- Guest Message -->
+<div class="flex flex-col items-end w-full">
+<div class="max-w-[85%] flex flex-col items-end">
+<div class="bg-primary-container rounded-2xl rounded-tr-sm px-4 py-3 shadow-sm relative">
+<p class="font-body-lg text-body-lg text-on-primary">Extra pillows please</p>
+</div>
+<div class="flex items-center gap-1 mt-1 mr-1">
+<span class="font-label-sm text-label-sm text-text-secondary">09:20 AM</span>
+<span class="material-symbols-outlined text-[16px] text-status-blue-text" data-icon="done_all">done_all</span>
+</div>
+</div>
+</div>
+<!-- Staff Message -->
+<div class="flex flex-col items-start w-full max-w-[85%]">
+<span class="font-label-sm text-label-sm text-text-secondary mb-1 ml-1">Housekeeping</span>
+<div class="bg-surface-container-lowest border border-border-standard rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm relative">
+<p class="font-body-lg text-body-lg text-on-surface">Absolutely. I've dispatched housekeeping to Room 104 with extra pillows. They should be there in 5 minutes.</p>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary mt-1 ml-1">09:22 AM</span>
+</div>
+<!-- Spacer to push content above fixed footer -->
+<div class="h-4 pb-32"></div>
+</main>
+<!-- Interaction Area (Footer) -->
+<footer class="absolute bottom-0 left-0 w-full bg-surface-container-lowest border-t border-border-standard z-10 flex flex-col">
+<!-- Quick Request Panel -->
+<div class="flex overflow-x-auto gap-2 px-4 py-3 no-scrollbar border-b border-surface-container-highest">
+<button class="shrink-0 flex items-center justify-center h-[44px] px-5 bg-surface border border-border-standard rounded-full font-label-md text-label-md text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 shadow-sm">
+                    Extra Towels
+                </button>
+<button class="shrink-0 flex items-center justify-center h-[44px] px-5 bg-surface border border-border-standard rounded-full font-label-md text-label-md text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 shadow-sm">
+                    Water Refill
+                </button>
+<button class="shrink-0 flex items-center justify-center h-[44px] px-5 bg-surface border border-border-standard rounded-full font-label-md text-label-md text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 shadow-sm">
+                    Room Service
+                </button>
+<button class="shrink-0 flex items-center justify-center h-[44px] px-5 bg-surface border border-border-standard rounded-full font-label-md text-label-md text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 shadow-sm">
+                    Housekeeping
+                </button>
+<button class="shrink-0 flex items-center justify-center h-[44px] px-5 bg-surface border border-border-standard rounded-full font-label-md text-label-md text-on-surface hover:bg-surface-container-high transition-colors active:scale-95 shadow-sm">
+                    Late Checkout
+                </button>
+</div>
+<!-- Message Input Bar -->
+<div class="flex items-end gap-3 p-4 bg-surface-container-lowest">
+<div class="flex-1 bg-surface border border-border-standard rounded-3xl min-h-[48px] flex items-center px-4 focus-within:border-primary-container focus-within:ring-1 focus-within:ring-primary-container transition-all">
+<input autocomplete="off" class="w-full bg-transparent border-none focus:ring-0 font-body-lg text-body-lg text-on-surface placeholder-text-secondary py-3 outline-none" placeholder="Type a message..." type="text">
+</div>
+<button aria-label="Send Message" class="flex items-center justify-center w-[48px] h-[48px] rounded-full bg-primary-container hover:bg-primary-hover transition-colors text-on-primary shrink-0 shadow-md active:scale-95">
+<span class="material-symbols-outlined" data-icon="send" style="font-variation-settings: 'FILL' 1;">send</span>
+</button>
+</div>
+</footer>
+</div>
+<script>
+        // Scroll chat to bottom on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const chatContainer = document.getElementById('chat-container');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        });
+    </script>
+</body></html>

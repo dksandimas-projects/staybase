@@ -1,0 +1,165 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Join Spark Rewards | spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Fallback generic serif if link is unavailable */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #FDF8F3; /* Specific request: Warm white background */
+        }
+        .font-apollo { font-family: 'Apollo', serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#8d4f00",
+                        "primary-container": "#ea8a1a",
+                        "primary-hover": "#C4720E",
+                        "on-primary": "#ffffff",
+                        "surface": "#f9f9f9",
+                        "on-surface": "#1b1b1b",
+                        "text-secondary": "#4B5563",
+                        "border-standard": "#E5E7EB",
+                        "outline": "#877363",
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.5rem",
+                        "lg": "0.75rem",
+                        "xl": "1rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "h2": ["Apollo", "serif"],
+                        "h1": ["Apollo", "serif"],
+                        "body-sm": ["Inter", "sans-serif"],
+                        "label-md": ["Inter", "sans-serif"]
+                    },
+                    "fontSize": {
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h2-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 antialiased">
+<!-- Auth Container -->
+<main class="w-full max-w-[460px] animate-fade-in">
+<!-- Logo Section -->
+<div class="flex flex-col items-center mb-8">
+<img alt="spark inn logo" class="h-10 w-auto mb-6" data-alt="The spark inn luxury hotel logo, featuring elegant, modern typography with a focus on a boutique aesthetic. The design is minimalist and sophisticated, rendered in a deep earthy tone that contrasts beautifully against a soft cream background, reflecting the warm minimal sanctuary vibe of a high-end Bohol resort." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDzuSd0-yCRdqL9Xl1MzzKf7Fc6VM5jCup38AErI_UeYLhotbS4gQFfZeTE13qHygdS48HR2aCW4nh5QtF6go6rye6gg4OK7yzNGWwEgOgXm-TFeSqD8DFsfdS7bfYJkdHgo4NBgi3BCXbYMPPOqtVU5WKhf6DDnxAOJGAQcRxhWX46EAk4XknSuDIW8WSqF3KLiPhnKxZ75ZNqpasswwEwTrBtzoyTbP0dqBn1ETy4Z6uEGyg0prEwFCSoho4-S1UH-aVYZQ57pv3F">
+<h1 class="font-h2 text-h2-mobile text-on-surface text-center mb-2">Join Spark Rewards</h1>
+<p class="font-body-sm text-body-sm text-text-secondary text-center px-4">Experience the pinnacle of Bohol luxury with exclusive member benefits and serene escapes.</p>
+</div>
+<!-- Form Card -->
+<section class="bg-white rounded-xl shadow-sm border border-[#F3E6D9] p-8 md:p-10">
+<form action="#" class="space-y-5" method="POST">
+<!-- Name Fields -->
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-text-secondary block px-1" for="first_name">First Name</label>
+<input class="w-full px-4 py-3 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all placeholder:text-gray-300 h-11" id="first_name" name="first_name" placeholder="Juan" required="" type="text">
+</div>
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-text-secondary block px-1" for="last_name">Last Name</label>
+<input class="w-full px-4 py-3 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all placeholder:text-gray-300 h-11" id="last_name" name="last_name" placeholder="Dela Cruz" required="" type="text">
+</div>
+</div>
+<!-- Email Field -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-text-secondary block px-1" for="email">Email</label>
+<div class="relative">
+<input class="w-full pl-11 pr-4 py-3 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all placeholder:text-gray-300 h-11" id="email" name="email" placeholder="name@example.com" required="" type="email">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-[20px]">mail</span>
+</div>
+</div>
+<!-- Password Fields -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-text-secondary block px-1" for="password">Password</label>
+<div class="relative">
+<input class="w-full pl-11 pr-11 py-3 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all placeholder:text-gray-300 h-11" id="password" name="password" placeholder="••••••••" required="" type="password">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-[20px]">lock</span>
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-primary transition-colors focus:outline-none" onclick="togglePassword('password', this)" type="button">
+<span class="material-symbols-outlined text-[20px]">visibility</span>
+</button>
+</div>
+</div>
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-text-secondary block px-1" for="confirm_password">Confirm Password</label>
+<div class="relative">
+<input class="w-full pl-11 pr-11 py-3 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all placeholder:text-gray-300 h-11" id="confirm_password" name="confirm_password" placeholder="••••••••" required="" type="password">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-[20px]">lock</span>
+</div>
+</div>
+<!-- Consent Checkbox -->
+<div class="flex items-start gap-3 py-2">
+<div class="flex items-center h-5">
+<input class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer transition-all" id="privacy" name="privacy" required="" type="checkbox">
+</div>
+<label class="font-body-sm text-body-sm text-text-secondary cursor-pointer leading-tight" for="privacy">
+                        I agree to the <a class="text-primary font-medium hover:underline" href="#">Privacy Policy</a> and consent to receiving updates about Spark Rewards.
+                    </label>
+</div>
+<!-- Primary Action -->
+<button class="w-full bg-primary-container hover:bg-primary-hover text-white font-medium py-3.5 rounded-lg shadow-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2 h-11" type="submit">
+                    Create Account
+                    <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</form>
+</section>
+<!-- Secondary Link -->
+<div class="mt-8 text-center">
+<p class="font-body-sm text-body-sm text-text-secondary">
+                Already a member? 
+                <a class="text-primary font-semibold hover:underline decoration-2 underline-offset-4 ml-1" href="#">Sign In</a>
+</p>
+</div>
+<!-- Footer Decoration -->
+<footer class="mt-12 text-center opacity-40">
+<p class="font-label-md text-[10px] tracking-widest text-text-secondary uppercase">Secure Boutique Portal • spark inn</p>
+</footer>
+</main>
+<script>
+        function togglePassword(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const icon = btn.querySelector('span');
+            if (input.type === "password") {
+                input.type = "text";
+                icon.textContent = "visibility_off";
+            } else {
+                input.type = "password";
+                icon.textContent = "visibility";
+            }
+        }
+
+        // Simple Fade-in Animation
+        document.addEventListener('DOMContentLoaded', () => {
+            const main = document.querySelector('main');
+            main.style.opacity = '0';
+            main.style.transform = 'translateY(10px)';
+            main.style.transition = 'opacity 0.6s ease-out, transform 0.6s ease-out';
+            
+            requestAnimationFrame(() => {
+                main.style.opacity = '1';
+                main.style.transform = 'translateY(0)';
+            });
+        });
+    </script>
+</body></html>

@@ -1,0 +1,324 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Homepage</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<!-- Assuming Apollo is not available on Google Fonts, falling back to a serif for display -->
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "primary-fixed": "#ffdcc0",
+                      "status-amber-bg": "#FFFBEB",
+                      "secondary": "#575e70",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "on-secondary-fixed-variant": "#404758",
+                      "primary-hover": "#C4720E",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "on-surface": "#1b1b1b",
+                      "inverse-primary": "#ffb876",
+                      "surface-tint": "#8d4f00",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "status-purple-bg": "#F5F3FF",
+                      "surface-bright": "#f9f9f9",
+                      "status-gray-bg": "#F3F4F6",
+                      "page-bg": "#F9FAFB",
+                      "background": "#f9f9f9",
+                      "primary": "#8d4f00",
+                      "on-primary-container": "#562e00",
+                      "status-amber-text": "#D97706",
+                      "on-background": "#1b1b1b",
+                      "secondary-container": "#d9dff5",
+                      "status-gray-text": "#6B7280",
+                      "surface-container-high": "#e8e8e8",
+                      "status-red-text": "#DC2626",
+                      "error": "#ba1a1a",
+                      "tertiary": "#605e5a",
+                      "outline": "#877363",
+                      "on-surface-variant": "#544335",
+                      "surface-dim": "#dadada",
+                      "on-secondary-container": "#5c6274",
+                      "on-tertiary": "#ffffff",
+                      "status-blue-text": "#2563EB",
+                      "surface": "#f9f9f9",
+                      "on-primary": "#ffffff",
+                      "inverse-on-surface": "#f1f1f1",
+                      "border-standard": "#E5E7EB",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "status-red-bg": "#FEF2F2",
+                      "on-error": "#ffffff",
+                      "tertiary-container": "#a4a19d",
+                      "primary-light": "#FEF3E2",
+                      "surface-variant": "#e2e2e2",
+                      "primary-fixed-dim": "#ffb876",
+                      "error-container": "#ffdad6",
+                      "status-green-bg": "#F0FDF4",
+                      "on-error-container": "#93000a",
+                      "inverse-surface": "#303030",
+                      "outline-variant": "#dac2af",
+                      "on-secondary": "#ffffff",
+                      "on-tertiary-container": "#393835",
+                      "surface-container-highest": "#e2e2e2",
+                      "surface-container": "#eeeeee",
+                      "tertiary-fixed": "#e6e2dd",
+                      "status-purple-text": "#7C3AED",
+                      "on-secondary-fixed": "#141b2b",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "text-secondary": "#4B5563",
+                      "status-green-text": "#16A34A",
+                      "status-blue-bg": "#EFF6FF",
+                      "surface-container-lowest": "#ffffff",
+                      "surface-container-low": "#f3f3f3",
+                      "on-primary-fixed": "#2d1600",
+                      "primary-container": "#ea8a1a",
+                      "secondary-fixed": "#dce2f7"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "touch-target-min": "44px",
+                      "max-width-booking": "600px",
+                      "max-width-auth": "460px",
+                      "sidebar-width": "240px",
+                      "drawer-width": "480px",
+                      "unit": "8px"
+              },
+              "fontFamily": {
+                      "body-lg": ["Inter", "sans-serif"],
+                      "h2": ["Playfair Display", "serif"],
+                      "label-md": ["Inter", "sans-serif"],
+                      "h1-mobile": ["Playfair Display", "serif"],
+                      "label-sm": ["Inter", "sans-serif"],
+                      "display-hero": ["Playfair Display", "serif"],
+                      "h4": ["Inter", "sans-serif"],
+                      "h1": ["Playfair Display", "serif"],
+                      "display-hero-mobile": ["Playfair Display", "serif"],
+                      "body-sm": ["Inter", "sans-serif"],
+                      "h3": ["Inter", "sans-serif"]
+              },
+              "fontSize": {
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        /* Smooth scrolling */
+        html { scroll-behavior: smooth; }
+        
+        /* Navbar transition */
+        .navbar-transition {
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        .navbar-scrolled {
+            background-color: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+            color: #1b1b1b;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+        .navbar-scrolled .brand-text {
+            color: #1b1b1b;
+        }
+        .navbar-scrolled .nav-icon {
+            color: #1b1b1b;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-lg text-body-lg antialiased">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-transparent navbar-transition flat no shadows" id="main-nav">
+<div class="flex justify-between items-center px-6 py-4 max-w-7xl mx-auto w-full">
+<div class="flex items-center gap-4">
+<button class="flex items-center justify-center w-touch-target-min h-touch-target-min hover:opacity-80 transition-all nav-icon text-white">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">menu</span>
+</button>
+</div>
+<div class="text-center">
+<span class="font-h3 text-h3 md:font-h2 md:text-h2 lowercase tracking-tighter text-white brand-text">spark inn</span>
+</div>
+<div class="flex items-center">
+<button class="bg-primary-container text-on-primary-container h-touch-target-min px-6 rounded font-label-md text-label-md hover:bg-primary-hover transition-colors duration-200">
+                    Book Now
+                </button>
+</div>
+</div>
+</header>
+<!-- Hero Section -->
+<section class="relative w-full h-screen flex items-center justify-center overflow-hidden">
+<div class="absolute inset-0 z-0">
+<img alt="A cinematic, wide-angle shot of a luxurious infinity pool stretching towards a serene ocean horizon at sunset. The lighting is warm and golden, reflecting off the calm water. The setting exudes tranquility, premium luxury, and minimalist elegance, fitting the 'Warm Minimal' aesthetic. Deep shadows contrast with the bright, glowing sky." class="w-full h-full object-cover" data-alt="A cinematic, wide-angle shot of a luxurious infinity pool stretching towards a serene ocean horizon at sunset. The lighting is warm and golden, reflecting off the calm water. The setting exudes tranquility, premium luxury, and minimalist elegance, fitting the 'Warm Minimal' aesthetic. Deep shadows contrast with the bright, glowing sky." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAe299y5l46fEcYGSq8W_Mw_RbsGIq2LfztTC-3ZP0G552CAf1fv8wB2rOFfvCqSl7G02Oe6dXuIBFH_cjLltz2Sn_K2PcBkwwevwriyk5s1GHA66qApRG-w-cGzRcjrup4phlFVUeqK1ORL5E7hVHWyzW4wcXIVTCIwScnSkC4pxTn6WpBK3z8aNMG2nOTkF8cjIujWhEbv7KHc5w_52dY3aAizd2ZgTaC4Xp7Yoa90rrc95ZCsZTgAciNsBML-zU7D0eWiRuG1bwY">
+<div class="absolute inset-0 bg-black/30"></div>
+</div>
+<div class="relative z-10 text-center px-4 max-w-4xl mx-auto mt-20">
+<h1 class="font-display-hero-mobile text-display-hero-mobile md:font-display-hero md:text-display-hero text-white mb-8 drop-shadow-lg">
+                Find Your Spark
+            </h1>
+<p class="font-h4 text-h4 text-white/90 mb-12 max-w-2xl mx-auto font-light">
+                A warm, minimalist sanctuary blending boutique luxury with the natural beauty of Bohol.
+            </p>
+</div>
+</section>
+<!-- Availability Checker Bar (Sticky below hero) -->
+<section class="relative z-20 -mt-16 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+<div class="bg-surface-container-lowest rounded-xl shadow-lg p-4 md:p-6 flex flex-col md:flex-row gap-4 items-center justify-between border border-border-standard">
+<div class="flex-1 w-full grid grid-cols-1 sm:grid-cols-3 gap-4">
+<!-- Check In -->
+<div class="flex flex-col border-b sm:border-b-0 sm:border-r border-border-standard pb-3 sm:pb-0 sm:pr-4">
+<label class="font-label-sm text-label-sm text-text-secondary uppercase tracking-wider mb-1">Check In</label>
+<div class="flex items-center justify-between cursor-pointer group">
+<span class="font-h4 text-h4 text-on-surface">Oct 24, 2024</span>
+<span class="material-symbols-outlined text-tertiary group-hover:text-primary transition-colors">calendar_today</span>
+</div>
+</div>
+<!-- Check Out -->
+<div class="flex flex-col border-b sm:border-b-0 sm:border-r border-border-standard pb-3 sm:pb-0 sm:px-4">
+<label class="font-label-sm text-label-sm text-text-secondary uppercase tracking-wider mb-1">Check Out</label>
+<div class="flex items-center justify-between cursor-pointer group">
+<span class="font-h4 text-h4 text-on-surface">Oct 28, 2024</span>
+<span class="material-symbols-outlined text-tertiary group-hover:text-primary transition-colors">calendar_today</span>
+</div>
+</div>
+<!-- Guests -->
+<div class="flex flex-col sm:pl-4">
+<label class="font-label-sm text-label-sm text-text-secondary uppercase tracking-wider mb-1">Guests</label>
+<div class="flex items-center justify-between cursor-pointer group">
+<span class="font-h4 text-h4 text-on-surface">2 Adults, 0 Children</span>
+<span class="material-symbols-outlined text-tertiary group-hover:text-primary transition-colors">person</span>
+</div>
+</div>
+</div>
+<div class="w-full md:w-auto mt-4 md:mt-0 md:pl-6 shrink-0">
+<button class="w-full md:w-auto bg-primary-container text-on-primary-container h-touch-target-min px-8 rounded-lg font-h4 text-h4 hover:bg-primary-hover transition-colors duration-200">
+                    Check Availability
+                </button>
+</div>
+</div>
+</section>
+<!-- Main Content Area -->
+<main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
+<!-- Intro Section -->
+<div class="text-center max-w-3xl mx-auto mb-20">
+<h2 class="font-h1-mobile text-h1-mobile md:font-h1 md:text-h1 text-on-surface mb-6">Unassuming Luxury</h2>
+<p class="font-body-lg text-body-lg text-text-secondary">
+                Designed for those who seek tranquility without pretense. Our rooms offer generous whitespace for the mind, natural textures, and a seamless connection to the serene environment outside.
+            </p>
+</div>
+<!-- Featured Rooms Bento Grid -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-6 mb-24">
+<!-- Large Feature Room (Takes up 8 columns on desktop) -->
+<div class="col-span-1 md:col-span-8 group relative overflow-hidden rounded-xl shadow-sm hover:shadow-md transition-shadow bg-surface-container-lowest border border-border-standard flex flex-col min-h-[480px]">
+<div class="relative flex-grow overflow-hidden h-[300px] md:h-auto">
+<img alt="A spacious, well-lit premium hotel suite featuring minimalist decor. Large floor-to-ceiling windows look out onto lush tropical greenery. The bed is dressed in crisp white linens, and the room utilizes natural wood accents and a warm, inviting color palette. The aesthetic is modern, clean, and high-end luxury." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" data-alt="A spacious, well-lit premium hotel suite featuring minimalist decor. Large floor-to-ceiling windows look out onto lush tropical greenery. The bed is dressed in crisp white linens, and the room utilizes natural wood accents and a warm, inviting color palette. The aesthetic is modern, clean, and high-end luxury." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBROWAtzx3r6P2DrCtCX6SlsOosqCQrjeEnzSElnjhzuzCFZkhFxYs2aDDbgsitFYQ79O_inFjWy49NEiOh3WVn5gfEvc0cH7W-lZbhVQRHMhB-BpDLxRlyxpfXX-fkhQa5Km4MOwELC8yhDzupzv0poZDqF_LBRnPfQqIrgWizPT-POlT-6jm8IH56VF-gjzY5NwJLXvmjUiFtGG-XXzuBMq0ocxQrFatxJQFXvYCtWV0HTsc0qO5vsANuSxNV5Hpc8JYN5cEye1sX">
+<div class="absolute top-4 right-4 bg-surface-container-lowest/90 backdrop-blur-sm px-3 py-1 rounded-full text-primary font-label-sm text-label-sm uppercase tracking-wide">
+                        Signature Suite
+                    </div>
+</div>
+<div class="p-6 md:p-8 flex flex-col justify-between">
+<div>
+<h3 class="font-h3 text-h3 text-on-surface mb-2">The Oceanfront Villa</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mb-4 line-clamp-2">Experience ultimate privacy and panoramic views of the sea from your own expansive terrace.</p>
+</div>
+<div class="flex items-center justify-between mt-4 pt-4 border-t border-border-standard">
+<span class="font-h4 text-h4 text-primary">From $350<span class="font-body-sm text-body-sm text-text-secondary font-normal">/night</span></span>
+<button class="text-primary hover:text-primary-hover font-label-md text-label-md flex items-center gap-1 transition-colors">
+                            Explore <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Two smaller rooms stacked vertically (Takes up 4 columns) -->
+<div class="col-span-1 md:col-span-4 flex flex-col gap-6">
+<div class="group relative overflow-hidden rounded-xl shadow-sm hover:shadow-md transition-shadow bg-surface-container-lowest border border-border-standard flex-1 flex flex-col">
+<div class="relative h-48 overflow-hidden">
+<img alt="A cozy, minimalist guest room with warm natural light filtering through sheer curtains. The room features a comfortable bed, minimal wooden furniture, and a neutral, calming color palette. Soft shadows add depth to the serene, boutique hotel environment." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" data-alt="A cozy, minimalist guest room with warm natural light filtering through sheer curtains. The room features a comfortable bed, minimal wooden furniture, and a neutral, calming color palette. Soft shadows add depth to the serene, boutique hotel environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDtB2pY9pyA-nHcs0ODXwxWP--b1nfhZFJaBTYHwKm47pIe2HKLRd1EkTeXVpU_fbatxxxec-JWZ-9GahSvI5ISEbIVbFOQG2_3Qi1KWbATiZ6DCFV05FFNBm1KrQi2r6Us3EVHSFfRL4_kF3PR4-IgafYvrt0wMIN08MONiOJOia2LmghUtGRPxkTdTmk4ESSA_m3pHCsfQQ6mCuhhsoMoGtg-9NOzq41lb9fl3aqxjRzwQMgS74Vu9LL5KefrHaUmmjHzAuFDiWXQ">
+</div>
+<div class="p-5 flex flex-col flex-grow justify-between">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface mb-1">Deluxe Garden Room</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">A tranquil retreat nestled amongst our curated botanical gardens.</p>
+</div>
+<div class="flex items-center justify-between mt-3 pt-3 border-t border-border-standard">
+<span class="font-h4 text-h4 text-on-surface">From $180</span>
+<button class="text-primary hover:text-primary-hover transition-colors flex items-center justify-center w-8 h-8 rounded-full bg-surface-container-high group-hover:bg-primary-light">
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<div class="group relative overflow-hidden rounded-xl shadow-sm hover:shadow-md transition-shadow bg-surface-container-lowest border border-border-standard flex-1 flex flex-col">
+<div class="relative h-48 overflow-hidden">
+<img alt="An elegant, modern hotel bathroom featuring a large freestanding soaking tub, sleek minimalist fixtures, and natural stone textures. The lighting is soft and ambient, creating a spa-like sanctuary feel consistent with high-end boutique hospitality." class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" data-alt="An elegant, modern hotel bathroom featuring a large freestanding soaking tub, sleek minimalist fixtures, and natural stone textures. The lighting is soft and ambient, creating a spa-like sanctuary feel consistent with high-end boutique hospitality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA5OiUvWH_yNqmhSq4snEK7_e2x3VF_G_r88oWbUucSXveqcV96z6I3ZBt8MCotHH1A9xNFDGSpuYTQznp3-7Y-GbVUIFWhjcNMdKKWdJP67K_WSC_TYR4XEtnl2FqAlmxu8_XCz9_LoaiLHVx8eb1M23MAKWeDPCzQAdR1HeuwsvYoyPUaApOZBttpnVWIStzheAD14spp3xMEuKO_RCqJ0uN4EntkEaBC736Vr0BbEvlPOMToZQT61JNzOe4WWpAHNhztoFmrpRGa">
+</div>
+<div class="p-5 flex flex-col flex-grow justify-between">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface mb-1">Spa Studio</h3>
+<p class="font-body-sm text-body-sm text-text-secondary line-clamp-2">Includes a private in-room soaking tub and exclusive amenities.</p>
+</div>
+<div class="flex items-center justify-between mt-3 pt-3 border-t border-border-standard">
+<span class="font-h4 text-h4 text-on-surface">From $220</span>
+<button class="text-primary hover:text-primary-hover transition-colors flex items-center justify-center w-8 h-8 rounded-full bg-surface-container-high group-hover:bg-primary-light">
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full relative bottom-0 bg-inverse-surface dark:bg-surface-container-lowest text-white dark:text-on-surface flat no shadows">
+<div class="flex flex-col md:flex-row justify-between items-center px-8 py-12 max-w-7xl mx-auto border-t-0">
+<div class="mb-8 md:mb-0 text-center md:text-left">
+<div class="font-h2 text-h2 lowercase text-white mb-2">spark inn</div>
+<p class="font-body-sm text-body-sm text-tertiary-fixed-dim">Bohol, Philippines</p>
+</div>
+<nav class="flex flex-wrap justify-center gap-6 mb-8 md:mb-0">
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Rooms</a>
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">About Us</a>
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Contact</a>
+<a class="font-body-sm text-body-sm text-tertiary-fixed-dim hover:text-primary-fixed transition-colors focus:outline-none" href="#">Privacy Policy</a>
+</nav>
+<div class="font-body-sm text-body-sm text-tertiary-fixed-dim">
+                © 2024 spark inn. All rights reserved.
+            </div>
+</div>
+</footer>
+<script>
+        // Navbar scroll effect
+        const navbar = document.getElementById('main-nav');
+        
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 50) {
+                navbar.classList.add('navbar-scrolled');
+                // Change text color classes manually since transition handles the background smoothly
+                navbar.querySelector('.brand-text').classList.remove('text-white');
+                navbar.querySelector('.nav-icon').classList.remove('text-white');
+            } else {
+                navbar.classList.remove('navbar-scrolled');
+                navbar.querySelector('.brand-text').classList.add('text-white');
+                navbar.querySelector('.nav-icon').classList.add('text-white');
+            }
+        });
+    </script>
+</body></html>

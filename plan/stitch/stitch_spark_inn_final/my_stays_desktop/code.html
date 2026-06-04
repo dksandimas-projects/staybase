@@ -1,0 +1,305 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>My Stays | spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/111005/Apollo.woff'); /* Using a representative serif for Apollo */
+        }
+        .font-h1 { font-family: 'Apollo', serif; }
+        .font-h2 { font-family: 'Apollo', serif; }
+        .font-display-hero { font-family: 'Apollo', serif; }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "tertiary": "#605e5a",
+                      "outline": "#877363",
+                      "inverse-surface": "#303030",
+                      "on-surface": "#1b1b1b",
+                      "background": "#f9f9f9",
+                      "surface-container-highest": "#e2e2e2",
+                      "status-blue-text": "#2563EB",
+                      "primary": "#8d4f00",
+                      "inverse-primary": "#ffb876",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "status-red-text": "#DC2626",
+                      "status-blue-bg": "#EFF6FF",
+                      "on-secondary-container": "#5c6274",
+                      "surface-dim": "#dadada",
+                      "status-green-bg": "#F0FDF4",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "status-green-text": "#16A34A",
+                      "outline-variant": "#dac2af",
+                      "on-tertiary-container": "#393835",
+                      "on-secondary-fixed-variant": "#404758",
+                      "status-amber-text": "#D97706",
+                      "primary-fixed-dim": "#ffb876",
+                      "on-secondary": "#ffffff",
+                      "on-error-container": "#93000a",
+                      "on-background": "#1b1b1b",
+                      "on-error": "#ffffff",
+                      "border-standard": "#E5E7EB",
+                      "tertiary-fixed": "#e6e2dd",
+                      "inverse-on-surface": "#f1f1f1",
+                      "surface-container-lowest": "#ffffff",
+                      "text-secondary": "#4B5563",
+                      "surface-container-high": "#e8e8e8",
+                      "status-purple-bg": "#F5F3FF",
+                      "primary-container": "#ea8a1a",
+                      "on-secondary-fixed": "#141b2b",
+                      "surface-variant": "#e2e2e2",
+                      "surface-container-low": "#f3f3f3",
+                      "secondary": "#575e70",
+                      "status-purple-text": "#7C3AED",
+                      "on-surface-variant": "#544335",
+                      "primary-fixed": "#ffdcc0",
+                      "on-primary-container": "#562e00",
+                      "primary-light": "#FEF3E2",
+                      "surface-container": "#eeeeee",
+                      "surface": "#f9f9f9",
+                      "on-primary": "#ffffff",
+                      "status-red-bg": "#FEF2F2",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "status-gray-text": "#6B7280",
+                      "primary-hover": "#C4720E",
+                      "page-bg": "#F9FAFB",
+                      "on-tertiary": "#ffffff",
+                      "error": "#ba1a1a",
+                      "surface-tint": "#8d4f00",
+                      "tertiary-container": "#a4a19d",
+                      "secondary-container": "#d9dff5",
+                      "on-primary-fixed": "#2d1600",
+                      "secondary-fixed": "#dce2f7",
+                      "error-container": "#ffdad6",
+                      "status-gray-bg": "#F3F4F6",
+                      "status-amber-bg": "#FFFBEB",
+                      "surface-bright": "#f9f9f9"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "8px",
+                      "sidebar-width": "240px",
+                      "drawer-width": "480px",
+                      "touch-target-min": "44px",
+                      "max-width-auth": "460px",
+                      "max-width-booking": "600px"
+              },
+              "fontFamily": {
+                      "body-lg": ["Inter"],
+                      "h3": ["Inter"],
+                      "label-sm": ["Inter"],
+                      "h1": ["Apollo"],
+                      "display-hero-mobile": ["Apollo"],
+                      "display-hero": ["Apollo"],
+                      "body-sm": ["Inter"],
+                      "h4": ["Inter"],
+                      "h2": ["Apollo"],
+                      "h1-mobile": ["Apollo"],
+                      "label-md": ["Inter"]
+              },
+              "fontSize": {
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-page-bg font-body-lg text-on-surface antialiased">
+<!-- TopNavBar Implementation -->
+<nav class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-md shadow-sm">
+<div class="flex justify-between items-center w-full px-8 py-4 max-w-7xl mx-auto">
+<div class="text-h3 font-h3 lowercase text-primary">spark inn</div>
+<div class="hidden md:flex gap-8 items-center">
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Rooms</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Experience</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Gallery</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Contact</a>
+<button class="bg-primary-container text-on-primary-container px-6 py-2 rounded-lg font-label-md text-label-md active:scale-95 transition-transform">Book Now</button>
+</div>
+</div>
+</nav>
+<div class="pt-24 max-w-7xl mx-auto px-8 pb-20 flex gap-12">
+<!-- Sidebar Navigation -->
+<aside class="w-[240px] flex-shrink-0">
+<nav class="flex flex-col gap-2 sticky top-28">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined text-[20px]">person</span>
+<span class="font-label-md text-label-md">Profile</span>
+</a>
+<!-- Active State Implementation -->
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-primary-container text-on-primary-container shadow-sm group" href="/account/stays">
+<span class="material-symbols-outlined text-[20px]">calendar_today</span>
+<span class="font-label-md text-label-md">My Stays</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface-variant hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined text-[20px]">military_tech</span>
+<span class="font-label-md text-label-md">My Rewards</span>
+</a>
+<div class="mt-8 pt-8 border-t border-border-standard">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-status-red-text hover:bg-status-red-bg transition-all group" href="#">
+<span class="material-symbols-outlined text-[20px]">logout</span>
+<span class="font-label-md text-label-md">Sign Out</span>
+</a>
+</div>
+</nav>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-grow">
+<header class="mb-10">
+<h1 class="font-h1 text-h1 text-on-surface">My Stays</h1>
+<p class="text-text-secondary font-body-sm mt-2">Manage your upcoming and past experiences at spark inn.</p>
+</header>
+<!-- Booking List -->
+<div class="space-y-6">
+<!-- Stay Card 1: Confirmed -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl p-4 flex gap-6 hover:shadow-lg transition-shadow duration-300">
+<div class="w-48 h-32 rounded-lg overflow-hidden flex-shrink-0">
+<img alt="Luxury Room" class="w-full h-full object-cover" data-alt="A wide-angle professional photograph of a premium luxury hotel room at spark inn, featuring a large king-sized bed with plush white linens. The room is bathed in the warm, golden light of a Philippine sunset filtering through floor-to-ceiling windows. The interior design is warm minimalist with natural wood accents and soft beige stone walls. The overall mood is peaceful, high-end, and inviting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_GKSfWKvpLoitzd0gw0m25CWgCNv_PeDgCnmMxGubqyn0-w7WPBfoi_g8-lArL72Wjum54Cq9lt6ipRG0Zr8fw2Uzxx3qWB6M6SqSF0M8XFVx8TN9YyWfU2aK-frj4RiXPaXDLYlzEJwBYzmzKlZqyFfkPIfQTAH4KCD4Na4FoLIHh-TdGKXMTExvvHmBh_u1kxYBUm08r0ci-6rc-z6ENL2U_Tk-UyLRc340w2pT2iq-DYWAFD23XDRLlv4frfvaZP_ZCqa-dkvV">
+</div>
+<div class="flex-grow flex flex-col justify-between py-1">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">The Riverview Suite</h3>
+<div class="flex items-center gap-4 mt-1 text-text-secondary font-body-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">event</span>Oct 12 - Oct 15, 2024</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">stars</span>450 Points Earned</span>
+</div>
+</div>
+<span class="px-3 py-1 rounded-full bg-status-green-bg text-status-green-text font-label-sm text-label-sm uppercase tracking-wider">Confirmed</span>
+</div>
+<div class="flex justify-between items-center mt-4">
+<div class="text-label-md font-label-md text-on-surface-variant">Booking ID: <span class="text-on-surface">#SI-88902</span></div>
+<button class="flex items-center gap-2 text-primary font-label-md text-label-md hover:text-primary-hover transition-colors">
+                                View Details
+                                <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Stay Card 2: Checked Out -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl p-4 flex gap-6 opacity-85 hover:opacity-100 transition-all">
+<div class="w-48 h-32 rounded-lg overflow-hidden flex-shrink-0 grayscale-[0.2]">
+<img alt="Boutique Villa" class="w-full h-full object-cover" data-alt="A detailed shot of a boutique villa exterior at spark inn, showcasing traditional Filipino architecture blended with modern minimalism. Lush tropical greenery surrounds a private stone path leading to a dark wood entrance. The lighting is soft morning daylight, highlighting the organic textures of the thatch roof and polished concrete. The aesthetic is serene, upscale, and deeply rooted in nature." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDhmW_lUwlQ4pDOxnB-GOgO6BNNOHq1HThUL1I9rpEuTaxDP12vtu3dJgbsBKYAoF4KEQoZY19N7L-0MRrnB5rG5nttUg93F5UF_ZyeDI9UVAx0b7hetEO178cgGYG1Knuq4mdpbMRjgw1oAfoYntJNaBrDpbxNWVZgMO3xLeeBkUBlHTFZSWM_NAQcds7jUr757yxY2AfBpvuSIzSOa8SRQzEAaJqSyH8JunaRPJbkBtjYitO2aAH-sc5b1M07fKxbAouEKZKeq5x5">
+</div>
+<div class="flex-grow flex flex-col justify-between py-1">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Garden Sanctuary Villa</h3>
+<div class="flex items-center gap-4 mt-1 text-text-secondary font-body-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">event</span>Aug 05 - Aug 09, 2024</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">stars</span>620 Points Earned</span>
+</div>
+</div>
+<span class="px-3 py-1 rounded-full bg-status-gray-bg text-status-gray-text font-label-sm text-label-sm uppercase tracking-wider">Checked Out</span>
+</div>
+<div class="flex justify-between items-center mt-4">
+<div class="text-label-md font-label-md text-on-surface-variant">Booking ID: <span class="text-on-surface">#SI-77421</span></div>
+<button class="flex items-center gap-2 text-primary font-label-md text-label-md hover:text-primary-hover transition-colors">
+                                View Receipt
+                                <span class="material-symbols-outlined text-[18px]">receipt_long</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Stay Card 3: Cancelled -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl p-4 flex gap-6 opacity-60">
+<div class="w-48 h-32 rounded-lg overflow-hidden flex-shrink-0 grayscale">
+<img alt="Poolside Room" class="w-full h-full object-cover" data-alt="A tranquil poolside view from a guest room at spark inn during a blue hour evening. The calm turquoise water reflects the warm ambient lighting of the resort's boutique buildings. Minimalist lounge chairs sit on a clean wooden deck in the foreground. The mood is quiet, sophisticated, and slightly melancholy, matching a cancelled booking context with high-end photographic quality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYvsF7DffR0QASDG8974zLK3iJ18qEKUDm_Z_YeXKyzy7290P1jnLrkvfqshlaXuGWa-Ml-qnLJG25MY33O2Nuqom2biL3HOE9t8JWwhXn8Re-v5iQXplB5zi8g3jlAoRhqMwNoN0g1wQVv_w9lmyaQjNkgk8m3ScJBpeI71SHra7FWoS-rQixAk56iPgcc1i4LFg73mOimFJkwCY4RN2Jhab8XF_-JMxqT6iijwEfkrlUjop60wHfp-cXTD7byMfWf4UllmlmfR2r">
+</div>
+<div class="flex-grow flex flex-col justify-between py-1">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Sky Loft</h3>
+<div class="flex items-center gap-4 mt-1 text-text-secondary font-body-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">event</span>Jul 10 - Jul 12, 2024</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">stars</span>0 Points</span>
+</div>
+</div>
+<span class="px-3 py-1 rounded-full bg-status-red-bg text-status-red-text font-label-sm text-label-sm uppercase tracking-wider">Cancelled</span>
+</div>
+<div class="flex justify-between items-center mt-4">
+<div class="text-label-md font-label-md text-on-surface-variant">Booking ID: <span class="text-on-surface">#SI-66512</span></div>
+<button class="flex items-center gap-2 text-text-secondary font-label-md text-label-md hover:text-on-surface transition-colors">
+                                Support
+                                <span class="material-symbols-outlined text-[18px]">help_outline</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Bento-style Stats Section -->
+<section class="mt-16 grid grid-cols-3 gap-6">
+<div class="col-span-2 bg-primary-light rounded-xl p-8 border border-primary/10 flex flex-col justify-between">
+<div>
+<h4 class="font-h4 text-h4 text-on-primary-container">Next Adventure Awaits</h4>
+<p class="text-on-primary-container/80 mt-2 font-body-sm">You have 1 upcoming stay in 14 days. We are preparing the Riverview Suite for your arrival.</p>
+</div>
+<div class="mt-6">
+<button class="bg-primary text-white px-6 py-2.5 rounded-lg font-label-md text-label-md hover:bg-primary-hover transition-colors shadow-sm">Explore Activities</button>
+</div>
+</div>
+<div class="bg-white rounded-xl p-8 border border-border-standard flex flex-col items-center justify-center text-center">
+<span class="material-symbols-outlined text-primary text-[48px] mb-4">stars</span>
+<div class="text-h2 font-h2 text-on-surface">2,480</div>
+<div class="text-label-sm font-label-sm text-text-secondary uppercase mt-1">Total Reward Points</div>
+</div>
+</section>
+</main>
+</div>
+<!-- Footer Implementation -->
+<footer class="w-full bg-surface-container border-t border-border-standard">
+<div class="flex flex-col md:flex-row justify-between items-center w-full px-8 py-12 gap-6 max-w-7xl mx-auto">
+<div class="text-h4 font-h4 lowercase text-on-surface">spark inn</div>
+<div class="flex gap-8">
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Privacy Policy</a>
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Terms of Service</a>
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Sustainability</a>
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Careers</a>
+</div>
+<div class="text-label-sm font-label-sm text-text-secondary">
+                © 2024 spark inn. all rights reserved.
+            </div>
+</div>
+</footer>
+<script>
+        // Simple micro-interactions
+        document.querySelectorAll('button, a').forEach(elem => {
+            elem.addEventListener('mousedown', () => {
+                elem.classList.add('scale-95');
+            });
+            elem.addEventListener('mouseup', () => {
+                elem.classList.remove('scale-95');
+            });
+            elem.addEventListener('mouseleave', () => {
+                elem.classList.remove('scale-95');
+            });
+        });
+    </script>
+</body></html>

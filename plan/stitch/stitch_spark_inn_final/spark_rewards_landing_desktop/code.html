@@ -1,0 +1,360 @@
+<!DOCTYPE html><html class="scroll-smooth" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<!-- Note: Apollo is a custom font defined in the config; we use a premium Serif fallback if local Apollo is unavailable -->
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "page-bg": "#F9FAFB",
+                    "text-secondary": "#4B5563",
+                    "on-primary-fixed-variant": "#6b3b00",
+                    "status-purple-text": "#7C3AED",
+                    "primary-container": "#ea8a1a",
+                    "surface": "#f9f9f9",
+                    "on-primary-container": "#562e00",
+                    "error": "#ba1a1a",
+                    "status-gray-bg": "#F3F4F6",
+                    "tertiary-container": "#a4a19d",
+                    "surface-dim": "#dadada",
+                    "inverse-primary": "#ffb876",
+                    "primary": "#8d4f00",
+                    "on-secondary-fixed-variant": "#404758",
+                    "on-secondary-container": "#5c6274",
+                    "primary-light": "#FEF3E2",
+                    "on-primary-fixed": "#2d1600",
+                    "status-green-text": "#16A34A",
+                    "secondary-fixed-dim": "#c0c6db",
+                    "secondary-fixed": "#dce2f7",
+                    "primary-fixed": "#ffdcc0",
+                    "status-blue-bg": "#EFF6FF",
+                    "surface-container-lowest": "#ffffff",
+                    "status-amber-bg": "#FFFBEB",
+                    "on-secondary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#484643",
+                    "status-red-text": "#DC2626",
+                    "on-tertiary-fixed": "#1d1b19",
+                    "on-surface": "#1b1b1b",
+                    "primary-fixed-dim": "#ffb876",
+                    "error-container": "#ffdad6",
+                    "surface-container-high": "#e8e8e8",
+                    "on-secondary-fixed": "#141b2b",
+                    "on-error-container": "#93000a",
+                    "inverse-surface": "#303030",
+                    "surface-tint": "#8d4f00",
+                    "surface-container-low": "#f3f3f3",
+                    "on-primary": "#ffffff",
+                    "tertiary-fixed": "#e6e2dd",
+                    "surface-container": "#eeeeee",
+                    "surface-bright": "#f9f9f9",
+                    "outline-variant": "#dac2af",
+                    "tertiary-fixed-dim": "#cac6c1",
+                    "on-error": "#ffffff",
+                    "status-blue-text": "#2563EB",
+                    "status-gray-text": "#6B7280",
+                    "on-tertiary-container": "#393835",
+                    "status-amber-text": "#D97706",
+                    "on-background": "#1b1b1b",
+                    "secondary-container": "#d9dff5",
+                    "status-green-bg": "#F0FDF4",
+                    "status-red-bg": "#FEF2F2",
+                    "primary-hover": "#C4720E",
+                    "inverse-on-surface": "#f1f1f1",
+                    "status-purple-bg": "#F5F3FF",
+                    "background": "#f9f9f9",
+                    "secondary": "#575e70",
+                    "surface-container-highest": "#e2e2e2",
+                    "tertiary": "#605e5a",
+                    "on-tertiary": "#ffffff",
+                    "border-standard": "#E5E7EB",
+                    "on-surface-variant": "#544335",
+                    "surface-variant": "#e2e2e2",
+                    "outline": "#877363"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "unit": "8px",
+                    "touch-target-min": "44px",
+                    "max-width-booking": "600px",
+                    "sidebar-width": "240px",
+                    "drawer-width": "480px",
+                    "max-width-auth": "460px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter", "sans-serif"],
+                    "display-hero": ["Playfair Display", "serif"],
+                    "h1": ["Playfair Display", "serif"],
+                    "h2": ["Playfair Display", "serif"],
+                    "body-sm": ["Inter", "sans-serif"],
+                    "h3": ["Inter", "sans-serif"],
+                    "label-sm": ["Inter", "sans-serif"],
+                    "h4": ["Inter", "sans-serif"],
+                    "label-md": ["Inter", "sans-serif"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                    "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                    "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                    "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                    "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-nav {
+            background: rgba(249, 250, 251, 0.02);
+            backdrop-filter: blur(12px);
+        }
+        .bento-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(2, minmax(200px, auto));
+            gap: 24px;
+        }
+    </style>
+</head>
+<body class="bg-page-bg text-on-surface font-body-lg">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 transition-all duration-500 px-6 md:px-12 py-4 flex justify-between items-center text-white" id="main-nav">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-inherit" data-icon="menu">menu</span>
+<a class="font-h3 text-h3 lowercase tracking-tight" href="#">spark inn</a>
+</div>
+<nav class="hidden md:flex gap-8 items-center">
+<a class="font-label-md text-label-md hover:text-primary-hover transition-colors" href="#">Rewards</a>
+<a class="font-label-md text-label-md hover:text-primary-hover transition-colors" href="#">Rooms</a>
+<a class="font-label-md text-label-md hover:text-primary-hover transition-colors" href="#">About</a>
+<button class="bg-primary hover:bg-primary-hover text-white px-6 py-2 rounded-lg font-label-md transition-all duration-200 active:scale-95">
+                Join Now
+            </button>
+</nav>
+</header>
+<!-- Hero Section -->
+<section class="relative h-screen min-h-[700px] flex items-center overflow-hidden">
+<div class="absolute inset-0 z-0">
+<img alt="Boutique Hotel Interior" class="w-full h-full object-cover" data-alt="A wide-angle cinematic shot of a luxury boutique hotel lobby at sunset. Warm, golden sunlight streams through floor-to-ceiling windows, illuminating plush velvet seating and polished marble floors. The interior design features a sophisticated blend of mid-century modern aesthetics and natural tropical textures. Soft shadows and high-key lighting create a serene, welcoming sanctuary mood. The color palette is rich with earth tones, deep creams, and subtle gold accents." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxE3ob-vSO4zxT_VMu0OviqdIAMTOtgsJXzWeddVJ-6-QmLSHHkERJKmN_zfFFeGvMrFhzST6Xoc-MNtubwhDrYU3ZjBFSjACtuAwnlBaH4z6Ts-UB0kYlC38ol_42OAWXX2iUGuPhL2ZSvUac1bc6j0zvNGyAyCNMnyrg9X2dwyDXafz7n_EIfEX_xAI6S2D_XhfdiedtLyzdH-SxVWzm25SwLm9ovUul16TnLGbrr9fj2Jmezvw2N3x4T49eU2RDAchvC4pc-2UY">
+<div class="absolute inset-0 bg-black/40"></div>
+</div>
+<div class="relative z-10 container mx-auto px-6 md:px-12">
+<div class="max-w-2xl text-white">
+<h1 class="font-display-hero text-display-hero mb-6 animate-fade-in">Earn Every Stay</h1>
+<p class="font-body-lg text-body-lg mb-10 opacity-90 leading-relaxed">
+                    Join Spark Rewards and unlock a world of exclusive benefits and heartfelt hospitality. Experience the pinnacle of boutique comfort with personalized rewards tailored just for you.
+                </p>
+<div class="flex flex-col sm:flex-row gap-4">
+<button class="bg-primary hover:bg-primary-hover text-white px-8 py-3.5 rounded-lg font-h4 transition-all duration-200 shadow-xl min-w-[200px] flex items-center justify-center">
+                        Join Spark Rewards
+                    </button>
+<button class="border border-white/50 hover:bg-white/10 text-white px-8 py-3.5 rounded-lg font-h4 transition-all duration-200 backdrop-blur-sm min-w-[200px] flex items-center justify-center">
+                        Sign In
+                    </button>
+</div>
+</div>
+</div>
+</section>
+<!-- How It Works -->
+<section class="py-24 bg-surface-container-lowest">
+<div class="container mx-auto px-6 md:px-12">
+<div class="text-center mb-16">
+<h2 class="font-h2 text-h2 text-on-surface mb-4">How It Works</h2>
+<div class="h-1 w-12 bg-primary mx-auto"></div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-12">
+<!-- Step 1 -->
+<div class="group flex flex-col items-center text-center p-8 transition-all duration-300 hover:translate-y-[-8px] opacity-100 translate-y-0">
+<div class="w-16 h-16 rounded-full bg-primary-light flex items-center justify-center text-primary mb-6 group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-3xl" data-icon="person_add">person_add</span>
+</div>
+<h3 class="font-h3 text-h3 mb-4">1. Join for free</h3>
+<p class="text-text-secondary font-body-sm max-w-xs">Create your account in seconds and unlock immediate access to member-only privileges.</p>
+</div>
+<!-- Step 2 -->
+<div class="group flex flex-col items-center text-center p-8 transition-all duration-300 hover:translate-y-[-8px] opacity-100 translate-y-0">
+<div class="w-16 h-16 rounded-full bg-primary-light flex items-center justify-center text-primary mb-6 group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-3xl" data-icon="hotel">hotel</span>
+</div>
+<h3 class="font-h3 text-h3 mb-4">2. Stay &amp; Earn</h3>
+<p class="text-text-secondary font-body-sm max-w-xs">Earn 10 points for every night spent with us, plus bonus multipliers for longer escapes.</p>
+</div>
+<!-- Step 3 -->
+<div class="group flex flex-col items-center text-center p-8 transition-all duration-300 hover:translate-y-[-8px] opacity-100 translate-y-0">
+<div class="w-16 h-16 rounded-full bg-primary-light flex items-center justify-center text-primary mb-6 group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-3xl" data-icon="card_giftcard">card_giftcard</span>
+</div>
+<h3 class="font-h3 text-h3 mb-4">3. Redeem &amp; Relax</h3>
+<p class="text-text-secondary font-body-sm max-w-xs">Use points for free nights, bespoke room upgrades, and local experiential packages.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Member Perks Grid (Bento Style) -->
+<section class="py-24 bg-page-bg">
+<div class="container mx-auto px-6 md:px-12">
+<div class="flex justify-between items-end mb-12">
+<div class="max-w-xl">
+<h2 class="font-h2 text-h2 text-on-surface mb-4">Your World of Perks</h2>
+<p class="text-text-secondary">Beyond the points, Spark Rewards offers a suite of exclusive privileges designed to elevate your stay.</p>
+</div>
+<div class="hidden md:block">
+<button class="text-primary font-semibold flex items-center gap-2 group opacity-100 translate-y-0">
+                        Explore all benefits 
+                        <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Perk 1 -->
+<div class="bg-surface-container-lowest p-10 rounded-[12px] border border-border-standard hover:shadow-lg transition-all group overflow-hidden relative opacity-100 translate-y-0">
+<div class="relative z-10">
+<span class="material-symbols-outlined text-primary mb-6 block text-4xl" data-icon="sell">sell</span>
+<h4 class="font-h3 text-h3 mb-3">Member-Only Rates</h4>
+<p class="text-text-secondary mb-6">Always get the lowest price guaranteed. Save up to 15% on every booking when you sign in.</p>
+<ul class="space-y-2 text-label-md text-primary font-medium">
+<li class="flex items-center gap-2"><span class="material-symbols-outlined text-sm" data-icon="check">check</span> Best Rate Guarantee</li>
+<li class="flex items-center gap-2"><span class="material-symbols-outlined text-sm" data-icon="check">check</span> No Booking Fees</li>
+</ul>
+</div>
+<div class="absolute -bottom-10 -right-10 opacity-[0.03] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[200px]" data-icon="sell">sell</span>
+</div>
+</div>
+<!-- Perk 2 -->
+<div class="bg-surface-container-lowest p-10 rounded-[12px] border border-border-standard hover:shadow-lg transition-all group overflow-hidden relative opacity-100 translate-y-0">
+<div class="relative z-10">
+<span class="material-symbols-outlined text-primary mb-6 block text-4xl" data-icon="schedule">schedule</span>
+<h4 class="font-h3 text-h3 mb-3">Early Check-in</h4>
+<p class="text-text-secondary mb-6">Your vacation starts when you arrive. Subject to availability, enjoy your room sooner than the standard time.</p>
+<div class="inline-block px-4 py-1.5 bg-status-blue-bg text-status-blue-text rounded-full text-label-sm">
+                            Elite Member Priority
+                        </div>
+</div>
+<div class="absolute -bottom-10 -right-10 opacity-[0.03] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[200px]" data-icon="schedule">schedule</span>
+</div>
+</div>
+<!-- Perk 3 -->
+<div class="bg-surface-container-lowest p-10 rounded-[12px] border border-border-standard hover:shadow-lg transition-all group overflow-hidden relative opacity-100 translate-y-0">
+<div class="relative z-10">
+<span class="material-symbols-outlined text-primary mb-6 block text-4xl" data-icon="featured_seasonal_and_gifts">featured_seasonal_and_gifts</span>
+<h4 class="font-h3 text-h3 mb-3">Welcome Gift</h4>
+<p class="text-text-secondary mb-6">Feel at home immediately. A little something local, from artisanal snacks to handcrafted soaps, waiting in your room.</p>
+<p class="text-label-sm italic text-text-secondary">Curated by our local island partners.</p>
+</div>
+<div class="absolute -bottom-10 -right-10 opacity-[0.03] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[200px]" data-icon="featured_seasonal_and_gifts">featured_seasonal_and_gifts</span>
+</div>
+</div>
+<!-- Perk 4 -->
+<div class="bg-surface-container-lowest p-10 rounded-[12px] border border-border-standard hover:shadow-lg transition-all group overflow-hidden relative opacity-100 translate-y-0">
+<div class="relative z-10">
+<span class="material-symbols-outlined text-primary mb-6 block text-4xl" data-icon="campaign">campaign</span>
+<h4 class="font-h3 text-h3 mb-3">Exclusive Offers</h4>
+<p class="text-text-secondary mb-6">Be the first to know. Get 48-hour early access to seasonal promotions and limited-run holiday packages.</p>
+<div class="flex gap-2">
+<span class="bg-status-amber-bg text-status-amber-text px-3 py-1 rounded-full text-label-sm">Summer Presale</span>
+<span class="bg-status-purple-bg text-status-purple-text px-3 py-1 rounded-full text-label-sm">Holiday Drop</span>
+</div>
+</div>
+<div class="absolute -bottom-10 -right-10 opacity-[0.03] group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[200px]" data-icon="campaign">campaign</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- CTA Banner -->
+<section class="py-20 bg-primary-container relative overflow-hidden">
+<div class="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+<svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+<path d="M0 100 Q 25 50 50 100 T 100 100" fill="none" stroke="white" stroke-width="0.5"></path>
+<path d="M0 80 Q 25 30 50 80 T 100 80" fill="none" stroke="white" stroke-width="0.5"></path>
+</svg>
+</div>
+<div class="container mx-auto px-6 md:px-12 text-center relative z-10">
+<h2 class="font-display-hero text-h1 text-white mb-8">Start earning today.</h2>
+<p class="text-white/90 text-body-lg mb-12 max-w-xl mx-auto">
+                Join our community of travelers and experience a more rewarding way to stay in Bohol.
+            </p>
+<button class="bg-surface-container-lowest text-primary hover:bg-page-bg px-12 py-4 rounded-lg font-h4 transition-all duration-200 shadow-xl active:scale-95">
+                Create Account
+            </button>
+</div>
+</section>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest border-t border-border-standard w-full">
+<div class="container mx-auto flex flex-col md:flex-row justify-between items-center px-8 py-12 gap-6">
+<div class="flex flex-col items-center md:items-start gap-4">
+<a class="font-h4 text-h4 lowercase text-primary" href="#">spark inn</a>
+<p class="font-body-sm text-body-sm text-text-secondary">© 2024 spark inn. All rights reserved.</p>
+</div>
+<nav class="flex flex-wrap justify-center gap-8">
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">About</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Rooms</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Rewards</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Privacy</a>
+<a class="font-body-sm text-body-sm text-text-secondary hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">Contact</a>
+</nav>
+<div class="flex gap-4">
+<a class="w-10 h-10 flex items-center justify-center rounded-full border border-border-standard text-text-secondary hover:border-primary hover:text-primary transition-all" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="share">share</span>
+</a>
+<a class="w-10 h-10 flex items-center justify-center rounded-full border border-border-standard text-text-secondary hover:border-primary hover:text-primary transition-all" href="#">
+<span class="material-symbols-outlined text-lg" data-icon="language">language</span>
+</a>
+</div>
+</div>
+</footer>
+<script>
+        // Navbar Scroll Effect
+        window.addEventListener('scroll', () => {
+            const nav = document.getElementById('main-nav');
+            if (window.scrollY > 50) {
+                nav.classList.add('bg-page-bg', 'text-on-surface', 'shadow-sm');
+                nav.classList.remove('text-white');
+            } else {
+                nav.classList.remove('bg-page-bg', 'text-on-surface', 'shadow-sm');
+                nav.classList.add('text-white');
+            }
+        });
+
+        // Intersection Observer for Animations
+        const observerOptions = {
+            threshold: 0.1
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('opacity-100', 'translate-y-0');
+                    entry.target.classList.remove('opacity-0', 'translate-y-10');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.group').forEach(el => {
+            el.classList.add('transition-all', 'duration-700', 'opacity-0', 'translate-y-10');
+            observer.observe(el);
+        });
+    </script>
+</body></html>
