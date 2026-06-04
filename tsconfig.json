@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./guest-app" },
+    { "path": "./admin-app" }
+  ]
+}

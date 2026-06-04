@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 2, 2026
+> Last updated: June 4, 2026
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -18,25 +18,25 @@
 > Goal: Repo is set up, both apps run locally, Firebase connected, Vercel configured.
 
 ### Repo & Tooling
-- ⬜ Root `package.json` created with npm workspaces config (`guest-app`, `admin-app`, `shared`)
-- ⬜ `shared/package.json` created — name: `@spark-inn/shared`
-- ⬜ Initialize monorepo structure (`guest-app/`, `admin-app/`, `shared/`, `firebase/`)
-- ⬜ Vite + React 19 + TypeScript setup for both apps
-- ⬜ Tailwind CSS configured in both apps
-- ⬜ `@config` path alias in `vite.config.ts` + `tsconfig.json` (both apps) — points to `../../hotel.config.ts`
-- ⬜ `npm install` from repo root — installs all workspace deps together
+- ✅ Root `package.json` created with npm workspaces config (`guest-app`, `admin-app`, `shared`)
+- ✅ `shared/package.json` created — name: `@spark-inn/shared`
+- ✅ Initialize monorepo structure (`guest-app/`, `admin-app/`, `shared/`, `firebase/`)
+- ✅ Vite + React 19 + TypeScript setup for both apps
+- ✅ Tailwind CSS configured in both apps
+- ✅ `@config` path alias in `vite.config.ts` + `tsconfig.json` (both apps) — points to `../../hotel.config.ts`
+- ✅ `npm install` from repo root — installs all workspace deps together
 - ⬜ Husky installed + `commit-msg` hook for Conventional Commits + auto version bump
-- ⬜ `shared/VERSION.ts` created at `v0.1.0`
-- ⬜ `shared/types/index.ts` — all canonical types from `plan/docs/TYPES.md`
-- ⬜ `shared/constants/index.ts` — booking statuses, sources, etc.
-- ⬜ `shared/utils/pricing.ts` — price calculation helpers
+- ✅ `shared/VERSION.ts` created at `v0.1.0`
+- ✅ `shared/types/index.ts` — all canonical types from `plan/docs/TYPES.md`
+- ✅ `shared/constants/index.ts` — booking statuses, sources, etc.
+- ✅ `shared/utils/pricing.ts` — price calculation helpers
 
 ### Brand Config
-- ⬜ `hotel.config.ts` created with full Spark Inn config
-- ⬜ `public/brand/` folders created in both apps with Spark Inn assets
-- ⬜ Tailwind config reads colors + fonts from `hotel.config.ts`
-- ⬜ Apollo font loading via `@font-face` in both `index.html` files
-- ⬜ Inter loaded via Google Fonts in both `index.html` files
+- ✅ `hotel.config.ts` created with full Spark Inn config
+- 🔄 `public/brand/` folders created in both apps with Spark Inn assets
+- ✅ Tailwind config reads colors + fonts from `hotel.config.ts`
+- ✅ Apollo font loading via `@font-face` in both `index.html` files
+- ✅ Inter loaded via Google Fonts in both `index.html` files
 
 ### Firebase
 - ⬜ Firebase project created (Auth + Firestore + Storage enabled)
@@ -54,7 +54,7 @@
 - ⬜ All env vars set in Vercel dashboard
 - ⬜ Cloudflare Turnstile site + secret keys obtained and added to env
 - ⬜ Resend account set up + API key obtained
-- ⬜ `.env.example` files created for each app
+- ✅ `.env.example` files created for each app
 
 ---
 
