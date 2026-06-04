@@ -58,6 +58,109 @@
 
 ---
 
+## Phase 0.5 — Wireframe Pass
+> Goal: Every screen in both apps built as a static React component — correct layout, brand tokens, routing wired, no backend.
+> Full process and screen checklist: `plan/docs/WIREFRAME-WORKFLOW.md`
+
+### How to start this phase
+
+Paste the following prompt at the start of a new AI session:
+
+```
+Read these files before doing anything else:
+1. plan/CLAUDE.md — master context, hard rules, stack
+2. plan/docs/WIREFRAME-WORKFLOW.md — wireframe process, agent rules, screen checklist
+3. plan/docs/FRONTEND.md — brand tokens, Tailwind config, component conventions
+4. plan/docs/WHITE-LABEL.md — hotel.config.ts schema and how config values are used in UI
+
+Your task: Build the Spark Inn wireframe pass — all screens as static React components with no backend connections.
+
+Start with the component library listed in WIREFRAME-WORKFLOW.md §Component Library — Build First. Do not start any page until all shared components are done. Build guest-app components first, then admin-app components.
+
+After the component library, follow the screen order in WIREFRAME-WORKFLOW.md §Phase Order. For each screen:
+- Read the Stitch HTML at plan/stitch/stitch_spark_inn_final/<screen>/code.html for layout reference
+- Read the corresponding feature MD listed in the screen checklist
+- Build the React component with static/hardcoded data that mirrors the shape of real data
+- No Firebase imports, no API calls, no Zod validators, no auth checks
+- All Tailwind tokens — zero hardcoded hex values
+- All brand values via config.* from hotel.config.ts
+- Wire routing with React Router <Link> / useNavigate
+- Mark the screen done in the checklist when it passes visual QA against the Stitch screenshot
+
+The apps are already scaffolded. Both run locally. hotel.config.ts is populated with Spark Inn values. Tailwind tokens are mapped. Start building.
+```
+
+### Component Library (build first)
+
+**Guest App**
+- ⬜ `Navbar` — transparent over hero, solid on scroll, sticky
+- ⬜ `Footer` — dark bg, white logo, nav links, version
+- ⬜ `PrimaryButton` — orange `primary`, `8px` radius, `44px` min-height
+- ⬜ `GhostButton` — transparent, orange border + text
+- ⬜ `StatusBadge` — pill, all status variants
+- ⬜ `RoomCard` — photo, name, amenities, price (never price first)
+- ⬜ `BookingSummaryCard` — read-only recap panel
+- ⬜ `StepIndicator` — 4-step, orange active + completed
+- ⬜ `DateRangePicker` — blocks past dates, min 1-night
+- ⬜ `PaymentMethodCard` — radio card, orange border when selected
+- ⬜ `Modal` — centered overlay, `16px` radius, backdrop blur
+- ⬜ `Drawer` (guest) — right-side, full height, ~480px wide
+
+**Admin App**
+- ⬜ `Sidebar` — `#111827`, 240px, white logo, orange active, version bottom
+- ⬜ `StatsCard` — white card, `12px` radius, label + value + optional trend
+- ⬜ `DataTable` — sortable, filterable, skeleton rows, row click
+- ⬜ `Drawer` (admin) — right-side, full height, ~480px wide
+- ⬜ `ChatBubble` — guest: right orange; staff: left white with border
+- ⬜ `QuickRequestChip` — pill button in quick-select row
+
+### Guest App Screens
+- ⬜ G-01 Homepage `/`
+- ⬜ G-02 Rooms Page `/rooms`
+- ⬜ G-03 Booking Step 1 — Select Room `/book`
+- ⬜ G-04 Booking Step 2 — Guest Details `/book`
+- ⬜ G-05 Booking Step 3 — Review & Pay `/book`
+- ⬜ G-06 Booking Step 4 — Confirmation `/book/confirm`
+- ⬜ G-07 My Booking Lookup `/my-booking`
+- ⬜ G-08 Corporate Stays Marketing `/corporate`
+- ⬜ G-09 Corporate Booking Gate + Flow `/corporate/book`
+- ⬜ G-10 Spark Rewards Landing `/rewards`
+- ⬜ G-11 Sign In `/signin`
+- ⬜ G-12 Sign Up `/signup`
+- ⬜ G-13 Member Profile `/account/profile`
+- ⬜ G-14 My Stays `/account/stays`
+- ⬜ G-15 My Rewards Portal `/account/rewards`
+- ⬜ G-16 Intercom Guest Chat `/intercom/:roomId`
+- ⬜ G-17 About Us `/about`
+- ⬜ G-18 Contact Us `/contact`
+- ⬜ G-19 404 Not Found `*`
+- ⬜ M-01 Room Detail Modal
+- ⬜ M-02 Availability Filter Drawer (mobile)
+- ⬜ M-03 Corporate Access Code Gate
+- ⬜ M-04 Voucher Input (inline)
+
+### Admin App Screens
+- ⬜ A-01 Admin Login `/login`
+- ⬜ A-02 Dashboard Overview `/`
+- ⬜ A-03 Bookings Management `/bookings`
+- ⬜ A-04 Room Management `/rooms`
+- ⬜ A-05 Rate Management `/rates`
+- ⬜ A-06 Reports `/reports`
+- ⬜ A-07 Corporate Inquiries `/corporate`
+- ⬜ A-08 Intercom Inbox `/intercom`
+- ⬜ A-09 QR Management `/qr`
+- ⬜ A-10 Members `/members`
+- ⬜ A-11 Settings `/settings`
+- ⬜ D-01 Booking Detail Drawer
+- ⬜ D-02 Room Edit Drawer
+- ⬜ D-03 Corporate Inquiry Detail Drawer
+- ⬜ D-04 Member Detail Drawer
+- ⬜ D-05 Store Order Detail Drawer
+- ⬜ M-05 Walk-in Booking Modal
+- ⬜ M-06 Add/Edit Voucher Modal
+
+---
+
 ## Phase 1 — Guest App Shell & Static Pages
 > Goal: Public website loads with correct branding, navigation works, static pages done.
 
