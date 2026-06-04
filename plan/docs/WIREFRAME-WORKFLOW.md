@@ -33,6 +33,74 @@ Copy logos from `plan/stitch/Mockups - v1/` into `guest-app/public/brand/` and `
 
 ---
 
+## Resolving Stitch Inconsistencies
+
+Google Stitch generates each screen independently, so shared elements (navbar, buttons, badges, cards) drift between screens. The rule is: **the design spec wins, not the HTML.**
+
+### Resolution hierarchy (highest to lowest authority)
+
+1. `plan/stitch/design.md` — canonical brand tokens, component specs, spacing rules. Always the tiebreaker.
+2. `plan/docs/FRONTEND.md` — Tailwind token mapping and component conventions.
+3. The Stitch screen that best matches the spec — pick one, ignore the others for that component.
+
+### What to do when screens disagree
+
+- **Navbar looks different on homepage vs. rooms page** → use whichever matches the spec, apply it once in the shared `Navbar` component, ignore the other.
+- **Button sizes, radii, or colors vary** → always use spec values: `8px` radius, `44px` height, `primary` token. Strip whatever Stitch generated.
+- **Spacing or font sizes drift** → follow `plan/stitch/design.md §Typography` and `§Spacing & Shape Rules` exactly.
+- **A component appears in one screen but is missing from another** → add it — Stitch omissions are not design decisions.
+
+### Never do this
+
+- Do not average or blend two conflicting Stitch outputs.
+- Do not preserve Stitch inline styles, hardcoded hex values, or px font sizes — replace all with Tailwind tokens.
+- Do not treat a Stitch screen as pixel-perfect. Treat it as a layout reference only.
+
+---
+
+## Component Library — Build First
+
+Before porting any full page, build these shared components once. Every page then composes from them. This is what eliminates cross-screen inconsistency.
+
+### Guest App components
+
+| Done | Component | Best Stitch source | Notes |
+|---|---|---|---|
+| [ ] | `Navbar` | `spark_inn_homepage_refined_2` | Transparent over hero, solid white on scroll, sticky |
+| [ ] | `Footer` | `spark_inn_homepage_refined_2` | Dark bg `#111827`, white logo, nav links, version |
+| [ ] | `PrimaryButton` | spec only | Orange `primary`, `8px` radius, `44px` min-height |
+| [ ] | `GhostButton` | spec only | Transparent, orange border + text |
+| [ ] | `StatusBadge` | `spark_inn_our_rooms` | Pill, all status variants from spec color table |
+| [ ] | `RoomCard` | `spark_inn_our_rooms` | Photo top, name, amenities, price — never price first |
+| [ ] | `BookingSummaryCard` | `spark_inn_complete_your_booking` | Read-only recap panel |
+| [ ] | `StepIndicator` | `spark_inn_select_room` | 4-step, orange active + completed, gray inactive |
+| [ ] | `DateRangePicker` | `spark_inn_availability_calendar` | Blocks past dates, min 1-night enforced |
+| [ ] | `PaymentMethodCard` | `spark_inn_complete_your_booking` | Radio card, orange border when selected |
+| [ ] | `Modal` | spec only | Centered overlay, `16px` radius, backdrop blur, close X |
+| [ ] | `Drawer` (guest) | spec only | Right-side, full height, `~480px` wide |
+
+### Admin App components
+
+| Done | Component | Best Stitch source | Notes |
+|---|---|---|---|
+| [ ] | `Sidebar` | `spark_inn_front_desk_dashboard` | `#111827`, `240px`, white logo, orange active indicator, version bottom |
+| [ ] | `StatsCard` | `spark_inn_front_desk_dashboard` | White card, `12px` radius, label + value + optional trend |
+| [ ] | `DataTable` | `spark_inn_manage_bookings` | Sortable, filterable, skeleton rows, row click |
+| [ ] | `Drawer` (admin) | spec only | Right-side, full height, `~480px` wide |
+| [ ] | `StatusBadge` (admin) | `spark_inn_manage_bookings` | Same component as guest — all admin statuses included |
+| [ ] | `ChatBubble` | `spark_inn_intercom_inbox` | Guest: right orange; Staff: left white with border |
+| [ ] | `QuickRequestChip` | `spark_inn_guest_chat_mobile` | Pill button in quick-select row |
+
+### Mark component done when
+
+- [ ] File exists at `guest-app/src/components/` or `admin-app/src/components/`
+- [ ] Uses only Tailwind tokens — no hardcoded hex
+- [ ] Uses `config.*` for any brand value
+- [ ] Renders correctly at both breakpoints (where applicable)
+- [ ] No backend/Firebase imports
+
+---
+
 ## Agent Rules for Wireframe Tasks
 
 When an agent is assigned a wireframe screen:
@@ -159,12 +227,10 @@ These exports were iteration variants — use the **most refined** version as th
 
 ## Phase Order
 
-Build wireframes in this order to unblock navigation dependencies:
+Build in this order — components before pages, guest before admin.
 
-1. Shared layout components — `Navbar`, `Footer`, `Sidebar` (admin)
-2. G-01 Homepage → G-02 Rooms Page → G-03–G-06 Booking Flow
-3. G-17 About, G-18 Contact, G-08 Corporate, G-16 Intercom, G-19 404
-4. Guest modals M-01–M-04
-5. A-01 Login → A-02 Dashboard → A-03 Bookings → A-04 Rooms → A-05 Rates
-6. A-06–A-11 remaining admin pages
-7. Admin drawers/modals D-01–D-05, M-05–M-06
+1. **Component library** — all guest + admin components in the table above. Do not start any page until these are done.
+2. **Guest pages** — G-01 Homepage → G-02 Rooms → G-03–G-06 Booking Flow → G-07 Lookup → G-17 About → G-18 Contact → G-08 Corporate → G-16 Intercom → G-19 404 → G-10–G-15 Rewards/Auth
+3. **Guest modals** — M-01–M-04
+4. **Admin pages** — A-01 Login → A-02 Dashboard → A-03 Bookings → A-04 Rooms → A-05 Rates → A-06–A-11 remaining
+5. **Admin drawers/modals** — D-01–D-05, M-05–M-06
