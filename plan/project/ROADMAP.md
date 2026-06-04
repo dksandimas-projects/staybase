@@ -124,7 +124,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ `QuickRequestChip` — pill button in quick-select row
 
 ### Guest App Screens
-- ⬜ G-01 Homepage `/`
+- 🔄 G-01 Homepage `/`
 - ⬜ G-02 Rooms Page `/rooms`
 - ⬜ G-03 Booking Step 1 — Select Room `/book`
 - ⬜ G-04 Booking Step 2 — Guest Details `/book`
