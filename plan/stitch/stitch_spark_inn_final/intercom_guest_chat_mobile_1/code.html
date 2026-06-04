@@ -1,0 +1,270 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+<title>spark inn | Guest Concierge Chat</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Apollo:wght@100..900&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Fallback to a serif for demo if needed */
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .chat-container {
+            height: calc(100vh - 64px - 72px - 88px); /* App Bar - Bottom Nav - Input Area */
+        }
+        /* Custom scrollbar hiding */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-surface": "#1b1b1b",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "secondary-fixed": "#dce2f7",
+                      "status-green-bg": "#F0FDF4",
+                      "on-error": "#ffffff",
+                      "surface-container-low": "#f3f3f3",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "text-secondary": "#4B5563",
+                      "primary": "#8d4f00",
+                      "surface-variant": "#e2e2e2",
+                      "background": "#f9f9f9",
+                      "inverse-on-surface": "#f1f1f1",
+                      "status-green-text": "#16A34A",
+                      "tertiary-fixed": "#e6e2dd",
+                      "primary-fixed-dim": "#ffb876",
+                      "surface-container-lowest": "#ffffff",
+                      "secondary": "#575e70",
+                      "status-blue-bg": "#EFF6FF",
+                      "on-surface-variant": "#544335",
+                      "on-tertiary-container": "#393835",
+                      "status-blue-text": "#2563EB",
+                      "on-secondary-fixed-variant": "#404758",
+                      "surface-dim": "#dadada",
+                      "surface": "#f9f9f9",
+                      "surface-container-highest": "#e2e2e2",
+                      "on-secondary-fixed": "#141b2b",
+                      "status-amber-text": "#D97706",
+                      "primary-fixed": "#ffdcc0",
+                      "status-gray-bg": "#F3F4F6",
+                      "error-container": "#ffdad6",
+                      "outline": "#877363",
+                      "surface-tint": "#8d4f00",
+                      "surface-container": "#eeeeee",
+                      "status-gray-text": "#6B7280",
+                      "on-secondary": "#ffffff",
+                      "page-bg": "#F9FAFB",
+                      "tertiary-container": "#a4a19d",
+                      "on-primary": "#ffffff",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "on-primary-fixed": "#2d1600",
+                      "status-purple-bg": "#F5F3FF",
+                      "status-red-bg": "#FEF2F2",
+                      "error": "#ba1a1a",
+                      "status-purple-text": "#7C3AED",
+                      "primary-hover": "#C4720E",
+                      "surface-bright": "#f9f9f9",
+                      "border-standard": "#E5E7EB",
+                      "primary-light": "#FEF3E2",
+                      "secondary-container": "#d9dff5",
+                      "surface-container-high": "#e8e8e8",
+                      "inverse-primary": "#ffb876",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "tertiary": "#605e5a",
+                      "status-amber-bg": "#FFFBEB",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "on-tertiary": "#ffffff",
+                      "on-error-container": "#93000a",
+                      "on-primary-container": "#562e00",
+                      "status-red-text": "#DC2626",
+                      "on-secondary-container": "#5c6274",
+                      "inverse-surface": "#303030",
+                      "primary-container": "#ea8a1a",
+                      "on-background": "#1b1b1b",
+                      "outline-variant": "#dac2af"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "sidebar-width": "240px",
+                      "max-width-auth": "460px",
+                      "touch-target-min": "44px",
+                      "unit": "8px",
+                      "drawer-width": "480px",
+                      "max-width-booking": "600px"
+              },
+              "fontFamily": {
+                      "h4": ["Inter"],
+                      "display-hero": ["Apollo"],
+                      "body-sm": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "h2": ["Apollo"],
+                      "label-md": ["Inter"],
+                      "label-sm": ["Inter"],
+                      "h1-mobile": ["Apollo"],
+                      "display-hero-mobile": ["Apollo"],
+                      "h3": ["Inter"],
+                      "h1": ["Apollo"]
+              },
+              "fontSize": {
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                      "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-surface font-body-lg text-on-surface selection:bg-primary-fixed">
+<!-- Top App Bar -->
+<header class="fixed top-0 w-full z-50 bg-surface dark:bg-surface-dim border-b border-border-standard dark:border-outline-variant flex justify-between items-center px-6 h-16">
+<div class="flex items-center gap-3">
+<img alt="spark inn logo" class="h-6 w-auto object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDjwpG1o5oDcVvFzLIxK6s2K03YDgJV9nukNd3CpcRzSJhvX8KDS0KM6yWLa33-YEZSsOuadLET6ipvAHE18zBxkCUQo7Gzz6CKg_m7QuyMJkYZPTo7fQMo-Rp7RNVXIobsU05Nu2pX6mSPJzvseHlpfUAHn4oWbKlkxEFzDWzJxRLRy8QWnYWccb7WSCwcspszrGZCxtW4iQAgcEZKS4DjvcJBF3hpZ2bZKqQFJTq5cTVqeLoja4xqzen3zbGBATNDwXsJevB630rb">
+<div class="flex items-center gap-1.5 ml-2">
+<div class="w-2 h-2 rounded-full bg-status-green-text"></div>
+<span class="font-label-sm text-label-sm text-status-green-text">Online</span>
+</div>
+</div>
+<div class="flex items-center">
+<span class="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-full font-label-md text-label-md">Room 402</span>
+</div>
+</header>
+<!-- Chat Thread -->
+<main class="chat-container pt-16 pb-32 overflow-y-auto px-6 space-y-6 hide-scrollbar">
+<!-- Date Indicator -->
+<div class="flex justify-center my-4">
+<span class="text-label-sm font-label-sm text-status-gray-text px-3 py-1 bg-surface-container rounded-full">Today</span>
+</div>
+<!-- Staff Message -->
+<div class="flex items-start gap-3 max-w-[85%]">
+<div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary-light flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" style="font-size: 18px;">room_service</span>
+</div>
+<div class="space-y-1">
+<div class="bg-white border border-border-standard p-4 rounded-2xl rounded-tl-none shadow-sm text-text-secondary font-body-sm text-body-sm leading-relaxed">
+                    Mabuhay! Welcome to spark inn. I am your concierge for today. How can I assist you in making your stay more comfortable?
+                </div>
+<span class="text-[10px] text-status-gray-text px-1">10:42 AM</span>
+</div>
+</div>
+<!-- Guest Message -->
+<div class="flex flex-col items-end gap-1">
+<div class="max-w-[85%] bg-primary-container text-white p-4 rounded-2xl rounded-tr-none shadow-sm font-body-sm text-body-sm leading-relaxed">
+                Thank you! Could you please let me know when the breakfast ends?
+            </div>
+<span class="text-[10px] text-status-gray-text px-1">10:45 AM</span>
+</div>
+<!-- Staff Message -->
+<div class="flex items-start gap-3 max-w-[85%]">
+<div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary-light flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" style="font-size: 18px;">room_service</span>
+</div>
+<div class="space-y-1">
+<div class="bg-white border border-border-standard p-4 rounded-2xl rounded-tl-none shadow-sm text-text-secondary font-body-sm text-body-sm leading-relaxed">
+                    Breakfast is served until 10:30 AM at the Garden Terrace. We can also arrange for a late continental breakfast to be sent to your room if you prefer.
+                </div>
+<span class="text-[10px] text-status-gray-text px-1">10:46 AM</span>
+</div>
+</div>
+<!-- Guest Message -->
+<div class="flex flex-col items-end gap-1">
+<div class="max-w-[85%] bg-primary-container text-white p-4 rounded-2xl rounded-tr-none shadow-sm font-body-sm text-body-sm leading-relaxed">
+                That's perfect, thank you. I might need some extra towels later too.
+            </div>
+<span class="text-[10px] text-status-gray-text px-1">10:48 AM</span>
+</div>
+</main>
+<!-- Bottom Controls & Navigation -->
+<div class="fixed bottom-[72px] left-0 w-full z-40 bg-surface/80 backdrop-blur-md border-t border-border-standard/50">
+<!-- Quick Request Chips -->
+<div class="flex gap-2 overflow-x-auto px-6 py-4 hide-scrollbar">
+<button class="flex-shrink-0 px-4 py-2 bg-white border border-border-standard rounded-full font-label-md text-label-md text-text-secondary hover:border-primary-container transition-colors active:scale-95">
+                Extra Towels
+            </button>
+<button class="flex-shrink-0 px-4 py-2 bg-white border border-border-standard rounded-full font-label-md text-label-md text-text-secondary hover:border-primary-container transition-colors active:scale-95">
+                Housekeeping
+            </button>
+<button class="flex-shrink-0 px-4 py-2 bg-white border border-border-standard rounded-full font-label-md text-label-md text-text-secondary hover:border-primary-container transition-colors active:scale-95">
+                Ice Bucket
+            </button>
+<button class="flex-shrink-0 px-4 py-2 bg-white border border-border-standard rounded-full font-label-md text-label-md text-text-secondary hover:border-primary-container transition-colors active:scale-95">
+                Late Checkout
+            </button>
+</div>
+<!-- Input Area -->
+<div class="px-6 pb-6">
+<div class="relative flex items-center">
+<input class="w-full h-14 pl-6 pr-14 rounded-full border border-border-standard focus:border-primary-container focus:ring-1 focus:ring-primary-container outline-none bg-white text-body-sm font-body-sm placeholder:text-status-gray-text shadow-sm" placeholder="Type your request..." type="text">
+<button class="absolute right-2 w-10 h-10 rounded-full bg-primary-container text-white flex items-center justify-center active:scale-90 transition-transform">
+<span class="material-symbols-outlined">arrow_forward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Bottom Nav Bar -->
+<nav class="fixed bottom-0 w-full flex justify-around items-center h-[72px] px-2 pb-2 bg-surface-container-lowest dark:bg-surface-container-low shadow-lg dark:shadow-none rounded-t-xl z-50">
+<a class="flex flex-col items-center justify-center text-secondary dark:text-secondary-fixed-dim px-4 py-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="font-label-sm text-label-sm">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-secondary dark:text-secondary-fixed-dim px-4 py-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="chat_bubble">chat_bubble</span>
+<span class="font-label-sm text-label-sm">Chat</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-primary-container dark:bg-on-primary-fixed-variant text-on-primary-container dark:text-primary-fixed rounded-2xl px-4 py-1 active:scale-95 transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="doorbell" style="font-variation-settings: 'FILL' 1;">doorbell</span>
+<span class="font-label-sm text-label-sm">Concierge</span>
+</a>
+<a class="flex flex-col items-center justify-center text-secondary dark:text-secondary-fixed-dim px-4 py-1 hover:text-primary transition-colors active:scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-label-sm text-label-sm">Profile</span>
+</a>
+</nav>
+<script>
+        // Micro-interaction: Scroll to bottom on load
+        window.addEventListener('load', () => {
+            const container = document.querySelector('main');
+            container.scrollTop = container.scrollHeight;
+        });
+
+        // Toggle focus state for input container
+        const input = document.querySelector('input');
+        const inputContainer = input.parentElement;
+        
+        input.addEventListener('focus', () => {
+            inputContainer.classList.add('scale-[1.01]');
+            inputContainer.style.transition = 'transform 0.2s ease-out';
+        });
+        
+        input.addEventListener('blur', () => {
+            inputContainer.classList.remove('scale-[1.01]');
+        });
+    </script>
+</body></html>

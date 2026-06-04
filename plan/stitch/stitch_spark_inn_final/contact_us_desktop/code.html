@@ -1,0 +1,299 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Apollo:wght@100..900&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "tertiary-fixed-dim": "#cac6c1",
+                    "primary-fixed-dim": "#ffb876",
+                    "surface-variant": "#e2e2e2",
+                    "surface-bright": "#f9f9f9",
+                    "secondary-container": "#d9dff5",
+                    "on-error": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "on-surface-variant": "#544335",
+                    "primary-container": "#ea8a1a",
+                    "status-purple-bg": "#F5F3FF",
+                    "page-bg": "#F9FAFB",
+                    "status-amber-text": "#D97706",
+                    "on-tertiary-container": "#393835",
+                    "on-primary-fixed": "#2d1600",
+                    "tertiary": "#605e5a",
+                    "background": "#f9f9f9",
+                    "status-gray-bg": "#F3F4F6",
+                    "status-green-text": "#16A34A",
+                    "error-container": "#ffdad6",
+                    "tertiary-container": "#a4a19d",
+                    "status-blue-bg": "#EFF6FF",
+                    "inverse-on-surface": "#f1f1f1",
+                    "surface-container-high": "#e8e8e8",
+                    "text-secondary": "#4B5563",
+                    "status-red-bg": "#FEF2F2",
+                    "inverse-primary": "#ffb876",
+                    "primary-light": "#FEF3E2",
+                    "surface": "#f9f9f9",
+                    "status-blue-text": "#2563EB",
+                    "status-amber-bg": "#FFFBEB",
+                    "on-secondary-container": "#5c6274",
+                    "secondary-fixed-dim": "#c0c6db",
+                    "inverse-surface": "#303030",
+                    "secondary": "#575e70",
+                    "tertiary-fixed": "#e6e2dd",
+                    "on-secondary": "#ffffff",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed": "#ffdcc0",
+                    "primary": "#8d4f00",
+                    "outline": "#877363",
+                    "border-standard": "#E5E7EB",
+                    "surface-container": "#eeeeee",
+                    "on-surface": "#1b1b1b",
+                    "surface-dim": "#dadada",
+                    "status-purple-text": "#7C3AED",
+                    "on-secondary-fixed": "#141b2b",
+                    "secondary-fixed": "#dce2f7",
+                    "on-tertiary-fixed": "#1d1b19",
+                    "surface-container-low": "#f3f3f3",
+                    "status-gray-text": "#6B7280",
+                    "on-background": "#1b1b1b",
+                    "on-primary-fixed-variant": "#6b3b00",
+                    "on-error-container": "#93000a",
+                    "status-red-text": "#DC2626",
+                    "on-tertiary-fixed-variant": "#484643",
+                    "on-secondary-fixed-variant": "#404758",
+                    "on-primary-container": "#562e00",
+                    "surface-tint": "#8d4f00",
+                    "surface-container-highest": "#e2e2e2",
+                    "error": "#ba1a1a",
+                    "status-green-bg": "#F0FDF4",
+                    "primary-hover": "#C4720E",
+                    "outline-variant": "#dac2af",
+                    "on-tertiary": "#ffffff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "max-width-auth": "460px",
+                    "touch-target-min": "44px",
+                    "sidebar-width": "240px",
+                    "unit": "8px",
+                    "max-width-booking": "600px",
+                    "drawer-width": "480px"
+            },
+            "fontFamily": {
+                    "h4": ["Inter"],
+                    "h1-mobile": ["Apollo"],
+                    "h2": ["Apollo"],
+                    "body-lg": ["Inter"],
+                    "h1": ["Apollo"],
+                    "label-md": ["Inter"],
+                    "body-sm": ["Inter"],
+                    "display-hero": ["Apollo"],
+                    "display-hero-mobile": ["Apollo"],
+                    "h3": ["Inter"],
+                    "label-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                    "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                    "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                    "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                    "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                    "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                    "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                    "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/14876/Apollo.woff') format('woff');
+        }
+        body {
+            background-color: #FDF8F3;
+            color: #1b1b1b;
+            font-family: 'Inter', sans-serif;
+        }
+        .apollo-font { font-family: 'Apollo', serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="selection:bg-primary-fixed-dim selection:text-on-primary-fixed">
+<!-- TopNavBar -->
+<header class="fixed top-0 w-full z-50 bg-surface/90 backdrop-blur-md shadow-sm">
+<nav class="flex justify-between items-center w-full px-8 py-4 max-w-7xl mx-auto">
+<div class="text-h3 font-h3 lowercase text-primary">spark inn</div>
+<div class="hidden md:flex items-center gap-8">
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Rooms</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Experience</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:text-primary-hover transition-colors duration-200" href="#">Gallery</a>
+<a class="font-label-md text-label-md text-primary border-b-2 border-primary pb-1" href="#">Contact</a>
+</div>
+<button class="bg-primary-container text-on-primary-container px-6 py-2 rounded-lg font-label-md text-label-md hover:bg-primary-hover transition-all active:scale-95">
+                Book Now
+            </button>
+</nav>
+</header>
+<main class="pt-32 pb-24 px-6 md:px-12 max-w-7xl mx-auto">
+<!-- Hero Section -->
+<section class="mb-16">
+<h1 class="apollo-font text-h1 font-h1 mb-4">Say Hello</h1>
+<p class="text-text-secondary font-body-lg text-body-lg max-w-2xl">
+                We’re here to ensure your journey to the heart of Bohol is seamless and memorable. Reach out for inquiries, special requests, or just to share a story.
+            </p>
+</section>
+<!-- Two Column Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-start">
+<!-- Left Column: Contact Info & Map -->
+<div class="space-y-12">
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-8">
+<!-- Phone -->
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 flex items-center justify-center bg-primary-light rounded-full text-primary">
+<span class="material-symbols-outlined">call</span>
+</div>
+<div>
+<p class="font-label-sm text-label-sm uppercase tracking-wider text-text-secondary mb-1">Phone</p>
+<p class="font-h4 text-h4 text-on-surface">+63 38 411 0000</p>
+</div>
+</div>
+<!-- Email -->
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 flex items-center justify-center bg-primary-light rounded-full text-primary">
+<span class="material-symbols-outlined">mail</span>
+</div>
+<div>
+<p class="font-label-sm text-label-sm uppercase tracking-wider text-text-secondary mb-1">Email</p>
+<p class="font-h4 text-h4 text-on-surface">hello@sparkinn.com</p>
+</div>
+</div>
+<!-- Address -->
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 flex items-center justify-center bg-primary-light rounded-full text-primary">
+<span class="material-symbols-outlined">location_on</span>
+</div>
+<div>
+<p class="font-label-sm text-label-sm uppercase tracking-wider text-text-secondary mb-1">Address</p>
+<p class="font-h4 text-h4 text-on-surface leading-snug">Panglao Island,<br>Bohol, Philippines</p>
+</div>
+</div>
+</div>
+<!-- Google Map Placeholder -->
+<div class="relative w-full h-[400px] rounded-xl overflow-hidden shadow-sm group">
+<img class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" data-alt="A sophisticated, minimalist digital map rendering of Panglao Island, Bohol, featuring elegant line work and a warm color palette of cream and soft orange. The map style is boutique and artistic, reflecting a luxury resort aesthetic with clean typography and subtle iconography for points of interest, illuminated by soft, natural daylight tones." data-location="Panglao, Bohol" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDHGySAOBDgLsrem0etR5U6D65TdlCAkUmAeHQ7ngrlWP_JvRKfzoOv6rY2hws9p91XCah1m10MGtSnsxGthfD_l-XudCJRKIPe35kdUKmLWhBBG0RSjOxWk-a9d7HkyHKCxZB49S-IFndlsAbyNrgWrnQskzMBSpLKxqQtN0uMGXbngw-A-KWTH4RhF9fxbZybiWxwExZ39Y2rGBZ65eca57Nj3QdHcI8rkIm7T-BXWvHkh9edi5p4S7BGGrmXYciPZVoQVzqiR3zU">
+<div class="absolute inset-0 bg-primary/10 pointer-events-none"></div>
+<div class="absolute bottom-6 left-6 bg-surface p-4 rounded-lg shadow-lg max-w-[240px]">
+<p class="font-label-md text-label-md text-primary mb-1">Our Location</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Located just 10 minutes away from Alona Beach.</p>
+</div>
+</div>
+</div>
+<!-- Right Column: Contact Form -->
+<div class="bg-surface p-8 md:p-12 rounded-xl shadow-sm border border-border-standard">
+<form class="space-y-6" id="contactForm">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Name -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant" for="name">Full Name</label>
+<input class="w-full bg-white border-border-standard rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary transition-all font-body-sm text-body-sm" id="name" name="name" placeholder="John Doe" type="text">
+</div>
+<!-- Email -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant" for="email">Email Address</label>
+<input class="w-full bg-white border-border-standard rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary transition-all font-body-sm text-body-sm" id="email" name="email" placeholder="john@example.com" type="email">
+</div>
+</div>
+<!-- Subject -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant" for="subject">Subject</label>
+<select class="w-full bg-white border-border-standard rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary transition-all font-body-sm text-body-sm appearance-none" id="subject" name="subject">
+<option>General Inquiry</option>
+<option>Booking Modification</option>
+<option>Event Planning</option>
+<option>Feedback</option>
+</select>
+</div>
+<!-- Message -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant" for="message">Your Message</label>
+<textarea class="w-full bg-white border-border-standard rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary focus:border-primary transition-all font-body-sm text-body-sm resize-none" id="message" name="message" placeholder="How can we help you?" rows="6"></textarea>
+</div>
+<!-- Submit Button -->
+<button class="w-full bg-primary-container text-on-primary-container py-4 rounded-lg font-h4 text-h4 hover:bg-primary-hover transition-all transform active:scale-[0.98] flex items-center justify-center gap-2" type="submit">
+                        Send Message
+                        <span class="material-symbols-outlined">send</span>
+</button>
+</form>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full bg-surface-container border-t border-border-standard">
+<div class="flex flex-col md:flex-row justify-between items-center w-full px-8 py-12 gap-6 max-w-7xl mx-auto">
+<div class="text-h4 font-h4 lowercase text-on-surface">spark inn</div>
+<div class="flex flex-wrap justify-center gap-8">
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Privacy Policy</a>
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Terms of Service</a>
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Sustainability</a>
+<a class="font-label-sm text-label-sm text-text-secondary hover:text-primary transition-colors" href="#">Careers</a>
+</div>
+<div class="font-body-sm text-body-sm text-text-secondary">
+                © 2024 spark inn. all rights reserved.
+            </div>
+</div>
+</footer>
+<script>
+        // Simple form interaction
+        document.getElementById('contactForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerHTML;
+            
+            btn.innerHTML = 'Sending...';
+            btn.disabled = true;
+            btn.classList.add('opacity-80');
+
+            setTimeout(() => {
+                btn.innerHTML = 'Message Sent!';
+                btn.classList.replace('bg-primary-container', 'bg-status-green-bg');
+                btn.classList.add('text-status-green-text');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-80', 'text-status-green-text');
+                    btn.classList.replace('bg-status-green-bg', 'bg-primary-container');
+                    e.target.reset();
+                }, 3000);
+            }, 1500);
+        });
+
+        // Sticky Nav subtle shadow on scroll
+        window.addEventListener('scroll', () => {
+            const header = document.querySelector('header');
+            if (window.scrollY > 20) {
+                header.classList.add('shadow-md');
+            } else {
+                header.classList.remove('shadow-md');
+            }
+        });
+    </script>
+</body></html>

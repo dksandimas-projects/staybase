@@ -1,0 +1,443 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Admin Console - Intercom</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Apollo:wght@400&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "status-red-bg": "#FEF2F2",
+                      "on-secondary-fixed": "#141b2b",
+                      "outline": "#877363",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "secondary": "#575e70",
+                      "secondary-fixed": "#dce2f7",
+                      "status-green-text": "#16A34A",
+                      "status-amber-bg": "#FFFBEB",
+                      "on-secondary": "#ffffff",
+                      "on-primary-fixed": "#2d1600",
+                      "surface": "#f9f9f9",
+                      "on-surface": "#1b1b1b",
+                      "surface-dim": "#dadada",
+                      "on-tertiary": "#ffffff",
+                      "on-primary-container": "#562e00",
+                      "on-primary": "#ffffff",
+                      "surface-container-highest": "#e2e2e2",
+                      "surface-bright": "#f9f9f9",
+                      "status-amber-text": "#D97706",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "on-tertiary-container": "#393835",
+                      "on-background": "#1b1b1b",
+                      "primary-hover": "#C4720E",
+                      "on-secondary-fixed-variant": "#404758",
+                      "primary-fixed-dim": "#ffb876",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "status-gray-bg": "#F3F4F6",
+                      "background": "#f9f9f9",
+                      "on-error": "#ffffff",
+                      "inverse-on-surface": "#f1f1f1",
+                      "surface-variant": "#e2e2e2",
+                      "inverse-surface": "#303030",
+                      "on-error-container": "#93000a",
+                      "status-purple-text": "#7C3AED",
+                      "inverse-primary": "#ffb876",
+                      "tertiary-container": "#a4a19d",
+                      "surface-container-lowest": "#ffffff",
+                      "status-gray-text": "#6B7280",
+                      "page-bg": "#F9FAFB",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "outline-variant": "#dac2af",
+                      "surface-tint": "#8d4f00",
+                      "surface-container-low": "#f3f3f3",
+                      "status-blue-text": "#2563EB",
+                      "on-secondary-container": "#5c6274",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "secondary-container": "#d9dff5",
+                      "on-surface-variant": "#544335",
+                      "primary-fixed": "#ffdcc0",
+                      "status-blue-bg": "#EFF6FF",
+                      "error": "#ba1a1a",
+                      "status-red-text": "#DC2626",
+                      "primary-container": "#ea8a1a",
+                      "surface-container": "#eeeeee",
+                      "status-green-bg": "#F0FDF4",
+                      "tertiary-fixed": "#e6e2dd",
+                      "border-standard": "#E5E7EB",
+                      "primary-light": "#FEF3E2",
+                      "text-secondary": "#4B5563",
+                      "tertiary": "#605e5a",
+                      "surface-container-high": "#e8e8e8",
+                      "error-container": "#ffdad6",
+                      "status-purple-bg": "#F5F3FF",
+                      "primary": "#8d4f00"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "max-width-auth": "460px",
+                      "unit": "8px",
+                      "touch-target-min": "44px",
+                      "sidebar-width": "240px",
+                      "max-width-booking": "600px",
+                      "drawer-width": "480px"
+              },
+              "fontFamily": {
+                      "label-sm": ["Inter"],
+                      "h1": ["Apollo"],
+                      "display-hero-mobile": ["Apollo"],
+                      "h1-mobile": ["Apollo"],
+                      "h4": ["Inter"],
+                      "body-sm": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "display-hero": ["Apollo"],
+                      "h2": ["Apollo"],
+                      "h3": ["Inter"],
+                      "label-md": ["Inter"]
+              },
+              "fontSize": {
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .icon-fill {
+            font-variation-settings: 'FILL' 1;
+        }
+        /* Custom scrollbar for chat area */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #E5E7EB;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #dadada;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface h-screen w-full flex overflow-hidden font-body-lg">
+<!-- SideNavBar (Shared Component JSON) -->
+<nav class="bg-[#111827] fixed left-0 top-0 h-full w-sidebar-width border-r border-border-standard flex flex-col py-6 z-20">
+<div class="px-6 mb-8 flex flex-col gap-1">
+<h1 class="font-h2 text-h2 text-on-primary lowercase">spark inn</h1>
+<span class="font-label-sm text-label-sm text-secondary-fixed-dim uppercase tracking-wider">Admin Console</span>
+</div>
+<div class="flex-1 overflow-y-auto">
+<ul class="flex flex-col gap-1 w-full font-label-md text-label-md">
+<!-- Dashboard -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Dashboard</span>
+</a>
+</li>
+<!-- Bookings -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_today">calendar_today</span>
+<span>Bookings</span>
+</a>
+</li>
+<!-- Rooms -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="bed">bed</span>
+<span>Rooms</span>
+</a>
+</li>
+<!-- Rates -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="payments">payments</span>
+<span>Rates</span>
+</a>
+</li>
+<!-- Reports -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span>Reports</span>
+</a>
+</li>
+<!-- Corporate -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="business">business</span>
+<span>Corporate</span>
+</a>
+</li>
+<!-- Intercom (ACTIVE) -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-primary border-l-4 border-primary bg-on-primary-fixed-variant/10 transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined icon-fill" data-icon="chat">chat</span>
+<span>Intercom</span>
+</a>
+</li>
+<!-- QR Codes -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="qr_code">qr_code</span>
+<span>QR Codes</span>
+</a>
+</li>
+<!-- Members -->
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span>Members</span>
+</a>
+</li>
+</ul>
+</div>
+<!-- Bottom User Profile Area -->
+<div class="mt-auto px-4 pt-4 border-t border-border-standard/20">
+<div class="flex items-center gap-3 px-2 py-2 text-secondary-fixed-dim cursor-pointer hover:bg-secondary-container/10 hover:text-on-primary rounded transition-colors duration-200 ease-in-out">
+<img alt="Admin Profile" class="w-8 h-8 rounded-full border border-border-standard/50" data-alt="A professional headshot of an administrative staff member, brightly lit with a clean, minimalist background. The lighting is soft and neutral, enhancing a warm and approachable expression. Used as an avatar in a premium boutique hotel dashboard." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBgqunSdM4uuCH5QfIljhfCHPBOmKspc_HwHqv_x_Q9CaZDMjOav-QyyAB4AgAphvk3QwzMLXQ8EHD8m7PfFUHP-L1joTjHDJZlkaBGkJS1Hr9Qdvh593vfNZxvB1kr0HGtuqaspe16WB-KAY97wd3_DSMKwwcEDvimx-x2C1JMyy-z_Th7Pn3qkzG_yTzb2C-YME8VTFGNV_MWmL85tzVdGe6yeAzqGlUb3xN5VSnZ5N0b9sg_Eq9QexDrtwvlxVn6ij0UCZDdrcee">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-primary">A. Mercer</span>
+<span class="font-label-sm text-label-sm opacity-70">Duty Manager</span>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-sidebar-width flex h-full bg-surface-container-low">
+<!-- Left Panel: Inbox List -->
+<aside class="w-[360px] bg-surface-container-lowest border-r border-border-standard flex flex-col h-full shrink-0 relative z-10 shadow-[2px_0_10px_rgba(0,0,0,0.02)]">
+<!-- Sticky Header -->
+<div class="h-16 px-4 flex items-center justify-between border-b border-border-standard bg-surface-container-lowest sticky top-0 z-10 shrink-0">
+<div class="relative flex-1 mr-4 group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm group-focus-within:text-primary-container transition-colors">search</span>
+<input class="w-full pl-9 pr-3 py-2 bg-surface border border-border-standard rounded-lg font-body-sm text-body-sm focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-all text-on-surface placeholder:text-on-surface-variant" placeholder="Search guests, rooms..." type="text">
+</div>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-variant text-text-secondary transition-colors" title="Toggle Notifications">
+<span class="material-symbols-outlined">notifications_active</span>
+</button>
+</div>
+<!-- Conversation List -->
+<div class="flex-1 overflow-y-auto">
+<!-- Active Item -->
+<div class="p-4 border-b border-border-standard border-l-4 border-l-primary-container bg-primary-light cursor-pointer hover:bg-primary-light/80 transition-colors">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="font-h4 text-h4 text-on-surface">304</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 bg-surface-container-lowest border border-border-standard rounded-full text-text-secondary">Ocean Suite</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary">Just now</span>
+</div>
+<div class="flex justify-between items-end mt-1">
+<div class="flex flex-col gap-0.5">
+<span class="font-body-sm text-body-sm text-on-surface font-medium">Eleanor Vance</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate w-48">Could we get an extra set of towels before dinner?</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container text-sm" title="Housekeeping Request">cleaning_services</span>
+<span class="flex items-center justify-center w-5 h-5 bg-primary-container text-on-primary font-label-sm text-label-sm rounded-full shadow-sm">1</span>
+</div>
+</div>
+</div>
+<!-- Inactive Item 1 -->
+<div class="p-4 border-b border-border-standard border-l-4 border-l-transparent bg-surface-container-lowest cursor-pointer hover:bg-surface transition-colors group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="font-h4 text-h4 text-on-surface">112</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 bg-surface border border-border-standard rounded-full text-text-secondary group-hover:bg-surface-container-lowest transition-colors">Garden Room</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary">10:42 AM</span>
+</div>
+<div class="flex justify-between items-end mt-1">
+<div class="flex flex-col gap-0.5">
+<span class="font-body-sm text-body-sm text-on-surface font-medium">Marcus Chen</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate w-56">Thank you, the wine was excellent.</span>
+</div>
+</div>
+</div>
+<!-- Inactive Item 2 (No Name) -->
+<div class="p-4 border-b border-border-standard border-l-4 border-l-transparent bg-surface-container-lowest cursor-pointer hover:bg-surface transition-colors group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="font-h4 text-h4 text-on-surface">401</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 bg-surface border border-border-standard rounded-full text-text-secondary group-hover:bg-surface-container-lowest transition-colors">Penthouse</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary">Yesterday</span>
+</div>
+<div class="flex justify-between items-end mt-1">
+<div class="flex flex-col gap-0.5">
+<span class="font-body-sm text-body-sm text-text-secondary italic">Awaiting Check-in</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate w-56">System: Pre-arrival message sent.</span>
+</div>
+</div>
+</div>
+<!-- Inactive Item 3 -->
+<div class="p-4 border-b border-border-standard border-l-4 border-l-transparent bg-surface-container-lowest cursor-pointer hover:bg-surface transition-colors group">
+<div class="flex justify-between items-start mb-1">
+<div class="flex items-center gap-2">
+<span class="font-h4 text-h4 text-on-surface">215</span>
+<span class="font-label-sm text-label-sm px-2 py-0.5 bg-surface border border-border-standard rounded-full text-text-secondary group-hover:bg-surface-container-lowest transition-colors">Standard King</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary">Mon</span>
+</div>
+<div class="flex justify-between items-end mt-1">
+<div class="flex flex-col gap-0.5">
+<span class="font-body-sm text-body-sm text-on-surface font-medium">Sarah Jenkins</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate w-56">Is the spa open later on weekends?</span>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Right Panel: Active Chat View -->
+<section class="flex-1 flex flex-col bg-page-bg h-full">
+<!-- Room Header -->
+<div class="h-16 px-6 flex items-center justify-between border-b border-border-standard bg-surface-container-lowest shrink-0 shadow-[0_2px_10px_rgba(0,0,0,0.02)] z-10">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-primary-light flex items-center justify-center text-primary-container font-h4 text-h4">
+                        304
+                    </div>
+<div class="flex flex-col">
+<div class="flex items-baseline gap-2">
+<h2 class="font-h4 text-h4 text-on-surface">Eleanor Vance</h2>
+<span class="font-label-sm text-label-sm text-text-secondary border border-border-standard px-2 py-0.5 rounded text-[10px] tracking-wide uppercase">In-House</span>
+</div>
+<span class="font-body-sm text-body-sm text-text-secondary">Ocean View Suite • Checkout tomorrow</span>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-variant text-text-secondary transition-colors" title="Guest Profile">
+<span class="material-symbols-outlined">person</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-variant text-text-secondary transition-colors" title="Add Note">
+<span class="material-symbols-outlined">note_add</span>
+</button>
+<div class="w-px h-6 bg-border-standard mx-1"></div>
+<button class="font-label-md text-label-md border border-primary-container text-primary-container hover:bg-primary-light px-5 py-2 rounded-lg transition-colors flex items-center gap-2 touch-target-min">
+<span class="material-symbols-outlined text-[18px]">check_circle</span>
+                        Resolve
+                    </button>
+</div>
+</div>
+<!-- Chat Thread Area -->
+<div class="flex-1 overflow-y-auto p-6 flex flex-col gap-6 relative">
+<!-- Date Divider -->
+<div class="flex justify-center w-full my-2">
+<span class="font-label-sm text-label-sm text-text-secondary bg-surface-container-highest px-3 py-1 rounded-full border border-border-standard">Today</span>
+</div>
+<!-- Guest Message (Left) -->
+<div class="flex flex-col gap-1 self-start w-full max-w-[75%]">
+<div class="bg-surface-container-lowest border border-border-standard text-on-surface p-4 rounded-2xl rounded-tl-sm shadow-sm font-body-sm text-body-sm leading-relaxed relative">
+                        Hello! We are loving the room. I was wondering if it's possible to order a late lunch to the patio?
+                    </div>
+<span class="font-label-sm text-label-sm text-text-secondary ml-1 mt-0.5">1:15 PM</span>
+</div>
+<!-- Staff Message (Right) -->
+<div class="flex flex-col gap-1 self-end w-full max-w-[75%] items-end">
+<div class="bg-primary-container text-on-primary p-4 rounded-2xl rounded-tr-sm shadow-sm font-body-sm text-body-sm leading-relaxed relative">
+                        Good afternoon Mrs. Vance! I'm so glad you're enjoying the Ocean Suite. Absolutely, we can arrange a late lunch for you. I've sent over our in-room dining menu below. Just let me know what you'd like.
+                    </div>
+<span class="font-label-sm text-label-sm text-text-secondary mr-1 mt-0.5 flex items-center gap-1">
+                        1:18 PM <span class="material-symbols-outlined text-[14px]">done_all</span>
+</span>
+</div>
+<!-- Inline Store Order Card (Staff Context) -->
+<div class="flex flex-col gap-1 self-end w-full max-w-[75%] items-end mt-2">
+<div class="bg-surface-container-lowest border border-border-standard rounded-xl p-4 shadow-sm w-full max-w-[320px] flex flex-col gap-3">
+<div class="flex justify-between items-center border-b border-border-standard pb-2">
+<span class="font-label-sm text-label-sm text-text-secondary uppercase tracking-wider flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">restaurant_menu</span> Dining Menu Sent</span>
+</div>
+<div class="flex gap-3 items-center">
+<div class="w-12 h-12 rounded bg-surface-container-highest flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-text-secondary">ramen_dining</span>
+</div>
+<div class="flex flex-col">
+<span class="font-h4 text-h4 text-on-surface text-base">In-Room Dining</span>
+<span class="font-body-sm text-body-sm text-text-secondary text-xs">Tap to view full menu</span>
+</div>
+</div>
+</div>
+<span class="font-label-sm text-label-sm text-text-secondary mr-1 mt-0.5">1:18 PM</span>
+</div>
+<!-- Guest Message (Left) -->
+<div class="flex flex-col gap-1 self-start w-full max-w-[75%] mt-4">
+<div class="bg-surface-container-lowest border border-border-standard text-on-surface p-4 rounded-2xl rounded-tl-sm shadow-sm font-body-sm text-body-sm leading-relaxed relative">
+                        Perfect, thank you! Also, could we get an extra set of towels before dinner?
+                    </div>
+<span class="font-label-sm text-label-sm text-text-secondary ml-1 mt-0.5">Just now</span>
+</div>
+<!-- Typing Indicator (Simulated) -->
+<div class="flex gap-1 self-start ml-2 items-center text-text-secondary/50">
+<span class="material-symbols-outlined text-sm animate-pulse">more_horiz</span>
+</div>
+</div>
+<!-- Input Bar -->
+<div class="p-4 border-t border-border-standard bg-surface-container-lowest shrink-0">
+<div class="flex items-end gap-3 max-w-4xl mx-auto">
+<!-- Attachment Button -->
+<button class="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-secondary hover:bg-surface-variant transition-colors" title="Attach file">
+<span class="material-symbols-outlined">attach_file</span>
+</button>
+<!-- Text Area -->
+<div class="flex-1 relative bg-surface border border-border-standard rounded-2xl focus-within:border-primary-container focus-within:ring-1 focus-within:ring-primary-container transition-all">
+<textarea class="w-full bg-transparent border-none focus:ring-0 resize-none py-3 px-4 font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant rounded-2xl min-h-[44px] max-h-[120px] overflow-y-auto" placeholder="Reply to Eleanor Vance..." rows="1" style="line-height: 1.5;"></textarea>
+<!-- Quick Insert Actions within input -->
+<div class="absolute right-2 bottom-1.5 flex items-center gap-1">
+<button class="w-8 h-8 flex items-center justify-center rounded-full text-text-secondary hover:bg-surface-container-highest transition-colors" title="Insert Snippet">
+<span class="material-symbols-outlined text-[18px]">bolt</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-full text-text-secondary hover:bg-surface-container-highest transition-colors" title="Add Emoji">
+<span class="material-symbols-outlined text-[18px]">mood</span>
+</button>
+</div>
+</div>
+<!-- Send Button -->
+<button class="w-11 h-11 shrink-0 flex items-center justify-center rounded-full bg-primary-container text-on-primary hover:bg-primary-hover shadow-sm transition-colors touch-target-min" title="Send message">
+<span class="material-symbols-outlined icon-fill">send</span>
+</button>
+</div>
+</div>
+</section>
+</main>
+<script>
+        // Simple auto-resize for textarea to simulate real chat behavior
+        const textarea = document.querySelector('textarea');
+        if(textarea) {
+            textarea.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+                if(this.value === '') {
+                    this.style.height = '44px'; // Reset to min-height
+                }
+            });
+        }
+    </script>
+</body></html>

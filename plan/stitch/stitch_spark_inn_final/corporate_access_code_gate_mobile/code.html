@@ -1,0 +1,236 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn | Corporate Access</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Representative of a high-end serif like Apollo */
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .font-apollo { font-family: 'Apollo', serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "status-green-bg": "#F0FDF4",
+                        "outline": "#877363",
+                        "primary-fixed": "#ffdcc0",
+                        "inverse-primary": "#ffb876",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-secondary-container": "#5c6274",
+                        "tertiary-container": "#a4a19d",
+                        "on-primary": "#ffffff",
+                        "tertiary": "#605e5a",
+                        "primary-container": "#ea8a1a",
+                        "status-gray-text": "#6B7280",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "status-red-bg": "#FEF2F2",
+                        "surface": "#f9f9f9",
+                        "error-container": "#ffdad6",
+                        "status-blue-bg": "#EFF6FF",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "surface-bright": "#f9f9f9",
+                        "on-secondary-fixed": "#141b2b",
+                        "error": "#ba1a1a",
+                        "status-blue-text": "#2563EB",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-amber-text": "#D97706",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-purple-text": "#7C3AED",
+                        "primary-light": "#FEF3E2",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "on-primary-fixed": "#2d1600",
+                        "surface-tint": "#8d4f00",
+                        "tertiary-fixed": "#e6e2dd",
+                        "surface-container-high": "#e8e8e8",
+                        "surface-container-low": "#f3f3f3",
+                        "on-error": "#ffffff",
+                        "on-background": "#1b1b1b",
+                        "primary-hover": "#C4720E",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-tertiary": "#ffffff",
+                        "surface-dim": "#dadada",
+                        "page-bg": "#F9FAFB",
+                        "on-secondary": "#ffffff",
+                        "background": "#f9f9f9",
+                        "primary-fixed-dim": "#ffb876",
+                        "surface-variant": "#e2e2e2",
+                        "status-green-text": "#16A34A",
+                        "text-secondary": "#4B5563",
+                        "inverse-on-surface": "#f1f1f1",
+                        "secondary-container": "#d9dff5",
+                        "on-surface": "#1b1b1b",
+                        "secondary-fixed": "#dce2f7",
+                        "status-red-text": "#DC2626",
+                        "inverse-surface": "#303030",
+                        "secondary": "#575e70",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "outline-variant": "#dac2af",
+                        "on-surface-variant": "#544335",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "surface-container": "#eeeeee",
+                        "on-error-container": "#93000a",
+                        "on-tertiary-container": "#393835",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-primary-container": "#562e00",
+                        "border-standard": "#E5E7EB",
+                        "primary": "#8d4f00"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "max-width-auth": "460px",
+                        "drawer-width": "480px",
+                        "touch-target-min": "44px",
+                        "sidebar-width": "240px",
+                        "max-width-booking": "600px"
+                    },
+                    "fontFamily": {
+                        "h1-mobile": ["Apollo"],
+                        "h3": ["Inter"],
+                        "label-md": ["Inter"],
+                        "h4": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "h2": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "display-hero-mobile": ["Apollo"],
+                        "label-sm": ["Inter"],
+                        "h1": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface min-h-screen flex flex-col items-center">
+<!-- TopAppBar -->
+<nav class="fixed top-0 w-full bg-surface dark:bg-background z-50">
+<div class="flex justify-between items-center px-6 py-4 w-full max-w-7xl mx-auto">
+<span class="font-h2 text-h2 text-primary dark:text-inverse-primary lowercase tracking-tight">spark inn</span>
+<div class="flex gap-4 items-center">
+<button class="text-on-surface-variant dark:text-on-secondary-container hover:text-primary-hover transition-colors active:scale-95 transition-transform">
+<span class="material-symbols-outlined">help</span>
+</button>
+<button class="text-on-surface-variant dark:text-on-secondary-container hover:text-primary-hover transition-colors active:scale-95 transition-transform">
+<span class="material-symbols-outlined">lock</span>
+</button>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-grow flex items-center justify-center px-6 pt-24 pb-32 w-full">
+<!-- Hero Background Effect (Atmospheric) -->
+<div class="fixed inset-0 pointer-events-none overflow-hidden opacity-20">
+<div class="absolute -top-24 -left-24 w-96 h-96 bg-primary-fixed rounded-full blur-[120px]"></div>
+<div class="absolute top-1/2 -right-24 w-64 h-64 bg-secondary-fixed rounded-full blur-[100px]"></div>
+</div>
+<!-- Corporate Access Card -->
+<div class="relative z-10 w-full max-w-auth bg-surface-container-lowest rounded-xl shadow-sm border border-border-standard p-8 md:p-10 transition-all duration-500 hover:shadow-lg">
+<!-- Card Header: Icon & Title -->
+<div class="flex flex-col items-center text-center space-y-6">
+<div class="w-16 h-16 rounded-full bg-primary-light flex items-center justify-center">
+<img alt="spark inn logo icon" class="w-10 h-10 object-contain" data-alt="A clean and minimalist circular logo for a premium boutique hotel named spark inn. The logo icon is elegantly designed with a subtle orange spark motif centered in a soft warm background, reflecting the brand's boutique luxury and welcoming sanctuary atmosphere. The visual style is modern, high-end, and focuses on warm minimal aesthetics with high information density for professional administration." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDdFFiX0FB8GFORr5f19knHdapnzKMD5w0Wzprg0joQ1TWIMRoi2hXXhcSvfQhj7bbroHunXsx1RYbop1eM4S1KpuqCzCu1pOufMCcL8AW06Gm-lF9mOvWIwQUAia16Ol9W-0WcKSTpnnQ5BGaVnDhcQDHhCWlBz8CDK7ovzLnrQFRJDfe_lvH_HQo50N1TBAB_tn9R_iuWVGGRDU9JdBhl-xwGp2efLdcipKNPHV5dL_-aqp8lhc4MI1Pkzqn8Vy1ySQ0bNJDBksq7">
+</div>
+<div class="space-y-2">
+<h1 class="font-h2 text-h2 text-on-surface">Corporate Booking</h1>
+<p class="font-body-sm text-body-sm text-text-secondary px-4">
+                        Please enter your corporate access code to unlock exclusive rates and benefits.
+                    </p>
+</div>
+</div>
+<!-- Form Section -->
+<form class="mt-10 space-y-6" onsubmit="event.preventDefault();">
+<div class="space-y-2">
+<label class="font-label-sm text-label-sm text-on-surface-variant ml-1 uppercase tracking-wider" for="access-code">Access Code</label>
+<div class="relative group">
+<input class="w-full h-[44px] px-4 rounded-lg border border-border-standard bg-white font-body-sm text-body-sm text-on-surface placeholder:text-status-gray-text focus:ring-2 focus:ring-primary-container focus:border-primary transition-all outline-none" id="access-code" placeholder="Enter code" required="" type="text">
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-status-gray-text pointer-events-none group-focus-within:text-primary transition-colors">
+                            key
+                        </span>
+</div>
+</div>
+<button class="w-full h-[44px] bg-primary-container hover:bg-primary-hover text-white font-h4 text-h4 rounded-lg shadow-sm transition-all active:scale-[0.98] flex items-center justify-center gap-2" type="submit">
+                    Proceed
+                    <span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+</button>
+</form>
+<!-- Verification Status / Hint -->
+<div class="mt-8 pt-6 border-t border-border-standard flex items-center justify-center gap-2 text-status-gray-text">
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+<span class="font-label-sm text-label-sm">Secure and private corporate portal</span>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="fixed bottom-0 w-full bg-transparent">
+<div class="flex flex-col items-center gap-4 pb-8 w-full">
+<div class="flex gap-6">
+<a class="font-label-sm text-label-sm text-on-surface-variant hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">privacy</a>
+<a class="font-label-sm text-label-sm text-on-surface-variant hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">terms</a>
+<a class="font-label-sm text-label-sm text-on-surface-variant hover:text-primary transition-colors opacity-80 hover:opacity-100" href="#">support</a>
+</div>
+<p class="font-label-sm text-label-sm text-status-gray-text">© 2024 spark inn. all rights reserved.</p>
+</div>
+</footer>
+<script>
+        // Micro-interaction for input field
+        const accessInput = document.getElementById('access-code');
+        accessInput.addEventListener('input', (e) => {
+            if(e.target.value.length > 0) {
+                e.target.classList.add('border-primary-container');
+            } else {
+                e.target.classList.remove('border-primary-container');
+            }
+        });
+
+        // Simple button active state visual feedback
+        const btn = document.querySelector('button[type="submit"]');
+        btn.addEventListener('click', () => {
+            btn.innerHTML = `
+                <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            `;
+            setTimeout(() => {
+                btn.innerHTML = 'Proceed <span class="material-symbols-outlined text-[20px]">arrow_forward</span>';
+            }, 2000);
+        });
+    </script>
+</body></html>

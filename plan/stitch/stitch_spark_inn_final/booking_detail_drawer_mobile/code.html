@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>spark inn | Booking Details</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/73916/Apollo.woff') format('woff');
+        }
+        
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        /* Custom scrollbar for efficiency-first UI */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #E5E7EB;
+            border-radius: 10px;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "border-standard": "#E5E7EB",
+                        "status-green-bg": "#F0FDF4",
+                        "primary-container": "#ea8a1a",
+                        "surface-container": "#eeeeee",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "tertiary-container": "#a4a19d",
+                        "on-primary-fixed": "#2d1600",
+                        "surface-variant": "#e2e2e2",
+                        "on-surface": "#1b1b1b",
+                        "error": "#ba1a1a",
+                        "on-secondary-fixed-variant": "#404758",
+                        "status-gray-bg": "#F3F4F6",
+                        "surface": "#f9f9f9",
+                        "surface-container-high": "#e8e8e8",
+                        "page-bg": "#F9FAFB",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-gray-text": "#6B7280",
+                        "status-purple-bg": "#F5F3FF",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "surface-container-low": "#f3f3f3",
+                        "on-primary-container": "#562e00",
+                        "on-secondary-fixed": "#141b2b",
+                        "on-secondary-container": "#5c6274",
+                        "text-secondary": "#4B5563",
+                        "primary-fixed": "#ffdcc0",
+                        "background": "#f9f9f9",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary": "#575e70",
+                        "tertiary-fixed": "#e6e2dd",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "surface-bright": "#f9f9f9",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "primary-hover": "#C4720E",
+                        "surface-tint": "#8d4f00",
+                        "inverse-on-surface": "#f1f1f1",
+                        "error-container": "#ffdad6",
+                        "secondary-container": "#d9dff5",
+                        "on-tertiary": "#ffffff",
+                        "status-red-text": "#DC2626",
+                        "status-blue-bg": "#EFF6FF",
+                        "secondary-fixed": "#dce2f7",
+                        "tertiary": "#605e5a",
+                        "on-error-container": "#93000a",
+                        "status-blue-text": "#2563EB",
+                        "status-purple-text": "#7C3AED",
+                        "on-surface-variant": "#544335",
+                        "primary-fixed-dim": "#ffb876",
+                        "surface-dim": "#dadada",
+                        "primary": "#8d4f00",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "primary-light": "#FEF3E2",
+                        "on-primary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-background": "#1b1b1b",
+                        "status-amber-bg": "#FFFBEB",
+                        "status-amber-text": "#D97706",
+                        "inverse-primary": "#ffb876",
+                        "on-error": "#ffffff",
+                        "status-red-bg": "#FEF2F2",
+                        "outline-variant": "#dac2af",
+                        "on-tertiary-container": "#393835",
+                        "status-green-text": "#16A34A",
+                        "outline": "#877363",
+                        "inverse-surface": "#303030"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "sidebar-width": "240px",
+                        "max-width-booking": "600px",
+                        "max-width-auth": "460px",
+                        "touch-target-min": "44px",
+                        "drawer-width": "480px",
+                        "unit": "8px"
+                    },
+                    "fontFamily": {
+                        "h2": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-md": ["Inter"],
+                        "h4": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "h1": ["Apollo"],
+                        "h3": ["Inter"],
+                        "h1-mobile": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface font-body-sm text-on-surface overflow-hidden">
+<!-- Mock Background: Bookings Management Table (Blurred) -->
+<main class="fixed inset-0 p-4 md:p-8 flex flex-col gap-6 opacity-40 grayscale pointer-events-none">
+<header class="flex justify-between items-center h-16">
+<span class="font-h3 text-h3 text-primary lowercase">spark inn</span>
+<div class="w-10 h-10 rounded-full bg-surface-container"></div>
+</header>
+<div class="flex-1 bg-surface-container-lowest rounded-lg border border-border-standard overflow-hidden shadow-sm">
+<div class="h-12 bg-surface-container border-b border-border-standard flex items-center px-4 gap-4">
+<div class="h-4 w-24 bg-surface-variant rounded"></div>
+<div class="h-4 w-32 bg-surface-variant rounded"></div>
+<div class="h-4 w-16 bg-surface-variant rounded"></div>
+</div>
+<div class="p-4 flex flex-col gap-4">
+<div class="h-10 w-full bg-surface-container-low rounded"></div>
+<div class="h-10 w-full bg-surface-container-low rounded"></div>
+<div class="h-10 w-full bg-surface-container-low rounded"></div>
+<div class="h-10 w-full bg-surface-container-low rounded"></div>
+</div>
+</div>
+</main>
+<!-- Drawer Overlay -->
+<div class="fixed inset-0 bg-on-tertiary-fixed/20 backdrop-blur-sm z-40 transition-opacity duration-300"></div>
+<!-- Booking Detail Drawer (Mobile optimized, Full-height right panel) -->
+<section class="fixed right-0 top-0 h-full w-full max-w-[420px] bg-surface-container-lowest z-50 shadow-2xl flex flex-col transition-transform duration-300 translate-x-0 border-l border-border-standard">
+<!-- Header -->
+<header class="flex items-center justify-between px-6 h-16 border-b border-border-standard shrink-0 bg-surface-container-lowest">
+<div class="flex items-center gap-3">
+<span class="font-h3 text-h3 text-primary lowercase">spark inn</span>
+<span class="px-2 py-1 bg-surface-container-high text-on-surface-variant text-[11px] font-bold tracking-wider rounded border border-border-standard">#SI-8821</span>
+</div>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-text-secondary" data-icon="close">close</span>
+</button>
+</header>
+<!-- Content Area -->
+<div class="flex-1 overflow-y-auto custom-scrollbar">
+<div class="p-6 space-y-8">
+<!-- Section Heading -->
+<div>
+<h1 class="font-h2 text-h2-mobile text-on-surface mb-1">Booking Details</h1>
+<p class="text-text-secondary font-label-sm text-label-sm">Manage guest reservation and payment records.</p>
+</div>
+<!-- Status Management -->
+<div class="flex items-center justify-between p-4 bg-status-green-bg border border-status-green-text/20 rounded-lg">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-status-green-text"></span>
+<span class="font-semibold text-status-green-text uppercase tracking-wide text-xs">Confirmed</span>
+</div>
+<button class="flex items-center gap-1 text-status-green-text font-label-md text-label-md hover:underline">
+<span>Change Status</span>
+<span class="material-symbols-outlined text-sm" data-icon="expand_more">expand_more</span>
+</button>
+</div>
+<!-- Guest Profile -->
+<div class="space-y-4">
+<h2 class="text-xs font-bold text-text-secondary uppercase tracking-widest border-b border-border-standard pb-2">Guest Profile</h2>
+<div class="flex items-start justify-between">
+<div class="flex items-center gap-4">
+<div class="relative w-14 h-14 rounded-full overflow-hidden border-2 border-primary-light">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a sophisticated woman with long dark hair, wearing a neutral-toned linen shirt against a soft, sun-drenched minimalist background. The lighting is warm and airy, reflecting a premium boutique hospitality aesthetic with natural skin tones and a clean, serene mood." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAWjgJw9ENIcYTg9AlvdSa94m7rZYQY-HbYEwywkYKE7yvz-EYYheDuK-5vIYng7fXNg43t-SHEflrrSDwap9kful33FJWXHDddNRKAIwz1PYT3VdbaFqgYwTv0CC3KuS6_v2b17WOBhjCVOvqc-fgqbgkcuSX0E4F7_dFObb73Lhs3cEjVvHit0AeA7CFEdoQf-rdD6QqIXuwwFiD3qeUWBiUxNxNeMib-ljfO7STwUr6OuPO83z6F1nabQl7fwVpFVNl93iShZ8yL"/>
+</div>
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Elena Castillo</h3>
+<p class="text-text-secondary font-label-sm text-label-sm">elenacastillo@gmail.com</p>
+<p class="text-text-secondary font-label-sm text-label-sm">+63 917 123 4567</p>
+</div>
+</div>
+<button class="flex items-center justify-center w-10 h-10 rounded-lg border border-border-standard hover:bg-surface-container transition-all active:scale-95" title="Message via Intercom">
+<span class="material-symbols-outlined text-primary" data-icon="forum">forum</span>
+</button>
+</div>
+</div>
+<!-- Stay Details -->
+<div class="space-y-4">
+<h2 class="text-xs font-bold text-text-secondary uppercase tracking-widest border-b border-border-standard pb-2">Stay Details</h2>
+<div class="grid grid-cols-2 gap-y-4">
+<div class="space-y-1">
+<p class="text-text-secondary text-[11px] font-semibold uppercase">Room Type</p>
+<p class="font-h4 text-h4">Deluxe King</p>
+</div>
+<div class="space-y-1">
+<p class="text-text-secondary text-[11px] font-semibold uppercase">Room Number</p>
+<p class="font-h4 text-h4">104</p>
+</div>
+<div class="space-y-1">
+<p class="text-text-secondary text-[11px] font-semibold uppercase">Stay Dates</p>
+<p class="text-on-surface font-body-sm text-body-sm">Oct 12 - Oct 15, 2023</p>
+</div>
+<div class="space-y-1">
+<p class="text-text-secondary text-[11px] font-semibold uppercase">Total Nights</p>
+<p class="text-on-surface font-body-sm text-body-sm">3 Nights</p>
+</div>
+</div>
+</div>
+<!-- Housekeeping & Amenities -->
+<div class="p-4 bg-surface-container-low rounded-lg flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-secondary-container" data-icon="restaurant">restaurant</span>
+<div>
+<p class="font-label-md text-label-md text-on-surface font-semibold">Breakfast Included</p>
+<p class="text-[11px] text-text-secondary uppercase">2 Guests Daily</p>
+</div>
+</div>
+<div class="w-10 h-5 bg-primary-container rounded-full relative flex items-center px-1">
+<div class="w-3.5 h-3.5 bg-on-primary rounded-full absolute right-1"></div>
+</div>
+</div>
+<!-- Billing Summary -->
+<div class="space-y-4">
+<h2 class="text-xs font-bold text-text-secondary uppercase tracking-widest border-b border-border-standard pb-2">Billing Summary</h2>
+<div class="space-y-2">
+<div class="flex justify-between items-center text-body-sm font-body-sm">
+<span class="text-text-secondary">Room Rate (3 nights)</span>
+<span class="text-on-surface">₱18,000.00</span>
+</div>
+<div class="flex justify-between items-center text-body-sm font-body-sm">
+<span class="text-text-secondary">Service Charge (10%)</span>
+<span class="text-on-surface">₱1,800.00</span>
+</div>
+<div class="flex justify-between items-center text-body-sm font-body-sm">
+<span class="text-status-green-text">Voucher Discount (PROMO20)</span>
+<span class="text-status-green-text">-₱1,200.00</span>
+</div>
+<div class="pt-4 mt-2 border-t border-border-standard flex justify-between items-baseline">
+<span class="font-h4 text-h4">Total Amount</span>
+<span class="font-h3 text-h3 text-primary-container">₱18,600.00</span>
+</div>
+</div>
+</div>
+<!-- Payment Info -->
+<div class="space-y-4">
+<h2 class="text-xs font-bold text-text-secondary uppercase tracking-widest border-b border-border-standard pb-2">Payment</h2>
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="px-2 py-0.5 bg-status-blue-bg text-status-blue-text text-[10px] font-bold rounded uppercase">Paid</span>
+<div class="flex items-center gap-2">
+<img alt="GCash" class="h-4 object-contain opacity-80" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQfD2exFzyeAPQYcM2wwPxh-srKkswkPlhCpMwD6CDpyRYrby6rGp7JRk3L34r-CFsBVWEjzdekmFaJAGzb3dkMCllDPIpU8069laG0mljpFCFo6YZeQH3fc833WtdORt9AWS4Xw6XjLiId5gYRe2Rxp2qYvAzXw-huxBkdEF3rbbc8iPzCGnUPYBj42dLFiC5x3TcoeT5nsoLeBjXkJpqQakJM120QagGnUZ7adXVJYaWmu5Se43f4bb2jvFhA5xd9xk68PUsY7nz"/>
+<span class="text-body-sm text-text-secondary">GCash Payment</span>
+</div>
+</div>
+<button class="text-primary font-label-md text-label-md hover:underline flex items-center gap-1">
+<span class="material-symbols-outlined text-sm" data-icon="visibility">visibility</span>
+                            View Proof
+                        </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Sticky Footer Actions -->
+<footer class="p-6 border-t border-border-standard flex flex-col gap-3 bg-surface-container-lowest">
+<button class="w-full h-touch-target-min bg-primary-container text-on-primary-fixed font-semibold rounded-lg hover:bg-primary-hover active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="receipt_long">receipt_long</span>
+                Generate Receipt
+            </button>
+<button class="w-full h-touch-target-min border border-error text-error font-semibold rounded-lg hover:bg-status-red-bg active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="cancel">cancel</span>
+                Cancel Booking
+            </button>
+</footer>
+</section>
+<!-- Bottom Navigation (Shared Component) - Hidden on this drawer view per instructions but defined logic-wise -->
+<nav class="fixed bottom-0 w-full z-50 md:hidden flex justify-around items-center px-4 py-2 bg-surface-container-lowest border-t border-border-standard shadow-lg">
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2">
+<span class="material-symbols-outlined" data-icon="login">login</span>
+<span class="font-label-sm text-label-sm">Arrivals</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+<span class="font-label-sm text-label-sm">Departures</span>
+</div>
+<div class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-xl p-2">
+<span class="material-symbols-outlined" data-icon="bed">bed</span>
+<span class="font-label-sm text-label-sm">In-House</span>
+</div>
+<div class="flex flex-col items-center justify-center text-on-surface-variant p-2">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="font-label-sm text-label-sm">Alerts</span>
+</div>
+</nav>
+<script>
+        // Simple JS for interaction demonstration
+        document.querySelector('[data-icon="close"]').parentElement.addEventListener('click', () => {
+            const drawer = document.querySelector('section');
+            const overlay = document.querySelector('.fixed.inset-0.bg-on-tertiary-fixed\\/20');
+            drawer.style.transform = 'translateX(100%)';
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                drawer.classList.add('hidden');
+                overlay.classList.add('hidden');
+            }, 300);
+        });
+
+        // Toggle breakfast for micro-interaction
+        const toggle = document.querySelector('.bg-primary-container.rounded-full');
+        toggle.addEventListener('click', function() {
+            const circle = this.querySelector('div');
+            if (this.classList.contains('bg-primary-container')) {
+                this.classList.replace('bg-primary-container', 'bg-surface-variant');
+                circle.style.right = 'auto';
+                circle.style.left = '4px';
+            } else {
+                this.classList.replace('bg-surface-variant', 'bg-primary-container');
+                circle.style.left = 'auto';
+                circle.style.right = '4px';
+            }
+        });
+    </script>
+</body></html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn | Guest Details</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/111005/Apollo.woff');
+        }
+        body {
+            background-color: #FDF8F3; /* Specifically requested Warm Minimalist background */
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .step-active {
+            width: 100%;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        /* Custom scroll behavior for the form area to accommodate sticky elements */
+        .main-content {
+            padding-bottom: 120px;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#8d4f00",
+                        "primary-container": "#ea8a1a",
+                        "primary-hover": "#C4720E",
+                        "surface": "#f9f9f9",
+                        "on-surface": "#1b1b1b",
+                        "on-surface-variant": "#544335",
+                        "outline": "#877363",
+                        "border-standard": "#E5E7EB",
+                        "status-amber-bg": "#FFFBEB",
+                        "status-amber-text": "#D97706"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "h1-mobile": ["Apollo"],
+                        "h2-mobile": ["Apollo"],
+                        "h3": ["Inter"],
+                        "h4": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "h2-mobile": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="font-body-lg text-on-surface">
+<!-- Header: Sticky White Navbar -->
+<header class="fixed top-0 left-0 right-0 z-50 bg-white shadow-sm px-6 py-4 flex items-center justify-between">
+<button aria-label="Go back" class="flex items-center text-on-surface active:scale-95 transition-transform">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<span class="font-h2-mobile text-h2-mobile text-primary lowercase tracking-tighter">spark inn</span>
+<div class="w-6"></div> <!-- Spacer for symmetry -->
+</header>
+<!-- Progress Indicator -->
+<div class="mt-20 px-6">
+<div class="flex justify-between items-center mb-2">
+<span class="font-label-md text-label-md text-primary font-bold">Step 2: Guest Details</span>
+<span class="font-label-md text-label-md text-on-surface-variant">50% Complete</span>
+</div>
+<div class="h-1.5 w-full bg-border-standard rounded-full overflow-hidden">
+<div class="h-full bg-primary-container step-active" style="width: 50%;"></div>
+</div>
+</div>
+<main class="main-content px-6 mt-8 space-y-6">
+<!-- Section 1: Booking Summary (Collapsible) -->
+<section class="bg-white rounded-xl shadow-sm border border-border-standard overflow-hidden transition-all duration-300" x-data="{ open: false }">
+<button class="w-full px-4 py-4 flex justify-between items-center text-left focus:outline-none" onclick="toggleSummary()">
+<div>
+<h2 class="font-h1-mobile text-h1-mobile text-primary leading-none">Bohol Serenity Suite</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">Oct 12 — Oct 15 • 2 Guests</p>
+</div>
+<span class="material-symbols-outlined text-primary-container transition-transform duration-300" id="summary-icon">expand_more</span>
+</button>
+<div class="hidden px-4 pb-4 border-t border-border-standard pt-4 space-y-3" id="summary-details">
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">3 Nights stay</span>
+<span>₱18,500.00</span>
+</div>
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Service Fee</span>
+<span>₱1,200.00</span>
+</div>
+<div class="flex justify-between font-bold text-lg pt-2 border-t border-dashed border-border-standard">
+<span>Total Price</span>
+<span class="text-primary">₱19,700.00</span>
+</div>
+<div class="relative w-full h-32 rounded-lg mt-4 overflow-hidden">
+<img alt="Bohol Serenity Suite" class="w-full h-full object-cover" data-alt="A luxurious boutique hotel suite in Bohol featuring warm wood accents, minimalist white linen bedding, and a private terrace overlooking lush tropical palms. The lighting is soft and golden, reflecting the premium sanctuary vibe of spark inn. The image is captured in a high-end architectural photography style with high-key brightness and serene natural colors." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDYOwFLwRWszbGyGCOfrajR8gd6qEeC5TIFw5mTjCvk25b0tudnzCh4iAXTNenaVLQDxqLIrRiBDZdiMUyooMHX42tks9SRWqiNUN8SMLfDV5TwqjKuwoIo0-xqn8LdoZhM-T4eunxJFRiHv0O09JuJUAwCk56XC5bEADhnCcMI4dUK3zOUOEdgWybiPWCuJJ4ts6Po9-b8FI3SJJRMQoeQLE9kSO0HwM0GNyrQvaBv449oMiNjo5x1Se4fpYx1qEZNvU2J09n6m_AL">
+</div>
+</div>
+</section>
+<!-- Section 2: Guest Details Form -->
+<section class="space-y-6">
+<h3 class="font-h3 text-h3 text-on-surface">Enter your details</h3>
+<form class="space-y-4" id="guest-details-form">
+<div class="grid grid-cols-1 gap-4">
+<!-- First Name -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="first-name">First Name *</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 transition-all outline-none bg-white font-body-lg" id="first-name" name="first-name" placeholder="e.g. Maria" required="" type="text">
+</div>
+<!-- Last Name -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="last-name">Last Name *</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 transition-all outline-none bg-white font-body-lg" id="last-name" name="last-name" placeholder="e.g. Santos" required="" type="text">
+</div>
+<!-- Email -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="email">Email Address *</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 transition-all outline-none bg-white font-body-lg" id="email" name="email" placeholder="maria@example.com" required="" type="email">
+</div>
+<!-- Phone -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="phone">Phone Number *</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 transition-all outline-none bg-white font-body-lg" id="phone" name="phone" placeholder="+63 917 000 0000" required="" type="tel">
+</div>
+<!-- Special Requests -->
+<div class="space-y-1.5">
+<label class="font-label-md text-label-md text-on-surface-variant" for="requests">Special Requests (Optional)</label>
+<textarea class="w-full px-4 py-3 rounded-lg border border-border-standard focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 transition-all outline-none bg-white font-body-lg resize-none" id="requests" name="requests" placeholder="e.g. High floor, early check-in, allergy-free pillows..." rows="3"></textarea>
+</div>
+<!-- Privacy Consent -->
+<div class="flex items-start gap-3 mt-2">
+<div class="flex items-center h-5">
+<input class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container" id="privacy" name="privacy" required="" type="checkbox">
+</div>
+<label class="font-body-sm text-body-sm text-on-surface-variant" for="privacy">
+                            I agree to the <a class="text-primary font-medium underline" href="#">Privacy Policy</a> and consent to the collection of my personal data.
+                        </label>
+</div>
+</div>
+</form>
+</section>
+<!-- Information Prompt -->
+<div class="p-4 bg-status-amber-bg rounded-lg border border-status-amber-bg flex gap-3">
+<span class="material-symbols-outlined text-status-amber-text">info</span>
+<p class="font-body-sm text-status-amber-text leading-tight">
+                Your booking details are encrypted and securely stored for a seamless check-in experience.
+            </p>
+</div>
+</main>
+<!-- Sticky Bottom Bar -->
+<footer class="fixed bottom-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-t border-border-standard px-6 py-4 safe-area-bottom">
+<button class="w-full h-11 bg-primary-container hover:bg-primary-hover text-white font-h4 text-h4 rounded-lg shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2" form="guest-details-form" type="submit">
+            Continue to Step 3
+            <span class="material-symbols-outlined">chevron_right</span>
+</button>
+</footer>
+<script>
+        // Collapsible Summary Logic
+        function toggleSummary() {
+            const content = document.getElementById('summary-details');
+            const icon = document.getElementById('summary-icon');
+            
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                content.classList.add('hidden');
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // Form Submission micro-interaction
+        document.getElementById('guest-details-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            // Animation for transition feel
+            this.style.opacity = '0.5';
+            setTimeout(() => {
+                alert('Proceeding to Step 3: Payment Method');
+                this.style.opacity = '1';
+            }, 400);
+        });
+
+        // Input focus effects
+        const inputs = document.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+            input.addEventListener('focus', () => {
+                input.parentElement.classList.add('scale-[1.01]');
+            });
+            input.addEventListener('blur', () => {
+                input.parentElement.classList.remove('scale-[1.01]');
+            });
+        });
+    </script>
+</body></html>

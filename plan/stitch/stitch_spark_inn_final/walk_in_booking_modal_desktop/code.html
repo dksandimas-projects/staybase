@@ -1,0 +1,352 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Walk-in Booking Modal - spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Times New Roman'), local('Georgia'), serif; /* Placeholder for Apollo */
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#dce2f7",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-secondary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "surface-dim": "#dadada",
+                        "text-secondary": "#4B5563",
+                        "status-amber-text": "#D97706",
+                        "status-purple-text": "#7C3AED",
+                        "error-container": "#ffdad6",
+                        "status-green-text": "#16A34A",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "status-purple-bg": "#F5F3FF",
+                        "primary-fixed": "#ffdcc0",
+                        "page-bg": "#F9FAFB",
+                        "tertiary-container": "#a4a19d",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "surface-bright": "#f9f9f9",
+                        "status-gray-text": "#6B7280",
+                        "outline": "#877363",
+                        "surface-tint": "#8d4f00",
+                        "surface-container-high": "#e8e8e8",
+                        "surface-variant": "#e2e2e2",
+                        "secondary-container": "#d9dff5",
+                        "on-primary-container": "#562e00",
+                        "status-gray-bg": "#F3F4F6",
+                        "primary-container": "#ea8a1a",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-red-bg": "#FEF2F2",
+                        "outline-variant": "#dac2af",
+                        "inverse-on-surface": "#f1f1f1",
+                        "inverse-primary": "#ffb876",
+                        "status-red-text": "#DC2626",
+                        "tertiary": "#605e5a",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface-container": "#eeeeee",
+                        "primary-light": "#FEF3E2",
+                        "primary-hover": "#C4720E",
+                        "on-surface": "#1b1b1b",
+                        "on-tertiary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "status-amber-bg": "#FFFBEB",
+                        "surface-container-low": "#f3f3f3",
+                        "secondary": "#575e70",
+                        "surface": "#f9f9f9",
+                        "primary": "#8d4f00",
+                        "on-primary": "#ffffff",
+                        "error": "#ba1a1a",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "tertiary-fixed": "#e6e2dd",
+                        "border-standard": "#E5E7EB",
+                        "on-surface-variant": "#544335",
+                        "on-primary-fixed": "#2d1600",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-secondary-fixed-variant": "#404758",
+                        "inverse-surface": "#303030",
+                        "on-secondary-container": "#5c6274",
+                        "status-blue-text": "#2563EB",
+                        "on-tertiary-container": "#393835",
+                        "surface-container-highest": "#e2e2e2",
+                        "on-background": "#1b1b1b",
+                        "background": "#f9f9f9",
+                        "status-green-bg": "#F0FDF4",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "on-error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "max-width-booking": "600px",
+                        "drawer-width": "480px",
+                        "unit": "8px",
+                        "max-width-auth": "460px",
+                        "touch-target-min": "44px",
+                        "sidebar-width": "240px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "h4": ["Inter"],
+                        "h3": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "h2": ["Apollo"],
+                        "h1": ["Apollo"],
+                        "h1-mobile": ["Apollo"],
+                        "display-hero-mobile": ["Apollo"],
+                        "label-sm": ["Inter"],
+                        "display-hero": ["Apollo"],
+                        "label-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg font-body-sm text-body-sm text-on-surface h-screen flex overflow-hidden">
+<!-- Sidebar Placeholder for Context -->
+<div class="fixed left-0 top-0 h-full w-[240px] bg-inverse-surface dark:bg-surface-container-lowest border-r border-outline-variant flex flex-col py-8 z-10 hidden md:flex">
+<div class="px-6 mb-8 left_align">
+<h2 class="font-h3 text-h3 lowercase text-white">spark inn</h2>
+<p class="font-body-sm text-body-sm text-secondary-fixed-dim mt-1">Admin Portal</p>
+</div>
+<nav class="flex-1 flex flex-col gap-1">
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#"><span class="material-symbols-outlined" data-icon="dashboard">dashboard</span> Dashboard</a>
+<a class="text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#"><span class="material-symbols-outlined" data-icon="calendar_month" style="font-variation-settings: 'FILL' 1;">calendar_month</span> Bookings</a>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#"><span class="material-symbols-outlined" data-icon="bed">bed</span> Rooms</a>
+</nav>
+</div>
+<!-- Main Content Area Placeholder -->
+<main class="flex-1 ml-[240px] p-8 hidden md:block">
+<h1 class="font-h2 text-h2 text-on-surface mb-6">Bookings</h1>
+<div class="bg-surface-container-lowest p-6 rounded-lg border border-border-standard shadow-sm h-64 flex items-center justify-center">
+<button class="bg-primary-container text-on-primary-container font-label-md text-label-md px-6 py-3 rounded-lg hover:bg-primary-hover transition-colors h-touch-target-min" onclick="document.getElementById('bookingModal').classList.remove('hidden')">Open Walk-in Booking Modal</button>
+</div>
+</main>
+<!-- Modal Overlay & Container -->
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/40 backdrop-blur-sm p-4 md:p-8" id="bookingModal">
+<!-- Modal Content -->
+<div class="bg-surface-container-lowest rounded-2xl shadow-xl w-full max-w-[900px] max-h-full overflow-y-auto border border-border-standard flex flex-col" style="background-color: #FDF8F3;">
+<!-- Header -->
+<div class="flex items-center justify-between p-6 border-b border-border-standard sticky top-0 bg-[#FDF8F3] z-10">
+<h2 class="font-h2 text-h2 text-on-surface">Walk-in Booking</h2>
+<button class="text-text-secondary hover:text-on-surface transition-colors p-2 rounded-full hover:bg-surface-variant flex items-center justify-center w-10 h-10" onclick="document.getElementById('bookingModal').classList.add('hidden')">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<!-- Form Body -->
+<div class="p-6 md:p-8 flex-1 overflow-y-auto">
+<form class="space-y-8">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<!-- Left Column: Stay Details -->
+<div class="space-y-6">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface border-b border-border-standard pb-2 mb-4">Stay Details</h3>
+</div>
+<!-- Room Selection -->
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Room Selection</label>
+<div class="relative">
+<select class="w-full h-touch-target-min border border-border-standard rounded-lg pl-4 pr-10 appearance-none bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface">
+<option disabled="" selected="" value="">Select an available room...</option>
+<option>Standard King (Room 101)</option>
+<option>Deluxe Suite (Room 205)</option>
+<option>Ocean View Twin (Room 302)</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none">expand_more</span>
+</div>
+</div>
+<!-- Dates -->
+<div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Check-in</label>
+<input class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface" type="date" value="2024-05-20">
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Check-out</label>
+<input class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface" type="date" value="2024-05-22">
+</div>
+</div>
+<!-- Guests -->
+<div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Adults</label>
+<div class="flex items-center border border-border-standard rounded-lg bg-white h-touch-target-min overflow-hidden">
+<button class="px-3 hover:bg-surface-variant h-full text-text-secondary" type="button"><span class="material-symbols-outlined">remove</span></button>
+<input class="w-full text-center border-none focus:ring-0 font-body-sm text-body-sm text-on-surface" min="1" type="number" value="2">
+<button class="px-3 hover:bg-surface-variant h-full text-text-secondary" type="button"><span class="material-symbols-outlined">add</span></button>
+</div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Children</label>
+<div class="flex items-center border border-border-standard rounded-lg bg-white h-touch-target-min overflow-hidden">
+<button class="px-3 hover:bg-surface-variant h-full text-text-secondary" type="button"><span class="material-symbols-outlined">remove</span></button>
+<input class="w-full text-center border-none focus:ring-0 font-body-sm text-body-sm text-on-surface" min="0" type="number" value="0">
+<button class="px-3 hover:bg-surface-variant h-full text-text-secondary" type="button"><span class="material-symbols-outlined">add</span></button>
+</div>
+</div>
+</div>
+<!-- Package Options -->
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-2">Package Options</label>
+<div class="flex gap-4">
+<label class="flex-1 border border-border-standard rounded-lg p-3 cursor-pointer bg-white hover:border-primary-container transition-colors relative flex items-center">
+<input checked="" class="peer sr-only" name="package" type="radio">
+<div class="w-4 h-4 rounded-full border border-text-secondary peer-checked:border-primary-container flex items-center justify-center mr-3">
+<div class="w-2 h-2 rounded-full bg-primary-container opacity-0 peer-checked:opacity-100 transition-opacity"></div>
+</div>
+<div>
+<span class="block font-body-sm text-body-sm text-on-surface">Room Only</span>
+</div>
+<div class="absolute inset-0 rounded-lg border-2 border-transparent peer-checked:border-primary-container pointer-events-none"></div>
+</label>
+<label class="flex-1 border border-border-standard rounded-lg p-3 cursor-pointer bg-white hover:border-primary-container transition-colors relative flex items-center">
+<input class="peer sr-only" name="package" type="radio">
+<div class="w-4 h-4 rounded-full border border-text-secondary peer-checked:border-primary-container flex items-center justify-center mr-3">
+<div class="w-2 h-2 rounded-full bg-primary-container opacity-0 peer-checked:opacity-100 transition-opacity"></div>
+</div>
+<div>
+<span class="block font-body-sm text-body-sm text-on-surface">Room + Breakfast</span>
+</div>
+<div class="absolute inset-0 rounded-lg border-2 border-transparent peer-checked:border-primary-container pointer-events-none"></div>
+</label>
+</div>
+</div>
+</div>
+<!-- Right Column: Guest Details -->
+<div class="space-y-6">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface border-b border-border-standard pb-2 mb-4">Guest Details</h3>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">First Name</label>
+<input class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface" placeholder="e.g. Jane" type="text">
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Last Name</label>
+<input class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface" placeholder="e.g. Doe" type="text">
+</div>
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Email Address <span class="text-text-secondary font-normal italic">(Optional)</span></label>
+<input class="w-full h-touch-target-min border border-border-standard rounded-lg px-4 bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface" placeholder="jane.doe@example.com" type="email">
+</div>
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Phone Number</label>
+<div class="flex border border-border-standard rounded-lg bg-white overflow-hidden focus-within:ring-2 focus-within:ring-primary-container focus-within:border-primary-container">
+<span class="flex items-center px-4 border-r border-border-standard bg-surface-variant font-body-sm text-body-sm text-text-secondary h-touch-target-min">+63</span>
+<input class="w-full h-touch-target-min px-4 border-none focus:ring-0 font-body-sm text-body-sm text-on-surface" placeholder="912 345 6789" type="tel">
+</div>
+</div>
+</div>
+</div>
+<!-- Payment Section (Full Width) -->
+<div class="pt-6 mt-6 border-t border-border-standard space-y-6">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface mb-4">Payment Summary</h3>
+</div>
+<!-- Payment Methods -->
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-2">Payment Method</label>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<label class="border border-border-standard rounded-lg p-3 cursor-pointer bg-white hover:border-primary-container transition-colors relative text-center">
+<input checked="" class="peer sr-only" name="payment_method" type="radio">
+<span class="block font-body-sm text-body-sm text-on-surface font-medium mb-1">GCash</span>
+<div class="absolute inset-0 rounded-lg border-2 border-transparent peer-checked:border-primary-container pointer-events-none"></div>
+</label>
+<label class="border border-border-standard rounded-lg p-3 cursor-pointer bg-white hover:border-primary-container transition-colors relative text-center">
+<input class="peer sr-only" name="payment_method" type="radio">
+<span class="block font-body-sm text-body-sm text-on-surface font-medium mb-1">Maya</span>
+<div class="absolute inset-0 rounded-lg border-2 border-transparent peer-checked:border-primary-container pointer-events-none"></div>
+</label>
+<label class="border border-border-standard rounded-lg p-3 cursor-pointer bg-white hover:border-primary-container transition-colors relative text-center">
+<input class="peer sr-only" name="payment_method" type="radio">
+<span class="block font-body-sm text-body-sm text-on-surface font-medium mb-1">Bank Transfer</span>
+<div class="absolute inset-0 rounded-lg border-2 border-transparent peer-checked:border-primary-container pointer-events-none"></div>
+</label>
+<label class="border border-border-standard rounded-lg p-3 cursor-pointer bg-white hover:border-primary-container transition-colors relative text-center">
+<input class="peer sr-only" name="payment_method" type="radio">
+<span class="block font-body-sm text-body-sm text-on-surface font-medium mb-1">Pay on Arrival</span>
+<div class="absolute inset-0 rounded-lg border-2 border-transparent peer-checked:border-primary-container pointer-events-none"></div>
+</label>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<!-- Amount & Total -->
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Amount Received</label>
+<div class="flex border border-border-standard rounded-lg bg-white overflow-hidden focus-within:ring-2 focus-within:ring-primary-container focus-within:border-primary-container mb-4">
+<span class="flex items-center px-4 border-r border-border-standard bg-surface-variant font-body-sm text-body-sm text-text-secondary h-touch-target-min">PHP</span>
+<input class="w-full h-touch-target-min px-4 border-none focus:ring-0 font-body-sm text-body-sm text-on-surface" placeholder="0.00" type="number">
+</div>
+<div class="bg-surface-container p-4 rounded-lg flex justify-between items-center">
+<span class="font-body-sm text-body-sm text-text-secondary">Estimated Total:</span>
+<span class="font-h4 text-h4 text-on-surface">PHP 4,500.00</span>
+</div>
+</div>
+<!-- Special Requests -->
+<div>
+<label class="block font-label-sm text-label-sm text-text-secondary mb-1">Special Requests (Notes)</label>
+<textarea class="w-full border border-border-standard rounded-lg p-3 bg-white focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container font-body-sm text-body-sm text-on-surface resize-none h-32" placeholder="Add any special requirements or notes here..."></textarea>
+</div>
+</div>
+</div>
+</form>
+</div>
+<!-- Footer Actions -->
+<div class="p-6 border-t border-border-standard bg-surface-bright rounded-b-2xl flex justify-end gap-4 sticky bottom-0">
+<button class="px-6 py-2 border border-border-standard rounded-lg font-label-md text-label-md text-on-surface bg-white hover:bg-surface-variant transition-colors h-touch-target-min" onclick="document.getElementById('bookingModal').classList.add('hidden')" type="button">Cancel</button>
+<button class="px-8 py-2 bg-primary-container text-on-primary-container rounded-lg font-label-md text-label-md hover:bg-primary-hover transition-colors h-touch-target-min flex items-center gap-2" type="submit">
+<span class="material-symbols-outlined" data-icon="check_circle">check_circle</span> Create Booking
+                </button>
+</div>
+</div>
+</div>
+<script>
+        // Simple script to toggle number inputs (visual only for this prototype)
+        document.querySelectorAll('input[type="number"]').forEach(input => {
+            const minusBtn = input.previousElementSibling;
+            const plusBtn = input.nextElementSibling;
+            
+            if(minusBtn && minusBtn.tagName === 'BUTTON') {
+                minusBtn.addEventListener('click', () => {
+                    let min = input.getAttribute('min') ? parseInt(input.getAttribute('min')) : 0;
+                    if(parseInt(input.value) > min) {
+                        input.value = parseInt(input.value) - 1;
+                    }
+                });
+            }
+            if(plusBtn && plusBtn.tagName === 'BUTTON') {
+                plusBtn.addEventListener('click', () => {
+                    input.value = parseInt(input.value) + 1;
+                });
+            }
+        });
+    </script>
+</body></html>

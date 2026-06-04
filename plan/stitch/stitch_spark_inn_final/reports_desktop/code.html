@@ -1,0 +1,470 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Reports Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+@font-face {
+    font-family: 'Apollo';
+    src: url('https://fonts.cdnfonts.com/s/115456/Apollo.woff') format('woff');
+}
+.material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+</style>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "on-primary-fixed-variant": "#6b3b00",
+                "inverse-primary": "#ffb876",
+                "status-purple-text": "#7C3AED",
+                "surface-container-high": "#e8e8e8",
+                "inverse-on-surface": "#f1f1f1",
+                "on-tertiary-fixed-variant": "#484643",
+                "secondary-fixed-dim": "#c0c6db",
+                "surface-bright": "#f9f9f9",
+                "status-blue-text": "#2563EB",
+                "secondary-container": "#d9dff5",
+                "secondary-fixed": "#dce2f7",
+                "page-bg": "#F9FAFB",
+                "surface-container-lowest": "#ffffff",
+                "surface": "#f9f9f9",
+                "on-secondary-fixed-variant": "#404758",
+                "primary-fixed-dim": "#ffb876",
+                "on-background": "#1b1b1b",
+                "primary": "#8d4f00",
+                "surface-container": "#eeeeee",
+                "status-red-bg": "#FEF2F2",
+                "on-error-container": "#93000a",
+                "surface-container-highest": "#e2e2e2",
+                "surface-tint": "#8d4f00",
+                "outline": "#877363",
+                "surface-variant": "#e2e2e2",
+                "surface-dim": "#dadada",
+                "status-purple-bg": "#F5F3FF",
+                "on-secondary": "#ffffff",
+                "background": "#f9f9f9",
+                "status-gray-bg": "#F3F4F6",
+                "inverse-surface": "#303030",
+                "error-container": "#ffdad6",
+                "on-secondary-fixed": "#141b2b",
+                "on-primary": "#ffffff",
+                "status-blue-bg": "#EFF6FF",
+                "status-green-text": "#16A34A",
+                "primary-hover": "#C4720E",
+                "text-secondary": "#4B5563",
+                "primary-fixed": "#ffdcc0",
+                "on-error": "#ffffff",
+                "tertiary-fixed-dim": "#cac6c1",
+                "status-green-bg": "#F0FDF4",
+                "primary-light": "#FEF3E2",
+                "tertiary": "#605e5a",
+                "on-secondary-container": "#5c6274",
+                "error": "#ba1a1a",
+                "on-tertiary": "#ffffff",
+                "border-standard": "#E5E7EB",
+                "outline-variant": "#dac2af",
+                "on-primary-container": "#562e00",
+                "on-tertiary-fixed": "#1d1b19",
+                "primary-container": "#ea8a1a",
+                "tertiary-fixed": "#e6e2dd",
+                "surface-container-low": "#f3f3f3",
+                "status-amber-text": "#D97706",
+                "tertiary-container": "#a4a19d",
+                "on-primary-fixed": "#2d1600",
+                "on-surface-variant": "#544335",
+                "status-red-text": "#DC2626",
+                "secondary": "#575e70",
+                "on-surface": "#1b1b1b",
+                "status-gray-text": "#6B7280",
+                "status-amber-bg": "#FFFBEB",
+                "on-tertiary-container": "#393835"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+        },
+        "spacing": {
+                "max-width-booking": "600px",
+                "max-width-auth": "460px",
+                "touch-target-min": "44px",
+                "drawer-width": "480px",
+                "unit": "8px",
+                "sidebar-width": "240px"
+        },
+        "fontFamily": {
+                "h3": [
+                        "Inter"
+                ],
+                "h1-mobile": [
+                        "Apollo"
+                ],
+                "body-sm": [
+                        "Inter"
+                ],
+                "h1": [
+                        "Apollo"
+                ],
+                "h2": [
+                        "Apollo"
+                ],
+                "display-hero-mobile": [
+                        "Apollo"
+                ],
+                "label-sm": [
+                        "Inter"
+                ],
+                "label-md": [
+                        "Inter"
+                ],
+                "body-lg": [
+                        "Inter"
+                ],
+                "display-hero": [
+                        "Apollo"
+                ],
+                "h4": [
+                        "Inter"
+                ]
+        },
+        "fontSize": {
+                "h3": [
+                        "24px",
+                        {
+                                "lineHeight": "1.4",
+                                "fontWeight": "600"
+                        }
+                ],
+                "h1-mobile": [
+                        "28px",
+                        {
+                                "lineHeight": "1.3",
+                                "fontWeight": "400"
+                        }
+                ],
+                "body-sm": [
+                        "14px",
+                        {
+                                "lineHeight": "1.5",
+                                "fontWeight": "400"
+                        }
+                ],
+                "h1": [
+                        "40px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "h2": [
+                        "32px",
+                        {
+                                "lineHeight": "1.3",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "display-hero-mobile": [
+                        "44px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "label-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "1.2",
+                                "fontWeight": "500"
+                        }
+                ],
+                "label-md": [
+                        "13px",
+                        {
+                                "lineHeight": "1.2",
+                                "fontWeight": "500"
+                        }
+                ],
+                "body-lg": [
+                        "16px",
+                        {
+                                "lineHeight": "1.6",
+                                "fontWeight": "400"
+                        }
+                ],
+                "display-hero": [
+                        "72px",
+                        {
+                                "lineHeight": "1.1",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "h4": [
+                        "18px",
+                        {
+                                "lineHeight": "1.4",
+                                "fontWeight": "600"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+</head>
+<body class="bg-page-bg text-on-background font-body-lg text-body-lg min-h-screen flex antialiased">
+<!-- Navigation Drawer -->
+<nav class="bg-inverse-surface dark:bg-surface-container-lowest text-primary-fixed dark:text-primary font-body-lg text-body-lg fixed left-0 top-0 h-full w-[240px] border-r border-outline-variant flat no shadows flex flex-col py-8 z-40 hidden md:flex">
+<div class="px-6 mb-8 flex items-center justify-between">
+<div>
+<h2 class="font-h3 text-h3 lowercase text-white">spark inn</h2>
+<p class="text-tertiary-fixed-dim font-label-sm text-label-sm mt-1">Admin Portal</p>
+</div>
+<img alt="Admin User" class="w-10 h-10 rounded-full border-2 border-outline-variant" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCNJXStZiGWLeHjs57E2w-TGCMt1d9GHVkC6eyz4KVfEDpmMOC3AQ7AEAs6IsjHa57SkWqK2vvCkzf4EKHk2VEUIfnY_oerVju2LYVXQZ76avqzGL-dnTM57ZwV_qyWrr57f5G-6lpKIVQ7SiUzb4d_XanaJwDfPCCwAtBsnv0u7fv6PVB4AnT5yV9Tg9k-IvqdMKv2-3S3LH54bRdU2vDm5DQ4EmZXqa2h_m1vc5aZbpLJkKSd7Bzymithh2oRDVwJZgbV6X6y_w0_">
+</div>
+<div class="flex-1 overflow-y-auto">
+<ul class="space-y-1">
+<li>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span>Dashboard</span>
+</a>
+</li>
+<li>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>Bookings</span>
+</a>
+</li>
+<li>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">bed</span>
+<span>Rooms</span>
+</a>
+</li>
+<li>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">group</span>
+<span>Guests</span>
+</a>
+</li>
+<li>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">bar_chart</span>
+<span>Reports</span>
+</a>
+</li>
+<li>
+<a class="text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>Settings</span>
+</a>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 md:ml-[240px] p-6 lg:p-8 overflow-y-auto w-full">
+<!-- Header Section -->
+<header class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+<div>
+<h1 class="font-h1 text-h1 text-on-background">Reports</h1>
+<p class="font-body-lg text-body-lg text-text-secondary mt-1">Performance overview and insights.</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-2 bg-surface-container-lowest border border-border-standard rounded-lg px-4 py-2 hover:border-primary-container transition-colors min-h-[touch-target-min]">
+<span class="material-symbols-outlined text-text-secondary">calendar_today</span>
+<span class="font-label-md text-label-md text-on-surface">Last 30 Days</span>
+<span class="material-symbols-outlined text-text-secondary text-sm">expand_more</span>
+</button>
+<button class="bg-primary-container text-on-background hover:bg-primary-hover rounded-lg px-6 py-2 font-label-md text-label-md transition-colors flex items-center gap-2 min-h-[touch-target-min]">
+<span class="material-symbols-outlined">download</span>
+                Export CSV
+            </button>
+</div>
+</header>
+<!-- Stat Cards Row -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+<!-- Occupancy Rate -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard shadow-sm">
+<div class="flex justify-between items-start mb-2">
+<span class="font-label-md text-label-md text-text-secondary">Occupancy Rate</span>
+<span class="material-symbols-outlined text-primary-container">meeting_room</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-h3 text-h3 text-on-background">78%</span>
+<span class="font-label-sm text-label-sm text-status-green-text flex items-center bg-status-green-bg px-2 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-[14px]">trending_up</span> +5%
+                </span>
+</div>
+</div>
+<!-- Total Revenue -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard shadow-sm">
+<div class="flex justify-between items-start mb-2">
+<span class="font-label-md text-label-md text-text-secondary">Total Revenue</span>
+<span class="material-symbols-outlined text-primary-container">payments</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-h3 text-h3 text-on-background">₱425K</span>
+<span class="font-label-sm text-label-sm text-status-green-text flex items-center bg-status-green-bg px-2 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-[14px]">trending_up</span> +12%
+                </span>
+</div>
+</div>
+<!-- Avg Nightly Rate -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard shadow-sm">
+<div class="flex justify-between items-start mb-2">
+<span class="font-label-md text-label-md text-text-secondary">Avg. Nightly Rate</span>
+<span class="material-symbols-outlined text-primary-container">sell</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-h3 text-h3 text-on-background">₱12.5K</span>
+<span class="font-label-sm text-label-sm text-status-gray-text flex items-center bg-status-gray-bg px-2 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-[14px]">horizontal_rule</span> 0%
+                </span>
+</div>
+</div>
+<!-- Total Bookings -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard shadow-sm">
+<div class="flex justify-between items-start mb-2">
+<span class="font-label-md text-label-md text-text-secondary">Total Bookings</span>
+<span class="material-symbols-outlined text-primary-container">book_online</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-h3 text-h3 text-on-background">34</span>
+<span class="font-label-sm text-label-sm text-status-green-text flex items-center bg-status-green-bg px-2 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-[14px]">trending_up</span> +8%
+                </span>
+</div>
+</div>
+</div>
+<!-- Main Analytics Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+<!-- Occupancy Chart Placeholder -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard shadow-sm p-6 flex flex-col">
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-h4 text-h4 text-on-background">Occupancy (30 Days)</h3>
+<button class="text-text-secondary hover:text-primary-container transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+<div class="flex-1 bg-surface-container-low rounded-lg flex items-center justify-center min-h-[240px] border border-dashed border-border-standard relative overflow-hidden">
+<!-- Decorative Bar Chart Representation -->
+<div class="absolute inset-0 flex items-end justify-around px-4 pb-4 pt-8 gap-2 opacity-60">
+<div class="w-full bg-secondary-fixed-dim rounded-t-sm h-[40%]"></div>
+<div class="w-full bg-primary-fixed-dim rounded-t-sm h-[60%]"></div>
+<div class="w-full bg-primary-container rounded-t-sm h-[85%]"></div>
+<div class="w-full bg-secondary-fixed-dim rounded-t-sm h-[50%]"></div>
+<div class="w-full bg-primary-fixed-dim rounded-t-sm h-[70%]"></div>
+<div class="w-full bg-primary-container rounded-t-sm h-[90%]"></div>
+<div class="w-full bg-secondary-fixed-dim rounded-t-sm h-[65%]"></div>
+<div class="w-full bg-primary-fixed-dim rounded-t-sm h-[80%]"></div>
+</div>
+<p class="font-label-md text-label-md text-text-secondary relative z-10 bg-surface-container-lowest/80 px-3 py-1 rounded backdrop-blur-sm">[ Bar Chart Visualization ]</p>
+</div>
+</div>
+<!-- Revenue Growth Chart Placeholder -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard shadow-sm p-6 flex flex-col">
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-h4 text-h4 text-on-background">Revenue Growth</h3>
+<button class="text-text-secondary hover:text-primary-container transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</div>
+<div class="flex-1 bg-surface-container-low rounded-lg flex items-center justify-center min-h-[240px] border border-dashed border-border-standard relative overflow-hidden">
+<!-- Decorative Line Chart Representation -->
+<svg class="absolute inset-0 w-full h-full opacity-60" preserveAspectRatio="none" viewBox="0 0 100 100">
+<path d="M0,80 L20,60 L40,70 L60,30 L80,40 L100,10" fill="none" stroke="#ea8a1a" stroke-width="2" vector-effect="non-scaling-stroke"></path>
+<path d="M0,100 L0,80 L20,60 L40,70 L60,30 L80,40 L100,10 L100,100 Z" fill="url(#gradient)" opacity="0.2"></path>
+<defs>
+<linearGradient id="gradient" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0%" stop-color="#ea8a1a"></stop>
+<stop offset="100%" stop-color="#ea8a1a" stop-opacity="0"></stop>
+</linearGradient>
+</defs>
+</svg>
+<p class="font-label-md text-label-md text-text-secondary relative z-10 bg-surface-container-lowest/80 px-3 py-1 rounded backdrop-blur-sm">[ Line Chart Visualization ]</p>
+</div>
+</div>
+</div>
+<!-- Secondary Analytics Row -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- Bookings by Source -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard shadow-sm p-6">
+<h3 class="font-h4 text-h4 text-on-background mb-6">Bookings by Source</h3>
+<div class="space-y-5">
+<div>
+<div class="flex justify-between font-label-md text-label-md mb-2">
+<span class="text-on-background">Direct</span>
+<span class="text-text-secondary">60%</span>
+</div>
+<div class="w-full bg-surface-container-highest rounded-full h-2">
+<div class="bg-primary-container h-2 rounded-full" style="width: 60%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between font-label-md text-label-md mb-2">
+<span class="text-on-background">Corporate</span>
+<span class="text-text-secondary">25%</span>
+</div>
+<div class="w-full bg-surface-container-highest rounded-full h-2">
+<div class="bg-on-secondary-fixed-variant h-2 rounded-full" style="width: 25%"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between font-label-md text-label-md mb-2">
+<span class="text-on-background">Walk-in</span>
+<span class="text-text-secondary">15%</span>
+</div>
+<div class="w-full bg-surface-container-highest rounded-full h-2">
+<div class="bg-secondary-fixed-dim h-2 rounded-full" style="width: 15%"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Room Type Performance -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard shadow-sm p-6 overflow-hidden">
+<h3 class="font-h4 text-h4 text-on-background mb-4">Room Type Performance</h3>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-border-standard text-text-secondary font-label-sm text-label-sm">
+<th class="py-3 px-2 font-medium">Room Type</th>
+<th class="py-3 px-2 font-medium text-right">Occupancy %</th>
+<th class="py-3 px-2 font-medium text-right">Revenue</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-body-sm">
+<tr class="border-b border-border-standard/50 hover:bg-surface-container-low transition-colors">
+<td class="py-3 px-2 text-on-background">Deluxe Suite</td>
+<td class="py-3 px-2 text-right">85%</td>
+<td class="py-3 px-2 text-right">₱180K</td>
+</tr>
+<tr class="border-b border-border-standard/50 hover:bg-surface-container-low transition-colors">
+<td class="py-3 px-2 text-on-background">Ocean View</td>
+<td class="py-3 px-2 text-right">72%</td>
+<td class="py-3 px-2 text-right">₱145K</td>
+</tr>
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="py-3 px-2 text-on-background">Standard</td>
+<td class="py-3 px-2 text-right">90%</td>
+<td class="py-3 px-2 text-right">₱100K</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+</body></html>

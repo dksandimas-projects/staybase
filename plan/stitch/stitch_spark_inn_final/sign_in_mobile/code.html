@@ -1,0 +1,193 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Sign In | spark inn</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/s/95734/Apollo.woff'); /* Fallback to a high-end serif if necessary */
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #FDF8F3; /* Forced brand background */
+        }
+
+        .font-h2 { font-family: 'Apollo', serif; }
+        .font-h1 { font-family: 'Apollo', serif; }
+        .font-display-hero { font-family: 'Apollo', serif; }
+        
+        /* Smooth transition for interactions */
+        .transition-standard {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "primary-fixed": "#ffdcc0",
+                      "primary": "#8d4f00",
+                      "secondary-container": "#d9dff5",
+                      "inverse-primary": "#ffb876",
+                      "surface-variant": "#e2e2e2",
+                      "outline": "#877363",
+                      "primary-light": "#FEF3E2",
+                      "on-tertiary": "#ffffff",
+                      "tertiary": "#605e5a",
+                      "on-primary-fixed": "#2d1600",
+                      "error-container": "#ffdad6",
+                      "primary-hover": "#C4720E",
+                      "page-bg": "#FDF8F3",
+                      "on-secondary-container": "#5c6274",
+                      "primary-container": "#ea8a1a",
+                      "inverse-surface": "#303030",
+                      "border-standard": "#E5E7EB",
+                      "on-surface-variant": "#544335",
+                      "on-surface": "#1b1b1b",
+                      "text-secondary": "#4B5563",
+                      "on-primary": "#ffffff",
+                      "secondary": "#575e70",
+                      "surface": "#f9f9f9"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "fontFamily": {
+                      "h2": ["Apollo", "serif"],
+                      "h1": ["Apollo", "serif"],
+                      "body-lg": ["Inter", "sans-serif"],
+                      "h4": ["Inter", "sans-serif"],
+                      "h3": ["Inter", "sans-serif"],
+                      "label-md": ["Inter", "sans-serif"]
+              },
+              "fontSize": {
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+              }
+            },
+          },
+        }
+      </script>
+</head>
+<body class="bg-page-bg min-h-screen flex flex-col items-center justify-center p-6">
+<!-- Auth Container -->
+<main class="w-full max-w-[460px] animate-in fade-in slide-in-from-bottom-4 duration-700">
+<!-- Logo Section -->
+<div class="flex justify-center mb-10">
+<img alt="spark inn logo" class="h-8 w-auto" data-alt="A clean, minimalist luxury brand logo for spark inn, featuring elegant lowercase sans-serif typography. The logo is set against a warm, off-white studio background with soft ambient lighting, reflecting a high-end boutique hospitality aesthetic. The colors are muted and earthy, conveying a sense of serenity and premium quality consistent with a boutique hotel in a tropical paradise." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBCZZyefuDzsMM66cRClEi1m183sajdzUNwgBSj4Ak4xPdS3U2ZkgZthlEI72jI7Tel8pbUi3q_8Eyr6zQ7blt2LxwLHxEALIL7oNe7VrN16VVovihjk6E2Hiazrwo5OYFC3m2_rjMGLUWuLSchQnWkqe-0IbuxDb2vD-F2tbHTIZEUjL338oeslkfD3PbJRJORyHl0u_Dpgf0OaDNbOXatYpP-xCZDlqdc7yLaJVtqojITm8jbuHGynmxGDOwcusFbzdegCXe-MRZ4">
+</div>
+<!-- Sign-In Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-border-standard p-8 md:p-10">
+<!-- Header -->
+<header class="text-center mb-8">
+<h1 class="font-h2 text-h2 text-on-surface mb-2">Welcome back</h1>
+<p class="font-body-sm text-body-sm text-text-secondary">Please enter your details to access your sanctuary.</p>
+</header>
+<!-- Form -->
+<form class="space-y-6" id="signInForm">
+<!-- Email Input -->
+<div class="space-y-1.5">
+<label class="block font-label-md text-label-md text-on-surface-variant" for="email">Email Address</label>
+<div class="relative group">
+<input class="w-full px-4 py-3 bg-white border border-border-standard rounded-lg focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-standard outline-none font-body-sm text-on-surface placeholder:text-outline-variant/60" id="email" name="email" placeholder="e.g. guest@luxury.com" required="" type="email">
+</div>
+</div>
+<!-- Password Input -->
+<div class="space-y-1.5">
+<div class="flex justify-between items-center">
+<label class="block font-label-md text-label-md text-on-surface-variant" for="password">Password</label>
+<a class="font-label-md text-label-md text-primary hover:text-primary-hover transition-standard" href="#">Forgot password?</a>
+</div>
+<div class="relative group">
+<input class="w-full px-4 py-3 bg-white border border-border-standard rounded-lg focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-standard outline-none font-body-sm text-on-surface placeholder:text-outline-variant/60" id="password" name="password" placeholder="••••••••" required="" type="password">
+<button class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-outline-variant hover:text-primary transition-standard" onclick="togglePassword()" type="button">
+<span class="material-symbols-outlined" id="passwordIcon" style="font-size: 20px;">visibility</span>
+</button>
+</div>
+</div>
+<!-- Sign In Button -->
+<button class="w-full h-[44px] bg-primary-container text-white font-label-md text-label-md rounded-lg hover:bg-primary-hover active:scale-[0.98] transition-standard shadow-sm flex items-center justify-center gap-2" type="submit">
+                    Sign In
+                </button>
+</form>
+<!-- Divider -->
+<div class="flex items-center my-8">
+<div class="flex-grow border-t border-border-standard"></div>
+<span class="px-4 font-label-md text-label-md text-outline-variant uppercase tracking-widest">or</span>
+<div class="flex-grow border-t border-border-standard"></div>
+</div>
+<!-- Create Account -->
+<button class="w-full h-[44px] bg-transparent border border-border-standard text-on-surface font-label-md text-label-md rounded-lg hover:bg-primary-light hover:border-primary-container transition-standard active:scale-[0.98] flex items-center justify-center" type="button">
+                Create Account
+            </button>
+</div>
+<!-- Footer Note -->
+<footer class="mt-8 text-center">
+<p class="font-label-sm text-[12px] text-outline-variant leading-relaxed px-4">
+                By signing in, you agree to our 
+                <a class="underline hover:text-primary transition-standard" href="#">Privacy Policy</a> and 
+                <a class="underline hover:text-primary transition-standard" href="#">Terms of Service</a>.
+            </p>
+</footer>
+</main>
+<!-- Background Atmospheric Effect (Vanilla JS) -->
+<div class="fixed top-[-10%] right-[-10%] w-[40vw] h-[40vw] bg-primary-fixed opacity-20 blur-[120px] pointer-events-none -z-10" id="glow"></div>
+<div class="fixed bottom-[-10%] left-[-10%] w-[30vw] h-[30vw] bg-secondary-container opacity-20 blur-[100px] pointer-events-none -z-10" id="glow2"></div>
+<script>
+        function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const icon = document.getElementById('passwordIcon');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                icon.innerText = 'visibility_off';
+            } else {
+                passwordInput.type = 'password';
+                icon.innerText = 'visibility';
+            }
+        }
+
+        // Lightweight mouse movement interaction for glow
+        document.addEventListener('mousemove', (e) => {
+            const glow = document.getElementById('glow');
+            const x = (e.clientX / window.innerWidth) * 20;
+            const y = (e.clientY / window.innerHeight) * 20;
+            glow.style.transform = `translate(${x}px, ${y}px)`;
+        });
+
+        // Form submission micro-interaction
+        document.getElementById('signInForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = '<span class="animate-spin material-symbols-outlined">progress_activity</span>';
+            btn.disabled = true;
+            
+            setTimeout(() => {
+                btn.innerHTML = originalContent;
+                btn.disabled = false;
+                alert('Sign in logic would trigger here.');
+            }, 1500);
+        });
+    </script>
+</body></html>

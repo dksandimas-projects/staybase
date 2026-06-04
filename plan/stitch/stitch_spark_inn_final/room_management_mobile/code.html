@@ -1,0 +1,339 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Room Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Apollo:wght@400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#e2e2e2",
+                        "surface-container-lowest": "#ffffff",
+                        "status-amber-text": "#D97706",
+                        "tertiary-fixed": "#e6e2dd",
+                        "surface-tint": "#8d4f00",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "on-primary-fixed": "#2d1600",
+                        "primary-light": "#FEF3E2",
+                        "status-purple-text": "#7C3AED",
+                        "status-blue-text": "#2563EB",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-blue-bg": "#EFF6FF",
+                        "surface": "#f9f9f9",
+                        "error-container": "#ffdad6",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "status-red-bg": "#FEF2F2",
+                        "status-gray-text": "#6B7280",
+                        "tertiary": "#605e5a",
+                        "primary-container": "#ea8a1a",
+                        "surface-bright": "#f9f9f9",
+                        "on-secondary-fixed": "#141b2b",
+                        "error": "#ba1a1a",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "inverse-primary": "#ffb876",
+                        "primary-fixed": "#ffdcc0",
+                        "status-green-bg": "#F0FDF4",
+                        "outline": "#877363",
+                        "on-primary": "#ffffff",
+                        "tertiary-container": "#a4a19d",
+                        "on-secondary-container": "#5c6274",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-secondary-fixed-variant": "#404758",
+                        "on-tertiary-container": "#393835",
+                        "surface-container": "#eeeeee",
+                        "on-error-container": "#93000a",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "primary": "#8d4f00",
+                        "on-primary-container": "#562e00",
+                        "border-standard": "#E5E7EB",
+                        "secondary": "#575e70",
+                        "status-red-text": "#DC2626",
+                        "inverse-surface": "#303030",
+                        "secondary-fixed": "#dce2f7",
+                        "on-surface-variant": "#544335",
+                        "outline-variant": "#dac2af",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "inverse-on-surface": "#f1f1f1",
+                        "text-secondary": "#4B5563",
+                        "status-green-text": "#16A34A",
+                        "surface-variant": "#e2e2e2",
+                        "secondary-container": "#d9dff5",
+                        "on-surface": "#1b1b1b",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-tertiary": "#ffffff",
+                        "primary-hover": "#C4720E",
+                        "on-error": "#ffffff",
+                        "on-background": "#1b1b1b",
+                        "surface-container-low": "#f3f3f3",
+                        "surface-container-high": "#e8e8e8",
+                        "primary-fixed-dim": "#ffb876",
+                        "background": "#f9f9f9",
+                        "page-bg": "#F9FAFB",
+                        "on-secondary": "#ffffff",
+                        "surface-dim": "#dadada"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "max-width-booking": "600px",
+                        "touch-target-min": "44px",
+                        "sidebar-width": "240px",
+                        "unit": "8px",
+                        "max-width-auth": "460px",
+                        "drawer-width": "480px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "display-hero": ["Apollo"],
+                        "h1": ["Apollo"],
+                        "display-hero-mobile": ["Apollo"],
+                        "label-sm": ["Inter"],
+                        "h3": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "h2": ["Apollo"],
+                        "label-md": ["Inter"],
+                        "h4": ["Inter"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-page-bg text-on-surface font-body-sm antialiased h-screen flex flex-col md:flex-row overflow-hidden">
+<!-- Mobile Top App Bar (Visible on Mobile) -->
+<header class="md:hidden flex justify-between items-center px-6 py-4 bg-surface-container-lowest/80 backdrop-blur-md fixed top-0 w-full z-50 border-b border-border-standard">
+<button aria-label="Menu" class="text-primary hover:text-primary-hover transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="menu">menu</span>
+</button>
+<div class="font-h3 text-h3 lowercase tracking-tighter text-on-background">spark inn</div>
+<button aria-hidden="true" class="text-primary hover:text-primary-hover transition-colors duration-200 opacity-0 pointer-events-none">
+<span class="material-symbols-outlined">menu</span>
+</button>
+</header>
+<!-- Desktop Sidebar (Visible on Desktop) -->
+<aside class="hidden md:flex flex-col h-full w-[240px] bg-inverse-surface py-8 border-r border-outline-variant flex-shrink-0 z-40 fixed left-0 top-0">
+<div class="px-6 mb-8 flex items-center justify-start">
+<div class="flex flex-col">
+<span class="font-h3 text-h3 lowercase text-white">spark inn</span>
+<span class="font-body-sm text-body-sm text-tertiary-fixed-dim">Admin Portal</span>
+</div>
+</div>
+<nav class="flex flex-col gap-2 flex-grow overflow-y-auto">
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-white/5 transition-all w-full" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-lg text-body-lg">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-white/5 transition-all w-full" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_month">calendar_month</span>
+<span class="font-body-lg text-body-lg">Bookings</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 w-full translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="bed" data-weight="fill" style="font-variation-settings: 'FILL' 1;">bed</span>
+<span class="font-body-lg text-body-lg font-semibold">Rooms</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-white/5 transition-all w-full" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span class="font-body-lg text-body-lg">Guests</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-white/5 transition-all w-full" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-lg text-body-lg">Settings</span>
+</a>
+</nav>
+<div class="px-6 mt-auto flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-surface-container overflow-hidden flex-shrink-0">
+<img alt="Admin User" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCUgJoSH5-hYB35w1KdGIQYJlZZtzVelF-u7arxaG-dLVS6-ZdESrb5CQGRgJPD7bGI9pMmPbKz20nR3xs9a0EURn4rLOhm36wrRRWxqHF4Y9ipc5SMpTy7A6EmEQQFzN9W1tQw-d6ujRYMLxzThLROfpySqU7YX6cfEpV14V8rxzggzalp3gFWhpXSFTOcjdR1ZVw0Nn3FitzS-EB8ZG2JMMvYyfU9cyYu4fMsFcA6vyi6xEenJZlRb7mFHy8wnJqnA5o-6x06MtJZ">
+</div>
+<span class="font-label-md text-label-md text-white truncate">Admin User</span>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 w-full flex flex-col pt-[72px] md:pt-0 md:ml-[240px] h-full overflow-y-auto bg-page-bg">
+<div class="p-4 md:p-8 max-w-7xl mx-auto w-full flex-1 flex flex-col gap-6">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+<div>
+<h1 class="font-h1-mobile text-h1-mobile md:font-h1 md:text-h1 text-on-surface mb-1">Room Management</h1>
+<p class="font-body-sm text-body-sm text-text-secondary">Overview and status control for all properties.</p>
+</div>
+<button class="h-[44px] px-6 bg-primary-container text-on-primary-fixed font-label-md text-label-md rounded-[8px] hover:bg-primary-hover transition-colors flex items-center justify-center gap-2 shadow-sm whitespace-nowrap w-full md:w-auto">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+                    Add Room
+                </button>
+</div>
+<!-- Search and Filter Bar -->
+<div class="flex flex-col sm:flex-row gap-3 w-full bg-surface-container-lowest p-4 rounded-[12px] border border-border-standard shadow-sm">
+<div class="relative flex-1">
+<div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-text-secondary text-opacity-70" data-icon="search">search</span>
+</div>
+<input class="block w-full pl-10 pr-3 py-2 border border-border-standard rounded-[8px] leading-5 bg-surface-container-lowest text-on-surface placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container sm:text-sm transition-shadow h-[44px]" placeholder="Search by room number or type..." type="text">
+</div>
+<div class="flex gap-3">
+<select class="block w-full sm:w-[160px] pl-3 pr-10 py-2 text-base border border-border-standard focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container sm:text-sm rounded-[8px] h-[44px] bg-surface-container-lowest text-on-surface appearance-none">
+<option value="">All Statuses</option>
+<option value="available">Available</option>
+<option value="occupied">Occupied</option>
+<option value="blocked">Blocked</option>
+</select>
+<select class="block w-full sm:w-[160px] pl-3 pr-10 py-2 text-base border border-border-standard focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-primary-container sm:text-sm rounded-[8px] h-[44px] bg-surface-container-lowest text-on-surface appearance-none">
+<option value="">Housekeeping</option>
+<option value="clean">Clean</option>
+<option value="dirty">Dirty</option>
+<option value="progress">In Progress</option>
+</select>
+</div>
+</div>
+<!-- Room List -->
+<div class="flex flex-col gap-4">
+<!-- Room Card 1: Available & Clean -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 hover:border-primary-container/50 transition-colors shadow-sm">
+<div class="w-full sm:w-24 h-24 rounded-[8px] overflow-hidden flex-shrink-0 bg-surface-container">
+<img alt="Minimalist hotel room with bright natural light, crisp white linens, and warm wooden accents." class="w-full h-full object-cover" data-alt="A bright, airy boutique hotel room featuring crisp white bed linens and warm wooden furniture. Sunlight streams through large windows, creating a serene and inviting atmosphere. The design is minimalistic with elegant, modern touches, perfectly embodying a sophisticated yet relaxing retreat. Soft shadows and clean lines dominate the composition." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAxWljD8z4AkzwW79M_r-XFDGhD1HcQmnw6l9zEvmFDxlSeJmfXdBEJgp6qyv__3O4QRxyVXTUcz5IpyZbxK0Ah6EtGPQTFWSpU66ouGr1Y_sXM1eltLPgLzUw9BTUrcplTQ1170smODD4R9xRudrImfprp8QE3sO79QmY8QgW4lnvEiHjpSLiqFicykV8W-hxipo-kv3jduxw0m_v1oVLDjgmFUfverirU66kDzID4P_UOf8Vfm3jLU7n5raX0Eb7GRUl42LgEn92a">
+</div>
+<div class="flex-1 flex flex-col gap-1 min-w-0 w-full">
+<div class="flex items-center justify-between gap-2">
+<div class="flex items-baseline gap-2 truncate">
+<span class="font-h4 text-h4 text-on-surface truncate">101</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate">Deluxe King</span>
+</div>
+<button aria-label="Edit" class="sm:hidden text-text-secondary hover:text-primary-container flex items-center justify-center w-[44px] h-[44px]">
+<span class="material-symbols-outlined" data-icon="edit">edit</span>
+</button>
+</div>
+<div class="flex flex-wrap gap-2 mt-2">
+<!-- Occupancy Status Pill -->
+<div class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">
+                                Available
+                            </div>
+<!-- Housekeeping Status Pill -->
+<div class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">
+                                Clean
+                            </div>
+</div>
+</div>
+<div class="hidden sm:flex items-center gap-3 ml-auto flex-shrink-0">
+<button class="h-[44px] px-4 border border-border-standard text-text-secondary font-label-md text-label-md rounded-[8px] hover:border-primary-container hover:text-primary-container transition-colors flex items-center justify-center gap-2 bg-surface-container-lowest">
+<span class="material-symbols-outlined text-[18px]" data-icon="cleaning_services">cleaning_services</span>
+                            Mark Dirty
+                        </button>
+<button class="h-[44px] px-4 bg-surface-container text-on-surface font-label-md text-label-md rounded-[8px] hover:bg-surface-container-high transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit">edit</span>
+                            Edit
+                        </button>
+</div>
+</div>
+<!-- Room Card 2: Occupied & Dirty -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 hover:border-primary-container/50 transition-colors shadow-sm">
+<div class="w-full sm:w-24 h-24 rounded-[8px] overflow-hidden flex-shrink-0 bg-surface-container relative">
+<img alt="Cozy hotel room with a queen bed, soft lighting, and modern decor." class="w-full h-full object-cover opacity-80" data-alt="A comfortably appointed hotel room featuring a queen-sized bed with slightly rumpled linens, indicating recent use. The lighting is warm and subdued, highlighting the textured wall treatments and modern side tables. The overall mood is lived-in yet premium, reflecting an efficient hospitality environment. Colors are muted with earthy undertones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDs3LWOEdbGwJxoiAXmeXwK-o4h6vPSmFFaohTqRIM5zyJbA8I37slHQBXJaklVW0gMfbdCBwBFxW66cf-PzFkVfz_FE2JN-2QJG8El8u8COzDt-250Grdt62lZc1cmI09zX5V5RGPA2K-BvizH3skYtqq4KT-tJurYwuEtW3WMt4qwlIygpVi1wES_AbwNBQvP5c3vJQLXdT6u41aOIRa0yyF0XxPma65YBZaVtoUjBIaJ8xndIqq3gQWg9e15bQ63TzpwMX1UWtfE">
+</div>
+<div class="flex-1 flex flex-col gap-1 min-w-0 w-full">
+<div class="flex items-center justify-between gap-2">
+<div class="flex items-baseline gap-2 truncate">
+<span class="font-h4 text-h4 text-on-surface truncate">102</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate">Standard Queen</span>
+</div>
+<button aria-label="Edit" class="sm:hidden text-text-secondary hover:text-primary-container flex items-center justify-center w-[44px] h-[44px]">
+<span class="material-symbols-outlined" data-icon="edit">edit</span>
+</button>
+</div>
+<div class="flex flex-wrap gap-2 mt-2">
+<!-- Occupancy Status Pill -->
+<div class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-red-bg text-status-red-text border border-status-red-text/20">
+                                Occupied
+                            </div>
+<!-- Housekeeping Status Pill -->
+<div class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-red-bg text-status-red-text border border-status-red-text/20">
+                                Dirty
+                            </div>
+</div>
+</div>
+<div class="hidden sm:flex items-center gap-3 ml-auto flex-shrink-0">
+<button class="h-[44px] px-4 border border-border-standard text-text-secondary font-label-md text-label-md rounded-[8px] hover:border-primary-container hover:text-primary-container transition-colors flex items-center justify-center gap-2 bg-surface-container-lowest">
+<span class="material-symbols-outlined text-[18px]" data-icon="sync">sync</span>
+                            In Progress
+                        </button>
+<button class="h-[44px] px-4 bg-surface-container text-on-surface font-label-md text-label-md rounded-[8px] hover:bg-surface-container-high transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit">edit</span>
+                            Edit
+                        </button>
+</div>
+</div>
+<!-- Room Card 3: Blocked & In Progress -->
+<div class="bg-surface-container-lowest border border-border-standard rounded-[12px] p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 hover:border-primary-container/50 transition-colors shadow-sm opacity-75">
+<div class="w-full sm:w-24 h-24 rounded-[8px] overflow-hidden flex-shrink-0 bg-surface-container grayscale-[50%]">
+<img alt="Spacious suite with maintenance equipment visible, natural light." class="w-full h-full object-cover" data-alt="A spacious hotel suite undergoing maintenance, featuring large windows letting in ample natural light. The room's premium furnishings are partially covered, and a subtle sense of renovation is present. The color palette is neutral and subdued, reflecting a temporary inactive status within a luxury environment. The composition is clean and structured." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAzQ8_JRSiIdie5SdQb9zWbVOCACIipYL0dsyZg4Z99FMkUovc3otorZZ_OXt4xfVcvRcmfmpkaUaieOmfJdAyyUvF94wPRo95U8kJrVqclE-uGzCFE5_0UCylrWMLn1WcNEeuOQva9_saZi5TuY-oKb_6vy6CkX3c_sfsLMKmLalG6sIMOrghenvAbgxzY8epLnp2kIPZwS7Qs1q-0Qt8yuhM3Tm4sfo0CkxvghfuOvH5EPngjldKC-ms09ah2tZuzrgvgCoejone5">
+</div>
+<div class="flex-1 flex flex-col gap-1 min-w-0 w-full">
+<div class="flex items-center justify-between gap-2">
+<div class="flex items-baseline gap-2 truncate">
+<span class="font-h4 text-h4 text-on-surface truncate">205</span>
+<span class="font-body-sm text-body-sm text-text-secondary truncate">Executive Suite</span>
+</div>
+<button aria-label="Edit" class="sm:hidden text-text-secondary hover:text-primary-container flex items-center justify-center w-[44px] h-[44px]">
+<span class="material-symbols-outlined" data-icon="edit">edit</span>
+</button>
+</div>
+<div class="flex flex-wrap gap-2 mt-2">
+<!-- Occupancy Status Pill -->
+<div class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-gray-bg text-status-gray-text border border-status-gray-text/20">
+                                Blocked
+                            </div>
+<!-- Housekeeping Status Pill -->
+<div class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-amber-bg text-status-amber-text border border-status-amber-text/20">
+                                In Progress
+                            </div>
+</div>
+</div>
+<div class="hidden sm:flex items-center gap-3 ml-auto flex-shrink-0">
+<button class="h-[44px] px-4 border border-status-green-text/30 text-status-green-text font-label-md text-label-md rounded-[8px] hover:bg-status-green-bg transition-colors flex items-center justify-center gap-2 bg-surface-container-lowest">
+<span class="material-symbols-outlined text-[18px]" data-icon="check_circle">check_circle</span>
+                            Mark Clean
+                        </button>
+<button class="h-[44px] px-4 bg-surface-container text-on-surface font-label-md text-label-md rounded-[8px] hover:bg-surface-container-high transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit">edit</span>
+                            Edit
+                        </button>
+</div>
+</div>
+</div>
+<!-- Bottom padding for mobile scrolling -->
+<div class="h-8 md:hidden"></div>
+</div>
+</main>
+<!-- Mobile Bottom Nav (Mockup - suppressed on this specific admin view as it's a side-nav primary flow, but kept minimal if needed. Suppressing based on rules for admin) -->
+</body></html>

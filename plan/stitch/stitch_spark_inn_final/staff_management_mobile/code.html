@@ -1,0 +1,412 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Staff Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Apollo:wght@400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "status-amber-text": "#D97706",
+                      "surface": "#f9f9f9",
+                      "surface-variant": "#e2e2e2",
+                      "status-green-bg": "#F0FDF4",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "status-purple-text": "#7C3AED",
+                      "primary-container": "#ea8a1a",
+                      "on-background": "#1b1b1b",
+                      "surface-container-lowest": "#ffffff",
+                      "border-standard": "#E5E7EB",
+                      "inverse-primary": "#ffb876",
+                      "page-bg": "#F9FAFB",
+                      "on-error-container": "#93000a",
+                      "inverse-on-surface": "#f1f1f1",
+                      "on-error": "#ffffff",
+                      "surface-tint": "#8d4f00",
+                      "status-green-text": "#16A34A",
+                      "outline-variant": "#dac2af",
+                      "error": "#ba1a1a",
+                      "on-surface": "#1b1b1b",
+                      "tertiary": "#605e5a",
+                      "surface-container": "#eeeeee",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "inverse-surface": "#303030",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "primary-light": "#FEF3E2",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "outline": "#877363",
+                      "primary": "#8d4f00",
+                      "status-gray-text": "#6B7280",
+                      "secondary-fixed": "#dce2f7",
+                      "status-red-text": "#DC2626",
+                      "on-secondary-container": "#5c6274",
+                      "primary-hover": "#C4720E",
+                      "secondary": "#575e70",
+                      "surface-container-highest": "#e2e2e2",
+                      "background": "#f9f9f9",
+                      "on-tertiary": "#ffffff",
+                      "tertiary-container": "#a4a19d",
+                      "primary-fixed": "#ffdcc0",
+                      "status-blue-text": "#2563EB",
+                      "surface-dim": "#dadada",
+                      "status-gray-bg": "#F3F4F6",
+                      "on-surface-variant": "#544335",
+                      "status-purple-bg": "#F5F3FF",
+                      "on-secondary": "#ffffff",
+                      "status-blue-bg": "#EFF6FF",
+                      "error-container": "#ffdad6",
+                      "text-secondary": "#4B5563",
+                      "primary-fixed-dim": "#ffb876",
+                      "on-secondary-fixed": "#141b2b",
+                      "on-secondary-fixed-variant": "#404758",
+                      "tertiary-fixed": "#e6e2dd",
+                      "surface-container-low": "#f3f3f3",
+                      "status-amber-bg": "#FFFBEB",
+                      "status-red-bg": "#FEF2F2",
+                      "on-primary-fixed": "#2d1600",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "secondary-container": "#d9dff5",
+                      "surface-bright": "#f9f9f9",
+                      "on-tertiary-container": "#393835",
+                      "surface-container-high": "#e8e8e8",
+                      "on-primary-container": "#562e00",
+                      "on-primary": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "max-width-auth": "460px",
+                      "unit": "8px",
+                      "touch-target-min": "44px",
+                      "max-width-booking": "600px",
+                      "drawer-width": "480px",
+                      "sidebar-width": "240px"
+              },
+              "fontFamily": {
+                      "h4": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "label-md": [
+                              "Inter"
+                      ],
+                      "h1": [
+                              "Apollo"
+                      ],
+                      "display-hero": [
+                              "Apollo"
+                      ],
+                      "h2": [
+                              "Apollo"
+                      ],
+                      "h3": [
+                              "Inter"
+                      ],
+                      "label-sm": [
+                              "Inter"
+                      ],
+                      "display-hero-mobile": [
+                              "Apollo"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "h1-mobile": [
+                              "Apollo"
+                      ]
+              },
+              "fontSize": {
+                      "h4": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h1": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-hero": [
+                              "72px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h2": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h3": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "display-hero-mobile": [
+                              "44px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h1-mobile": [
+                              "28px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        [data-weight="fill"] .material-symbols-outlined {
+            font-variation-settings: 'FILL' 1;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-page-bg text-on-background min-h-screen flex flex-col font-body-sm pb-24 md:pb-0">
+<!-- TopAppBar -->
+<header class="bg-surface-container-lowest dark:bg-surface-container-low w-full sticky top-0 border-b border-border-standard dark:border-outline-variant flat no shadows flex justify-between items-center px-6 h-16 z-40">
+<div class="flex items-center gap-4 cursor-pointer active:opacity-80 md:hidden">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed-dim">menu</span>
+</div>
+<div class="font-h3 text-h3 text-primary dark:text-primary-fixed-dim lowercase">
+            spark inn
+        </div>
+<div class="flex items-center gap-4 cursor-pointer active:opacity-80">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center overflow-hidden border border-border-standard">
+<span class="material-symbols-outlined text-text-secondary text-sm">person</span>
+</div>
+</div>
+</header>
+<!-- NavigationDrawer (Desktop) -->
+<nav class="hidden md:flex fixed left-0 top-0 h-screen w-[240px] bg-surface-container-lowest dark:bg-surface-container-low border-r border-border-standard dark:border-outline-variant flat no shadows flex-col py-4 z-50 transition-all duration-200">
+<div class="px-6 pb-6">
+<div class="font-h2 text-h2 text-primary dark:text-primary-fixed-dim lowercase">spark inn</div>
+</div>
+<div class="flex flex-col gap-1 px-2 font-label-md text-label-md">
+<a class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg flex items-center gap-3 px-3 py-3 transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                Dashboard
+            </a>
+<a class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg flex items-center gap-3 px-3 py-3 transition-colors" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+                Bookings
+            </a>
+<a class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg flex items-center gap-3 px-3 py-3 transition-colors" href="#">
+<span class="material-symbols-outlined">event_available</span>
+                Availability
+            </a>
+<a class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg flex items-center gap-3 px-3 py-3 transition-colors" href="#">
+<span class="material-symbols-outlined">cleaning_services</span>
+                Housekeeping
+            </a>
+<a class="text-on-surface-variant hover:bg-surface-container mx-2 my-1 rounded-lg flex items-center gap-3 px-3 py-3 transition-colors" href="#">
+<span class="material-symbols-outlined">payments</span>
+                Finance
+            </a>
+<a class="bg-primary-container text-on-primary-container font-semibold rounded-lg mx-2 my-1 flex items-center gap-3 px-3 py-3 transition-colors" href="#">
+<span class="material-symbols-outlined" data-weight="fill">settings</span>
+                Settings
+            </a>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="flex-1 md:ml-[240px] p-4 md:p-8 flex flex-col gap-6 w-full max-w-4xl mx-auto">
+<div class="flex justify-between items-center mb-2">
+<h1 class="font-h3 text-h3 text-on-background">Staff Management</h1>
+<button class="bg-primary-container text-on-primary-container hover:bg-primary-hover active:bg-primary font-label-md text-label-md px-4 py-2 rounded-lg min-h-[44px] flex items-center gap-2 transition-colors" onclick="document.getElementById('add-staff-modal').classList.remove('hidden')">
+<span class="material-symbols-outlined text-[20px]">add</span>
+<span class="hidden md:inline">Add Staff</span>
+</button>
+</div>
+<!-- Staff List (Bento-style Cards for Mobile) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<!-- Staff Card 1 -->
+<div class="bg-surface-container-lowest rounded-xl p-4 border border-border-standard flex flex-col gap-4 shadow-sm relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-primary-light to-transparent opacity-50 rounded-bl-full z-0"></div>
+<div class="flex justify-between items-start z-10 relative">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center border border-border-standard text-primary font-h4 text-h4">
+                            AJ
+                        </div>
+<div>
+<div class="font-h4 text-h4 text-on-background">Alice Johnson</div>
+<div class="font-body-sm text-body-sm text-text-secondary">alice@sparkinn.com</div>
+</div>
+</div>
+<span class="bg-status-amber-bg text-status-amber-text border border-[#FDE68A] font-label-sm text-label-sm px-2 py-1 rounded-full whitespace-nowrap">Admin</span>
+</div>
+<div class="flex justify-end border-t border-border-standard pt-3 mt-1 z-10 relative">
+<button class="text-error hover:bg-error-container hover:text-on-error-container font-label-md text-label-md px-3 py-2 rounded-lg transition-colors flex items-center gap-1 min-h-[44px]">
+<span class="material-symbols-outlined text-[18px]">person_off</span>
+                        Deactivate
+                    </button>
+</div>
+</div>
+<!-- Staff Card 2 -->
+<div class="bg-surface-container-lowest rounded-xl p-4 border border-border-standard flex flex-col gap-4 shadow-sm relative overflow-hidden group">
+<div class="flex justify-between items-start z-10 relative">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center border border-border-standard text-primary font-h4 text-h4">
+                            BS
+                        </div>
+<div>
+<div class="font-h4 text-h4 text-on-background">Bob Smith</div>
+<div class="font-body-sm text-body-sm text-text-secondary">bob@sparkinn.com</div>
+</div>
+</div>
+<span class="bg-status-blue-bg text-status-blue-text border border-[#BFDBFE] font-label-sm text-label-sm px-2 py-1 rounded-full whitespace-nowrap">Front Desk</span>
+</div>
+<div class="flex justify-end border-t border-border-standard pt-3 mt-1 z-10 relative">
+<button class="text-error hover:bg-error-container hover:text-on-error-container font-label-md text-label-md px-3 py-2 rounded-lg transition-colors flex items-center gap-1 min-h-[44px]">
+<span class="material-symbols-outlined text-[18px]">person_off</span>
+                        Deactivate
+                    </button>
+</div>
+</div>
+<!-- Staff Card 3 -->
+<div class="bg-surface-container-lowest rounded-xl p-4 border border-border-standard flex flex-col gap-4 shadow-sm relative overflow-hidden group">
+<div class="flex justify-between items-start z-10 relative">
+<div class="flex items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center border border-border-standard text-primary font-h4 text-h4">
+                            CL
+                        </div>
+<div>
+<div class="font-h4 text-h4 text-on-background">Carol Lee</div>
+<div class="font-body-sm text-body-sm text-text-secondary">carol@sparkinn.com</div>
+</div>
+</div>
+<span class="bg-status-blue-bg text-status-blue-text border border-[#BFDBFE] font-label-sm text-label-sm px-2 py-1 rounded-full whitespace-nowrap">Front Desk</span>
+</div>
+<div class="flex justify-end border-t border-border-standard pt-3 mt-1 z-10 relative">
+<button class="text-error hover:bg-error-container hover:text-on-error-container font-label-md text-label-md px-3 py-2 rounded-lg transition-colors flex items-center gap-1 min-h-[44px]">
+<span class="material-symbols-outlined text-[18px]">person_off</span>
+                        Deactivate
+                    </button>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Mobile) -->
+<nav class="bg-surface-container-lowest dark:bg-surface-container-low fixed bottom-0 w-full z-50 md:hidden border-t border-border-standard shadow-lg flex justify-around items-center px-4 py-2">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-primary-light active:scale-95 transition-transform rounded-xl min-w-[64px] min-h-[44px]" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1">dashboard</span>
+<span class="font-label-sm text-label-sm">Dashboard</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-primary-light active:scale-95 transition-transform rounded-xl min-w-[64px] min-h-[44px]" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1">calendar_month</span>
+<span class="font-label-sm text-label-sm">Bookings</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-primary-light active:scale-95 transition-transform rounded-xl min-w-[64px] min-h-[44px]" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1">cleaning_services</span>
+<span class="font-label-sm text-label-sm">Tasks</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-container rounded-xl p-2 active:scale-95 transition-transform min-w-[64px] min-h-[44px]" href="#">
+<span class="material-symbols-outlined text-[24px] mb-1" data-weight="fill">settings</span>
+<span class="font-label-sm text-label-sm">Settings</span>
+</a>
+</nav>
+<!-- Add Staff Modal -->
+<div class="hidden fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-on-background/40 backdrop-blur-sm transition-opacity" id="add-staff-modal">
+<div class="bg-surface-container-lowest w-full md:w-full md:max-w-md rounded-t-2xl md:rounded-2xl p-6 shadow-2xl transform transition-transform translate-y-0 relative border border-border-standard">
+<button class="absolute top-4 right-4 w-10 h-10 flex items-center justify-center text-text-secondary hover:bg-surface-container rounded-full transition-colors min-h-[44px]" onclick="document.getElementById('add-staff-modal').classList.add('hidden')">
+<span class="material-symbols-outlined">close</span>
+</button>
+<h2 class="font-h3 text-h3 text-on-background mb-6">Add New Staff</h2>
+<form class="flex flex-col gap-5">
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-text-secondary" for="staff-name">Full Name</label>
+<input class="w-full h-[44px] px-4 rounded-lg border border-border-standard bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent font-body-sm text-body-sm text-on-background placeholder-status-gray-text" id="staff-name" placeholder="e.g. Jane Doe" type="text">
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-text-secondary" for="staff-email">Email Address</label>
+<input class="w-full h-[44px] px-4 rounded-lg border border-border-standard bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent font-body-sm text-body-sm text-on-background placeholder-status-gray-text" id="staff-email" placeholder="jane@sparkinn.com" type="email">
+</div>
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-text-secondary" for="staff-role">Role</label>
+<div class="relative">
+<select class="w-full h-[44px] px-4 pr-10 appearance-none rounded-lg border border-border-standard bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent font-body-sm text-body-sm text-on-background" id="staff-role">
+<option value="front-desk">Front Desk</option>
+<option value="admin">Admin</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none">expand_more</span>
+</div>
+</div>
+<div class="mt-4 pt-4 border-t border-border-standard flex justify-end gap-3">
+<button class="px-5 py-2 min-h-[44px] rounded-lg border border-border-standard font-label-md text-label-md text-text-secondary hover:bg-surface-container transition-colors" onclick="document.getElementById('add-staff-modal').classList.add('hidden')" type="button">
+                        Cancel
+                    </button>
+<button class="px-5 py-2 min-h-[44px] rounded-lg bg-primary-container text-on-primary-container font-label-md text-label-md hover:bg-primary-hover active:bg-primary transition-colors flex items-center justify-center" type="submit">
+                        Add Staff Member
+                    </button>
+</div>
+</form>
+</div>
+</div>
+</body></html>

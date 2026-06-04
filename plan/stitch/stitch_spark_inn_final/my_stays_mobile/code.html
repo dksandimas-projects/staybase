@@ -1,0 +1,273 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "tertiary": "#605e5a",
+                        "outline": "#877363",
+                        "inverse-surface": "#303030",
+                        "on-surface": "#1b1b1b",
+                        "background": "#FDF8F3",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-blue-text": "#2563EB",
+                        "primary": "#8d4f00",
+                        "inverse-primary": "#ffb876",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "status-red-text": "#DC2626",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-secondary-container": "#5c6274",
+                        "surface-dim": "#dadada",
+                        "status-green-bg": "#F0FDF4",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "status-green-text": "#16A34A",
+                        "outline-variant": "#dac2af",
+                        "on-tertiary-container": "#393835",
+                        "on-secondary-fixed-variant": "#404758",
+                        "status-amber-text": "#D97706",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-secondary": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "on-background": "#1b1b1b",
+                        "on-error": "#ffffff",
+                        "border-standard": "#E5E7EB",
+                        "tertiary-fixed": "#e6e2dd",
+                        "inverse-on-surface": "#f1f1f1",
+                        "surface-container-lowest": "#ffffff",
+                        "text-secondary": "#4B5563",
+                        "surface-container-high": "#e8e8e8",
+                        "status-purple-bg": "#F5F3FF",
+                        "primary-container": "#ea8a1a",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface-variant": "#e2e2e2",
+                        "surface-container-low": "#f3f3f3",
+                        "secondary": "#575e70",
+                        "status-purple-text": "#7C3AED",
+                        "on-surface-variant": "#544335",
+                        "primary-fixed": "#ffdcc0",
+                        "on-primary-container": "#562e00",
+                        "primary-light": "#FEF3E2",
+                        "surface-container": "#eeeeee",
+                        "surface": "#f9f9f9",
+                        "on-primary": "#ffffff",
+                        "status-red-bg": "#FEF2F2",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-gray-text": "#6B7280",
+                        "primary-hover": "#C4720E",
+                        "page-bg": "#FDF8F3",
+                        "on-tertiary": "#ffffff",
+                        "error": "#ba1a1a",
+                        "surface-tint": "#8d4f00",
+                        "tertiary-container": "#a4a19d",
+                        "secondary-container": "#d9dff5",
+                        "on-primary-fixed": "#2d1600",
+                        "secondary-fixed": "#dce2f7",
+                        "error-container": "#ffdad6",
+                        "status-gray-bg": "#F3F4F6",
+                        "status-amber-bg": "#FFFBEB",
+                        "surface-bright": "#f9f9f9"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "8px",
+                        "xl": "12px",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "body-lg": ["Inter"],
+                        "h3": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "h1": ["Apollo"],
+                        "display-hero-mobile": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "h4": ["Inter"],
+                        "h2": ["Apollo"],
+                        "h1-mobile": ["Apollo"],
+                        "label-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Times New Roman'); /* Fallback for the prompt context */
+        }
+        .apollo-font { font-family: 'Apollo', serif; }
+        .inter-font { font-family: 'Inter', sans-serif; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+        .active-tab-indicator {
+            height: 2px;
+            width: 20px;
+            background: #8d4f00;
+            border-radius: 2px;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body class="bg-page-bg text-on-surface min-h-screen pb-24">
+<!-- Header / Top Bar -->
+<header class="fixed top-0 w-full z-50 bg-background/90 backdrop-blur-md">
+<div class="flex items-center px-6 py-4 max-w-7xl mx-auto">
+<button aria-label="Go back" class="w-11 h-11 flex items-center justify-start text-on-surface active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-[24px]">arrow_back</span>
+</button>
+<h1 class="font-h1-mobile text-h1-mobile apollo-font lowercase flex-grow text-center pr-11">my stays</h1>
+</div>
+</header>
+<main class="pt-24 px-6 max-w-md mx-auto space-y-8">
+<!-- Tab Navigation -->
+<div class="flex space-x-6 border-b border-outline-variant/30">
+<button class="pb-2 flex flex-col items-center group">
+<span class="font-label-md text-label-md text-primary font-bold">Upcoming</span>
+<div class="active-tab-indicator"></div>
+</button>
+<button class="pb-2 flex flex-col items-center group opacity-50">
+<span class="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors">Past</span>
+<div class="h-[2px] w-5 bg-transparent group-hover:bg-primary/20 mt-1"></div>
+</button>
+</div>
+<!-- Bookings List -->
+<div class="space-y-4">
+<!-- Confirmed Stay Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col group transition-all active:scale-[0.98]">
+<div class="flex p-3 gap-4">
+<div class="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden">
+<img alt="Luxury Room" class="w-full h-full object-cover" data-alt="A sun-drenched boutique hotel room in Bohol with warm wood accents and crisp white linens. The morning light filters through sheer curtains, highlighting the minimalist warm-minimalist aesthetic. Tropical foliage is visible through the window, creating a serene and private sanctuary atmosphere. High-end photography with soft shadows and rich textures." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC7Hj3W14OzEa6J5zbvac6OapN-X-IFpBAl8R9baLqe60feGqrQ2onY1XBbabOY4yeqFAA4lV95sGc-tIAltfuYjfCIE_rd48rkJSwMCS67OE1Si59NHfht57mmgrvlZsM1i7cPhApmMOn0rHZkUXiKswiTGZfmGVur9l5lX-QKCB_X_SjWOceZspMRbdebM4wGW8bBq33IV1PecBcKZvjltwW3Ddi6wVgHWQHfUhulA5Y9HyXIZZHCBPSQF0liYi5sN8olKNfUAeZP">
+</div>
+<div class="flex flex-col justify-center flex-grow py-1">
+<div class="flex justify-between items-start">
+<h3 class="font-h4 text-h4 apollo-font">river view suite</h3>
+<span class="bg-status-green-bg text-status-green-text text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full">Confirmed</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Oct 12 — Oct 15, 2024</p>
+<div class="mt-3 flex items-center justify-between">
+<span class="bg-primary-light text-primary text-label-sm font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">star</span>
+                                450 pts
+                            </span>
+<a class="text-primary font-label-md text-label-md hover:underline" href="#">View Details</a>
+</div>
+</div>
+</div>
+</div>
+<!-- Checked Out Stay Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col group transition-all opacity-80">
+<div class="flex p-3 gap-4">
+<div class="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden grayscale-[0.3]">
+<img alt="Forest Loft" class="w-full h-full object-cover" data-alt="A cozy, high-end loft bedroom with exposed concrete walls and organic wood furniture. The lighting is moody and sophisticated, showcasing a boutique hotel vibe at night. The interior design reflects the efficiency-first yet warm luxury ethos of spark inn. The atmosphere is quiet, elegant, and deeply comfortable." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB_XofQabmkmoVTwHKK13DicY4wif8XxhcgFWmiQB8Df3qa20aqIc1-cxN58aYBfbbScY-TXx57dm-SE0iLUKWoLVO_qmU_qN3GRO41NdUbU45FJSmW1Bz8QQpqgwm5WcerJk68BBA069otMsgleSkKsgyuzX8uG5ara9r_KOZXUy_2msr5cCj37xwhFfCy_n1sfx1eGIlEapW_6TzYarCsx5y0ftTEPt9m_NitzZSE1mU30BppZBP28euvPJDj0lIOW22liXlAi1Y-">
+</div>
+<div class="flex flex-col justify-center flex-grow py-1">
+<div class="flex justify-between items-start">
+<h3 class="font-h4 text-h4 apollo-font">forest canopy loft</h3>
+<span class="bg-status-gray-bg text-status-gray-text text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full">Checked Out</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Aug 05 — Aug 08, 2024</p>
+<div class="mt-3 flex items-center justify-between">
+<span class="bg-surface-container-high text-on-surface-variant text-label-sm font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                                Earned
+                            </span>
+<a class="text-on-surface-variant font-label-md text-label-md hover:underline" href="#">Review Stay</a>
+</div>
+</div>
+</div>
+</div>
+<!-- Cancelled Stay Card -->
+<div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden flex flex-col group transition-all opacity-60">
+<div class="flex p-3 gap-4">
+<div class="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden grayscale">
+<img alt="Garden Villa" class="w-full h-full object-cover" data-alt="Modern tropical architecture with clean lines and natural materials. A garden villa featuring floor-to-ceiling glass and a private pool area. The aesthetic is warm minimalism with a focus on seamless indoor-outdoor living. The light is diffused and soft, creating a peaceful, high-end resort feel in a lush Bohol landscape." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBw0y8qDLUA549wg7fycM0lkD9sTQ07nuxBBCWOYlwWVyy_GyA2E-kZnsTgXxA5-pr4tESgLlwMX4rfO3cnIkGHPrsXQtgZ3oZIgxB-sYMhW9OyPy7u9aKhaLrOJXkF_IjNWApNzkklopJ8_Q8xCdvcY_n86FTa1qT8BWpnqB2n1JQzyl1tBwwbKkhP6TyulJgBZoQ89UeZcsuQnIgGxKMQNNyRq1l3qirM7_njQ27bPtYvU7VvNgq5ti9uhleIdpi_9F733ObDfiAS">
+</div>
+<div class="flex flex-col justify-center flex-grow py-1">
+<div class="flex justify-between items-start">
+<h3 class="font-h4 text-h4 apollo-font">terrace garden villa</h3>
+<span class="bg-status-red-bg text-status-red-text text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full">Cancelled</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">July 18 — July 20, 2024</p>
+<div class="mt-3 flex items-center justify-between">
+<span class="text-status-red-text text-label-sm font-medium italic">Refund Processed</span>
+<a class="text-on-surface-variant font-label-md text-label-md hover:underline opacity-50" href="#">Details</a>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Empty State (Hidden by default for this view) -->
+<div class="hidden flex flex-col items-center justify-center text-center py-16 px-8 animate-fade-in" id="empty-state">
+<div class="mb-6 opacity-20">
+<span class="material-symbols-outlined text-[120px] text-primary" style="font-variation-settings: 'wght' 100;">bed</span>
+</div>
+<h2 class="font-h2 text-h2 apollo-font lowercase mb-2">no stays yet.</h2>
+<p class="font-body-lg text-body-lg text-text-secondary mb-8">book your first stay and start earning points for your sanctuary escape.</p>
+<button class="bg-primary-container text-on-primary-container px-8 h-touch-target-min rounded-lg font-label-md text-label-md uppercase tracking-widest active:scale-95 transition-transform">
+                Book your stay
+            </button>
+</div>
+</main>
+<!-- Bottom Navigation Shell -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full bg-surface-container-lowest/80 backdrop-blur-xl z-50">
+<div class="flex justify-around items-center h-20 px-4">
+<button class="flex flex-col items-center text-on-surface-variant gap-1">
+<span class="material-symbols-outlined text-[24px]">explore</span>
+<span class="text-[10px] font-medium font-inter-font">Explore</span>
+</button>
+<button class="flex flex-col items-center text-on-surface-variant gap-1">
+<span class="material-symbols-outlined text-[24px]">favorite</span>
+<span class="text-[10px] font-medium font-inter-font">Saved</span>
+</button>
+<button class="flex flex-col items-center text-primary gap-1">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">bed</span>
+<span class="text-[10px] font-medium font-inter-font">My Stays</span>
+</button>
+<button class="flex flex-col items-center text-on-surface-variant gap-1">
+<span class="material-symbols-outlined text-[24px]">person</span>
+<span class="text-[10px] font-medium font-inter-font">Profile</span>
+</button>
+</div>
+</nav>
+<!-- Minimal Script for Demo Interaction -->
+<script>
+        // Example: Toggling between tabs logic could be added here
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Haptic feedback simulation
+                if (window.navigator.vibrate) window.navigator.vibrate(10);
+            });
+        });
+
+        // Simple script to toggle empty state for showcase purposes if needed
+        function showEmpty() {
+            document.querySelector('main > div:nth-child(2)').classList.add('hidden');
+            document.getElementById('empty-state').classList.remove('hidden');
+        }
+    </script>
+</body></html>

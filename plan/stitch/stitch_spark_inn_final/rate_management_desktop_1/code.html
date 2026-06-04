@@ -1,0 +1,329 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Rate Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/apollo" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "status-purple-text": "#7C3AED",
+                        "tertiary-container": "#a4a19d",
+                        "tertiary-fixed": "#e6e2dd",
+                        "on-primary-container": "#562e00",
+                        "outline-variant": "#dac2af",
+                        "inverse-primary": "#ffb876",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "on-primary-fixed": "#2d1600",
+                        "inverse-on-surface": "#f1f1f1",
+                        "on-primary": "#ffffff",
+                        "surface-bright": "#f9f9f9",
+                        "status-purple-bg": "#F5F3FF",
+                        "border-standard": "#E5E7EB",
+                        "background": "#f9f9f9",
+                        "primary-hover": "#C4720E",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface-container": "#eeeeee",
+                        "status-green-bg": "#F0FDF4",
+                        "secondary": "#575e70",
+                        "primary-fixed-dim": "#ffb876",
+                        "status-gray-text": "#6B7280",
+                        "on-tertiary": "#ffffff",
+                        "on-tertiary-container": "#393835",
+                        "on-error": "#ffffff",
+                        "error": "#ba1a1a",
+                        "text-secondary": "#4B5563",
+                        "on-surface": "#1b1b1b",
+                        "surface-container-highest": "#e2e2e2",
+                        "secondary-fixed": "#dce2f7",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "status-amber-text": "#D97706",
+                        "outline": "#877363",
+                        "on-background": "#1b1b1b",
+                        "primary-light": "#FEF3E2",
+                        "on-secondary-container": "#5c6274",
+                        "tertiary": "#605e5a",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "secondary-container": "#d9dff5",
+                        "surface-container-low": "#f3f3f3",
+                        "error-container": "#ffdad6",
+                        "surface-variant": "#e2e2e2",
+                        "status-red-text": "#DC2626",
+                        "page-bg": "#F9FAFB",
+                        "status-green-text": "#16A34A",
+                        "surface-container-high": "#e8e8e8",
+                        "status-amber-bg": "#FFFBEB",
+                        "surface-tint": "#8d4f00",
+                        "surface-container-lowest": "#ffffff",
+                        "surface": "#f9f9f9",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-secondary": "#ffffff",
+                        "surface-dim": "#dadada",
+                        "on-surface-variant": "#544335",
+                        "inverse-surface": "#303030",
+                        "primary": "#8d4f00",
+                        "primary-container": "#ea8a1a",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-error-container": "#93000a",
+                        "status-blue-text": "#2563EB",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "status-red-bg": "#FEF2F2",
+                        "on-secondary-fixed-variant": "#404758",
+                        "primary-fixed": "#ffdcc0"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "touch-target-min": "44px",
+                        "sidebar-width": "240px",
+                        "max-width-auth": "460px",
+                        "drawer-width": "480px",
+                        "max-width-booking": "600px",
+                        "unit": "8px"
+                    },
+                    "fontFamily": {
+                        "label-sm": ["Inter"],
+                        "h4": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "h3": ["Inter"],
+                        "h2": ["Apollo"],
+                        "h1-mobile": ["Apollo"],
+                        "display-hero-mobile": ["Apollo"],
+                        "h1": ["Apollo"],
+                        "body-lg": ["Inter"],
+                        "display-hero": ["Apollo"],
+                        "label-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface font-body-sm h-screen flex overflow-hidden">
+<!-- NavigationDrawer Component -->
+<nav class="fixed left-0 top-0 h-full w-[240px] bg-inverse-surface dark:bg-surface-container-lowest border-r border-outline-variant flex flex-col h-full py-8 z-40">
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-surface-container-low flex items-center justify-center overflow-hidden">
+<span class="material-symbols-outlined text-on-surface" style="font-variation-settings: 'FILL' 1;">person</span>
+</div>
+<div>
+<h2 class="font-h3 text-h3 lowercase text-white">spark inn</h2>
+<p class="font-label-sm text-label-sm text-secondary-fixed-dim">Admin Portal</p>
+</div>
+</div>
+<ul class="flex flex-col gap-1 w-full flex-grow">
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-body-lg text-body-lg">Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span class="font-body-lg text-body-lg">Bookings</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">bed</span>
+<span class="font-body-lg text-body-lg">Rooms</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="font-body-lg text-body-lg">Guests</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-body-lg text-body-lg">Settings</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- Main Content -->
+<main class="ml-[240px] flex-1 flex flex-col h-full overflow-y-auto">
+<!-- Header -->
+<header class="px-8 pt-10 pb-6 border-b border-border-standard bg-surface-container-lowest sticky top-0 z-10">
+<div class="max-w-7xl mx-auto flex justify-between items-end">
+<div>
+<h1 class="font-h1 text-h1 text-on-surface mb-2">Rate Management</h1>
+<p class="font-body-lg text-body-lg text-text-secondary">Configure base rates, seasonal pricing, and promotional rules.</p>
+</div>
+<button class="bg-primary-container text-on-primary-container font-label-md text-label-md h-[touch-target-min] px-6 rounded-lg hover:bg-primary-hover transition-colors duration-200 flex items-center justify-center">
+                    Save All Changes
+                </button>
+</div>
+<!-- Tab Navigation -->
+<div class="max-w-7xl mx-auto mt-8 flex gap-8">
+<button class="font-label-md text-label-md text-primary-container border-b-2 border-primary-container pb-3 px-1 font-semibold">Room Rates</button>
+<button class="font-label-md text-label-md text-text-secondary border-b-2 border-transparent hover:text-on-surface pb-3 px-1 transition-colors">Weekend Rates</button>
+<button class="font-label-md text-label-md text-text-secondary border-b-2 border-transparent hover:text-on-surface pb-3 px-1 transition-colors">Corporate Rate</button>
+<button class="font-label-md text-label-md text-text-secondary border-b-2 border-transparent hover:text-on-surface pb-3 px-1 transition-colors">Discounts</button>
+<button class="font-label-md text-label-md text-text-secondary border-b-2 border-transparent hover:text-on-surface pb-3 px-1 transition-colors">Vouchers</button>
+</div>
+</header>
+<!-- Content Area -->
+<div class="p-8 max-w-7xl mx-auto w-full">
+<div class="mb-6">
+<h2 class="font-h3 text-h3 text-on-surface mb-1">Standard Nightly Rates</h2>
+<p class="font-body-sm text-body-sm text-text-secondary">Base rates before seasonal adjustments.</p>
+</div>
+<!-- Data Table Card -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-border-standard">
+<th class="font-label-sm text-label-sm text-text-secondary px-6 py-4 uppercase tracking-wider w-1/3">Room Type</th>
+<th class="font-label-sm text-label-sm text-text-secondary px-6 py-4 uppercase tracking-wider w-1/4">Nightly Rate (PHP)</th>
+<th class="font-label-sm text-label-sm text-text-secondary px-6 py-4 uppercase tracking-wider w-1/4">Weekend Rate (PHP)</th>
+<th class="font-label-sm text-label-sm text-text-secondary px-6 py-4 uppercase tracking-wider text-right w-auto">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-4">
+<img alt="Deluxe King Suite thumbnail" class="w-12 h-12 rounded-lg object-cover border border-border-standard" data-alt="A bright, luxurious modern hotel room with a large king bed, soft white linens, and minimalist warm wood accents. The lighting is soft and natural, creating a serene sanctuary feel typical of a premium boutique resort." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCsQ-BvMr8EiTC1pY8zj0zad2RvkQeoQZGr1ndS3IeEzMOKcdIS-oZ-CuFURDnDB48HK0fBJn13qUKDuB0S1Ausvec6nJ3sKowUIWTRKKpOvcOPChyE4Fp64iNDIzPdnhhZX_w4DPPq7Cz0glTY62JaN8Frltn72dZ7GaEv0MIUSvyjQadh9l2W5dQqOadF-AlC6KBOhxstyMsO-k6uLos89-jFDhpeXQxUEWSj7IU-z_5HeZ-UGpHiOriVzYujqYvCYv5W-Cc5_m6p">
+<div>
+<p class="font-label-md text-label-md text-on-surface font-semibold">Deluxe King Suite</p>
+<p class="font-label-sm text-label-sm text-text-secondary">2 Guests • 45sqm</p>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="12500">
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="14000">
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="font-label-md text-label-md text-primary-container hover:text-primary-hover transition-colors">Save</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-4">
+<img alt="Standard Queen thumbnail" class="w-12 h-12 rounded-lg object-cover border border-border-standard" data-alt="A clean, minimalist hotel room featuring a comfortable queen-sized bed with crisp white sheets and a subtle warm-toned headboard. The room is well-lit, conveying an efficient yet luxurious guest experience." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_b5V0oZItgWKIHOY7cRwsWOs_Hm5ZdpZlMmBRf-vePFPlLgvvAcqXnvkkCY9D84ekeKXBM3cWXOXswmgp1Ccevc5sGrmZW2pRBaBx-P2TTiKS3FhBTciUzbb1PjIOtiuV18eOAiVWINq07UGihQ2ZifqBxk7RWF9-k8oZNWpJW0Y17kwvI8kZW7E5pqZUJ8GXpunAC0Wk2wW6amPUWy8i_UtVxIa36CWfXHH16ymhbio7fzcDdWWVNoM1Wp6FxvJNX-F-PnFpLDkt">
+<div>
+<p class="font-label-md text-label-md text-on-surface font-semibold">Standard Queen</p>
+<p class="font-label-sm text-label-sm text-text-secondary">2 Guests • 30sqm</p>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="8500">
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="9500">
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="font-label-md text-label-md text-primary-container hover:text-primary-hover transition-colors">Save</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-4">
+<img alt="Family Premium thumbnail" class="w-12 h-12 rounded-lg object-cover border border-border-standard" data-alt="A spacious family hotel suite with two large beds, elegant warm minimalist decor, and ample natural light. The aesthetic emphasizes comfort and premium service in a serene tropical setting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA4x37XQ3QD41xb19GtEMBVRNZYejOSYwjCJeNFF987kmKdvRGS3mfJ5NI1SedcFquj7hpiVGzWzgdTKfNBccPQ_Iy8-oFBHOA94sPPy7onBNBn4LtudmeQ7Jf_joccfl-PxjPJdixui6TCJGK4aF-U1zjzUuOreUnQQ1pCf7C3VDMgNW0xgdLotHK1jdz3t5sb0ZhHYF3iMYGzd_YwLRtBrsEo1SDCg1IZ0tyHvpE1S60pyICSMGdeGGXc7nUqwGPCN6fTKNMRT83U">
+<div>
+<p class="font-label-md text-label-md text-on-surface font-semibold">Family Premium</p>
+<p class="font-label-sm text-label-sm text-text-secondary">4 Guests • 65sqm</p>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="16000">
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="18000">
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="font-label-md text-label-md text-primary-container hover:text-primary-hover transition-colors">Save</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-4">
+<img alt="Suite Ocean View thumbnail" class="w-12 h-12 rounded-lg object-cover border border-border-standard" data-alt="An upscale luxury hotel suite showcasing a stunning ocean view through large windows. The room is styled in warm minimalism with elegant furniture, bright natural light, and a relaxing, high-end atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAqIAU4o8LWOT5gD72iizuXb-Xgy_fzBFenLksPoxep5j3B3apVflu5fAEXqdFpaIe61hkBmEhjv0G9H3cH_j5MH_Dxj60bIJ16OWN9QQJ0uppNGqE9knCUof9g0er-A5OKIIcptrt4NLhZKRt27VgbfoDj_wUWhSR58V1Y5l2vSU9W0nazm6aLcASbhPVem3gqAVxdWVvPGZBZYjSvHwv3UBxVQb84jZoJG8plcLk7GgL7H37idUPXWf1ZRNRZtMqNAabHAHiRHzDA">
+<div>
+<p class="font-label-md text-label-md text-on-surface font-semibold">Suite Ocean View</p>
+<p class="font-label-sm text-label-sm text-text-secondary">2 Guests • 55sqm</p>
+</div>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="22000">
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="relative">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-4 h-[touch-target-min] rounded-lg border border-border-standard bg-surface-container-lowest focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-surface outline-none transition-all" type="number" value="25000">
+</div>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="font-label-md text-label-md text-primary-container hover:text-primary-hover transition-colors">Save</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="mt-8 mb-12 flex justify-end">
+<button class="bg-primary-container text-on-primary-container font-label-md text-label-md h-[touch-target-min] px-8 rounded-lg hover:bg-primary-hover transition-colors duration-200 flex items-center justify-center shadow-sm">
+                    Save All Changes
+                </button>
+</div>
+</div>
+</main>
+</body></html>

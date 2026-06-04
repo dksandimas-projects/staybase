@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    @font-face {
+      font-family: 'Apollo';
+      src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Fallback generic serif for simulation */
+    }
+    .font-apollo { font-family: 'Apollo', serif; }
+    
+    /* Custom Scrollbar for the Warm Minimal aesthetic */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 10px; }
+    
+    .drawer-open { transform: translateX(0); }
+    .drawer-closed { transform: translateX(100%); }
+    .overlay-active { opacity: 1; pointer-events: auto; }
+    .overlay-inactive { opacity: 0; pointer-events: none; }
+  </style>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+                  "on-tertiary": "#ffffff",
+                  "on-background": "#1b1b1b",
+                  "surface-bright": "#f9f9f9",
+                  "primary-hover": "#C4720E",
+                  "status-blue-text": "#2563EB",
+                  "on-primary": "#ffffff",
+                  "surface-tint": "#8d4f00",
+                  "border-standard": "#E5E7EB",
+                  "tertiary-fixed": "#e6e2dd",
+                  "status-amber-text": "#D97706",
+                  "inverse-primary": "#ffb876",
+                  "secondary-fixed": "#dce2f7",
+                  "on-primary-fixed-variant": "#6b3b00",
+                  "on-secondary-fixed": "#141b2b",
+                  "on-primary-fixed": "#2d1600",
+                  "primary-container": "#ea8a1a",
+                  "status-gray-text": "#6B7280",
+                  "tertiary": "#605e5a",
+                  "text-secondary": "#4B5563",
+                  "status-red-text": "#DC2626",
+                  "status-green-text": "#16A34A",
+                  "surface": "#f9f9f9",
+                  "on-surface-variant": "#544335",
+                  "secondary-container": "#d9dff5",
+                  "outline-variant": "#dac2af",
+                  "tertiary-fixed-dim": "#cac6c1",
+                  "outline": "#877363",
+                  "surface-variant": "#e2e2e2",
+                  "status-gray-bg": "#F3F4F6",
+                  "primary-fixed": "#ffdcc0",
+                  "on-tertiary-fixed": "#1d1b19",
+                  "primary-light": "#FEF3E2",
+                  "secondary": "#575e70",
+                  "status-purple-text": "#7C3AED",
+                  "surface-container": "#eeeeee",
+                  "on-surface": "#1b1b1b",
+                  "on-secondary": "#ffffff",
+                  "surface-container-lowest": "#ffffff",
+                  "on-secondary-fixed-variant": "#404758",
+                  "on-primary-container": "#562e00",
+                  "status-green-bg": "#F0FDF4",
+                  "tertiary-container": "#a4a19d",
+                  "status-purple-bg": "#F5F3FF",
+                  "error": "#ba1a1a",
+                  "primary-fixed-dim": "#ffb876",
+                  "background": "#f9f9f9",
+                  "primary": "#8d4f00",
+                  "on-secondary-container": "#5c6274",
+                  "surface-container-high": "#e8e8e8",
+                  "surface-container-highest": "#e2e2e2",
+                  "page-bg": "#F9FAFB",
+                  "on-error": "#ffffff",
+                  "status-amber-bg": "#FFFBEB",
+                  "surface-container-low": "#f3f3f3",
+                  "error-container": "#ffdad6",
+                  "on-tertiary-container": "#393835",
+                  "status-blue-bg": "#EFF6FF",
+                  "secondary-fixed-dim": "#c0c6db",
+                  "inverse-on-surface": "#f1f1f1",
+                  "on-tertiary-fixed-variant": "#484643",
+                  "on-error-container": "#93000a",
+                  "status-red-bg": "#FEF2F2",
+                  "inverse-surface": "#303030",
+                  "surface-dim": "#dadada"
+          },
+          "borderRadius": {
+                  "DEFAULT": "0.25rem",
+                  "lg": "0.5rem",
+                  "xl": "0.75rem",
+                  "full": "9999px"
+          },
+          "fontFamily": {
+                  "h1": ["Apollo"],
+                  "h2": ["Apollo"],
+                  "h3": ["Inter"],
+                  "h4": ["Inter"],
+                  "body-lg": ["Inter"],
+                  "body-sm": ["Inter"],
+                  "label-md": ["Inter"],
+                  "label-sm": ["Inter"]
+          },
+          "fontSize": {
+                  "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                  "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                  "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                  "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                  "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                  "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                  "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                  "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-page-bg text-on-background font-body-sm min-h-screen flex flex-col items-center justify-center p-0 md:p-8">
+<!-- Trigger Button (For Demo) -->
+<button class="bg-primary text-on-primary px-6 py-3 rounded-lg shadow-lg font-label-md flex items-center gap-2 hover:bg-primary-hover transition-colors" onclick="toggleDrawer()">
+<span class="material-symbols-outlined">edit</span> Edit Room 402
+  </button>
+<!-- Overlay -->
+<div class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] transition-opacity duration-300 overlay-inactive" id="drawerOverlay" onclick="toggleDrawer()"></div>
+<!-- Drawer Container (Mobile Focused) -->
+<aside class="fixed right-0 top-0 h-full w-full max-w-[480px] bg-surface-container-lowest z-[70] shadow-2xl transition-transform duration-500 ease-in-out drawer-closed flex flex-col overflow-hidden" id="roomEditDrawer">
+<!-- Header -->
+<header class="flex justify-between items-center px-6 h-16 bg-surface-container-lowest border-b border-border-standard">
+<h1 class="font-h1-mobile text-h1-mobile text-primary font-apollo lowercase">Edit Room 402</h1>
+<button class="p-2 hover:bg-surface-container-high rounded-full transition-colors active:scale-95" onclick="toggleDrawer()">
+<span class="material-symbols-outlined text-text-secondary">close</span>
+</button>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto px-6 py-8 space-y-10 pb-32">
+<!-- Photos Section -->
+<section>
+<div class="flex items-center justify-between mb-4">
+<h4 class="font-h4 text-h4 text-on-surface">Photos</h4>
+<span class="text-label-sm text-text-secondary">4 of 8 uploads</span>
+</div>
+<div class="flex gap-4 overflow-x-auto pb-4 -mx-2 px-2 snap-x">
+<!-- Add Photo Card -->
+<div class="flex-shrink-0 w-32 h-32 rounded-xl border-2 border-dashed border-outline-variant bg-surface flex flex-col items-center justify-center cursor-pointer hover:bg-primary-light transition-colors group">
+<span class="material-symbols-outlined text-primary mb-1">add_a_photo</span>
+<span class="text-label-sm text-primary font-semibold">Add Photo</span>
+</div>
+<!-- Photo Cards -->
+<div class="flex-shrink-0 w-32 h-32 rounded-xl overflow-hidden shadow-sm snap-start relative">
+<img class="w-full h-full object-cover" data-alt="A warm, minimalist boutique hotel room interior featuring soft morning light streaming through sheer white curtains. The palette is dominated by creams, soft oranges, and natural wood textures. A single plush bed with high-thread-count linen sits centrally, radiating a sanctuary-like peace and luxury." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBG9T-25yDwzt2gCUmAuVeEvik2Uyc1X6TskzreOq75DF21QNiYteytbv7as0h3RhqHuRurfK6whLEpAvxRWZea5n1nHDIK9OgOjR_Kgije_IHSukB6IT5ijZfutrW82BdGpmJ3sQpTJNXs7ETohteO5YdUv_ZplQHzHUm-Hv6I2_YIsffvTaFg2lUK1z_5m5B3xNZkXvRePnv38w46rll1wq0iU6nuSLwCOlFBixZt8phYXXZTM5pfu2jo2gCqF_LgT83xUTxVOhLY"/>
+<button class="absolute top-1 right-1 bg-black/40 p-1 rounded-full text-white backdrop-blur-md"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</div>
+<div class="flex-shrink-0 w-32 h-32 rounded-xl overflow-hidden shadow-sm snap-start relative">
+<img class="w-full h-full object-cover" data-alt="Detail shot of a minimalist bathroom within a luxury suite, featuring matte black fixtures and smooth beige stone tiles. The lighting is low and moody, highlighting the tactile quality of the surfaces. A small wooden tray with high-end organic toiletries sits elegantly on the vanity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCJXxvkQGg8-EYgTbx99ko8bjzQ3JR-HwgMUTJ-q9UulURrXGoerSpUzGG6i4PYEDkEe-U3vnsXq2x04SMHrsIGu5Qv8cTavBdcUutLeMtVzZob_ZjYgDN31x4-zQMc_Lv2-edN7aEjn6EjEHbb9frK6cEfzTGeRgJ3M0ZSHqrtTHSI9IYc-byOdk5lvZLC8hduhG-95M3ynWmaZgNLXuvmH7TiMELI8lNPpwNMYq-yTFP0Ek5hCUS6UhO2TzQC3xCkJp9Q_IB1EfEW"/>
+<button class="absolute top-1 right-1 bg-black/40 p-1 rounded-full text-white backdrop-blur-md"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</div>
+<div class="flex-shrink-0 w-32 h-32 rounded-xl overflow-hidden shadow-sm snap-start relative">
+<img class="w-full h-full object-cover" data-alt="A spacious balcony view from a boutique hotel room overlooking a lush tropical landscape of Bohol. The warm glow of the sunset bathes the modern wooden furniture in deep amber tones. The overall aesthetic is one of unassuming luxury and quiet connection to nature." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7Tm8h8BuBWrYMZy4prWcopj1vFn7wbwT41bxiwvQfg6WLvA62-s_VghzQn9DfZpu9929KFcYy9_zWyQ0UITerteUPIp_X73THy91tW9if6OZC3-CnastFsJ01MhOXw8Jdx0elS6b-WYKMO9umAEjUc_p7sruTEGDtkgEptbbOIArzuM4O4TLy_J-p4bBXPV4rbI1M5XYkCSsrBjZFLkzMp-dxZG3gqx30EDLNbA-xQ-O0yNtucL3NpT7FKYBlIiP8T_sMo9UNlQyy"/>
+<button class="absolute top-1 right-1 bg-black/40 p-1 rounded-full text-white backdrop-blur-md"><span class="material-symbols-outlined text-[16px]">close</span></button>
+</div>
+</div>
+</section>
+<!-- Basic Information -->
+<section class="space-y-6">
+<h4 class="font-h4 text-h4 text-on-surface">Basic Information</h4>
+<div class="grid grid-cols-1 gap-6">
+<div class="space-y-1.5">
+<label class="text-label-sm text-text-secondary uppercase tracking-wider font-semibold">Room Name</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary outline-none transition-all text-body-sm" type="text" value="The Horizon Suite"/>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-1.5">
+<label class="text-label-sm text-text-secondary uppercase tracking-wider font-semibold">Room Type</label>
+<select class="w-full h-11 px-4 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary outline-none bg-surface-container-lowest appearance-none text-body-sm">
+<option>Suite</option>
+<option>Deluxe</option>
+<option>Standard</option>
+</select>
+</div>
+<div class="space-y-1.5">
+<label class="text-label-sm text-text-secondary uppercase tracking-wider font-semibold">Max Capacity</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary outline-none text-body-sm" type="number" value="2"/>
+</div>
+</div>
+<div class="space-y-1.5">
+<label class="text-label-sm text-text-secondary uppercase tracking-wider font-semibold">Bed Type</label>
+<input class="w-full h-11 px-4 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary outline-none text-body-sm" type="text" value="King Size (Organic Cotton)"/>
+</div>
+</div>
+</section>
+<!-- Description -->
+<section class="space-y-1.5">
+<label class="text-label-sm text-text-secondary uppercase tracking-wider font-semibold">Marketing Copy</label>
+<textarea class="w-full p-4 rounded-lg border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary outline-none resize-none text-body-sm leading-relaxed" rows="4">Experience unparalleled tranquility in our Horizon Suite. Designed with warm minimalist principles, this room features expansive views of the Panglao coastline, handmade local furnishings, and a curated sensory experience for the ultimate sanctuary.</textarea>
+</section>
+<!-- Amenities -->
+<section class="space-y-4">
+<h4 class="font-h4 text-h4 text-on-surface">Amenities</h4>
+<div class="grid grid-cols-2 gap-y-4">
+<label class="flex items-center gap-3 cursor-pointer group">
+<input checked="" class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" type="checkbox"/>
+<span class="text-body-sm text-on-surface-variant group-hover:text-primary transition-colors">High-speed WiFi</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<input checked="" class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" type="checkbox"/>
+<span class="text-body-sm text-on-surface-variant group-hover:text-primary transition-colors">Air Conditioning</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<input class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" type="checkbox"/>
+<span class="text-body-sm text-on-surface-variant group-hover:text-primary transition-colors">Private Balcony</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<input checked="" class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" type="checkbox"/>
+<span class="text-body-sm text-on-surface-variant group-hover:text-primary transition-colors">Mini Bar</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<input class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" type="checkbox"/>
+<span class="text-body-sm text-on-surface-variant group-hover:text-primary transition-colors">Smart TV</span>
+</label>
+<label class="flex items-center gap-3 cursor-pointer group">
+<input checked="" class="w-5 h-5 rounded border-border-standard text-primary-container focus:ring-primary-container cursor-pointer" type="checkbox"/>
+<span class="text-body-sm text-on-surface-variant group-hover:text-primary transition-colors">Safety Deposit</span>
+</label>
+</div>
+</section>
+<!-- Status -->
+<section class="bg-surface-container-low p-6 rounded-2xl space-y-6">
+<div class="flex items-center justify-between">
+<div>
+<h4 class="font-h4 text-body-lg font-bold text-on-surface">Room Availability</h4>
+<p class="text-label-sm text-text-secondary">Toggle status for bookings</p>
+</div>
+<button class="relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-status-green-text" id="statusToggle" onclick="toggleStatus()">
+<span aria-hidden="true" class="translate-x-5 pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+</button>
+</div>
+<div class="hidden space-y-3 pt-4 border-t border-border-standard" id="blockReason">
+<label class="text-label-sm text-status-red-text uppercase font-bold">Blocking Reason</label>
+<div class="flex flex-col gap-2">
+<select class="w-full h-11 px-4 rounded-lg border border-status-red-text focus:ring-1 focus:ring-status-red-text outline-none text-body-sm">
+<option>Scheduled Maintenance</option>
+<option>Deep Cleaning</option>
+<option>Emergency Repairs</option>
+<option>Management Hold</option>
+</select>
+<textarea class="w-full p-4 rounded-lg border border-border-standard text-body-sm" placeholder="Additional notes for front desk..."></textarea>
+</div>
+</div>
+</section>
+</div>
+<!-- Sticky Footer -->
+<footer class="absolute bottom-0 left-0 w-full bg-surface-container-lowest border-t border-border-standard p-6 grid grid-cols-2 gap-4">
+<button class="h-11 flex items-center justify-center border border-border-standard rounded-lg font-label-md text-text-secondary hover:bg-surface transition-colors active:scale-95" onclick="toggleDrawer()">
+        Cancel
+      </button>
+<button class="h-11 flex items-center justify-center bg-primary-container text-on-primary-container font-semibold rounded-lg shadow-md hover:bg-primary-hover hover:text-white transition-all active:scale-95" onclick="saveChanges()">
+        Save Changes
+      </button>
+</footer>
+</aside>
+<script>
+    let isBlocked = false;
+
+    function toggleDrawer() {
+      const drawer = document.getElementById('roomEditDrawer');
+      const overlay = document.getElementById('drawerOverlay');
+      
+      if (drawer.classList.contains('drawer-closed')) {
+        drawer.classList.remove('drawer-closed');
+        drawer.classList.add('drawer-open');
+        overlay.classList.remove('overlay-inactive');
+        overlay.classList.add('overlay-active');
+      } else {
+        drawer.classList.add('drawer-closed');
+        drawer.classList.remove('drawer-open');
+        overlay.classList.add('overlay-inactive');
+        overlay.classList.remove('overlay-active');
+      }
+    }
+
+    function toggleStatus() {
+      const toggle = document.getElementById('statusToggle');
+      const circle = toggle.querySelector('span');
+      const blockReason = document.getElementById('blockReason');
+      
+      isBlocked = !isBlocked;
+      
+      if (isBlocked) {
+        toggle.classList.remove('bg-status-green-text');
+        toggle.classList.add('bg-status-red-text');
+        circle.classList.remove('translate-x-5');
+        circle.classList.add('translate-x-0');
+        blockReason.classList.remove('hidden');
+      } else {
+        toggle.classList.add('bg-status-green-text');
+        toggle.classList.remove('bg-status-red-text');
+        circle.classList.add('translate-x-5');
+        circle.classList.remove('translate-x-0');
+        blockReason.classList.add('hidden');
+      }
+    }
+
+    function saveChanges() {
+      // Micro-interaction for feedback
+      const btn = event.currentTarget;
+      const originalText = btn.innerHTML;
+      btn.innerHTML = `<span class="material-symbols-outlined animate-spin">refresh</span>`;
+      btn.disabled = true;
+      
+      setTimeout(() => {
+        btn.innerHTML = `<span class="material-symbols-outlined">check_circle</span>`;
+        btn.classList.add('bg-status-green-text');
+        
+        setTimeout(() => {
+          toggleDrawer();
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+          btn.classList.remove('bg-status-green-text');
+        }, 800);
+      }, 1200);
+    }
+  </script>
+</body></html>

@@ -1,0 +1,273 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn | Concierge Chat</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: url('https://fonts.cdnfonts.com/css/apollo') format('woff2'); /* Fallback approximation */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #F9FAFB;
+        }
+        .font-display-hero { font-family: 'Apollo', serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Custom Scrollbar for Chat */
+        .chat-scroll::-webkit-scrollbar { width: 6px; }
+        .chat-scroll::-webkit-scrollbar-track { background: transparent; }
+        .chat-scroll::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 10px; }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface": "#1b1b1b",
+                        "text-secondary": "#4B5563",
+                        "primary": "#8d4f00",
+                        "surface": "#f9f9f9",
+                        "primary-hover": "#C4720E",
+                        "border-standard": "#E5E7EB",
+                        "primary-light": "#FEF3E2",
+                        "primary-container": "#ea8a1a",
+                        "on-primary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#f3f3f3",
+                        "surface-container": "#eeeeee",
+                        "outline-variant": "#dac2af"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem"
+                    },
+                    "spacing": {
+                        "sidebar-width": "240px",
+                        "unit": "8px"
+                    },
+                    "fontFamily": {
+                        "h3": ["Inter"],
+                        "label-md": ["Inter"],
+                        "display-hero-mobile": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-surface antialiased overflow-hidden">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-8 h-20 w-full bg-surface/80 backdrop-blur-md shadow-sm">
+<div class="flex items-center gap-12">
+<h1 class="font-display-hero-mobile text-primary lowercase" style="font-size: 28px;">spark inn</h1>
+<nav class="hidden md:flex items-center gap-8">
+<a class="text-secondary hover:text-primary-hover transition-colors duration-200" href="#">Rooms</a>
+<a class="text-secondary hover:text-primary-hover transition-colors duration-200" href="#">Amenities</a>
+<a class="text-secondary hover:text-primary-hover transition-colors duration-200" href="#">Dining</a>
+<a class="text-primary font-bold border-b-2 border-primary pb-1" href="#">Concierge</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 text-secondary hover:text-primary transition-transform active:scale-90">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-secondary hover:text-primary transition-transform active:scale-90">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</header>
+<div class="flex h-screen pt-20">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-20 h-[calc(100vh-80px)] w-sidebar-width flex flex-col py-6 px-4 bg-surface-container-lowest border-r border-border-standard">
+<div class="mb-8 px-2">
+<p class="text-label-md font-bold text-primary uppercase tracking-wider mb-1">Your Stay</p>
+<p class="text-sm text-text-secondary">Room 402 • Deluxe Suite</p>
+</div>
+<nav class="flex-1 space-y-1">
+<div class="flex items-center gap-3 px-3 py-3 text-secondary hover:bg-surface-container rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined">info</span>
+<span class="font-label-md text-label-md">Stay Details</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-3 text-secondary hover:bg-surface-container rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined">bolt</span>
+<span class="font-label-md text-label-md">Quick Actions</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-3 text-secondary hover:bg-surface-container rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined">restaurant</span>
+<span class="font-label-md text-label-md">Room Service</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-3 text-secondary hover:bg-surface-container rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined">cleaning_services</span>
+<span class="font-label-md text-label-md">Housekeeping</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-3 text-primary font-bold bg-primary-light rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">chat_bubble</span>
+<span class="font-label-md text-label-md">Support</span>
+</div>
+</nav>
+<div class="mt-auto pt-6 border-t border-border-standard space-y-1">
+<button class="w-full mb-4 py-3 bg-primary text-white rounded-lg font-bold text-sm hover:bg-primary-hover transition-colors">
+                    Extend Stay
+                </button>
+<div class="flex items-center gap-3 px-3 py-2 text-secondary hover:bg-surface-container rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</div>
+<div class="flex items-center gap-3 px-3 py-2 text-secondary hover:bg-surface-container rounded-lg cursor-pointer transition-all">
+<span class="material-symbols-outlined">help</span>
+<span class="font-label-md text-label-md">Help</span>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-sidebar-width flex-1 flex overflow-hidden">
+<!-- Left Panel: Stay Info -->
+<section class="w-80 border-r border-border-standard bg-white flex flex-col p-6 overflow-y-auto">
+<div class="mb-8">
+<div class="rounded-xl overflow-hidden mb-4 aspect-square bg-surface-container shadow-sm">
+<img alt="Room thumbnail" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida/AP1WRLvT2Skvdac6eQhtsSbjcdTzv-Mf079tDrkZv7MN53t2q-CwGULr03xCarYdQUJfiuFVqo9E8L1YxU3_o_cVfnuhp55cm0HZ9q4ajOivSKaA0ns6F6JEhsdUf8FYnFi-pYxadj0zEU4p1EapQQrQ_upDkPB3EnQBW0NPpPAGxYyMzkHWxAVUbESEsq6AJualdonzKsjUPnwza0v6xxe_zPlAun6It9jh71ALKo-f2zhGMtPjLpO8p4TojsUY">
+</div>
+<h2 class="text-xl font-semibold mb-1">Deluxe Suite</h2>
+<p class="text-text-secondary text-sm">Check-out: Oct 24, 11:00 AM</p>
+</div>
+<div class="space-y-6">
+<div>
+<h3 class="text-xs font-bold text-text-secondary uppercase tracking-widest mb-3">Quick Requests</h3>
+<div class="grid grid-cols-1 gap-2">
+<button class="flex items-center justify-between p-3 border border-border-standard rounded-lg hover:border-primary hover:bg-primary-light transition-all group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">restaurant</span>
+<span class="text-sm font-medium">Room Service</span>
+</div>
+<span class="material-symbols-outlined text-text-secondary group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<button class="flex items-center justify-between p-3 border border-border-standard rounded-lg hover:border-primary hover:bg-primary-light transition-all group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary">cleaning_services</span>
+<span class="text-sm font-medium">Housekeeping</span>
+</div>
+<span class="material-symbols-outlined text-text-secondary group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+</div>
+</div>
+<div class="p-4 bg-surface-container-low rounded-xl">
+<p class="text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Assigned Agent</p>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center text-white font-bold">M</div>
+<div>
+<p class="text-sm font-semibold">Maria Santos</p>
+<p class="text-xs text-text-secondary">Guest Relations Lead</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Main Panel: Chat Thread -->
+<section class="flex-1 flex flex-col bg-white">
+<!-- Chat Header -->
+<header class="h-16 border-b border-border-standard flex items-center justify-between px-6 bg-white shrink-0">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-status-green-text animate-pulse"></div>
+<h3 class="font-semibold text-lg">Concierge Chat - Active</h3>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-text-secondary hover:bg-surface-container rounded-full transition-colors">
+<span class="material-symbols-outlined">call</span>
+</button>
+<button class="p-2 text-text-secondary hover:bg-surface-container rounded-full transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</div>
+</header>
+<!-- Messages -->
+<div class="flex-1 overflow-y-auto p-6 space-y-6 chat-scroll bg-page-bg/30">
+<!-- Date Separator -->
+<div class="flex justify-center">
+<span class="text-[10px] font-bold text-text-secondary uppercase tracking-[0.2em] bg-surface-container px-3 py-1 rounded-full">Today</span>
+</div>
+<!-- Staff Message -->
+<div class="flex items-start gap-3 max-w-[80%]">
+<div class="w-8 h-8 rounded-full bg-primary-container shrink-0 flex items-center justify-center text-[10px] text-white font-bold">MS</div>
+<div class="space-y-1">
+<div class="bg-white border border-border-standard px-4 py-3 rounded-2xl rounded-tl-none shadow-sm">
+<p class="text-sm leading-relaxed">Good morning, Mr. Anderson! I hope you're enjoying your stay at spark inn. How can I assist you today?</p>
+</div>
+<p class="text-[10px] text-text-secondary px-1">09:12 AM</p>
+</div>
+</div>
+<!-- Guest Message -->
+<div class="flex items-start gap-3 max-w-[80%] ml-auto flex-row-reverse">
+<div class="w-8 h-8 rounded-full bg-on-surface shrink-0 flex items-center justify-center text-[10px] text-white font-bold">JA</div>
+<div class="space-y-1 text-right">
+<div class="bg-primary-container text-white px-4 py-3 rounded-2xl rounded-tr-none shadow-sm">
+<p class="text-sm leading-relaxed">Hi Maria! Could we arrange for two extra fluffy towels and some more espresso pods for the room?</p>
+</div>
+<p class="text-[10px] text-text-secondary px-1">09:15 AM</p>
+</div>
+</div>
+<!-- Staff Message -->
+<div class="flex items-start gap-3 max-w-[80%]">
+<div class="w-8 h-8 rounded-full bg-primary-container shrink-0 flex items-center justify-center text-[10px] text-white font-bold">MS</div>
+<div class="space-y-1">
+<div class="bg-white border border-border-standard px-4 py-3 rounded-2xl rounded-tl-none shadow-sm">
+<p class="text-sm leading-relaxed">Absolutely! I've placed that request with Housekeeping. They should be at your door within the next 15 minutes. Is there anything else you'd like? Perhaps a dinner reservation at The Cliff?</p>
+</div>
+<p class="text-[10px] text-text-secondary px-1">09:16 AM</p>
+</div>
+</div>
+<!-- Guest Message -->
+<div class="flex items-start gap-3 max-w-[80%] ml-auto flex-row-reverse">
+<div class="w-8 h-8 rounded-full bg-on-surface shrink-0 flex items-center justify-center text-[10px] text-white font-bold">JA</div>
+<div class="space-y-1 text-right">
+<div class="bg-primary-container text-white px-4 py-3 rounded-2xl rounded-tr-none shadow-sm">
+<p class="text-sm leading-relaxed">That sounds lovely. Could you book a table for two around 7:30 PM? We'd love a view of the ocean if possible.</p>
+</div>
+<p class="text-[10px] text-text-secondary px-1">09:18 AM</p>
+</div>
+</div>
+</div>
+<!-- Footer / Input -->
+<footer class="p-6 pt-0 bg-white border-t border-border-standard">
+<!-- Quick Chips -->
+<div class="flex gap-2 overflow-x-auto py-4 no-scrollbar">
+<button class="shrink-0 px-4 py-2 bg-primary-light border border-outline-variant text-primary rounded-full text-xs font-medium hover:bg-primary-container hover:text-white transition-all">Thank you!</button>
+<button class="shrink-0 px-4 py-2 bg-surface-container border border-border-standard text-text-secondary rounded-full text-xs font-medium hover:border-primary transition-all">Order more coffee</button>
+<button class="shrink-0 px-4 py-2 bg-surface-container border border-border-standard text-text-secondary rounded-full text-xs font-medium hover:border-primary transition-all">Late check-out?</button>
+<button class="shrink-0 px-4 py-2 bg-surface-container border border-border-standard text-text-secondary rounded-full text-xs font-medium hover:border-primary transition-all">Spa menu</button>
+</div>
+<!-- Input Bar -->
+<div class="relative flex items-end gap-3 bg-surface-container-low p-2 rounded-2xl border border-border-standard focus-within:border-primary transition-all shadow-sm">
+<button class="p-2 text-text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined">add_circle</span>
+</button>
+<textarea class="flex-1 bg-transparent border-none focus:ring-0 py-2 text-sm resize-none chat-scroll max-h-32" placeholder="Type your message to concierge..." rows="1"></textarea>
+<button class="w-10 h-10 bg-primary text-white rounded-xl flex items-center justify-center hover:bg-primary-hover active:scale-95 transition-all">
+<span class="material-symbols-outlined">send</span>
+</button>
+</div>
+</footer>
+</section>
+</main>
+</div>
+<!-- Micro-interaction for Textarea Auto-expand -->
+<script>
+        const textarea = document.querySelector('textarea');
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+    </script>
+</body></html>

@@ -1,0 +1,290 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - QR Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Georgia'), local('Times New Roman'), serif; /* Fallback for local testing if Apollo isn't available */
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-fixed": "#ffdcc0",
+                        "page-bg": "#F9FAFB",
+                        "primary": "#8d4f00",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "on-tertiary-container": "#393835",
+                        "outline": "#877363",
+                        "surface-tint": "#8d4f00",
+                        "tertiary": "#605e5a",
+                        "on-primary-fixed": "#2d1600",
+                        "surface-container-highest": "#e2e2e2",
+                        "status-red-text": "#DC2626",
+                        "error-container": "#ffdad6",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-tertiary": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "status-blue-text": "#2563EB",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-surface-variant": "#544335",
+                        "status-gray-text": "#6B7280",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "secondary": "#575e70",
+                        "surface-dim": "#dadada",
+                        "inverse-surface": "#303030",
+                        "error": "#ba1a1a",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-secondary": "#ffffff",
+                        "surface-container-low": "#f3f3f3",
+                        "tertiary-fixed": "#e6e2dd",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "status-purple-text": "#7C3AED",
+                        "status-green-text": "#16A34A",
+                        "surface-variant": "#e2e2e2",
+                        "tertiary-container": "#a4a19d",
+                        "on-primary": "#ffffff",
+                        "secondary-container": "#d9dff5",
+                        "border-standard": "#E5E7EB",
+                        "outline-variant": "#dac2af",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "inverse-on-surface": "#f1f1f1",
+                        "on-secondary-container": "#5c6274",
+                        "inverse-primary": "#ffb876",
+                        "primary-light": "#FEF3E2",
+                        "on-surface": "#1b1b1b",
+                        "surface-container-lowest": "#ffffff",
+                        "text-secondary": "#4B5563",
+                        "primary-fixed-dim": "#ffb876",
+                        "on-secondary-fixed": "#141b2b",
+                        "surface": "#f9f9f9",
+                        "primary-hover": "#C4720E",
+                        "status-amber-text": "#D97706",
+                        "on-primary-container": "#562e00",
+                        "on-error": "#ffffff",
+                        "surface-container-high": "#e8e8e8",
+                        "on-background": "#1b1b1b",
+                        "background": "#f9f9f9",
+                        "surface-container": "#eeeeee",
+                        "surface-bright": "#f9f9f9",
+                        "primary-container": "#ea8a1a",
+                        "status-red-bg": "#FEF2F2",
+                        "status-green-bg": "#F0FDF4",
+                        "secondary-fixed": "#dce2f7",
+                        "on-secondary-fixed-variant": "#404758"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "touch-target-min": "44px",
+                        "max-width-auth": "460px",
+                        "drawer-width": "480px",
+                        "max-width-booking": "600px",
+                        "unit": "8px",
+                        "sidebar-width": "240px"
+                    },
+                    "fontFamily": {
+                        "h4": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "h3": ["Inter"],
+                        "h2": ["Apollo"],
+                        "label-sm": ["Inter"],
+                        "label-md": ["Inter"],
+                        "display-hero-mobile": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "h1-mobile": ["Apollo"],
+                        "h1": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "h4": ["18px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "body-sm": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "h3": ["24px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "h2": ["32px", { "lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "label-md": ["13px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "display-hero-mobile": ["44px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "display-hero": ["72px", { "lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400" }],
+                        "h1-mobile": ["28px", { "lineHeight": "1.3", "fontWeight": "400" }],
+                        "h1": ["40px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-page-bg text-on-background font-body-lg text-body-lg h-screen flex overflow-hidden">
+<!-- NavigationDrawer -->
+<nav class="bg-[#111827] dark:bg-surface-container-lowest fixed left-0 top-0 h-full w-[240px] border-r border-outline-variant flat no shadows flex flex-col h-full py-8 z-40 hidden md:flex">
+<!-- Header -->
+<div class="px-6 mb-8 flex flex-col items-start gap-4">
+<h1 class="font-h3 text-h3 lowercase text-white tracking-tighter">spark inn</h1>
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-surface-container-low overflow-hidden flex-shrink-0">
+<img alt="Admin User" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAa8R6ya113Xui-hZwoYw4Uo7EjD7oE40A1-WRJpFUzll26iJI2fXQqOCwK2CNaqMq8yhdj9vv2pc31CZDy75jlmncMC_Whn94twEgEiz0a7I35lWEGzprhseCMRyLCAHb3A4faaNwJzSOh9zuwl09LwZPVy_ArEDiJNC-bs62zfmVWX50SNAjXwHKn-Zk6s1ZWaA6C5qEo7r7vfIFIO5zWUVahWzQDrKuyIRplo8esHvI-ddKYakvuS7qlJ_cKBCv5bje-YKq8rx-m">
+</div>
+<div>
+<p class="font-body-sm text-body-sm text-white font-medium">Admin Portal</p>
+</div>
+</div>
+</div>
+<!-- Navigation Links -->
+<div class="flex flex-col gap-1 w-full flex-grow">
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard" style="font-variation-settings: 'FILL' 0;">dashboard</span>
+<span class="font-body-lg text-body-lg">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_month" style="font-variation-settings: 'FILL' 0;">calendar_month</span>
+<span class="font-body-lg text-body-lg">Bookings</span>
+</a>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined" data-icon="bed" style="font-variation-settings: 'FILL' 0;">bed</span>
+<span class="font-body-lg text-body-lg">Rooms</span>
+</a>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all" href="#">
+<span class="material-symbols-outlined" data-icon="group" style="font-variation-settings: 'FILL' 0;">group</span>
+<span class="font-body-lg text-body-lg">Guests</span>
+</a>
+<a class="flex items-center gap-3 text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 hover:bg-white/5 transition-all translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="qr_code_scanner" style="font-variation-settings: 'FILL' 0;">qr_code_scanner</span>
+<span class="font-body-lg text-body-lg font-medium">QR Management</span>
+</a>
+<a class="flex items-center gap-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all mt-auto" href="#">
+<span class="material-symbols-outlined" data-icon="settings" style="font-variation-settings: 'FILL' 0;">settings</span>
+<span class="font-body-lg text-body-lg">Settings</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-0 md:ml-[240px] h-full overflow-y-auto bg-page-bg">
+<div class="px-6 py-8 md:px-8 max-w-7xl mx-auto flex flex-col gap-8">
+<!-- Page Header -->
+<header class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border-standard pb-6">
+<div>
+<h2 class="font-h1 text-h1 text-on-surface mb-2">QR Management</h2>
+<p class="font-body-sm text-body-sm text-text-secondary">Manage and generate intercom QR codes for all rooms.</p>
+</div>
+<button class="bg-primary-container text-on-tertiary hover:bg-primary-hover transition-colors rounded-lg h-[44px] px-6 font-body-sm text-body-sm font-medium flex items-center justify-center gap-2 whitespace-nowrap shadow-sm">
+<span class="material-symbols-outlined text-[20px]" data-icon="print" style="font-variation-settings: 'FILL' 0;">print</span>
+                    Print All
+                </button>
+</header>
+<!-- Controls (Search & Filters) -->
+<div class="flex flex-col md:flex-row items-center justify-between gap-4">
+<!-- Search Bar -->
+<div class="relative w-full md:w-80">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary text-[20px]" data-icon="search" style="font-variation-settings: 'FILL' 0;">search</span>
+<input class="w-full h-[44px] pl-10 pr-4 rounded-lg border border-border-standard bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary-container focus:border-transparent font-body-sm text-body-sm text-on-surface" placeholder="Search room..." type="text">
+</div>
+<!-- Filter Chips -->
+<div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+<button class="h-8 px-4 rounded-full bg-primary-container text-on-tertiary font-label-md text-label-md transition-colors hover:bg-primary-hover shadow-sm">All Rooms</button>
+<button class="h-8 px-4 rounded-full bg-surface-container-lowest text-text-secondary border border-border-standard font-label-md text-label-md transition-colors hover:bg-surface-container hover:text-on-surface">Floor 1</button>
+<button class="h-8 px-4 rounded-full bg-surface-container-lowest text-text-secondary border border-border-standard font-label-md text-label-md transition-colors hover:bg-surface-container hover:text-on-surface">Floor 2</button>
+<button class="h-8 px-4 rounded-full bg-surface-container-lowest text-text-secondary border border-border-standard font-label-md text-label-md transition-colors hover:bg-surface-container hover:text-on-surface">Villas</button>
+</div>
+</div>
+<!-- QR Code Grid -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+<!-- Card 1 (Active) -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="flex justify-between items-center">
+<span class="font-h2 text-h3 text-on-surface">Room 101</span>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">Active</span>
+</div>
+<div class="flex-grow flex items-center justify-center p-4 bg-surface-bright rounded-lg border border-border-standard/50 aspect-square">
+<img alt="QR Code for Room 101" class="w-full h-full max-w-[140px] max-h-[140px] object-contain opacity-90 group-hover:opacity-100 transition-opacity" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDVA1JMJcGpMRijxAQE5sSflkV6DiKwUPTFV7kBqiL1ugqYfl2HUZuvmfTDkFCckVLvrYuTKc-oIYIFSXFnIAzqTlnhCGSGaULX1rHuUfpM-D2lUS3M_mGG3c1d1a6uA8y6oLJc9gUB3K2slXuWzkQhFIphQFkaKLVtmP58FO5nKXKLlO4F-eA7JL9KjullZ1MOTbDfPq1bS2SNjKi6C-tWPH-PqeVdv5VGNopavNghVU9nCRdEfayZo5MmfL0-fnHXZ9lnOiOz3R7A">
+</div>
+<div class="flex items-center gap-2 pt-2">
+<button class="flex-1 h-[44px] rounded-lg border border-primary-container text-primary-container font-body-sm text-body-sm font-medium hover:bg-primary-container/10 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="download" style="font-variation-settings: 'FILL' 0;">download</span>
+                            Download
+                        </button>
+<button aria-label="Regenerate QR" class="w-[44px] h-[44px] rounded-lg border border-border-standard text-text-secondary hover:text-primary-container hover:border-primary-container hover:bg-primary-container/10 transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]" data-icon="autorenew" style="font-variation-settings: 'FILL' 0;">autorenew</span>
+</button>
+</div>
+</div>
+<!-- Card 2 (Active) -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="flex justify-between items-center">
+<span class="font-h2 text-h3 text-on-surface">Room 102</span>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">Active</span>
+</div>
+<div class="flex-grow flex items-center justify-center p-4 bg-surface-bright rounded-lg border border-border-standard/50 aspect-square">
+<img alt="QR Code for Room 102" class="w-full h-full max-w-[140px] max-h-[140px] object-contain opacity-90 group-hover:opacity-100 transition-opacity" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDP-3Ge5xIfR-DooCxIfF8ueCexrsNpY3xzPPAQq2_t7lRVMH9WvFBFGWisqwq9HI_OzXRLZhx8mcEobmabGD2CtoNdaSjJGt3i0s18ZommhBj8lB17Q8nG7XuEA-aoiCnK0nhBTPznwlWqk7lTKCsSw7KIODeCrn1A_KI0ksTyV9Cpr3oim3K3NTC3dvEOk0EYm3OsIGbxGCNpfEvxwhCJ2ShgcgPtu2U3IwzQML_3F6NKRiv9PAgBi12MdR3RtxsD0QL1kVHl7FJ_">
+</div>
+<div class="flex items-center gap-2 pt-2">
+<button class="flex-1 h-[44px] rounded-lg border border-primary-container text-primary-container font-body-sm text-body-sm font-medium hover:bg-primary-container/10 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="download" style="font-variation-settings: 'FILL' 0;">download</span>
+                            Download
+                        </button>
+<button aria-label="Regenerate QR" class="w-[44px] h-[44px] rounded-lg border border-border-standard text-text-secondary hover:text-primary-container hover:border-primary-container hover:bg-primary-container/10 transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]" data-icon="autorenew" style="font-variation-settings: 'FILL' 0;">autorenew</span>
+</button>
+</div>
+</div>
+<!-- Card 3 (Revoked) -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="flex justify-between items-center">
+<span class="font-h2 text-h3 text-on-surface">Room 103</span>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-red-bg text-status-red-text border border-status-red-text/20">Revoked</span>
+</div>
+<div class="flex-grow flex items-center justify-center p-4 bg-surface-container-high rounded-lg border border-border-standard/50 aspect-square opacity-60">
+<img alt="QR Code for Room 103" class="w-full h-full max-w-[140px] max-h-[140px] object-contain grayscale blur-[2px]" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCNmFEuS1y1gpVZUuDiRWRApyhYxd6324SWyDxbWtrlFBuDgnJFZOxTqmOnQls7-nK2hJ5uAStoOps_1Wbv_-hUn7LK-EBDyhngfsKvvV0PecToxFDYK4bZMuT7iPsFvbvc7xp1XhQJL7od-IYw4Tf8H_y7NV6XlTMSe5wWPysTyVpziCC29TDA3ya0HWyaB1ZnjP3mcRlp7D6n4duZ0c5Np5bLtRM1x6tdSmAecxdQpQ-hA0YHxXookyIgH_1NDyouA-KZ5lHaYsHg">
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-status-red-text text-[48px] bg-surface-container-lowest/80 rounded-full p-2" data-icon="block" style="font-variation-settings: 'FILL' 0;">block</span>
+</div>
+</div>
+<div class="flex items-center gap-2 pt-2">
+<button class="flex-1 h-[44px] rounded-lg border border-border-standard text-text-secondary font-body-sm text-body-sm font-medium hover:bg-surface-container transition-colors flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" disabled="">
+<span class="material-symbols-outlined text-[18px]" data-icon="download" style="font-variation-settings: 'FILL' 0;">download</span>
+                            Download
+                        </button>
+<button aria-label="Regenerate QR" class="flex-1 h-[44px] rounded-lg border border-primary-container text-primary-container hover:bg-primary-container/10 transition-colors flex items-center justify-center gap-2 font-body-sm text-body-sm font-medium">
+<span class="material-symbols-outlined text-[18px]" data-icon="autorenew" style="font-variation-settings: 'FILL' 0;">autorenew</span>
+                            Generate New
+                        </button>
+</div>
+</div>
+<!-- Card 4 (Active) -->
+<div class="bg-surface-container-lowest rounded-xl p-5 border border-border-standard flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
+<div class="flex justify-between items-center">
+<span class="font-h2 text-h3 text-on-surface">Villa 1</span>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-green-bg text-status-green-text border border-status-green-text/20">Active</span>
+</div>
+<div class="flex-grow flex items-center justify-center p-4 bg-surface-bright rounded-lg border border-border-standard/50 aspect-square">
+<img alt="QR Code for Villa 1" class="w-full h-full max-w-[140px] max-h-[140px] object-contain opacity-90 group-hover:opacity-100 transition-opacity" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDFHCQaWdNLZBcVw1AouKwwdN6WWAR9Ne9wv3rCD6BYg41Pkzb6jwJgHgU1OwN2VJ9ZwWixjidbNvOXyhigdx0qtP-yeCpI_hwyuI7KzjuwdmFlGR-vjLlCnItLUmL0C10fnN__pMBrGxlTMue5iJzpSvM2G81zoxx9ouE0cBYEeqRDs_y-5ZhF-3Jh02mDKHGwsbBUb8L90A70Aao8Azho5adV0qp3a4TQ0yyia26fmR4GUP8M_j8o4s3mze2YrorOHFUbc4zEdlUQ">
+</div>
+<div class="flex items-center gap-2 pt-2">
+<button class="flex-1 h-[44px] rounded-lg border border-primary-container text-primary-container font-body-sm text-body-sm font-medium hover:bg-primary-container/10 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="download" style="font-variation-settings: 'FILL' 0;">download</span>
+                            Download
+                        </button>
+<button aria-label="Regenerate QR" class="w-[44px] h-[44px] rounded-lg border border-border-standard text-text-secondary hover:text-primary-container hover:border-primary-container hover:bg-primary-container/10 transition-colors flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]" data-icon="autorenew" style="font-variation-settings: 'FILL' 0;">autorenew</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

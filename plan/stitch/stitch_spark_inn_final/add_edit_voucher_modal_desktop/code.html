@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>spark inn Admin - Voucher Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        /* Apollo font fallback since it's a local/brand font - using a premium serif style to mimic its character */
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Georgia'), local('Times New Roman');
+        }
+        
+        .font-h1, .font-h2, .font-display-hero { font-family: 'Apollo', serif; }
+        .font-body-lg, .font-body-sm, .font-h3, .font-h4, .font-label-md, .font-label-sm { font-family: 'Inter', sans-serif; }
+
+        .backdrop-blur-sm {
+            backdrop-filter: blur(4px);
+        }
+        
+        /* Custom scrollbar for admin efficiency */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
+
+        .modal-enter {
+            animation: modalFadeIn 0.3s ease-out forwards;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "primary-hover": "#C4720E",
+                      "on-primary": "#ffffff",
+                      "status-green-bg": "#F0FDF4",
+                      "on-primary-fixed": "#2d1600",
+                      "status-blue-bg": "#EFF6FF",
+                      "primary": "#8d4f00",
+                      "status-purple-text": "#7C3AED",
+                      "inverse-on-surface": "#f1f1f1",
+                      "tertiary": "#605e5a",
+                      "surface-tint": "#8d4f00",
+                      "surface-bright": "#f9f9f9",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "status-blue-text": "#2563EB",
+                      "secondary-container": "#d9dff5",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "on-error": "#ffffff",
+                      "primary-fixed": "#ffdcc0",
+                      "surface": "#f9f9f9",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "primary-container": "#ea8a1a",
+                      "on-secondary-fixed-variant": "#404758",
+                      "outline": "#877363",
+                      "on-surface": "#1b1b1b",
+                      "border-standard": "#E5E7EB",
+                      "on-background": "#1b1b1b",
+                      "background": "#f9f9f9",
+                      "text-secondary": "#4B5563",
+                      "error": "#ba1a1a",
+                      "status-red-text": "#DC2626",
+                      "error-container": "#ffdad6",
+                      "inverse-primary": "#ffb876",
+                      "page-bg": "#F9FAFB",
+                      "surface-container-low": "#f3f3f3",
+                      "outline-variant": "#dac2af",
+                      "on-secondary-fixed": "#141b2b",
+                      "status-green-text": "#16A34A",
+                      "primary-fixed-dim": "#ffb876",
+                      "status-amber-text": "#D97706",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "surface-container": "#eeeeee",
+                      "surface-dim": "#dadada",
+                      "surface-container-highest": "#e2e2e2",
+                      "on-surface-variant": "#544335",
+                      "status-red-bg": "#FEF2F2",
+                      "on-secondary-container": "#5c6274",
+                      "secondary-fixed": "#dce2f7",
+                      "secondary": "#575e70",
+                      "status-amber-bg": "#FFFBEB",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "on-tertiary": "#ffffff",
+                      "tertiary-container": "#a4a19d",
+                      "on-error-container": "#93000a",
+                      "surface-variant": "#e2e2e2",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary": "#ffffff",
+                      "status-gray-text": "#6B7280",
+                      "primary-light": "#FEF3E2",
+                      "status-gray-bg": "#F3F4F6",
+                      "surface-container-high": "#e8e8e8",
+                      "tertiary-fixed": "#e6e2dd",
+                      "inverse-surface": "#303030",
+                      "on-tertiary-container": "#393835",
+                      "status-purple-bg": "#F5F3FF",
+                      "on-primary-container": "#562e00"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "touch-target-min": "44px",
+                      "unit": "8px",
+                      "max-width-booking": "600px",
+                      "sidebar-width": "240px",
+                      "max-width-auth": "460px",
+                      "drawer-width": "480px"
+              },
+              "fontFamily": {
+                      "h1": ["Apollo"],
+                      "body-lg": ["Inter"],
+                      "h2": ["Apollo"],
+                      "label-sm": ["Inter"],
+                      "label-md": ["Inter"],
+                      "display-hero": ["Apollo"],
+                      "h4": ["Inter"],
+                      "h3": ["Inter"],
+                      "body-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                      "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                      "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                      "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                      "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}]
+              }
+            },
+          },
+        }
+      </script>
+</head>
+<body class="bg-page-bg font-body-lg text-on-surface">
+<!-- Admin Shell Simulation -->
+<div class="flex min-h-screen">
+<!-- Sidebar -->
+<aside class="fixed left-0 top-0 h-full w-[240px] bg-[#111827] flex flex-col py-6 px-4 z-50">
+<div class="mb-10 px-2">
+<span class="font-h3 text-h3 text-white lowercase">spark inn</span>
+<p class="text-secondary-fixed-dim text-label-sm mt-1">Admin Portal</p>
+</div>
+<nav class="flex-1 space-y-2">
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white transition-all duration-200" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-primary-container text-on-primary-container rounded-lg" href="#">
+<span class="material-symbols-outlined">confirmation_number</span>
+<span class="font-label-md text-label-md">Vouchers</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white transition-all duration-200" href="#">
+<span class="material-symbols-outlined">bed</span>
+<span class="font-label-md text-label-md">Rooms</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white transition-all duration-200" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="font-label-md text-label-md">Guests</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-gray-700">
+<button class="flex items-center gap-3 px-3 py-2 text-secondary-fixed-dim hover:text-white transition-all w-full">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-label-md text-label-md">Logout</span>
+</button>
+</div>
+</aside>
+<!-- Main Content (Behind Modal) -->
+<main class="ml-[240px] flex-1 p-8">
+<header class="flex justify-between items-center mb-8">
+<div>
+<h1 class="font-h2 text-h2 text-on-surface">Voucher Management</h1>
+<p class="text-text-secondary font-body-sm mt-1">Manage promotional codes and discounts for guests.</p>
+</div>
+<button class="bg-primary-container text-white px-6 py-2.5 rounded-lg font-label-md flex items-center gap-2 hover:bg-primary-hover transition-colors shadow-sm active:scale-95">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                    Add Voucher
+                </button>
+</header>
+<!-- Table Simulation -->
+<div class="bg-white rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<table class="w-full text-left">
+<thead class="bg-status-gray-bg border-b border-border-standard">
+<tr>
+<th class="px-6 py-4 font-label-md text-text-secondary">Code</th>
+<th class="px-6 py-4 font-label-md text-text-secondary">Type</th>
+<th class="px-6 py-4 font-label-md text-text-secondary">Value</th>
+<th class="px-6 py-4 font-label-md text-text-secondary">Expiry</th>
+<th class="px-6 py-4 font-label-md text-text-secondary">Status</th>
+<th class="px-6 py-4 font-label-md text-text-secondary text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard">
+<tr class="hover:bg-status-gray-bg/30 transition-colors">
+<td class="px-6 py-4 font-h4 text-h4">WINTER23</td>
+<td class="px-6 py-4 text-body-sm">Percentage</td>
+<td class="px-6 py-4 text-body-sm">15%</td>
+<td class="px-6 py-4 text-body-sm">Dec 31, 2023</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 bg-status-red-bg text-status-red-text rounded-full text-label-sm">Expired</span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined">edit</span>
+</button>
+</td>
+</tr>
+<tr class="hover:bg-status-gray-bg/30 transition-colors">
+<td class="px-6 py-4 font-h4 text-h4">WELCOMEINN</td>
+<td class="px-6 py-4 text-body-sm">Fixed Amount</td>
+<td class="px-6 py-4 text-body-sm">₱500</td>
+<td class="px-6 py-4 text-body-sm">Ongoing</td>
+<td class="px-6 py-4">
+<span class="px-3 py-1 bg-status-green-bg text-status-green-text rounded-full text-label-sm">Active</span>
+</td>
+<td class="px-6 py-4 text-right">
+<button class="text-text-secondary hover:text-primary transition-colors">
+<span class="material-symbols-outlined">edit</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</main>
+</div>
+<!-- Modal Backdrop -->
+<div class="fixed inset-0 z-[100] bg-on-surface/40 backdrop-blur-sm flex items-center justify-center p-6" id="modalOverlay">
+<!-- Add/Edit Voucher Modal -->
+<div class="bg-white w-full max-w-[600px] rounded-[16px] shadow-2xl overflow-hidden modal-enter">
+<!-- Modal Header -->
+<div class="px-8 py-6 border-b border-border-standard flex justify-between items-center">
+<h2 class="font-h2 text-h2 text-on-surface">Add New Voucher</h2>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-status-gray-bg transition-colors active:scale-90" onclick="closeModal()">
+<span class="material-symbols-outlined text-text-secondary">close</span>
+</button>
+</div>
+<!-- Form Body -->
+<div class="px-8 py-8 space-y-6">
+<!-- Row 1: Voucher Code -->
+<div class="space-y-2">
+<label class="block font-label-md text-text-secondary" for="voucherCode">Voucher Code</label>
+<input class="w-full h-11 px-4 rounded-[8px] border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all placeholder:text-status-gray-text font-body-lg" id="voucherCode" placeholder="e.g. SUMMER24" type="text"/>
+</div>
+<!-- Row 2: Discount Type and Value -->
+<div class="grid grid-cols-2 gap-6">
+<div class="space-y-2">
+<label class="block font-label-md text-text-secondary">Discount Type</label>
+<div class="flex p-1 bg-status-gray-bg rounded-[8px] h-11">
+<button class="flex-1 text-label-sm rounded-[6px] transition-all bg-white shadow-sm text-on-surface font-semibold" id="typePercent" onclick="setType('percent')">Percentage</button>
+<button class="flex-1 text-label-sm rounded-[6px] transition-all text-text-secondary hover:text-on-surface" id="typeFixed" onclick="setType('fixed')">Fixed Amount</button>
+</div>
+</div>
+<div class="space-y-2">
+<label class="block font-label-md text-text-secondary" for="discountValue">Discount Value</label>
+<div class="relative">
+<input class="w-full h-11 pl-4 pr-10 rounded-[8px] border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-lg" id="discountValue" placeholder="0" type="number"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary font-medium" id="valueSuffix">%</span>
+</div>
+</div>
+</div>
+<!-- Row 3: Usage Limit -->
+<div class="space-y-2">
+<label class="block font-label-md text-text-secondary" for="usageLimit">Usage Limit</label>
+<input class="w-full h-11 px-4 rounded-[8px] border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-lg" id="usageLimit" placeholder="50" type="number"/>
+<p class="text-label-sm text-status-gray-text">Leave blank for unlimited uses.</p>
+</div>
+<!-- Row 4: Expiry Date -->
+<div class="space-y-2">
+<label class="block font-label-md text-text-secondary" for="expiryDate">Expiry Date</label>
+<div class="relative">
+<input class="w-full h-11 px-4 rounded-[8px] border border-border-standard focus:ring-2 focus:ring-primary-container focus:border-primary-container outline-none transition-all font-body-lg appearance-none" id="expiryDate" type="date"/>
+<span class="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none">calendar_today</span>
+</div>
+</div>
+<!-- Row 5: Status Toggle -->
+<div class="flex items-center justify-between py-2">
+<div class="space-y-1">
+<p class="font-label-md text-on-surface">Voucher is currently active</p>
+<p class="text-label-sm text-status-gray-text">Enable this to allow guests to redeem this code immediately.</p>
+</div>
+<button aria-checked="true" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out bg-primary-container focus:outline-none" onclick="toggleSwitch(this)" role="switch">
+<span aria-hidden="true" class="translate-x-5 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+</button>
+</div>
+</div>
+<!-- Modal Footer -->
+<div class="px-8 py-6 bg-status-gray-bg/50 border-t border-border-standard flex items-center justify-end gap-4">
+<button class="px-6 py-2.5 rounded-[8px] font-label-md text-text-secondary hover:bg-status-gray-bg border border-transparent transition-colors active:scale-95" onclick="closeModal()">
+                    Cancel
+                </button>
+<button class="px-8 py-2.5 rounded-[8px] font-label-md bg-primary-container text-white hover:bg-primary-hover transition-colors shadow-sm shadow-primary-container/20 active:scale-95" onclick="saveVoucher()">
+                    Save Voucher
+                </button>
+</div>
+</div>
+</div>
+<script>
+        function closeModal() {
+            const modal = document.querySelector('.modal-enter');
+            const overlay = document.getElementById('modalOverlay');
+            modal.style.transform = 'scale(0.95) translateY(10px)';
+            modal.style.opacity = '0';
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+            }, 300);
+        }
+
+        function toggleSwitch(btn) {
+            const circle = btn.querySelector('span');
+            const isActive = btn.getAttribute('aria-checked') === 'true';
+            
+            if (isActive) {
+                btn.classList.remove('bg-primary-container');
+                btn.classList.add('bg-gray-200');
+                circle.classList.remove('translate-x-5');
+                circle.classList.add('translate-x-0');
+                btn.setAttribute('aria-checked', 'false');
+            } else {
+                btn.classList.remove('bg-gray-200');
+                btn.classList.add('bg-primary-container');
+                circle.classList.remove('translate-x-0');
+                circle.classList.add('translate-x-5');
+                btn.setAttribute('aria-checked', 'true');
+            }
+        }
+
+        function setType(type) {
+            const btnPercent = document.getElementById('typePercent');
+            const btnFixed = document.getElementById('typeFixed');
+            const suffix = document.getElementById('valueSuffix');
+
+            if (type === 'percent') {
+                btnPercent.className = 'flex-1 text-label-sm rounded-[6px] transition-all bg-white shadow-sm text-on-surface font-semibold';
+                btnFixed.className = 'flex-1 text-label-sm rounded-[6px] transition-all text-text-secondary hover:text-on-surface';
+                suffix.innerText = '%';
+            } else {
+                btnFixed.className = 'flex-1 text-label-sm rounded-[6px] transition-all bg-white shadow-sm text-on-surface font-semibold';
+                btnPercent.className = 'flex-1 text-label-sm rounded-[6px] transition-all text-text-secondary hover:text-on-surface';
+                suffix.innerText = '₱';
+            }
+        }
+
+        function saveVoucher() {
+            const code = document.getElementById('voucherCode').value;
+            if(!code) {
+                alert('Please enter a voucher code.');
+                return;
+            }
+            
+            // Simple visual feedback
+            const saveBtn = event.currentTarget;
+            const originalText = saveBtn.innerText;
+            saveBtn.innerHTML = '<span class="material-symbols-outlined animate-spin text-[18px]">progress_activity</span> Saving...';
+            saveBtn.disabled = true;
+
+            setTimeout(() => {
+                closeModal();
+                // Reset state for demo purposes
+                setTimeout(() => {
+                    saveBtn.innerText = originalText;
+                    saveBtn.disabled = false;
+                }, 500);
+            }, 1000);
+        }
+
+        // Close on ESC
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+    </script>
+</body></html>

@@ -1,0 +1,276 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Walk-in Booking Modal</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        @font-face {
+            font-family: 'Apollo';
+            src: local('Times New Roman'), serif; /* Fallback for Apollo */
+            font-weight: 400;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#dadada",
+                        "tertiary": "#605e5a",
+                        "primary-hover": "#C4720E",
+                        "on-tertiary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "status-gray-bg": "#F3F4F6",
+                        "on-tertiary-fixed": "#1d1b19",
+                        "inverse-on-surface": "#f1f1f1",
+                        "page-bg": "#F9FAFB",
+                        "primary-fixed-dim": "#ffb876",
+                        "surface-variant": "#e2e2e2",
+                        "primary-fixed": "#ffdcc0",
+                        "status-amber-bg": "#FFFBEB",
+                        "on-primary-container": "#562e00",
+                        "background": "#f9f9f9",
+                        "on-primary-fixed": "#2d1600",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "on-secondary-container": "#5c6274",
+                        "on-tertiary-container": "#393835",
+                        "on-error-container": "#93000a",
+                        "on-tertiary-fixed-variant": "#484643",
+                        "error": "#ba1a1a",
+                        "secondary": "#575e70",
+                        "inverse-surface": "#303030",
+                        "inverse-primary": "#ffb876",
+                        "secondary-fixed-dim": "#c0c6db",
+                        "border-standard": "#E5E7EB",
+                        "text-secondary": "#4B5563",
+                        "surface-container-highest": "#e2e2e2",
+                        "tertiary-container": "#a4a19d",
+                        "status-purple-text": "#7C3AED",
+                        "tertiary-fixed": "#e6e2dd",
+                        "surface-container": "#eeeeee",
+                        "primary": "#8d4f00",
+                        "on-surface": "#1b1b1b",
+                        "status-green-text": "#16A34A",
+                        "secondary-container": "#d9dff5",
+                        "tertiary-fixed-dim": "#cac6c1",
+                        "error-container": "#ffdad6",
+                        "status-green-bg": "#F0FDF4",
+                        "status-purple-bg": "#F5F3FF",
+                        "status-red-bg": "#FEF2F2",
+                        "status-gray-text": "#6B7280",
+                        "secondary-fixed": "#dce2f7",
+                        "surface-container-high": "#e8e8e8",
+                        "surface-tint": "#8d4f00",
+                        "on-primary-fixed-variant": "#6b3b00",
+                        "surface-container-low": "#f3f3f3",
+                        "on-background": "#1b1b1b",
+                        "status-blue-bg": "#EFF6FF",
+                        "on-surface-variant": "#544335",
+                        "status-blue-text": "#2563EB",
+                        "outline": "#877363",
+                        "on-secondary-fixed": "#141b2b",
+                        "on-secondary": "#ffffff",
+                        "surface": "#f9f9f9",
+                        "on-secondary-fixed-variant": "#404758",
+                        "status-red-text": "#DC2626",
+                        "outline-variant": "#dac2af",
+                        "surface-bright": "#f9f9f9",
+                        "status-amber-text": "#D97706",
+                        "primary-light": "#FEF3E2",
+                        "primary-container": "#ea8a1a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "touch-target-min": "44px",
+                        "max-width-auth": "460px",
+                        "unit": "8px",
+                        "sidebar-width": "240px",
+                        "max-width-booking": "600px",
+                        "drawer-width": "480px"
+                    },
+                    "fontFamily": {
+                        "label-sm": ["Inter"],
+                        "h1": ["Apollo"],
+                        "h3": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-md": ["Inter"],
+                        "h1-mobile": ["Apollo"],
+                        "h4": ["Inter"],
+                        "display-hero-mobile": ["Apollo"],
+                        "display-hero": ["Apollo"],
+                        "body-sm": ["Inter"],
+                        "h2": ["Apollo"]
+                    },
+                    "fontSize": {
+                        "label-sm": ["12px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1": ["40px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "h3": ["24px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                        "label-md": ["13px", {"lineHeight": "1.2", "fontWeight": "500"}],
+                        "h1-mobile": ["28px", {"lineHeight": "1.3", "fontWeight": "400"}],
+                        "h4": ["18px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                        "display-hero-mobile": ["44px", {"lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "display-hero": ["72px", {"lineHeight": "1.1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-sm": ["14px", {"lineHeight": "1.5", "fontWeight": "400"}],
+                        "h2": ["32px", {"lineHeight": "1.3", "letterSpacing": "0.05em", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background min-h-screen text-on-background antialiased relative">
+<!-- Modal Backdrop -->
+<div class="fixed inset-0 z-40 bg-surface-variant/80 backdrop-blur-sm transition-opacity"></div>
+<!-- Full Screen Mobile Modal -->
+<div class="fixed inset-0 z-50 flex flex-col bg-surface-container-lowest md:hidden overflow-hidden">
+<!-- Header -->
+<header class="flex justify-between items-center px-4 py-4 border-b border-border-standard bg-surface-container-lowest sticky top-0 z-10 shrink-0">
+<h2 class="font-h4 text-h4 text-on-surface">Walk-in Booking</h2>
+<button class="flex items-center justify-center w-[44px] h-[44px] text-text-secondary hover:bg-surface-container-high rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-container" type="button">
+<span class="material-symbols-outlined">close</span>
+</button>
+</header>
+<!-- Scrollable Content -->
+<main class="flex-1 overflow-y-auto p-4 space-y-6">
+<!-- Room & Dates -->
+<section class="space-y-4">
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="room-selector">Room Selection</label>
+<div class="relative">
+<select class="w-full h-[44px] pl-3 pr-10 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface appearance-none focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="room-selector">
+<option disabled="" selected="" value="">Select an available room</option>
+<option value="101">101 - Standard Double (Available)</option>
+<option value="105">105 - Standard Double (Available)</option>
+<option value="202">202 - Deluxe King (Available)</option>
+<option value="301">301 - Family Suite (Available)</option>
+</select>
+<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary">
+<span class="material-symbols-outlined text-[20px]">expand_more</span>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-3">
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="check-in">Check-in</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="check-in" type="date" value="2023-10-27">
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="check-out">Check-out</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="check-out" type="date">
+</div>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1">Guests</label>
+<div class="flex items-center justify-between border border-border-standard rounded-lg h-[44px] px-3 bg-surface-container-lowest">
+<button aria-label="Decrease guests" class="w-8 h-8 flex items-center justify-center text-on-surface-variant hover:bg-surface-container rounded-md transition-colors" type="button">
+<span class="material-symbols-outlined text-[20px]">remove</span>
+</button>
+<span class="font-body-sm text-body-sm text-on-surface">2 Adults, 0 Children</span>
+<button aria-label="Increase guests" class="w-8 h-8 flex items-center justify-center text-on-surface-variant hover:bg-surface-container rounded-md transition-colors" type="button">
+<span class="material-symbols-outlined text-[20px]">add</span>
+</button>
+</div>
+</div>
+<div>
+<span class="block font-label-md text-label-md text-on-surface-variant mb-2">Package</span>
+<div class="flex gap-4">
+<label class="flex items-center gap-2 cursor-pointer h-[44px]">
+<input checked="" class="w-5 h-5 text-primary-container border-border-standard focus:ring-primary-container" name="package" type="radio" value="room-only">
+<span class="font-body-sm text-body-sm text-on-surface">Room Only</span>
+</label>
+<label class="flex items-center gap-2 cursor-pointer h-[44px]">
+<input class="w-5 h-5 text-primary-container border-border-standard focus:ring-primary-container" name="package" type="radio" value="bed-breakfast">
+<span class="font-body-sm text-body-sm text-on-surface">Room + Breakfast</span>
+</label>
+</div>
+</div>
+</section>
+<hr class="border-border-standard">
+<!-- Guest Information -->
+<section class="space-y-4">
+<h3 class="font-h4 text-h4 text-on-surface">Guest Details</h3>
+<div class="grid grid-cols-2 gap-3">
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="first-name">First Name</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="first-name" placeholder="Juan" type="text">
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="last-name">Last Name</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="last-name" placeholder="Dela Cruz" type="text">
+</div>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="email">Email Address (Optional)</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="email" placeholder="guest@example.com" type="email">
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="phone">Phone Number</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="phone" placeholder="+63 900 000 0000" type="tel">
+</div>
+</section>
+<hr class="border-border-standard">
+<!-- Payment -->
+<section class="space-y-4">
+<h3 class="font-h4 text-h4 text-on-surface">Payment Method</h3>
+<div class="grid grid-cols-2 gap-3">
+<label class="relative flex flex-col items-center justify-center p-3 border border-border-standard rounded-[12px] cursor-pointer hover:bg-surface-container transition-colors has-[:checked]:border-primary-container has-[:checked]:bg-primary-light">
+<input class="sr-only" name="payment_method" type="radio" value="gcash">
+<span class="material-symbols-outlined text-[24px] text-on-surface mb-1">account_balance_wallet</span>
+<span class="font-label-sm text-label-sm text-on-surface text-center">GCash</span>
+</label>
+<label class="relative flex flex-col items-center justify-center p-3 border border-border-standard rounded-[12px] cursor-pointer hover:bg-surface-container transition-colors has-[:checked]:border-primary-container has-[:checked]:bg-primary-light">
+<input class="sr-only" name="payment_method" type="radio" value="maya">
+<span class="material-symbols-outlined text-[24px] text-on-surface mb-1">payments</span>
+<span class="font-label-sm text-label-sm text-on-surface text-center">Maya</span>
+</label>
+<label class="relative flex flex-col items-center justify-center p-3 border border-border-standard rounded-[12px] cursor-pointer hover:bg-surface-container transition-colors has-[:checked]:border-primary-container has-[:checked]:bg-primary-light">
+<input class="sr-only" name="payment_method" type="radio" value="bank">
+<span class="material-symbols-outlined text-[24px] text-on-surface mb-1">account_balance</span>
+<span class="font-label-sm text-label-sm text-on-surface text-center">Bank Transfer</span>
+</label>
+<label class="relative flex flex-col items-center justify-center p-3 border border-border-standard rounded-[12px] cursor-pointer hover:bg-surface-container transition-colors has-[:checked]:border-primary-container has-[:checked]:bg-primary-light">
+<input checked="" class="sr-only" name="payment_method" type="radio" value="arrival">
+<span class="material-symbols-outlined text-[24px] text-on-surface mb-1">storefront</span>
+<span class="font-label-sm text-label-sm text-on-surface text-center">Pay on Arrival</span>
+</label>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="amount-received">Amount Received (PHP)</label>
+<input class="w-full h-[44px] px-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest" id="amount-received" placeholder="0.00" type="number">
+</div>
+</section>
+<hr class="border-border-standard">
+<!-- Requests -->
+<section class="space-y-4 pb-4">
+<div>
+<label class="block font-label-md text-label-md text-on-surface-variant mb-1" for="special-requests">Special Requests</label>
+<textarea class="w-full p-3 border border-border-standard rounded-lg font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container bg-surface-container-lowest resize-none" id="special-requests" placeholder="E.g., Extra pillows, late check-in..." rows="3"></textarea>
+</div>
+</section>
+</main>
+<!-- Footer / CTA -->
+<footer class="p-4 border-t border-border-standard bg-surface-container-lowest shrink-0">
+<button class="w-full h-[44px] bg-primary-container text-[#000000] font-body-lg text-body-lg rounded-lg hover:bg-primary-hover active:scale-[0.98] transition-all flex items-center justify-center" type="button">
+                Create Booking
+            </button>
+</footer>
+</div>
+</body></html>

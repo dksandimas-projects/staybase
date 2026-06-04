@@ -1,0 +1,553 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Settings</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Apollo:wght@400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-error": "#ffffff",
+                      "outline": "#877363",
+                      "status-amber-bg": "#FFFBEB",
+                      "surface-container-highest": "#e2e2e2",
+                      "tertiary-container": "#a4a19d",
+                      "on-primary": "#ffffff",
+                      "status-gray-text": "#6B7280",
+                      "primary-fixed": "#ffdcc0",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "on-surface": "#1b1b1b",
+                      "status-green-bg": "#F0FDF4",
+                      "surface-container-high": "#e8e8e8",
+                      "error": "#ba1a1a",
+                      "text-secondary": "#4B5563",
+                      "surface": "#f9f9f9",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "status-purple-text": "#7C3AED",
+                      "status-amber-text": "#D97706",
+                      "border-standard": "#E5E7EB",
+                      "inverse-on-surface": "#f1f1f1",
+                      "inverse-surface": "#303030",
+                      "secondary-container": "#d9dff5",
+                      "tertiary-fixed": "#e6e2dd",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "status-red-text": "#DC2626",
+                      "background": "#f9f9f9",
+                      "primary-light": "#FEF3E2",
+                      "primary-hover": "#C4720E",
+                      "status-blue-text": "#2563EB",
+                      "primary-fixed-dim": "#ffb876",
+                      "on-secondary-fixed": "#141b2b",
+                      "surface-container-lowest": "#ffffff",
+                      "status-gray-bg": "#F3F4F6",
+                      "surface-container": "#eeeeee",
+                      "on-secondary-fixed-variant": "#404758",
+                      "primary-container": "#ea8a1a",
+                      "on-secondary": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "surface-variant": "#e2e2e2",
+                      "on-tertiary": "#ffffff",
+                      "surface-tint": "#8d4f00",
+                      "on-tertiary-container": "#393835",
+                      "surface-container-low": "#f3f3f3",
+                      "status-blue-bg": "#EFF6FF",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "status-red-bg": "#FEF2F2",
+                      "surface-bright": "#f9f9f9",
+                      "on-error-container": "#93000a",
+                      "surface-dim": "#dadada",
+                      "secondary-fixed": "#dce2f7",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "on-background": "#1b1b1b",
+                      "on-primary-fixed": "#2d1600",
+                      "on-primary-container": "#562e00",
+                      "on-secondary-container": "#5c6274",
+                      "inverse-primary": "#ffb876",
+                      "secondary": "#575e70",
+                      "on-surface-variant": "#544335",
+                      "page-bg": "#F9FAFB",
+                      "status-green-text": "#16A34A",
+                      "outline-variant": "#dac2af",
+                      "status-purple-bg": "#F5F3FF",
+                      "tertiary": "#605e5a",
+                      "primary": "#8d4f00"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "drawer-width": "480px",
+                      "touch-target-min": "44px",
+                      "max-width-booking": "600px",
+                      "max-width-auth": "460px",
+                      "unit": "8px",
+                      "sidebar-width": "240px"
+              },
+              "fontFamily": {
+                      "label-md": [
+                              "Inter"
+                      ],
+                      "h2": [
+                              "Apollo"
+                      ],
+                      "h1": [
+                              "Apollo"
+                      ],
+                      "display-hero": [
+                              "Apollo"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "h1-mobile": [
+                              "Apollo"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "display-hero-mobile": [
+                              "Apollo"
+                      ],
+                      "label-sm": [
+                              "Inter"
+                      ],
+                      "h4": [
+                              "Inter"
+                      ],
+                      "h3": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "label-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h2": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h1": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-hero": [
+                              "72px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h1-mobile": [
+                              "28px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-hero-mobile": [
+                              "44px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h4": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "h3": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #ea8a1a;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #ea8a1a;
+        }
+        .toggle-checkbox {
+            right: 0;
+            z-index: 1;
+            border-color: #e2e8f0;
+            transition: all 0.3s;
+        }
+        .toggle-label {
+            width: 3rem;
+            height: 1.5rem;
+            background-color: #cbd5e1;
+            border-radius: 9999px;
+            transition: all 0.3s;
+        }
+    </style>
+</head>
+<body class="bg-page-bg font-body-sm text-on-surface h-screen flex overflow-hidden">
+<!-- SideNavBar -->
+<nav class="bg-[#111827] fixed left-0 top-0 h-full w-sidebar-width border-r border-border-standard flex flex-col py-6 z-20 hidden md:flex">
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined text-sm">hotel</span>
+</div>
+<div>
+<h1 class="font-h2 text-h2 text-on-primary lowercase m-0 leading-none">spark inn</h1>
+<p class="font-label-sm text-label-sm text-secondary-fixed-dim m-0 opacity-80">Admin Console</p>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto w-full">
+<ul class="space-y-1 w-full">
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                        Dashboard
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">calendar_today</span>
+                        Bookings
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">bed</span>
+                        Rooms
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">payments</span>
+                        Rates
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">analytics</span>
+                        Reports
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">business</span>
+                        Corporate
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">chat</span>
+                        Intercom
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">qr_code</span>
+                        QR Codes
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-3 text-secondary-fixed-dim hover:bg-secondary-container/10 hover:text-on-primary transition-colors duration-200 ease-in-out font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined">group</span>
+                        Members
+                    </a>
+</li>
+<li class="mt-8 border-t border-secondary-fixed-dim/20 pt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-primary border-l-4 border-primary bg-on-primary-fixed-variant/10 font-label-md text-label-md w-full" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">settings</span>
+                        Settings
+                    </a>
+</li>
+</ul>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-0 md:ml-[240px] flex flex-col h-screen overflow-hidden">
+<!-- TopAppBar -->
+<header class="bg-surface-container-lowest dark:bg-inverse-surface border-b border-border-standard h-16 flex items-center justify-between px-8 w-full z-10 shrink-0">
+<div class="flex items-center gap-4">
+<button class="md:hidden text-on-surface-variant hover:text-primary transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<h2 class="font-h3 text-h3 text-on-surface m-0 hidden md:block">Settings</h2>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative hidden sm:flex items-center">
+<span class="material-symbols-outlined absolute left-3 text-status-gray-text text-sm">search</span>
+<input class="pl-9 pr-4 py-2 bg-status-gray-bg border border-transparent rounded-lg text-sm focus:border-primary-container focus:bg-surface-container-lowest focus:ring-0 transition-colors w-64" placeholder="Search settings..." type="text">
+</div>
+<div class="flex items-center gap-4">
+<button class="text-on-surface-variant hover:text-primary transition-colors cursor-pointer active:opacity-80 relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-status-red-text rounded-full"></span>
+</button>
+<div class="w-8 h-8 rounded-full bg-secondary-container overflow-hidden cursor-pointer border border-border-standard">
+<img alt="Admin profile photo" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAjDNpsmGnd6g2FM93hlhF6Ju8Hcqf4y-mhSTURetW7JHIkKF0w0amgIg3a5LqsiHpH1eMdo-Hi1XSj-VXjAqDMDA91cQ8Bcj_iaB-O0hQ3_n0EHgYY1ZzAKOhMzQ713PasdpfcEw3dXQVOJXzT5eZ1RRoHTDzupWQzZoIQF_8rI4y9v1ojbwB4YyM7KoBhxHZu6xSesXHjV172gTsRsrQUGDVNoiwn6a_dnYNuc_JvPAeg8m2elErDU9TCLmUkPDEg_cEWD2kFcWm2">
+</div>
+</div>
+</div>
+</header>
+<!-- Content Canvas -->
+<div class="flex-1 overflow-y-auto p-6 md:p-8 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-8">
+<!-- Settings Navigation -->
+<div class="w-full lg:w-64 shrink-0">
+<nav class="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-4 lg:pb-0 sticky top-0">
+<a class="whitespace-nowrap px-4 py-3 rounded-lg bg-surface-container-lowest border border-primary-container text-primary-container font-label-md text-label-md shadow-sm transition-all flex items-center gap-3" href="#hotel-info">
+<span class="material-symbols-outlined text-[20px]">domain</span>
+                        Hotel Info
+                    </a>
+<a class="whitespace-nowrap px-4 py-3 rounded-lg text-text-secondary hover:bg-surface-container-lowest hover:text-on-surface font-label-md text-label-md transition-all flex items-center gap-3" href="#payment-methods">
+<span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>
+                        Payment Methods
+                    </a>
+<a class="whitespace-nowrap px-4 py-3 rounded-lg text-text-secondary hover:bg-surface-container-lowest hover:text-on-surface font-label-md text-label-md transition-all flex items-center gap-3" href="#breakfast-settings">
+<span class="material-symbols-outlined text-[20px]">restaurant</span>
+                        Breakfast Settings
+                    </a>
+<a class="whitespace-nowrap px-4 py-3 rounded-lg text-text-secondary hover:bg-surface-container-lowest hover:text-on-surface font-label-md text-label-md transition-all flex items-center gap-3" href="#spark-programs">
+<span class="material-symbols-outlined text-[20px]">stars</span>
+                        Spark Programs
+                    </a>
+<a class="whitespace-nowrap px-4 py-3 rounded-lg text-text-secondary hover:bg-surface-container-lowest hover:text-on-surface font-label-md text-label-md transition-all flex items-center gap-3" href="#staff-accounts">
+<span class="material-symbols-outlined text-[20px]">manage_accounts</span>
+                        Staff Accounts
+                    </a>
+</nav>
+</div>
+<!-- Settings Panels -->
+<div class="flex-1 flex flex-col gap-8 pb-12">
+<!-- Hotel Info Panel -->
+<section class="bg-surface-container-lowest rounded-[12px] border border-border-standard shadow-sm overflow-hidden scroll-mt-6" id="hotel-info">
+<div class="px-6 py-5 border-b border-border-standard flex items-center justify-between">
+<div>
+<h3 class="font-h4 text-h4 text-on-surface">Hotel Information</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Manage primary contact details and physical address.</p>
+</div>
+</div>
+<div class="p-6">
+<form class="space-y-6 max-w-2xl">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="space-y-2">
+<label class="block font-label-md text-label-md text-on-surface">Hotel Name</label>
+<input class="w-full h-11 px-4 rounded-[8px] border border-border-standard bg-surface-container-lowest text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors shadow-sm font-body-sm text-body-sm" type="text" value="spark inn">
+</div>
+<div class="space-y-2">
+<label class="block font-label-md text-label-md text-on-surface">Phone Number</label>
+<input class="w-full h-11 px-4 rounded-[8px] border border-border-standard bg-surface-container-lowest text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors shadow-sm font-body-sm text-body-sm" type="tel" value="+63 917 123 4567">
+</div>
+<div class="space-y-2 md:col-span-2">
+<label class="block font-label-md text-label-md text-on-surface">Email Address</label>
+<input class="w-full h-11 px-4 rounded-[8px] border border-border-standard bg-surface-container-lowest text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors shadow-sm font-body-sm text-body-sm" type="email" value="hello@sparkinn.com">
+</div>
+<div class="space-y-2 md:col-span-2">
+<label class="block font-label-md text-label-md text-on-surface">Physical Address</label>
+<textarea class="w-full px-4 py-3 rounded-[8px] border border-border-standard bg-surface-container-lowest text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors shadow-sm font-body-sm text-body-sm resize-none" rows="3">Alona Beach Rd, Tawala, Panglao, Bohol, Philippines</textarea>
+</div>
+</div>
+<div class="pt-4 flex justify-end">
+<button class="h-[44px] px-6 bg-primary-container hover:bg-primary-hover text-white font-label-md text-label-md rounded-[8px] transition-colors shadow-sm" type="button">
+                                    Save Changes
+                                </button>
+</div>
+</form>
+</div>
+</section>
+<!-- Payment Methods Panel -->
+<section class="bg-surface-container-lowest rounded-[12px] border border-border-standard shadow-sm overflow-hidden scroll-mt-6" id="payment-methods">
+<div class="px-6 py-5 border-b border-border-standard">
+<h3 class="font-h4 text-h4 text-on-surface">Payment Methods</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Configure acceptable payment channels for direct bookings.</p>
+</div>
+<div class="p-0">
+<!-- GCash -->
+<div class="p-6 border-b border-border-standard last:border-0">
+<div class="flex items-start justify-between mb-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-[8px] bg-[#007DFE]/10 flex items-center justify-center text-[#007DFE]">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+</div>
+<div>
+<h4 class="font-label-md text-label-md text-on-surface text-[15px]">GCash</h4>
+<p class="font-body-sm text-body-sm text-text-secondary text-xs">Mobile wallet transfers</p>
+</div>
+</div>
+<div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in cursor-pointer">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" id="toggle-gcash" name="toggle-gcash" type="checkbox">
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer" for="toggle-gcash"></label>
+</div>
+</div>
+<div class="pl-13 pr-4 max-w-xl space-y-4">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="block font-label-sm text-label-sm text-text-secondary">Account Name</label>
+<input class="w-full h-10 px-3 rounded-[8px] border border-border-standard bg-surface-container-low text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors text-sm" type="text" value="Spark Inn Corp">
+</div>
+<div class="space-y-1">
+<label class="block font-label-sm text-label-sm text-text-secondary">GCash Number</label>
+<input class="w-full h-10 px-3 rounded-[8px] border border-border-standard bg-surface-container-low text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors text-sm" type="text" value="0917 123 4567">
+</div>
+</div>
+</div>
+</div>
+<!-- Bank Transfer -->
+<div class="p-6 border-b border-border-standard last:border-0 bg-surface-bright">
+<div class="flex items-start justify-between mb-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-[8px] bg-status-amber-bg flex items-center justify-center text-status-amber-text">
+<span class="material-symbols-outlined">account_balance</span>
+</div>
+<div>
+<h4 class="font-label-md text-label-md text-on-surface text-[15px]">Bank Transfer</h4>
+<p class="font-body-sm text-body-sm text-text-secondary text-xs">Direct deposit to corporate account</p>
+</div>
+</div>
+<div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in cursor-pointer">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" id="toggle-bank" name="toggle-bank" type="checkbox">
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer" for="toggle-bank"></label>
+</div>
+</div>
+<div class="pl-13 pr-4 max-w-xl space-y-4">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1 md:col-span-2">
+<label class="block font-label-sm text-label-sm text-text-secondary">Bank Name</label>
+<input class="w-full h-10 px-3 rounded-[8px] border border-border-standard bg-surface-container-low text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors text-sm" type="text" value="BDO Unibank">
+</div>
+<div class="space-y-1">
+<label class="block font-label-sm text-label-sm text-text-secondary">Account Name</label>
+<input class="w-full h-10 px-3 rounded-[8px] border border-border-standard bg-surface-container-low text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors text-sm" type="text" value="Spark Inn Corp">
+</div>
+<div class="space-y-1">
+<label class="block font-label-sm text-label-sm text-text-secondary">Account Number</label>
+<input class="w-full h-10 px-3 rounded-[8px] border border-border-standard bg-surface-container-low text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors text-sm" type="text" value="0012 3456 7890">
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Breakfast Settings & Programs Row -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<!-- Breakfast Settings -->
+<section class="bg-surface-container-lowest rounded-[12px] border border-border-standard shadow-sm overflow-hidden scroll-mt-6" id="breakfast-settings">
+<div class="px-6 py-5 border-b border-border-standard">
+<h3 class="font-h4 text-h4 text-on-surface">Breakfast Add-on</h3>
+</div>
+<div class="p-6">
+<div class="flex items-center justify-between mb-6">
+<div>
+<span class="font-label-md text-label-md text-on-surface block">Enable Breakfast Option</span>
+<span class="font-body-sm text-body-sm text-text-secondary text-xs">Allow guests to add breakfast during booking</span>
+</div>
+<div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in cursor-pointer">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" id="toggle-breakfast" name="toggle-breakfast" type="checkbox">
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer" for="toggle-breakfast"></label>
+</div>
+</div>
+<div class="space-y-2">
+<label class="block font-label-md text-label-md text-on-surface">Rate per Person (PHP)</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary font-label-md">₱</span>
+<input class="w-full h-11 pl-8 pr-4 rounded-[8px] border border-border-standard bg-surface-container-lowest text-on-surface focus:border-primary-container focus:ring-1 focus:ring-primary-container transition-colors shadow-sm font-body-sm text-body-sm" type="number" value="450">
+</div>
+</div>
+</div>
+</section>
+<!-- Spark Programs -->
+<section class="bg-surface-container-lowest rounded-[12px] border border-border-standard shadow-sm overflow-hidden scroll-mt-6" id="spark-programs">
+<div class="px-6 py-5 border-b border-border-standard">
+<h3 class="font-h4 text-h4 text-on-surface">Spark Programs</h3>
+</div>
+<div class="p-6 space-y-6">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary-container">loyalty</span>
+<div>
+<span class="font-label-md text-label-md text-on-surface block">Spark Rewards</span>
+<span class="font-body-sm text-body-sm text-text-secondary text-xs">Guest loyalty program</span>
+</div>
+</div>
+<div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in cursor-pointer">
+<input checked="" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" id="toggle-rewards" name="toggle-rewards" type="checkbox">
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer" for="toggle-rewards"></label>
+</div>
+</div>
+<div class="flex items-center justify-between pt-6 border-t border-border-standard">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary-container">storefront</span>
+<div>
+<span class="font-label-md text-label-md text-on-surface block">Essentials Store</span>
+<span class="font-body-sm text-body-sm text-text-secondary text-xs">In-room mini bar purchasing</span>
+</div>
+</div>
+<div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in cursor-pointer">
+<input class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" id="toggle-store" name="toggle-store" type="checkbox">
+<label class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer" for="toggle-store"></label>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</div>
+</main>
+<script>
+        // Simple script to handle toggle visuals if needed beyond CSS
+        document.querySelectorAll('.toggle-checkbox').forEach(toggle => {
+            toggle.addEventListener('change', function() {
+                // Additional logic can go here if needed when toggled
+            });
+        });
+    </script>
+</body></html>

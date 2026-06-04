@@ -1,0 +1,376 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Store Order Detail Drawer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Apollo:wght@400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-dim": "#dadada",
+                    "surface": "#f9f9f9",
+                    "status-gray-bg": "#F3F4F6",
+                    "on-secondary": "#ffffff",
+                    "surface-tint": "#8d4f00",
+                    "surface-container-lowest": "#ffffff",
+                    "status-green-text": "#16A34A",
+                    "surface-container-high": "#e8e8e8",
+                    "status-amber-bg": "#FFFBEB",
+                    "primary": "#8d4f00",
+                    "primary-container": "#ea8a1a",
+                    "inverse-surface": "#303030",
+                    "on-surface-variant": "#544335",
+                    "status-blue-text": "#2563EB",
+                    "on-error-container": "#93000a",
+                    "status-blue-bg": "#EFF6FF",
+                    "on-secondary-fixed-variant": "#404758",
+                    "primary-fixed": "#ffdcc0",
+                    "tertiary-fixed-dim": "#cac6c1",
+                    "status-red-bg": "#FEF2F2",
+                    "outline": "#877363",
+                    "on-background": "#1b1b1b",
+                    "status-amber-text": "#D97706",
+                    "on-tertiary-fixed-variant": "#484643",
+                    "secondary-fixed": "#dce2f7",
+                    "tertiary": "#605e5a",
+                    "on-primary-fixed-variant": "#6b3b00",
+                    "on-secondary-container": "#5c6274",
+                    "primary-light": "#FEF3E2",
+                    "surface-container-low": "#f3f3f3",
+                    "error-container": "#ffdad6",
+                    "secondary-container": "#d9dff5",
+                    "page-bg": "#F9FAFB",
+                    "status-red-text": "#DC2626",
+                    "surface-variant": "#e2e2e2",
+                    "surface-bright": "#f9f9f9",
+                    "status-purple-bg": "#F5F3FF",
+                    "border-standard": "#E5E7EB",
+                    "background": "#f9f9f9",
+                    "on-primary": "#ffffff",
+                    "on-secondary-fixed": "#141b2b",
+                    "primary-hover": "#C4720E",
+                    "on-tertiary": "#ffffff",
+                    "status-gray-text": "#6B7280",
+                    "surface-container": "#eeeeee",
+                    "status-green-bg": "#F0FDF4",
+                    "secondary": "#575e70",
+                    "primary-fixed-dim": "#ffb876",
+                    "text-secondary": "#4B5563",
+                    "on-surface": "#1b1b1b",
+                    "surface-container-highest": "#e2e2e2",
+                    "error": "#ba1a1a",
+                    "on-tertiary-container": "#393835",
+                    "on-error": "#ffffff",
+                    "outline-variant": "#dac2af",
+                    "inverse-primary": "#ffb876",
+                    "tertiary-fixed": "#e6e2dd",
+                    "on-primary-container": "#562e00",
+                    "tertiary-container": "#a4a19d",
+                    "status-purple-text": "#7C3AED",
+                    "on-tertiary-fixed": "#1d1b19",
+                    "secondary-fixed-dim": "#c0c6db",
+                    "on-primary-fixed": "#2d1600",
+                    "inverse-on-surface": "#f1f1f1"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "max-width-auth": "460px",
+                    "drawer-width": "480px",
+                    "touch-target-min": "44px",
+                    "sidebar-width": "240px",
+                    "unit": "8px",
+                    "max-width-booking": "600px"
+            },
+            "fontFamily": {
+                    "h2": [
+                            "Apollo"
+                    ],
+                    "h3": [
+                            "Inter"
+                    ],
+                    "label-sm": [
+                            "Inter"
+                    ],
+                    "h4": [
+                            "Inter"
+                    ],
+                    "body-sm": [
+                            "Inter"
+                    ],
+                    "label-md": [
+                            "Inter"
+                    ],
+                    "display-hero": [
+                            "Apollo"
+                    ],
+                    "h1": [
+                            "Apollo"
+                    ],
+                    "body-lg": [
+                            "Inter"
+                    ],
+                    "h1-mobile": [
+                            "Apollo"
+                    ],
+                    "display-hero-mobile": [
+                            "Apollo"
+                    ]
+            },
+            "fontSize": {
+                    "h2": [
+                            "32px",
+                            {
+                                    "lineHeight": "1.3",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "h3": [
+                            "24px",
+                            {
+                                    "lineHeight": "1.4",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "label-sm": [
+                            "12px",
+                            {
+                                    "lineHeight": "1.2",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "h4": [
+                            "18px",
+                            {
+                                    "lineHeight": "1.4",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "body-sm": [
+                            "14px",
+                            {
+                                    "lineHeight": "1.5",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "label-md": [
+                            "13px",
+                            {
+                                    "lineHeight": "1.2",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "display-hero": [
+                            "72px",
+                            {
+                                    "lineHeight": "1.1",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "h1": [
+                            "40px",
+                            {
+                                    "lineHeight": "1.2",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "body-lg": [
+                            "16px",
+                            {
+                                    "lineHeight": "1.6",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "h1-mobile": [
+                            "28px",
+                            {
+                                    "lineHeight": "1.3",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "display-hero-mobile": [
+                            "44px",
+                            {
+                                    "lineHeight": "1.2",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "400"
+                            }
+                    ]
+            }
+    },
+        },
+      }
+    </script>
+</head>
+<body class="bg-surface font-body-sm text-body-sm text-on-surface antialiased overflow-hidden">
+<!-- Admin Shell Placeholder -->
+<div class="flex h-screen w-full">
+<!-- SideNav (Predicted Component) -->
+<nav class="hidden md:flex flex-col h-full py-8 fixed left-0 top-0 h-full w-[240px] bg-inverse-surface dark:bg-surface-container-lowest border-r border-outline-variant flat no shadows">
+<div class="px-4 mb-8">
+<h2 class="font-h3 text-h3 lowercase text-white">spark inn</h2>
+<p class="font-body-sm text-body-sm text-tertiary-fixed-dim mt-1">Admin Portal</p>
+</div>
+<ul class="flex flex-col space-y-2 flex-grow">
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span>Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_month">calendar_month</span>
+<span>Bookings</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined" data-icon="bed">bed</span>
+<span>Rooms</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span>Guests</span>
+</a>
+</li>
+<li>
+<a class="flex items-center space-x-3 text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 font-body-lg text-body-lg Active: translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+</li>
+</ul>
+<div class="px-4 mt-auto">
+<div class="flex items-center space-x-3 text-secondary-fixed-dim">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-on-surface font-label-sm text-label-sm">AU</div>
+<span class="font-body-sm text-body-sm">Admin User</span>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 ml-[240px] p-8 bg-page-bg relative">
+<h1 class="font-h3 text-h3 text-on-background mb-4">Intercom Inbox</h1>
+<p class="text-text-secondary">Simulated background content for drawer context.</p>
+<!-- Backdrop Overlay -->
+<div aria-hidden="true" class="fixed inset-0 bg-on-background/20 backdrop-blur-sm z-40"></div>
+<!-- Drawer Component -->
+<aside aria-labelledby="drawer-title" aria-modal="true" class="fixed inset-y-0 right-0 w-[480px] bg-surface-container-lowest shadow-2xl z-50 flex flex-col transform transition-transform duration-300 translate-x-0 border-l border-border-standard" role="dialog">
+<!-- Drawer Header -->
+<div class="flex items-center justify-between px-6 py-5 border-b border-border-standard shrink-0">
+<div class="flex items-center gap-3">
+<h2 class="font-h4 text-h4 text-on-background m-0 leading-none" id="drawer-title">#ORD-8842</h2>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full font-label-sm text-label-sm bg-status-blue-bg text-status-blue-text">
+                        Pending
+                    </span>
+</div>
+<button aria-label="Close Drawer" class="text-text-secondary hover:text-on-surface transition-colors w-[44px] h-[44px] flex items-center justify-center rounded-full hover:bg-surface-variant">
+<span class="material-symbols-outlined text-[20px]" data-icon="close">close</span>
+</button>
+</div>
+<!-- Drawer Body -->
+<div class="flex-1 overflow-y-auto p-6 space-y-6">
+<!-- Guest Summary Card -->
+<div class="bg-surface p-4 rounded-lg border border-border-standard flex items-start gap-4">
+<div class="w-10 h-10 rounded-full bg-primary-light flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary-container" data-icon="person">person</span>
+</div>
+<div class="flex-1">
+<p class="font-label-md text-label-md text-text-secondary uppercase tracking-wider mb-1">Room 204</p>
+<h3 class="font-h4 text-h4 text-on-surface mb-0.5">Eleanor Vance</h3>
+<p class="font-body-sm text-body-sm text-text-secondary">Today, 10:42 AM</p>
+</div>
+</div>
+<!-- Order Summary Table -->
+<div>
+<h4 class="font-label-md text-label-md text-text-secondary uppercase tracking-wider mb-3">Order Details</h4>
+<div class="bg-surface rounded-lg border border-border-standard overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-border-standard bg-surface-container-low">
+<th class="px-4 py-3 font-label-sm text-label-sm text-text-secondary w-16">Qty</th>
+<th class="px-4 py-3 font-label-sm text-label-sm text-text-secondary">Item</th>
+<th class="px-4 py-3 font-label-sm text-label-sm text-text-secondary text-right">Price</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border-standard font-body-sm text-body-sm text-on-surface">
+<tr>
+<td class="px-4 py-3">2x</td>
+<td class="px-4 py-3">Fresh Coconut Water</td>
+<td class="px-4 py-3 text-right">₱600.00</td>
+</tr>
+<tr>
+<td class="px-4 py-3">1x</td>
+<td class="px-4 py-3">Spark Essential Kit</td>
+<td class="px-4 py-3 text-right">₱850.00</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Financial Breakdown -->
+<div class="bg-surface-container-low rounded-lg p-4 space-y-2">
+<div class="flex justify-between font-body-sm text-body-sm text-text-secondary">
+<span>Subtotal</span>
+<span>₱1,450.00</span>
+</div>
+<div class="flex justify-between font-body-sm text-body-sm text-text-secondary">
+<span>Delivery Fee</span>
+<span>₱50.00</span>
+</div>
+<div class="pt-2 border-t border-border-standard mt-2 flex justify-between items-center">
+<span class="font-h4 text-h4 text-on-surface">Total</span>
+<span class="font-h4 text-h4 text-on-surface">₱1,500.00</span>
+</div>
+</div>
+<!-- Payment Details -->
+<div class="flex items-center gap-3 p-4 bg-surface rounded-lg border border-border-standard">
+<span class="material-symbols-outlined text-text-secondary" data-icon="credit_card">credit_card</span>
+<span class="font-body-sm text-body-sm text-on-surface">Charged to Room</span>
+</div>
+<!-- Order Timeline -->
+<div>
+<h4 class="font-label-md text-label-md text-text-secondary uppercase tracking-wider mb-4">Timeline</h4>
+<div class="relative pl-4 border-l-2 border-border-standard space-y-6">
+<!-- Step 1: Placed -->
+<div class="relative">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-border-standard ring-4 ring-surface-container-lowest"></span>
+<p class="font-label-md text-label-md text-on-surface">Order Placed</p>
+<p class="font-body-sm text-body-sm text-text-secondary">10:42 AM</p>
+</div>
+<!-- Step 2: Pending (Current) -->
+<div class="relative">
+<span class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-primary-container ring-4 ring-surface-container-lowest"></span>
+<p class="font-label-md text-label-md text-primary-container font-medium">Order Pending</p>
+<p class="font-body-sm text-body-sm text-text-secondary">Awaiting confirmation</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Drawer Footer (Actions) -->
+<div class="p-6 border-t border-border-standard bg-surface-container-lowest shrink-0 space-y-3">
+<button class="w-full h-[touch-target-min] bg-primary-container text-on-background font-label-md text-label-md rounded-lg hover:bg-primary-hover transition-colors flex items-center justify-center">
+                    Mark as Delivered
+                </button>
+<button class="w-full h-[touch-target-min] bg-transparent border border-border-standard text-on-surface font-label-md text-label-md rounded-lg hover:bg-surface-variant transition-colors flex items-center justify-center">
+                    Cancel Order
+                </button>
+</div>
+</aside>
+</main>
+</div>
+</body></html>

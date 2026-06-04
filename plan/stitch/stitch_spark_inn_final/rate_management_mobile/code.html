@@ -1,0 +1,386 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>spark inn - Rate Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Apollo&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container": "#eeeeee",
+                      "status-green-bg": "#F0FDF4",
+                      "primary-container": "#ea8a1a",
+                      "tertiary-fixed": "#e6e2dd",
+                      "status-blue-bg": "#EFF6FF",
+                      "error": "#ba1a1a",
+                      "status-red-text": "#DC2626",
+                      "surface-container-high": "#e8e8e8",
+                      "error-container": "#ffdad6",
+                      "primary": "#8d4f00",
+                      "status-purple-bg": "#F5F3FF",
+                      "text-secondary": "#4B5563",
+                      "tertiary": "#605e5a",
+                      "border-standard": "#E5E7EB",
+                      "primary-light": "#FEF3E2",
+                      "surface-tint": "#8d4f00",
+                      "surface-container-low": "#f3f3f3",
+                      "status-blue-text": "#2563EB",
+                      "on-secondary-container": "#5c6274",
+                      "status-gray-text": "#6B7280",
+                      "page-bg": "#F9FAFB",
+                      "on-primary-fixed-variant": "#6b3b00",
+                      "tertiary-container": "#a4a19d",
+                      "surface-container-lowest": "#ffffff",
+                      "outline-variant": "#dac2af",
+                      "on-surface-variant": "#544335",
+                      "primary-fixed": "#ffdcc0",
+                      "secondary-container": "#d9dff5",
+                      "on-tertiary-fixed-variant": "#484643",
+                      "primary-fixed-dim": "#ffb876",
+                      "tertiary-fixed-dim": "#cac6c1",
+                      "on-background": "#1b1b1b",
+                      "primary-hover": "#C4720E",
+                      "surface-bright": "#f9f9f9",
+                      "status-amber-text": "#D97706",
+                      "on-tertiary-fixed": "#1d1b19",
+                      "on-tertiary-container": "#393835",
+                      "on-secondary-fixed-variant": "#404758",
+                      "surface-variant": "#e2e2e2",
+                      "inverse-on-surface": "#f1f1f1",
+                      "status-purple-text": "#7C3AED",
+                      "inverse-primary": "#ffb876",
+                      "inverse-surface": "#303030",
+                      "on-error-container": "#93000a",
+                      "background": "#f9f9f9",
+                      "on-error": "#ffffff",
+                      "status-gray-bg": "#F3F4F6",
+                      "on-secondary": "#ffffff",
+                      "secondary-fixed": "#dce2f7",
+                      "status-green-text": "#16A34A",
+                      "status-amber-bg": "#FFFBEB",
+                      "on-primary-fixed": "#2d1600",
+                      "status-red-bg": "#FEF2F2",
+                      "secondary-fixed-dim": "#c0c6db",
+                      "secondary": "#575e70",
+                      "on-secondary-fixed": "#141b2b",
+                      "outline": "#877363",
+                      "surface-container-highest": "#e2e2e2",
+                      "surface-dim": "#dadada",
+                      "on-tertiary": "#ffffff",
+                      "surface": "#f9f9f9",
+                      "on-surface": "#1b1b1b",
+                      "on-primary-container": "#562e00",
+                      "on-primary": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "8px",
+                      "touch-target-min": "44px",
+                      "sidebar-width": "240px",
+                      "max-width-booking": "600px",
+                      "drawer-width": "480px",
+                      "max-width-auth": "460px"
+              },
+              "fontFamily": {
+                      "h3": [
+                              "Inter"
+                      ],
+                      "display-hero": [
+                              "Apollo"
+                      ],
+                      "h2": [
+                              "Apollo"
+                      ],
+                      "label-md": [
+                              "Inter"
+                      ],
+                      "display-hero-mobile": [
+                              "Apollo"
+                      ],
+                      "label-sm": [
+                              "Inter"
+                      ],
+                      "h1": [
+                              "Apollo"
+                      ],
+                      "h4": [
+                              "Inter"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "h1-mobile": [
+                              "Apollo"
+                      ]
+              },
+              "fontSize": {
+                      "h3": [
+                              "24px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "display-hero": [
+                              "72px",
+                              {
+                                      "lineHeight": "1.1",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h2": [
+                              "32px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "display-hero-mobile": [
+                              "44px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "h1": [
+                              "40px",
+                              {
+                                      "lineHeight": "1.2",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h4": [
+                              "18px",
+                              {
+                                      "lineHeight": "1.4",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "1.5",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "1.6",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "h1-mobile": [
+                              "28px",
+                              {
+                                      "lineHeight": "1.3",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-apollo { font-family: 'Apollo', serif; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-page-bg text-on-background antialiased flex h-screen overflow-hidden">
+<!-- NavigationDrawer (Sidebar) for Desktop -->
+<aside class="hidden md:flex flex-col h-full py-8 bg-inverse-surface dark:bg-surface-container-lowest border-r border-outline-variant w-sidebar-width shrink-0">
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-surface-variant overflow-hidden shrink-0" data-alt="Close up professional headshot of a smiling man in his 30s wearing a modern casual suit, warm lighting, plain light background, communicating approachability and competence for an admin portal profile picture.">
+<img alt="Admin User" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4qNKTDGPL3AO_UqkRa6eBIwBkLlw21lcIShdjah7HRmvvpBibtClzeBRB2UcByY4b6gpSdzm7MIFB6A3h6T9mYQAYcejtuVju1XsNHZcYlkCZQrcJuztW584Opul5imGV5RzbWhyqoCSUgcYSVJ7auSKjhTplMMb7DelHBJRpPoODVHBEzvmcaIMy0nPq0CKzn8keF5AJ6omI818P92bE-LDA9kek_y5zXNJTpX3mxJazb2vf1qN9gjS3i2KXV46lX6WQBZ58zgAa">
+</div>
+<div>
+<h2 class="font-h3 text-h3 lowercase text-white m-0 leading-tight">spark inn</h2>
+<p class="font-label-sm text-label-sm text-secondary-fixed-dim">Admin Portal</p>
+</div>
+</div>
+<nav class="flex-1 overflow-y-auto w-full">
+<ul class="flex flex-col gap-1 w-full px-2">
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all rounded-DEFAULT font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                        Dashboard
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all rounded-DEFAULT font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+                        Bookings
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all rounded-DEFAULT font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined">bed</span>
+                        Rooms
+                    </a>
+</li>
+<li>
+<!-- Intentionally highlighting "Rates" based on semantic intent, even though it's not strictly in the JSON array, it's the closest semantic match for "Settings" or a generic admin sub-page in this context. Let's map it to Settings since Rates management is a configuration. -->
+<a class="flex items-center gap-3 w-full text-primary-fixed-dim border-l-4 border-primary-fixed bg-white/10 px-4 py-3 hover:bg-white/5 transition-all rounded-DEFAULT font-body-lg text-body-lg translate-x-1 duration-200" href="#">
+<span class="material-symbols-outlined">settings</span>
+                        Rates
+                    </a>
+</li>
+<li>
+<a class="flex items-center gap-3 w-full text-secondary-fixed-dim px-4 py-3 hover:bg-white/5 transition-all rounded-DEFAULT font-body-lg text-body-lg" href="#">
+<span class="material-symbols-outlined">group</span>
+                        Guests
+                    </a>
+</li>
+</ul>
+</nav>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-full overflow-hidden relative">
+<!-- TopAppBar (Mobile & Desktop) -->
+<header class="bg-surface-container-lowest/80 backdrop-blur-md dark:bg-inverse-surface/80 flex justify-between items-center px-6 py-4 w-full border-b border-border-standard md:border-none z-40 sticky top-0">
+<div class="flex items-center gap-4">
+<button class="md:hidden text-on-surface-variant p-2 rounded-full hover:bg-surface-variant transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<h1 class="font-h3 text-h3 text-on-background hidden md:block">Rate Management</h1>
+<h1 class="font-h3 text-h3 lowercase tracking-tighter text-on-background md:hidden">spark inn</h1>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-primary-container hover:bg-primary-hover text-on-background font-label-md text-label-md px-4 py-2 rounded-lg transition-colors min-h-[44px] flex items-center justify-center hidden sm:flex">
+                    Save Changes
+                </button>
+</div>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto p-4 md:p-8 bg-page-bg">
+<div class="max-w-4xl mx-auto space-y-6">
+<!-- Mobile Page Title -->
+<h1 class="font-h2 text-h2 text-on-background md:hidden mb-4">Rate Management</h1>
+<!-- Tabbed Interface -->
+<div class="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 border-b border-border-standard">
+<button class="px-4 py-2 font-label-md text-label-md text-primary border-b-2 border-primary whitespace-nowrap min-h-[44px]">Room Rates</button>
+<button class="px-4 py-2 font-label-md text-label-md text-status-gray-text hover:text-on-background whitespace-nowrap min-h-[44px]">Weekend Rates</button>
+<button class="px-4 py-2 font-label-md text-label-md text-status-gray-text hover:text-on-background whitespace-nowrap min-h-[44px]">Corporate</button>
+<button class="px-4 py-2 font-label-md text-label-md text-status-gray-text hover:text-on-background whitespace-nowrap min-h-[44px]">Vouchers</button>
+</div>
+<!-- Content Area: Room Rates -->
+<div class="bg-surface-container-lowest rounded-xl border border-border-standard overflow-hidden shadow-sm">
+<div class="p-6 border-b border-border-standard bg-surface-bright flex justify-between items-center">
+<div>
+<h3 class="font-h4 text-h4 text-on-background">Standard Nightly Rates</h3>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Base rates before seasonal adjustments.</p>
+</div>
+<div class="text-right">
+<span class="inline-flex items-center gap-1 font-label-sm text-label-sm text-status-gray-text">
+                                Currency: <strong class="text-on-background">PHP (₱)</strong>
+</span>
+</div>
+</div>
+<!-- List of Room Types -->
+<div class="divide-y divide-border-standard">
+<!-- Room Item 1 -->
+<div class="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-surface-container-low transition-colors">
+<div class="flex items-start gap-4">
+<div class="w-16 h-16 rounded-lg bg-surface-variant shrink-0 overflow-hidden" data-alt="A bright, airy hotel room featuring a king-sized bed with pristine white linens, warm wood accents, and natural sunlight streaming through a large window, conveying modern minimal luxury.">
+<img alt="Deluxe King" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQe-VsQF2j1xPQ-uTfiNrpGwCWn4WzTsBYlkTDusGmlYTm9kvcgussvUEncNGMLNVrUkk9jIHxv3SgsEJjh4EvSoTnvDxVWn5n6Z658Lw-w7vd18PkVeU6f9SpwTTDUeJcOGpV34G2XLOe7jowVywZCmA5imZ6zFzZbPisU2VJ8mF8uG64i5uASEClydiYixdIg9brJ36UMpE8UVD-HduqV-b89g-EbIdQkvKcWt5BOiJIvkQ82mO56sIun3_CzAL0Afk2sfDImt-7">
+</div>
+<div>
+<h4 class="font-label-md text-label-md text-on-background font-semibold">Deluxe King Suite</h4>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Max 2 Adults • 45sqm</p>
+</div>
+</div>
+<div class="flex items-center gap-3 sm:ml-auto">
+<div class="relative w-full sm:w-32">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-status-gray-text font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-3 py-2 bg-surface-container-lowest border border-border-standard rounded-lg focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-background min-h-[44px]" type="number" value="12500">
+</div>
+</div>
+</div>
+<!-- Room Item 2 -->
+<div class="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-surface-container-low transition-colors">
+<div class="flex items-start gap-4">
+<div class="w-16 h-16 rounded-lg bg-surface-variant shrink-0 overflow-hidden" data-alt="A clean, modern hotel room with a queen-sized bed, soft warm lighting, minimalist decor, and a neutral color palette, representing an efficient yet comfortable standard room.">
+<img alt="Standard Queen" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuARPOqFUSyjdjGUFAL2_EglnVWWQ9VVoD4tnWrPZAFlRHH-8_qrpvXecy58N5xhZW_nl9QldpRfy7NVg3Y0Xt_hbAsF02jjfD-eBnfZ8tZ6EIqLIe7vkQCfpkDiQx5kxI3eyjUQUJAgiZNH5JB-dwam6nova7HujZJizkvMuvwXwDh1TBUS38rvp6qsqT94pdFvlDR-5dnVImlIybvwKM_5AKM0UhvjrhIthwhAO-48xiOdPmwGdFayiwd8mHiQPM_vGu3MmC3rZQKd">
+</div>
+<div>
+<h4 class="font-label-md text-label-md text-on-background font-semibold">Standard Queen</h4>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Max 2 Adults • 30sqm</p>
+</div>
+</div>
+<div class="flex items-center gap-3 sm:ml-auto">
+<div class="relative w-full sm:w-32">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-status-gray-text font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-3 py-2 bg-surface-container-lowest border border-border-standard rounded-lg focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-background min-h-[44px]" type="number" value="8500">
+</div>
+</div>
+</div>
+<!-- Room Item 3 -->
+<div class="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-surface-container-low transition-colors">
+<div class="flex items-start gap-4">
+<div class="w-16 h-16 rounded-lg bg-surface-variant shrink-0 overflow-hidden" data-alt="A spacious family hotel room featuring two double beds, warm sunlight, simple elegant furniture, and a welcoming atmosphere suitable for a group stay.">
+<img alt="Family Room" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC6MqVsxaIC9EyNkILcbh1Y5RjT2bp6sX4FoZJ3ND4V3HGRVEbNm4IoGVHuOZUHBPBxiltfgfdnpz-2V87kFl5f6YgmKuCpwtIdjH-J53gRCL5bYW5jQyoibklTGFJ03lBvRTjNwGD0d-QYPpU86TxF5ifNFwIkn89gpJQx6UEhQ3oebqm4GbUlWfUjXSK-QC5SY1sbQ-HZQxUl2URWN_rhA8wgQKRRP_UntIt8GkgjX4gaLoVTtgg7luGBGHEBiC1Bkq0zjaROqnMP">
+</div>
+<div>
+<h4 class="font-label-md text-label-md text-on-background font-semibold">Family Premium</h4>
+<p class="font-body-sm text-body-sm text-text-secondary mt-1">Max 4 Adults • 60sqm</p>
+</div>
+</div>
+<div class="flex items-center gap-3 sm:ml-auto">
+<div class="relative w-full sm:w-32">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 text-status-gray-text font-body-sm text-body-sm">₱</span>
+<input class="w-full pl-8 pr-3 py-2 bg-surface-container-lowest border border-border-standard rounded-lg focus:outline-none focus:border-primary-container focus:ring-1 focus:ring-primary-container font-body-sm text-body-sm text-on-background min-h-[44px]" type="number" value="16000">
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom padding for mobile FAB -->
+<div class="h-24 sm:hidden"></div>
+</div>
+<!-- Mobile Floating Action Button (FAB) -->
+<div class="sm:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-sm z-50">
+<button class="w-full bg-primary-container hover:bg-primary-hover text-on-background font-label-md text-label-md py-4 rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[20px]">save</span>
+                Save Changes
+            </button>
+</div>
+</main>
+</body></html>
