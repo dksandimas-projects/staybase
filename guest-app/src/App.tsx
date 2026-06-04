@@ -1,4 +1,5 @@
 import { Route, Routes } from "react-router-dom";
+import { BookingPage } from "./pages/BookingPage";
 import { HomePage } from "./pages/HomePage";
 import { RoomsPage } from "./pages/RoomsPage";
 
@@ -7,6 +8,7 @@ export function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/rooms" element={<RoomsPage />} />
+      <Route path="/book" element={<BookingPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );
