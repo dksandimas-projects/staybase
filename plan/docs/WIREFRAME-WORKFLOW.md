@@ -67,30 +67,30 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | Component | Best Stitch source | Notes |
 |---|---|---|---|
-| [ ] | `Navbar` | `homepage_desktop` | Transparent over hero, solid white on scroll, sticky |
-| [ ] | `Footer` | `homepage_desktop` | Dark bg `#111827`, white logo, nav links, version |
-| [ ] | `PrimaryButton` | spec only | Orange `primary`, `8px` radius, `44px` min-height |
-| [ ] | `GhostButton` | spec only | Transparent, orange border + text |
-| [ ] | `StatusBadge` | `rooms_rates_desktop` | Pill, all status variants from spec color table |
-| [ ] | `RoomCard` | `rooms_rates_desktop` | Photo top, name, amenities, price — never price first |
-| [ ] | `BookingSummaryCard` | `booking_step_3_desktop` | Read-only recap panel |
-| [ ] | `StepIndicator` | `booking_step_1_desktop` | 4-step, orange active + completed, gray inactive |
-| [ ] | `DateRangePicker` | `availability_filter_drawer_mobile` | Blocks past dates, min 1-night enforced |
-| [ ] | `PaymentMethodCard` | `booking_step_3_desktop` | Radio card, orange border when selected |
-| [ ] | `Modal` | `room_detail_modal_desktop` | Centered overlay, `16px` radius, backdrop blur, close X |
-| [ ] | `Drawer` (guest) | spec only | Right-side, full height, `~480px` wide |
+| [x] | `Navbar` | `homepage_desktop` | Transparent over hero, solid white on scroll, sticky |
+| [x] | `Footer` | `homepage_desktop` | Dark bg `#111827`, white logo, nav links, version |
+| [x] | `PrimaryButton` | spec only | Orange `primary`, `8px` radius, `44px` min-height |
+| [x] | `GhostButton` | spec only | Transparent, orange border + text |
+| [x] | `StatusBadge` | `rooms_rates_desktop` | Pill, all status variants from spec color table |
+| [x] | `RoomCard` | `rooms_rates_desktop` | Photo top, name, amenities, price — never price first |
+| [x] | `BookingSummaryCard` | `booking_step_3_desktop` | Read-only recap panel |
+| [x] | `StepIndicator` | `booking_step_1_desktop` | 4-step, orange active + completed, gray inactive |
+| [x] | `DateRangePicker` | `availability_filter_drawer_mobile` | Blocks past dates, min 1-night enforced |
+| [x] | `PaymentMethodCard` | `booking_step_3_desktop` | Radio card, orange border when selected |
+| [x] | `Modal` | `room_detail_modal_desktop` | Centered overlay, `16px` radius, backdrop blur, close X |
+| [x] | `Drawer` (guest) | spec only | Right-side, full height, `~480px` wide |
 
 ### Admin App components
 
 | Done | Component | Best Stitch source | Notes |
 |---|---|---|---|
-| [ ] | `Sidebar` | `admin_dashboard_desktop` | `#111827`, `240px`, white logo, orange active indicator, version bottom |
-| [ ] | `StatsCard` | `admin_dashboard_desktop` | White card, `12px` radius, label + value + optional trend |
-| [ ] | `DataTable` | `bookings_management_desktop` | Sortable, filterable, skeleton rows, row click |
-| [ ] | `Drawer` (admin) | `booking_detail_drawer_desktop_1` | Right-side, full height, `~480px` wide |
-| [ ] | `StatusBadge` (admin) | `bookings_management_desktop` | Same component as guest — all admin statuses included |
-| [ ] | `ChatBubble` | `intercom_inbox_desktop_1` | Guest: right orange; Staff: left white with border |
-| [ ] | `QuickRequestChip` | `intercom_guest_chat_mobile_1` | Pill button in quick-select row |
+| [x] | `Sidebar` | `admin_dashboard_desktop` | `#111827`, `240px`, white logo, orange active indicator, version bottom |
+| [x] | `StatsCard` | `admin_dashboard_desktop` | White card, `12px` radius, label + value + optional trend |
+| [x] | `DataTable` | `bookings_management_desktop` | Sortable, filterable, skeleton rows, row click |
+| [x] | `Drawer` (admin) | `booking_detail_drawer_desktop_1` | Right-side, full height, `~480px` wide |
+| [x] | `StatusBadge` (admin) | `bookings_management_desktop` | Same component as guest — all admin statuses included |
+| [x] | `ChatBubble` | `intercom_inbox_desktop_1` | Guest: right orange; Staff: left white with border |
+| [x] | `QuickRequestChip` | `intercom_guest_chat_mobile_1` | Pill button in quick-select row |
 
 ### Mark component done when
 

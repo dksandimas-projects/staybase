@@ -102,26 +102,26 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ### Component Library (build first)
 
 **Guest App**
-- ⬜ `Navbar` — transparent over hero, solid on scroll, sticky
-- ⬜ `Footer` — dark bg, white logo, nav links, version
-- ⬜ `PrimaryButton` — orange `primary`, `8px` radius, `44px` min-height
-- ⬜ `GhostButton` — transparent, orange border + text
-- ⬜ `StatusBadge` — pill, all status variants
-- ⬜ `RoomCard` — photo, name, amenities, price (never price first)
-- ⬜ `BookingSummaryCard` — read-only recap panel
-- ⬜ `StepIndicator` — 4-step, orange active + completed
-- ⬜ `DateRangePicker` — blocks past dates, min 1-night
-- ⬜ `PaymentMethodCard` — radio card, orange border when selected
-- ⬜ `Modal` — centered overlay, `16px` radius, backdrop blur
-- ⬜ `Drawer` (guest) — right-side, full height, ~480px wide
+- ✅ `Navbar` — transparent over hero, solid on scroll, sticky
+- ✅ `Footer` — dark bg, white logo, nav links, version
+- ✅ `PrimaryButton` — orange `primary`, `8px` radius, `44px` min-height
+- ✅ `GhostButton` — transparent, orange border + text
+- ✅ `StatusBadge` — pill, all status variants
+- ✅ `RoomCard` — photo, name, amenities, price (never price first)
+- ✅ `BookingSummaryCard` — read-only recap panel
+- ✅ `StepIndicator` — 4-step, orange active + completed
+- ✅ `DateRangePicker` — blocks past dates, min 1-night
+- ✅ `PaymentMethodCard` — radio card, orange border when selected
+- ✅ `Modal` — centered overlay, `16px` radius, backdrop blur
+- ✅ `Drawer` (guest) — right-side, full height, ~480px wide
 
 **Admin App**
-- ⬜ `Sidebar` — `#111827`, 240px, white logo, orange active, version bottom
-- ⬜ `StatsCard` — white card, `12px` radius, label + value + optional trend
-- ⬜ `DataTable` — sortable, filterable, skeleton rows, row click
-- ⬜ `Drawer` (admin) — right-side, full height, ~480px wide
-- ⬜ `ChatBubble` — guest: right orange; staff: left white with border
-- ⬜ `QuickRequestChip` — pill button in quick-select row
+- ✅ `Sidebar` — `#111827`, 240px, white logo, orange active, version bottom
+- ✅ `StatsCard` — white card, `12px` radius, label + value + optional trend
+- ✅ `DataTable` — sortable, filterable, skeleton rows, row click
+- ✅ `Drawer` (admin) — right-side, full height, ~480px wide
+- ✅ `ChatBubble` — guest: right orange; staff: left white with border
+- ✅ `QuickRequestChip` — pill button in quick-select row
 
 ### Guest App Screens
 - ⬜ G-01 Homepage `/`
