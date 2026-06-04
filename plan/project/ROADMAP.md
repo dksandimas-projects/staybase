@@ -25,7 +25,7 @@
 - ✅ Tailwind CSS configured in both apps
 - ✅ `@config` path alias in `vite.config.ts` + `tsconfig.json` (both apps) — points to `../../hotel.config.ts`
 - ✅ `npm install` from repo root — installs all workspace deps together
-- ⬜ Husky installed + `commit-msg` hook for Conventional Commits + auto version bump
+- ✅ Husky installed + `commit-msg` hook for Conventional Commits + auto version bump
 - ✅ `shared/VERSION.ts` created at `v0.1.0`
 - ✅ `shared/types/index.ts` — all canonical types from `plan/docs/TYPES.md`
 - ✅ `shared/constants/index.ts` — booking statuses, sources, etc.
