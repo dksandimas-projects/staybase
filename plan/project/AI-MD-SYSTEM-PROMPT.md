@@ -1,6 +1,7 @@
 # AI Prompt — Build an MD Documentation System for a Web App
 > Reusable prompt for any new web app project.
 > Copy everything below the line and paste it at the start of a new AI session.
+> **Scale to your project's complexity** — not every section applies to every app. A simple single-surface CRUD app needs maybe 10 files. A multi-app, white-label, loyalty-program-having system like Spark Inn needs 42. Use your judgment.
 
 ---
 
@@ -13,9 +14,6 @@
 5. Let the AI ask clarifying questions before building anything
 6. Give your go signal — the AI builds all MD files directly to your connected repo
 
----
-
----
 ---
 
 ## THE PROMPT
@@ -49,25 +47,34 @@ Do not build a single file until you have answers to all of these. Ask them in o
 8. Where is it hosted? (Vercel, Netlify, AWS, etc.)
 9. Is there a server-side API? If so, where does it live?
 10. Is this white-label / reusable for multiple clients, or single-tenant?
+11. Do you plan to release a native mobile app in the future? (affects PWA and Capacitor readiness decisions)
+12. Does the project need a wireframe/static-first pass before connecting real data?
 
 **Data:**
-11. What are the main data entities? (e.g. users, orders, products)
-12. What database are you using and is the schema defined yet?
+13. What are the main data entities? (e.g. users, orders, products)
+14. What database are you using and is the schema defined yet?
 
 **Code conventions:**
-13. Any strong preferences on code style, naming, exports, state management?
-14. Testing strategy? (automated, manual, none)
-15. Branching strategy? (gitflow, trunk-based, etc.)
-16. Versioning? (semantic versioning, displayed somewhere in the UI?)
+15. Any strong preferences on code style, naming, exports, state management?
+16. Testing strategy? (automated, manual, none — if none, at minimum test critical financial/transactional logic)
+17. Branching strategy? (gitflow, trunk-based, etc.)
+18. Versioning? (semantic versioning, displayed somewhere in the UI?)
+
+**UX & design:**
+19. What animation aesthetic? (premium/calm, playful, minimal/none)
+20. Are there existing design mockups or wireframes? (Figma, Stitch, etc.)
+21. SEO requirements? (structured data, sitemap, per-page meta?)
 
 **Security & compliance:**
-17. Does the app handle PII (personal data)? If so, which country's laws apply?
-18. Are there authentication requirements beyond standard login?
-19. Any specific security concerns? (payments, file uploads, public APIs, etc.)
+22. Does the app handle PII (personal data)? If so, which country's laws apply?
+23. Are there authentication requirements beyond standard login?
+24. Any specific security concerns? (payments, file uploads, public APIs, etc.)
+25. Any industry-specific compliance requirements? (e.g. hotel guest registration laws, health data, financial regulations)
 
 **White-label (if applicable):**
-20. Will this codebase be reused for multiple clients?
-21. What needs to be configurable per client? (branding, features, content?)
+26. Will this codebase be reused for multiple clients?
+27. What needs to be configurable per client? (branding, colors, fonts, logos, locale, currency, feature toggles?)
+28. What is runtime-editable by the client admin vs. requires a redeploy by the developer?
 
 If the user has a context file or PRD, read it first before asking — skip any questions already answered there.
 
@@ -75,7 +82,7 @@ If the user has a context file or PRD, read it first before asking — skip any 
 
 ### MD system rules — follow these exactly
 
-- **No code snippets in any MD** — high-level spec, rules, and checklists only
+- **No code snippets in any MD** — high-level spec, rules, and checklists only. Exceptions: precise technical specs where high specificity prevents misinterpretation are acceptable (e.g. animation token definitions, test coverage tables)
 - **Single source of truth** — each piece of information lives in exactly one MD; feature MDs reference, never repeat
 - **Every MD starts with a `> Requires:` line** listing which other MDs to read first
 - **Feature MDs use a standard template** (see below)
@@ -132,36 +139,40 @@ Before building any MD, create two files in a `plan/project/context/` folder:
 - `GEMINI.md` — one line: "See CLAUDE.md for full project context."
 - `AGENTS.md` — one line: "See CLAUDE.md for full project context."
 
-#### 3. `plan/docs/` — reference MDs
-At minimum, build these (add more as needed):
-- `FRONTEND.md` — design tokens, component conventions, typography, breakpoints
-- `BACKEND.md` — database schema (all collections/tables), security rules
-- `API-ROUTES.md` — API surface, auth pattern, request/response shapes
+#### 3. `docs/` — reference MDs
+Adjust the folder name to match your project structure (e.g. `plan/docs/`, `docs/`, `.context/`). At minimum, build these (add more as needed):
+- `FRONTEND.md` — design tokens, component conventions, typography, breakpoints, **animation spec** (which surfaces animate, easing, duration — stack-agnostic; reference your animation library), **SEO** (meta tags, structured data, sitemap, robots.txt, per-page descriptions)
+- `BACKEND.md` — database schema (all collections/tables + subcollections), security rules
+- `API-ROUTES.md` — API surface, auth pattern, request/response shapes, bot prevention, rate limiting
 - `TYPES.md` — canonical TypeScript types for all shared models
 - `ENV-SETUP.md` — all environment variables
-- `FILE-STRUCTURE.md` — full folder tree, naming conventions, monorepo setup
-- `DECISIONS-ARCH.md` — architecture, stack, tooling, security decisions (one line each)
+- `FILE-STRUCTURE.md` — full folder tree, naming conventions, monorepo setup, **test file locations** (wherever unit and integration tests live for your stack)
+- `DECISIONS-ARCH.md` — architecture, stack, tooling, security decisions (one line each) + **Testing Strategy section** (which logic areas get unit vs integration tests, what stays manual QA)
 - `DECISIONS-FEATURES.md` — feature scope, product, business rules decisions (one line each)
 - `GOTCHAS.md` — what agents must never do
-- `CONTRIBUTING.md` — MD ownership rules, update triggers, deploy checklist
-- `SECURITY.md` — auth rules, PII handling, compliance, bot prevention
-- `WHITE-LABEL.md` — if applicable: config schema, per-client deployment guide
+- `CONTRIBUTING.md` — MD ownership rules, update triggers, deploy checklist (include SEO validation steps)
+- `SECURITY.md` — auth rules, PII handling, compliance, data retention, breach protocol
+- `WHITE-LABEL.md` — if applicable: full `config` schema, runtime-editable vs deploy-time table, per-client deploy guide, asset checklist
+- `WIREFRAME-WORKFLOW.md` — if doing a wireframe-first pass: Stitch/Figma → React component process, screen checklist, agent rules, definition of done
 
 #### 4. App CLAUDEs
-One `CLAUDE.md` per app (e.g. `plan/guest-app/CLAUDE.md`, `plan/admin-app/CLAUDE.md`):
+One `CLAUDE.md` per app (e.g. `guest-app/CLAUDE.md`, `admin-app/CLAUDE.md`):
 - Pages and routes
-- App-specific Firebase/DB usage
+- App-specific database/API usage — every collection, table, or external service the app touches
 - Key conventions for that app
 
-#### 5. `plan/features/` — feature MDs
+#### 5. `features/` — feature MDs
 One MD per feature using the template above. Group as:
 - Public/guest app features
 - Admin/dashboard features
 - Cross-cutting features (auth, availability, email, etc.)
 
 #### 6. Project folder
-- `project/ROADMAP.md` — prioritized build checklist, phase by phase, with checkboxes
-- `project/SETUP-GUIDE.md` — step-by-step local + production setup guide
+- `project/ROADMAP.md` — prioritized build checklist, phase by phase, with checkboxes. If doing a wireframe pass, include it as Phase 0.5 with a copy-paste AI starter prompt embedded in the file
+- `project/SETUP-GUIDE.md` — step-by-step local + production setup guide, including how to run integration tests locally (emulator, Docker, test DB, etc. depending on your stack)
+- `project/context/[project-name]-MASTER-CONTEXT.md` — human-readable project reference, updated at major milestones
+- `project/context/[project-name]-MD-PLAN.md` — MD system inventory: file list with descriptions, decisions made, changes from prior versions
+- `project/AI-MD-SYSTEM-PROMPT.md` — this file; keep updated with lessons learned so it improves for the next project
 
 ---
 
@@ -171,30 +182,46 @@ The read bundle system is what makes this token-efficient. In `CLAUDE.md`, defin
 
 | Task type | Read these MDs |
 |---|---|
-| Frontend UI task | `plan/docs/FRONTEND.md` + `[app]/CLAUDE.md` + relevant feature MD |
-| Backend / API task | `plan/docs/BACKEND.md` + `plan/docs/TYPES.md` + `plan/docs/API-ROUTES.md` |
-| Full feature build | All of the above + `plan/docs/DECISIONS-FEATURES.md` |
-| Security / compliance | `plan/docs/SECURITY.md` + `plan/docs/GOTCHAS.md` |
-| New architecture decision | `plan/docs/DECISIONS-ARCH.md` + `plan/docs/GOTCHAS.md` |
+| Frontend UI task | `FRONTEND.md` + `[app]/CLAUDE.md` + relevant feature MD |
+| Backend / API task | `BACKEND.md` + `TYPES.md` + `API-ROUTES.md` |
+| Full feature build | All of the above + `DECISIONS-FEATURES.md` |
+| Security / compliance | `SECURITY.md` + `GOTCHAS.md` |
+| New architecture decision | `DECISIONS-ARCH.md` + `GOTCHAS.md` |
+| White-label deployment | `WHITE-LABEL.md` + `DECISIONS-ARCH.md` |
+| Wireframe task | `WIREFRAME-WORKFLOW.md` + `FRONTEND.md` + relevant feature MD |
 
-Tailor these to the actual project. Every read bundle should be the minimum set of MDs an agent needs — no more.
+Adjust paths to match your project's folder structure. Every read bundle should be the minimum set of MDs an agent needs — no more. Add project-specific bundles (e.g. "auth task", "payment task", "store task") as needed.
 
 ---
 
 ### Hard rules to enforce in CLAUDE.md
 
-Always include these in the hard rules section (adapt as needed):
+Split into two groups. Universal rules go in every project unchanged. Stack-specific rules are examples — replace with your own equivalents.
 
-- Never hardcode brand values (colors, logos, fonts, names) — use config
-- Never commit `.env` files
-- Never log PII
-- Never duplicate information across MDs
-- All primary CTAs use the configured primary color token — never raw hex
-- Availability/booking (if applicable) must use database transactions — never read-then-write
-- Validate sensitive inputs server-side — never trust client
-- Always unsubscribe real-time listeners in cleanup functions
-- Named exports for components/hooks, default exports for pages only
-- Conventional commits required
+#### Universal — apply to every project, every stack
+
+- **Never commit `.env` files** — use `.env.example` with placeholder values
+- **Never log PII** — names, emails, payment data, government IDs never appear in console or logs
+- **Never duplicate information across MDs** — each piece of information lives in exactly one MD; others reference it
+- **Never hardcode brand values** (colors, logos, fonts, names) in UI components — always use a config or token
+- **Validate sensitive inputs server-side** — never trust client-submitted values for pricing, discounts, roles, or permissions
+- **Conventional commits required** — `feat:` / `fix:` / `release:` / `docs:` / `chore:` prefixes
+- **Test critical financial and transactional logic** — even if the rest of the project is manual QA only, write unit tests for anything that touches money, inventory, or concurrent writes
+- **All public pages have a per-page meta description** — never rely solely on the site-wide default
+- **Every decision has a home** — architecture decisions in `DECISIONS-ARCH.md`, product/feature decisions in `DECISIONS-FEATURES.md`; never scatter decisions across feature MDs
+
+#### Stack-specific — adapt these for your project
+
+The examples below come from the Spark Inn React + Firebase build. Replace with your own equivalents.
+
+| Spark Inn rule | Why | Your equivalent |
+|---|---|---|
+| All primary CTAs use the `primary` Tailwind token — never raw hex | Brand changes should require zero component edits | Define your own token/variable system |
+| Availability locking must use Firestore transactions — never read-then-write | Prevents double-booking under concurrent requests | Apply transactions to any concurrent write problem (inventory, seat reservations, appointment slots) |
+| Always unsubscribe Firestore `onSnapshot` listeners in `useEffect` cleanup | Memory leak / stale data risk | Unsubscribe/teardown any real-time connection (WebSocket, SSE, pub/sub) on component unmount |
+| Named exports for components/hooks, default exports for pages only | Consistent import style across monorepo | Define your own export convention and stick to it |
+| All animations use shared variants from `shared/animations.ts` — never inline | Ensures consistent motion language across the app | Define animation tokens in a shared file regardless of animation library |
+| `hotel.config.ts` imported via `@config` alias — never relative paths | Keeps white-label swappable without touching components | Use path aliases for any globally-shared config to avoid brittle relative imports |
 
 ---
 
@@ -204,12 +231,20 @@ Run a final audit:
 - [ ] No hardcoded brand values (colors, logos, names) in feature MDs — all reference config
 - [ ] No hardcoded counts (e.g. "14 rooms") — all dynamic references
 - [ ] No hardcoded locale/currency/timezone — all config-driven
-- [ ] No code snippets in any MD
+- [ ] No code snippets in any MD (exceptions: animation variants, test coverage tables)
 - [ ] Every feature MD has a `> Requires:` line
 - [ ] Every decision has a home in either `DECISIONS-ARCH.md` or `DECISIONS-FEATURES.md`
 - [ ] `GOTCHAS.md` covers all "never do this" rules discovered during the session
-- [ ] `ROADMAP.md` covers all phases with checkboxes
+- [ ] `ROADMAP.md` covers all phases with checkboxes, and includes a copy-paste AI starter prompt for the wireframe phase
 - [ ] `README.md` at repo root points to `CLAUDE.md`, `project/SETUP-GUIDE.md`, `project/ROADMAP.md`
+- [ ] `TYPES.md` reflects all fields added to the database schema — check for drift after feature additions
+- [ ] App-level `CLAUDE.md` files have complete DB/API usage tables — every collection, table, or external service the app touches is listed
+- [ ] `SECURITY.md` "What We Collect" table matches all PII fields in the database schema
+- [ ] `WHITE-LABEL.md` config schema covers all values referenced via `config.*` in feature MDs
+- [ ] `FRONTEND.md §Animations` specifies every animated surface — no surface should animate without a spec
+- [ ] `DECISIONS-ARCH.md §Testing Strategy` exists if any automated tests are planned — lists exactly what is and isn't tested
+- [ ] `ROADMAP.md` Phase 0 includes scaffolding items for: shared utils files, test stubs, animation variants file, PWA setup (if applicable)
+- [ ] `[project-name]-MD-PLAN.md` updated to v-next with all new files and changed decisions
 
 ---
 
@@ -222,5 +257,6 @@ Run a final audit:
 
 ---
 
-*This prompt was derived from the Spark Inn hotel booking system MD build — a 35+ file documentation system covering a full-stack React + Firebase + Vercel web app.*
-*Adapt the file list and rules to your project's specific stack and needs.*
+*Author: DK (Daniel Kenneth Sandimas) — derived from the Spark Inn hotel booking system MD build, a 42-file documentation system covering a full-stack React + Firebase + Vercel web app with white-labelling, PWA, loyalty program, in-room store, WebRTC, SEO, animations, and targeted Vitest testing.*
+*Adapt the file list, questions, and rules to your project's specific stack and needs.*
+*Last updated: June 4, 2026 — v3.0 (updated to reflect lessons learned from Spark Inn full build MDs session)*
