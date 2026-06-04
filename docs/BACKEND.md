@@ -133,7 +133,7 @@ Guest loyalty members. Document ID = Firebase Auth UID. Separate from `guests/` 
 | `phone` | string | |
 | `photoUrl` | string | From Google profile or uploaded |
 | `authProvider` | string | `"google"` \| `"email"` |
-| `memberNumber` | string | e.g. `"SR-00042"` — sequential, zero-padded 5 digits, generated server-side via `/api/members/register` |
+| `memberNumber` | string | e.g. `"SR-00042"` — format: `{config.memberNumberPrefix}-{zero-padded 5 digits}`, generated server-side via `/api/members/register` |
 | `isMember` | boolean | `true` once enrolled in Spark Rewards |
 | `memberSince` | timestamp | Date of Spark Rewards enrollment |
 | `rewardsPoints` | number | Current points balance |

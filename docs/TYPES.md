@@ -281,6 +281,10 @@ HotelConfig {
   notificationSoundUrl: string
 }
 
+// HotelConfig additions (in hotel.config.ts)
+// memberNumberPrefix: string  — e.g. "SR" → "SR-00042"
+// storeName: string           — e.g. "Spark Essentials"
+
 RewardsEarningMode = "per-booking" | "per-spend"
 
 RewardsConfig {
