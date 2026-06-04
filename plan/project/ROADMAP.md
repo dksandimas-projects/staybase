@@ -30,15 +30,15 @@
 - ✅ `shared/types/index.ts` — all canonical types from `plan/docs/TYPES.md`
 - ✅ `shared/constants/index.ts` — booking statuses, sources, etc.
 - ✅ `shared/utils/pricing.ts` — price calculation helpers
-- ⬜ `shared/utils/dates.ts` — numNights, weekend detection, date overlap
-- ⬜ `shared/utils/points.ts` — points earning + redemption calculations
-- ⬜ `shared/utils/references.ts` — booking ref, member number, store order ref generation
-- ⬜ `shared/utils/vouchers.ts` — voucher validation logic
-- ⬜ Vitest configured in `shared/package.json` — `vitest` added as dev dependency, `test` script added
-- ⬜ `shared/__tests__/` folder created with 5 test files (stubs only at this stage — fill in when building each feature)
-- ⬜ Vitest configured in `guest-app/package.json` for integration tests
-- ⬜ `guest-app/api/__tests__/` folder created with 4 test files (stubs only — fill in when building API routes)
-- ⬜ Firebase emulator setup documented in `README.md` for running integration tests locally
+- ✅ `shared/utils/dates.ts` — numNights, weekend detection, date overlap
+- ✅ `shared/utils/points.ts` — points earning + redemption calculations
+- ✅ `shared/utils/references.ts` — booking ref, member number, store order ref generation
+- ✅ `shared/utils/vouchers.ts` — voucher validation logic
+- ✅ Vitest configured in `shared/package.json` — `vitest` added as dev dependency, `test` script added
+- ✅ `shared/__tests__/` folder created with 5 test files (stubs only at this stage — fill in when building each feature)
+- ✅ Vitest configured in `guest-app/package.json` for integration tests
+- ✅ `guest-app/api/__tests__/` folder created with 4 test files (stubs only — fill in when building API routes)
+- ✅ Firebase emulator setup documented in `README.md` for running integration tests locally
 
 ### Brand Config
 - ✅ `hotel.config.ts` created with full Spark Inn config
