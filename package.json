@@ -1,0 +1,23 @@
+{
+  "name": "spark-inn",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "guest-app",
+    "admin-app",
+    "shared"
+  ],
+  "scripts": {
+    "dev:guest": "npm run dev -w guest-app",
+    "dev:admin": "npm run dev -w admin-app",
+    "build:guest": "npm run build -w guest-app",
+    "build:admin": "npm run build -w admin-app",
+    "preview:guest": "npm run preview -w guest-app",
+    "preview:admin": "npm run preview -w admin-app",
+    "typecheck": "npm run typecheck -w guest-app && npm run typecheck -w admin-app"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "husky": "^9.1.7"
+  }
+}

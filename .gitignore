@@ -9,6 +9,7 @@ api/.env
 dist/
 node_modules/
 .vercel/
+*.tsbuildinfo
 
 # Legacy (renamed to project/)
 .project/
