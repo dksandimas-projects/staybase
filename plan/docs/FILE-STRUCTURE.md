@@ -147,6 +147,7 @@ shared/
 │   └── vouchers.ts                     ← Voucher validation logic (expiry, cap, room type, discount calc)
 ├── constants/
 │   └── index.ts                        ← Booking statuses, sources, etc.
+├── animations.ts                       ← Shared Framer Motion variants (fadeUp, staggerContainer, slideInRight, etc.) — see plan/docs/FRONTEND.md §Animations
 ├── __tests__/                          ← Unit tests (Vitest) — pure function tests only, no Firebase
 │   ├── pricing.test.ts                 ← U-1: full price calculation combinations
 │   ├── dates.test.ts                   ← U-2: numNights, weekend nights, date overlap

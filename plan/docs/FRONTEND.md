@@ -147,12 +147,267 @@ Logo file paths come from `hotel.config.ts → logos.*`. Never hardcode logo fil
 
 ---
 
-## Framer Motion
+## Animations (Framer Motion)
 
-- Use for: page transitions, modal open/close, card hover states, step transitions in booking flow
-- Keep animations under `300ms` — never slow or decorative for the sake of it
-- Dashboard: minimal animation — data visibility over aesthetics
-- Public site: subtle entrance animations on scroll (opacity + translateY only)
+The animation language is **calm, intentional, and premium** — like a well-run hotel. Nothing bounces. Nothing spins. Every motion has a reason. The guest site is expressive; the admin app is near-static.
+
+### Core Principles
+
+- **Easing:** Always `easeOut` or custom `[0.25, 0.1, 0.25, 1]` cubic-bezier — never `linear` or `easeIn`
+- **Duration:** Entrances 400–500ms · Exits 200–250ms · Micro-interactions 150ms
+- **Distance:** Translate max `16px` on entrances — never large sweeping movements
+- **Opacity:** Always pair movement with opacity — motion alone feels mechanical
+- **Reduced motion:** All animations respect `prefers-reduced-motion` — wrap in `useReducedMotion()` from Framer Motion and skip transforms when true (keep opacity fade only)
+- **Admin app:** No entrance animations — skeleton → content only. Drawers and modals use the same open/close spec as guest app.
+
+---
+
+### Shared Variants (define once in `shared/animations.ts`, import everywhere)
+
+```ts
+// Fade up — primary entrance for all content sections
+export const fadeUp = {
+  hidden:  { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.25, 0.1, 0.25, 1] } }
+}
+
+// Fade in — for elements that shouldn't move (overlays, badges, images)
+export const fadeIn = {
+  hidden:  { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.35, ease: 'easeOut' } }
+}
+
+// Stagger container — wraps lists of cards or items
+export const staggerContainer = {
+  hidden:  {},
+  visible: { transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
+}
+
+// Stagger child — used inside staggerContainer
+export const staggerChild = {
+  hidden:  { opacity: 0, y: 12 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.1, 0.25, 1] } }
+}
+
+// Scale in — modals, confirmation states
+export const scaleIn = {
+  hidden:  { opacity: 0, scale: 0.97 },
+  visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } }
+}
+
+// Slide in from right — drawers
+export const slideInRight = {
+  hidden:  { opacity: 0, x: 48 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] } },
+  exit:    { opacity: 0, x: 48, transition: { duration: 0.2, ease: 'easeIn' } }
+}
+
+// Slide in from bottom — mobile sheet / mobile modals
+export const slideInBottom = {
+  hidden:  { opacity: 0, y: 32 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] } },
+  exit:    { opacity: 0, y: 32, transition: { duration: 0.2, ease: 'easeIn' } }
+}
+```
+
+---
+
+### Page Transitions (guest-app only)
+
+Wrap the router outlet in `<AnimatePresence mode="wait">`. Each page component wraps its root element in `<motion.div>`.
+
+```ts
+// Page enter/exit — subtle fade + tiny upward drift
+const pageVariant = {
+  hidden:  { opacity: 0, y: 8 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.1, 0.25, 1] } },
+  exit:    { opacity: 0,        transition: { duration: 0.2, ease: 'easeIn' } }
+}
+```
+
+Pages exit quickly (200ms) so the user doesn't wait. Entrance is slightly slower (400ms) so content feels like it arrives, not snaps.
+
+---
+
+### Scroll Entrance Animations (guest-app sections)
+
+Use `whileInView` with `viewport={{ once: true, margin: "-80px" }}` — animates once as the section enters viewport, never repeats on scroll back.
+
+Apply `fadeUp` variant to:
+- Homepage: Hero content block, Availability Checker, each section heading + its content (`staggerContainer` + `staggerChild` for amenities grid, room cards grid, services grid)
+- About Us: Hero text, mission/vision blocks
+- Corporate: Feature perks list (staggered)
+- Rooms Page: Room cards grid (staggered)
+- Static pages: Any content block deeper than the fold
+
+Do NOT apply scroll entrance to:
+- Navbar
+- Footer
+- Any element visible above the fold on load (use page transition instead)
+
+---
+
+### Navbar Scroll Transition
+
+Transparent → solid white crossfade as page scrolls past 64px.
+
+```ts
+// In Navbar.tsx — controlled by scroll position
+const navVariant = {
+  transparent: { backgroundColor: 'rgba(255,255,255,0)', backdropFilter: 'blur(0px)' },
+  solid:        { backgroundColor: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)',
+                  boxShadow: '0 1px 0 rgba(0,0,0,0.06)' }
+}
+// Transition: duration 0.3s ease
+// Use Framer Motion animate prop with the variant key toggled on scroll
+```
+
+The frosted glass effect (`backdrop-filter: blur(12px)`) at solid state gives a premium feel without a hard white block.
+
+---
+
+### Room Cards (guest-app)
+
+```ts
+// Hover: subtle lift + shadow deepening
+whileHover={{ y: -4, boxShadow: '0 12px 32px rgba(0,0,0,0.10)' }}
+transition={{ duration: 0.2, ease: 'easeOut' }}
+
+// Tap: slight press
+whileTap={{ scale: 0.99 }}
+```
+
+Image inside the card: on hover, scale the image slightly for depth.
+```ts
+// Image wrapper inside card
+whileHover={{ scale: 1.03 }}
+transition={{ duration: 0.4, ease: 'easeOut' }}
+```
+
+---
+
+### Buttons
+
+```ts
+// Primary + Ghost buttons
+whileHover={{ scale: 1.02 }}
+whileTap={{ scale: 0.97 }}
+transition={{ duration: 0.15, ease: 'easeOut' }}
+```
+
+Never animate color on hover via Framer — use Tailwind's `hover:` for color changes. Framer handles only scale + shadow.
+
+---
+
+### Booking Flow — Step Transitions
+
+Steps live in a single page (`/book`). When the active step changes, the new step content enters from the right, the old step exits to the left.
+
+```ts
+const stepVariant = {
+  enter:  (direction: number) => ({ opacity: 0, x: direction > 0 ? 40 : -40 }),
+  center: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] } },
+  exit:   (direction: number) => ({ opacity: 0, x: direction > 0 ? -40 : 40,
+                                    transition: { duration: 0.2, ease: 'easeIn' } })
+}
+// direction = 1 for forward, -1 for back
+// Wrap in <AnimatePresence custom={direction} mode="wait">
+```
+
+The `BookingSummary` card on the right stays fixed — only the left step content slides.
+
+---
+
+### Modals
+
+Desktop: `scaleIn` variant (scale 0.97 → 1, opacity 0 → 1). Backdrop fades in separately.
+Mobile: `slideInBottom` variant (slides up from bottom like a sheet).
+
+```ts
+// Backdrop
+<motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+  transition={{ duration: 0.25 }} className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+
+// Modal panel (desktop)
+<motion.div variants={scaleIn} initial="hidden" animate="visible" exit="hidden" />
+
+// Modal panel (mobile — detect via useBreakpoint or window.innerWidth < 768)
+<motion.div variants={slideInBottom} initial="hidden" animate="visible" exit="exit" />
+```
+
+---
+
+### Drawers (admin + guest)
+
+Always slide in from the right. Backdrop fades independently.
+
+```ts
+<motion.div variants={slideInRight} initial="hidden" animate="visible" exit="exit" />
+```
+
+Drawer should be wrapped in `<AnimatePresence>` controlled by the open state so exit animation plays before unmount.
+
+---
+
+### Intercom Chat
+
+Incoming messages animate in with a subtle fade + slide from the relevant side:
+
+```ts
+// Guest message (right side)
+initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }}
+transition={{ duration: 0.25, ease: 'easeOut' }}
+
+// Staff message (left side)
+initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
+transition={{ duration: 0.25, ease: 'easeOut' }}
+```
+
+---
+
+### Loading States
+
+Skeleton screens use a shimmer animation — not pulse. Shimmer feels more premium.
+
+```css
+/* In global CSS or Tailwind plugin */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+```
+
+---
+
+### Spark Rewards Member Card
+
+The rewards card on `/account/profile` has an entrance that feels special — it's the member's identity.
+
+```ts
+// Card container: slightly longer entrance, slight rotation settling
+initial={{ opacity: 0, y: 24, rotateX: 8 }}
+animate={{ opacity: 1, y: 0, rotateX: 0 }}
+transition={{ duration: 0.55, ease: [0.25, 0.1, 0.25, 1] }}
+style={{ transformPerspective: 800 }}
+```
+
+On hover, the card subtly reflects — a very gentle shimmer on the card surface using a CSS gradient animation. Not a full holographic effect — just enough to feel like a physical card.
+
+---
+
+### What Does NOT Animate
+
+- Admin data tables — rows appear instantly (skeleton → content only)
+- Status badges — color changes are instant via Tailwind, no Framer
+- Form field focus states — CSS only (`ring`, `border-color`)
+- Toast notifications — slide in from top-right (simple CSS `@keyframes`)
+- Recharts — charts use their own built-in animation, do not override
+- Any animation inside a loading spinner — CSS `animate-spin` only
 
 ---
 
