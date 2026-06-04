@@ -15,7 +15,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 4 | Email: Resend via Vercel API routes (not Firebase Cloud Functions) |
 | 5 | Shared code: `shared/` is an npm workspace package (`@spark-inn/shared`) — imported by both apps and api/ without path alias hacks |
 | 6 | Two separate React + Vite apps — `guest-app/` and `admin-app/` — sharing one Firebase project |
-| 7 | No automated tests — manual QA only |
+| 7 | Targeted tests only — manual QA for everything except 10 critical logic areas (see below); no full test suite |
 | 8 | Data fetching: TanStack Query for API routes; custom Firebase hooks for Firestore real-time |
 | 9 | Validation: Zod for all form and data validation |
 | 10 | State management: React state + Context only — no Zustand or Jotai |
@@ -57,3 +57,41 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 46 | PWA is Capacitor-ready by design — if a native iOS/Android app is ever needed, `npx cap init` + `npx cap add ios` wraps the existing web app without a rewrite; no native APIs are used that would break this path |
 | 47 | admin-app is NOT a PWA — it is staff-only, always on a reliable connection, no install or offline use case |
 | 48 | Intercom voice call: WebRTC peer-to-peer audio via browser — signaling over Firestore (`calls/{roomId}` document for SDP offer/answer exchange) — zero third-party cost; fallback is a `tel:` link if WebRTC is unavailable |
+
+---
+
+## Testing Strategy
+
+Manual QA for all UI, flows, and integration scenarios. Automated tests for the 10 logic areas where silent failures would cause financial errors or data corruption.
+
+**Test runner:** Vitest (already compatible with Vite — no extra config)
+**Integration tests:** Firebase Local Emulator Suite (`firebase emulators:start`) — no live project needed
+
+---
+
+### Unit Tests — `shared/utils/` (pure functions, no Firebase)
+
+| # | File | What to cover |
+|---|---|---|
+| U-1 | `shared/utils/pricing.ts` | Base rate × nights; breakfast rate × guests × nights; member discount %; Senior/PWD 20%; voucher percent (applied after discount); voucher flat (never below ₱0); points redemption value; corporate rate override; correct order of operations across all combinations |
+| U-2 | `shared/utils/dates.ts` | `numNights` (checkOut − checkIn, never negative); weekend night detection (which specific nights fall Sat/Sun, timezone-aware using `config.timezone`); date overlap check (`checkIn < b.checkOut && checkOut > b.checkIn`) |
+| U-3 | `shared/utils/points.ts` | Per-booking earning (flat `pointsPerBooking`); per-spend earning (`floor(totalPrice / 100) × pointsPerHundred`); redemption value (`points × rate / 100`); insufficient balance returns error |
+| U-4 | `shared/utils/references.ts` | Booking ref format (`{prefix}-YYYYMMDD-NNN`); zero-padding to 3 digits; member number format (`{prefix}-NNNNN`, 5 digits); store order ref (`SO-YYYYMMDD-NNN`); same-day counter increments correctly |
+| U-5 | `shared/utils/vouchers.ts` | `isActive: false` → rejected; expired (`expiresAt < now`) → rejected; usage cap at exact limit → rejected; `usageCap: null` (unlimited) → accepted; room type mismatch → rejected; empty `applicableRoomTypes` → accepted for all types; flat discount > total → ₱0 floor; percent calculation correct |
+
+---
+
+### Integration Tests — API routes (Firebase emulator required)
+
+| # | Route | What to cover |
+|---|---|---|
+| I-1 | `/api/bookings/create` | Two simultaneous requests same room + dates → only one succeeds, other returns conflict error; room blocked mid-flow (between Step 1 and submission) → transaction rejects; timeout/abort → no booking created (idempotent, no partial writes) |
+| I-2 | `/api/store/confirm-order` | Stock decrements on status → `confirmed`; stock restored on cancel before `confirmed`; two concurrent orders for last item in stock → one succeeds, one returns out-of-stock error; `stock: null` (unlimited) → no decrement ever |
+| I-3 | `/api/members/redeem-points` | Insufficient balance → rejected with error; `totalPrice` updated correctly after redemption; member `rewardsPoints` deducted; `pointsHistory` entry created with correct type + bookingId; undo restores both `totalPrice` and member balance; undo after check-in → rejected |
+| I-4 | `/api/validate/corporate-code` + `/api/bookings/create` | `usageCount` increments on successful booking; usage cap hit → subsequent validation rejected; expired code (`expiresAt < now`) → rejected; `isActive: false` → rejected |
+
+---
+
+### What is NOT tested (manual QA only)
+
+UI components, page layouts, navigation, drawers, modals, static pages, email templates, PDF generation, chart rendering, Firestore `onSnapshot` wiring, Storage upload flows, admin status transitions, and all Spark Rewards portal screens. These are all well-covered by the Manual QA checklists in each feature MD.

@@ -136,15 +136,42 @@ Vercel automatically picks up `guest-app/api/` as serverless functions when root
 shared/
 ├── package.json                        ← name: "@spark-inn/shared", exports all public modules
 ├── types/
-│   └── index.ts                        ← All canonical TypeScript types (see docs/TYPES.md)
+│   └── index.ts                        ← All canonical TypeScript types (see plan/docs/TYPES.md)
 ├── schemas/
 │   └── booking.ts                      ← Zod schemas for booking form
 ├── utils/
-│   └── pricing.ts                      ← Price calculation helpers
+│   ├── pricing.ts                      ← Full price calculation (rate, breakfast, discount, voucher, points)
+│   ├── dates.ts                        ← numNights, weekend detection, date overlap check
+│   ├── points.ts                       ← Points earning + redemption calculations
+│   ├── references.ts                   ← Booking ref, member number, store order ref generation
+│   └── vouchers.ts                     ← Voucher validation logic (expiry, cap, room type, discount calc)
 ├── constants/
 │   └── index.ts                        ← Booking statuses, sources, etc.
+├── __tests__/                          ← Unit tests (Vitest) — pure function tests only, no Firebase
+│   ├── pricing.test.ts                 ← U-1: full price calculation combinations
+│   ├── dates.test.ts                   ← U-2: numNights, weekend nights, date overlap
+│   ├── points.test.ts                  ← U-3: earning modes, redemption value, insufficient balance
+│   ├── references.test.ts              ← U-4: ref formats, zero-padding, sequential counter
+│   └── vouchers.test.ts               ← U-5: all validation edge cases, discount calculations
 └── VERSION.ts                          ← Single source of version string e.g. "0.1.0"
 ```
+
+Unit tests run with `vitest` from `shared/`. No Firebase emulator needed — all pure functions.
+
+---
+
+## `guest-app/api/__tests__/` — Integration Tests
+
+```
+guest-app/api/
+└── __tests__/                          ← Integration tests (Vitest + Firebase emulator)
+    ├── bookings-create.test.ts         ← I-1: availability locking, concurrent requests, idempotency
+    ├── store-confirm-order.test.ts     ← I-2: stock decrement/restore, concurrent last-item orders
+    ├── members-redeem-points.test.ts   ← I-3: redemption, balance update, history log, undo
+    └── corporate-code.test.ts         ← I-4: usage count, cap, expiry, isActive checks
+```
+
+Integration tests require `firebase emulators:start` (Firestore + Auth emulators). Run with `vitest` from `guest-app/`. See `plan/docs/DECISIONS-ARCH.md §Testing Strategy` for full test coverage spec.
 
 Imported as `@spark-inn/shared` in both apps and in `api/` handlers — works in Vite (frontend) and Node.js (serverless) without any path alias hacks.
 
