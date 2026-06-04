@@ -161,6 +161,19 @@ fix/*       ← bug fixes off dev, merge back to dev
 
 Merge `dev → main` only at milestones: staging demo, production launch.
 
+### Agent branching rule
+
+**Before starting any task, always:**
+1. Verify the current branch — run `git branch --show-current`
+2. If not already on the right branch, create one off `dev` using the appropriate prefix:
+   - New feature → `git checkout -b feature/<task-name>`
+   - Bug fix → `git checkout -b fix/<task-name>`
+   - Docs-only change → `git checkout -b docs/<task-name>`
+3. Never work directly on `dev` or `main`
+4. Commit work to the branch — do not merge back to `dev` without DK's explicit instruction
+
+If already on a correctly-named branch, continue working on it. If unsure which prefix to use, ask before starting.
+
 ---
 
 ## Versioning
