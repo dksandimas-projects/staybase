@@ -150,7 +150,7 @@ Adjust the folder name to match your project structure (e.g. `plan/docs/`, `docs
 - `DECISIONS-ARCH.md` — architecture, stack, tooling, security decisions (one line each) + **Testing Strategy section** (which logic areas get unit vs integration tests, what stays manual QA)
 - `DECISIONS-FEATURES.md` — feature scope, product, business rules decisions (one line each)
 - `GOTCHAS.md` — what agents must never do
-- `CONTRIBUTING.md` — MD ownership rules, update triggers, deploy checklist (include SEO validation steps)
+- `CONTRIBUTING.md` — MD ownership rules, update triggers, deploy checklist, **branching strategy** (branch names, commit prefixes, version bump rules), **agent branching rule** (check branch before every task, never work on `dev`/`main` directly)
 - `SECURITY.md` — auth rules, PII handling, compliance, data retention, breach protocol
 - `WHITE-LABEL.md` — if applicable: full `config` schema, runtime-editable vs deploy-time table, per-client deploy guide, asset checklist
 - `WIREFRAME-WORKFLOW.md` — if doing a wireframe-first pass: Stitch/Figma → React component process, screen checklist, agent rules, definition of done
@@ -200,6 +200,15 @@ Split into two groups. Universal rules go in every project unchanged. Stack-spec
 
 #### Universal — apply to every project, every stack
 
+- **Agent branching rule** — always include this in `CLAUDE.md` under the Branching Strategy section:
+  1. Before starting any task, run `git branch --show-current`
+  2. If not already on the right branch, create one off `dev` using the appropriate prefix:
+     - New feature → `git checkout -b feature/<task-name>`
+     - Bug fix → `git checkout -b fix/<task-name>`
+     - Docs-only change → `git checkout -b docs/<task-name>`
+  3. Never work directly on `dev` or `main`
+  4. Do not merge back to `dev` without the developer's explicit instruction
+  5. If already on a correctly-named branch, continue on it; if unsure which prefix to use, ask before starting
 - **Never commit `.env` files** — use `.env.example` with placeholder values
 - **Never log PII** — names, emails, payment data, government IDs never appear in console or logs
 - **Never duplicate information across MDs** — each piece of information lives in exactly one MD; others reference it
