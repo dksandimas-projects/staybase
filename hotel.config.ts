@@ -37,7 +37,7 @@ export const config = {
     icon: "ICON LOGO.png",
     wordmark: "TEXT LOGO.png"
   },
-  favicon: "favicon.ico",
+  favicon: "ICON LOGO.png",
   roomTypes: [
     { value: "single", label: "Single", shortLabel: "Single" },
     { value: "standard-double", label: "Standard Double", shortLabel: "Std Double" },
