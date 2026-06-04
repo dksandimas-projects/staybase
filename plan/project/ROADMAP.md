@@ -39,6 +39,7 @@
 - ✅ Vitest configured in `guest-app/package.json` for integration tests
 - ✅ `guest-app/api/__tests__/` folder created with 4 test files (stubs only — fill in when building API routes)
 - ✅ Firebase emulator setup documented in `README.md` for running integration tests locally
+- ⬜ `shared/animations.ts` — all shared Framer Motion variants (fadeUp, fadeIn, staggerContainer, staggerChild, scaleIn, slideInRight, slideInBottom) — see `plan/docs/FRONTEND.md §Animations`
 
 ### Brand Config
 - ✅ `hotel.config.ts` created with full Spark Inn config
@@ -125,7 +126,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### Guest App Screens
 - 🔄 G-01 Homepage `/`
-- ⬜ G-02 Rooms Page `/rooms`
+- ✅ G-02 Rooms Page `/rooms`
 - ⬜ G-03 Booking Step 1 — Select Room `/book`
 - ⬜ G-04 Booking Step 2 — Guest Details `/book`
 - ⬜ G-05 Booking Step 3 — Review & Pay `/book`
@@ -143,8 +144,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ G-17 About Us `/about`
 - ⬜ G-18 Contact Us `/contact`
 - ⬜ G-19 404 Not Found `*`
-- ⬜ M-01 Room Detail Modal
-- ⬜ M-02 Availability Filter Drawer (mobile)
+- ✅ M-01 Room Detail Modal
+- ✅ M-02 Availability Filter Drawer (mobile)
 - ⬜ M-03 Corporate Access Code Gate
 - ⬜ M-04 Voucher Input (inline)
 

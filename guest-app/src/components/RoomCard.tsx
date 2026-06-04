@@ -1,16 +1,32 @@
 import { Users } from "lucide-react";
 import type { Room } from "@spark-inn/shared";
+import config from "@config";
 import { formatPrice } from "../utils/format";
 import { GhostButton } from "./GhostButton";
 import { PrimaryButton } from "./PrimaryButton";
 import { StatusBadge } from "./StatusBadge";
 
 interface RoomCardProps {
-  room: Pick<Room, "name" | "description" | "amenities" | "imageUrls" | "maxCapacity" | "pricePerNight" | "status">;
+  room: Pick<
+    Room,
+    | "id"
+    | "name"
+    | "type"
+    | "description"
+    | "amenities"
+    | "imageUrls"
+    | "maxCapacity"
+    | "bedDefinition"
+    | "pricePerNight"
+    | "status"
+  >;
   onDetails?: () => void;
+  bookingQuery?: string;
 }
 
-export function RoomCard({ room, onDetails }: RoomCardProps) {
+export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) {
+  const typeLabel = config.roomTypes.find((type) => type.value === room.type)?.shortLabel ?? room.type;
+
   return (
     <article className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
       <div className="aspect-[4/3] bg-section-bg">
@@ -18,13 +34,19 @@ export function RoomCard({ room, onDetails }: RoomCardProps) {
       </div>
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
-          <h3 className="text-lg font-semibold text-gray-950">{room.name}</h3>
+          <div>
+            <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">{typeLabel}</span>
+            <h3 className="mt-3 text-lg font-semibold text-gray-950">{room.name}</h3>
+          </div>
           <StatusBadge label={room.status === "available" ? "Available" : "Blocked"} status={room.status} />
         </div>
         <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{room.description}</p>
-        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
-          <Users size={16} className="text-primary" />
-          Up to {room.maxCapacity} guests
+        <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+          <span className="flex items-center gap-2">
+            <Users size={16} className="text-primary" />
+            Up to {room.maxCapacity}
+          </span>
+          <span className="truncate">{room.bedDefinition}</span>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {room.amenities.slice(0, 4).map((amenity) => (
@@ -44,7 +66,7 @@ export function RoomCard({ room, onDetails }: RoomCardProps) {
                 Details
               </GhostButton>
             ) : null}
-            <PrimaryButton to="/book">Book</PrimaryButton>
+            <PrimaryButton to={`/book?roomId=${room.id}${bookingQuery}`}>Book</PrimaryButton>
           </div>
         </div>
       </div>
