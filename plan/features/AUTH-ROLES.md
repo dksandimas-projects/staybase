@@ -14,7 +14,8 @@ Firebase Email/Password authentication for all staff. No public registration —
 - [ ] Login page (`/login`) — email + password fields, Sign In button (Spark Orange), spark inn logo centered
 - [ ] Error message for invalid credentials — friendly, not technical ("Incorrect email or password.")
 - [ ] Loading state on Sign In button
-- [ ] No "forgot password" link on login page — admin resets passwords manually
+- [ ] "Forgot password?" link below the form — opens forgot password view
+- [ ] Forgot password view — email input + "Send Reset Link" button; on success show "Check your email for a reset link." and a Back to Login link
 - [ ] No public registration link
 - [ ] Redirect to `/` (dashboard) on successful login
 - [ ] Redirect unauthenticated users from any protected route to `/login`
@@ -24,6 +25,9 @@ Firebase Email/Password authentication for all staff. No public registration —
 ## Data & Logic Checklist
 
 - [ ] Firebase Auth `signInWithEmailAndPassword` on form submit
+- [ ] Forgot password: `sendPasswordResetEmail(auth, email)` — same Firebase utility already used in guest app (`shared/utils/auth.ts` or inline)
+- [ ] Forgot password success: show confirmation message — do not redirect, let staff check email
+- [ ] Forgot password error: "No account found with that email." for unknown email
 - [ ] `onAuthStateChanged` listener in auth hook — unsubscribe on cleanup
 - [ ] Role sourced from Firebase Auth custom claims (`claims.role`) — fetched via `getIdTokenResult(true)` after login
 - [ ] Custom claims set by DK/admin via Firebase Admin SDK or Firebase Console — not settable client-side
@@ -52,6 +56,9 @@ Firebase Email/Password authentication for all staff. No public registration —
 - [ ] Front desk account cannot access Rates or Settings — sees access denied state
 - [ ] Admin account can access all pages
 - [ ] Invalid credentials show error, not console error
+- [ ] Forgot password — valid email receives reset link, success message shown
+- [ ] Forgot password — unknown email shows friendly error
+- [ ] Forgot password — back to login link works
 - [ ] Unauthenticated access to `/bookings` redirects to `/login`
 - [ ] After login, redirect goes to dashboard (not login page again)
 - [ ] Logging out clears auth state and redirects to `/login`
