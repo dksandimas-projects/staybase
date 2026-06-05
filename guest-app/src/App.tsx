@@ -5,6 +5,7 @@ import { BookingPage } from "./pages/BookingPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
 import { CorporateStaysPage } from "./pages/CorporateStaysPage";
 import { HomePage } from "./pages/HomePage";
+import { RewardsLandingPage } from "./pages/RewardsLandingPage";
 import { RoomsPage } from "./pages/RoomsPage";
 
 export function App() {
@@ -17,9 +18,11 @@ export function App() {
       <Route path="/my-booking" element={<BookingLookupPage />} />
       <Route path="/corporate" element={<CorporateStaysPage />} />
       <Route path="/corporate/book" element={<CorporateBookingPage />} />
+      <Route path="/rewards" element={<RewardsLandingPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );
 }
+
 
 

@@ -136,7 +136,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ G-07 My Booking Lookup `/my-booking`
 - ✅ G-08 Corporate Stays Marketing `/corporate`
 - ✅ G-09 Corporate Booking Gate + Flow `/corporate/book`
-- ⬜ G-10 Spark Rewards Landing `/rewards`
+- ✅ G-10 Spark Rewards Landing `/rewards`
 - ⬜ G-11 Sign In `/signin`
 - ⬜ G-12 Sign Up `/signup`
 - ⬜ G-13 Member Profile `/account/profile`
