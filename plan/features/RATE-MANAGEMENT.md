@@ -11,7 +11,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 
 ## UI Checklist
 
-- [ ] Base rates section — one row per room type, rows generated dynamically from `config.roomTypes[]` — never hardcoded
+- [ ] Base rates section — one row per room type, rows generated dynamically from `roomTypes` context state (seeded from `DEFAULT_ROOM_TYPES` in `@spark-inn/shared`) — never hardcoded
 - [ ] Weekend rates section — one row per room type (same dynamic list)
 - [ ] Flat corporate rate section — one row per room type; note: "This is the public rate at `/corporate/book`. Custom rates are set per inquiry via access codes."
 - [ ] All price inputs display `config.currencySymbol` prefix

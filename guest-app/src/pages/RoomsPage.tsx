@@ -2,7 +2,7 @@ import { Filter, SlidersHorizontal, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fadeUp, staggerContainer } from "@spark-inn/shared";
+import { fadeUp, staggerContainer, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Drawer } from "../components/Drawer";
@@ -110,7 +110,7 @@ export function RoomsPage() {
         <div>
           <p className="text-sm font-medium text-gray-700">Room type</p>
           <div className="mt-3 grid gap-2">
-            {[{ value: "all", label: "All Types" }, ...config.roomTypes].map((type) => (
+            {[{ value: "all", label: "All Types" }, ...DEFAULT_ROOM_TYPES].map((type) => (
               <button
                 key={type.value}
                 className={cn(
@@ -235,7 +235,7 @@ export function RoomsPage() {
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge label={selectedRoom.status === "available" ? "Available" : "Blocked"} status={selectedRoom.status} />
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                {config.roomTypes.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
+                {DEFAULT_ROOM_TYPES.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
               </span>
             </div>
             <p className="leading-7 text-gray-600">{selectedRoom.description}</p>
