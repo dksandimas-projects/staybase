@@ -1,11 +1,15 @@
 import { Route, Routes } from "react-router-dom";
+import { AboutPage } from "./pages/AboutPage";
 import { BookingConfirmPage } from "./pages/BookingConfirmPage";
 import { BookingLookupPage } from "./pages/BookingLookupPage";
 import { BookingPage } from "./pages/BookingPage";
+import { ContactPage } from "./pages/ContactPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
 import { CorporateStaysPage } from "./pages/CorporateStaysPage";
 import { HomePage } from "./pages/HomePage";
 import { IntercomPage } from "./pages/IntercomPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
+import { PrivacyPage } from "./pages/PrivacyPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RewardsPage } from "./pages/RewardsPage";
 import { RewardsLandingPage } from "./pages/RewardsLandingPage";
@@ -31,7 +35,10 @@ export function App() {
       <Route path="/account/stays" element={<StaysPage />} />
       <Route path="/account/rewards" element={<RewardsPage />} />
       <Route path="/intercom/:roomId" element={<IntercomPage />} />
-      <Route path="*" element={<HomePage />} />
+      <Route path="/about" element={<AboutPage />} />
+      <Route path="/contact" element={<ContactPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }
