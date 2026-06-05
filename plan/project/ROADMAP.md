@@ -170,6 +170,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ D-05 Store Order Detail Drawer
 - ✅ M-05 Walk-in Booking Modal
 - ✅ M-06 Add/Edit Voucher Modal
+- ✅ Check-in workstation wireframe — guest registration form, compressed ID upload, breakfast selections, checkout folio review
 
 ---
 
@@ -239,9 +240,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ `useBookings` hook — `onSnapshot` on `bookings` collection
 - ⬜ `BookingTable.tsx` — filterable, sortable, clickable rows
-- ⬜ Booking detail drawer — full details, payment proof, status actions, notes
-- ⬜ Status transition actions — context-aware buttons per current status
-- ⬜ Walk-in / manual booking creation modal
+- ✅ Booking detail drawer wireframe — full details, status actions, payments, check-in workstation, checkout folio
+- ✅ Status transition actions wireframe — context-aware buttons per current status
+- ✅ Walk-in / manual booking creation modal wireframe
 - ⬜ Cancellation flow — confirmation modal, reason, cancellation email
 - ⬜ Receipt PDF — print + download from drawer
 - ⬜ Dashboard Overview — stat cards, room grid, housekeeping toggles, pending payments, today's arrivals/checkouts
@@ -275,7 +276,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Breakfast add-on — Rate Management (rate per person per night)
 - ⬜ Breakfast add-on — Step 1 room card (Room Only vs Room + Breakfast option)
 - ⬜ Breakfast add-on — booking creation stores `hasBreakfast`, `breakfastRate`
-- ⬜ Breakfast selections panel — booking detail drawer (front desk enters at check-in)
+- ✅ Breakfast selections panel wireframe — booking detail drawer (front desk enters at check-in)
 - ⬜ Guest registration form PDF — breakfast section with silog options grid
 - ⬜ Breakfast reports — daily kitchen prep report + breakfast revenue
 
@@ -290,8 +291,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Tab title unread count
 - ⬜ QR Management page — QR grid, regenerate, print single/all
 - ⬜ Spark Essentials — guest store panel (item grid, cart, checkout, order tracking)
-- ⬜ Spark Essentials — catalog management in Settings → Store tab
-- ⬜ Spark Essentials — order management page/section (admin)
+- ✅ Spark Essentials — catalog management wireframe in Settings → Store tab
+- ✅ Spark Essentials — order management wireframe page/section (admin)
 - ⬜ Spark Essentials — store order API route (stock check + order creation transaction)
 - ⬜ Spark Essentials — store reports in Reports page
 
@@ -303,6 +304,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Booking Lookup page (`/my-booking`) — ref + email lookup, cancel, resend email
 - ⬜ Reports page — occupancy, revenue, bookings by source, PDF/CSV export
 - ⬜ Settings page — all 9 tabs (Hotel Info, Payment Methods, Email, Staff Accounts, Discounts, Vouchers, Intercom, Website Content, Legal Content)
+- ✅ Guest registration data capture wireframe — booking drawer at check-in
 - ⬜ Guest Registration PDF (jsPDF) — pre-filled from booking, printable at check-in
 
 ---

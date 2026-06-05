@@ -1,12 +1,28 @@
 import { useState, useEffect } from "react";
-import { useAdmin, Booking, Room } from "../context/AdminContext";
+import { useAdmin, Booking } from "../context/AdminContext";
+import { compressImageFile } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatPrice } from "../utils/format";
-import { Calendar, User, Phone, Mail, DollarSign, Plus, Eye, CheckCircle2, ShieldAlert, ShoppingBag, Clock, Package, CreditCard } from "lucide-react";
+import {
+  Calendar,
+  User,
+  Phone,
+  Mail,
+  Plus,
+  Eye,
+  ShoppingBag,
+  Package,
+  CreditCard,
+  ClipboardCheck,
+  FileText,
+  ImageIcon,
+  Utensils,
+  Save
+} from "lucide-react";
 import config from "@config";
 
 export function BookingsPage() {
@@ -19,7 +35,8 @@ export function BookingsPage() {
     storeOrders,
     updateStoreOrderStatus,
     billStoreOrder,
-    roomTypes
+    roomTypes,
+    breakfastConfig
   } = useAdmin();
 
   // Main navigation tab
@@ -45,6 +62,7 @@ export function BookingsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -236,6 +254,88 @@ export function BookingsPage() {
       // Update selected booking details in drawer local state
       setSelectedBooking(prev => prev ? { ...prev, status } : null);
     }
+  };
+
+  const getStayDates = (booking: Booking) => {
+    return Array.from({ length: booking.numNights }, (_, index) => {
+      const date = new Date(booking.checkIn);
+      date.setDate(date.getDate() + index);
+      return date.toISOString().split("T")[0];
+    });
+  };
+
+  const getBookingPaymentsTotal = (booking: Booking) => {
+    return (booking.onsitePayments || []).reduce((sum, payment) => sum + payment.amount, 0);
+  };
+
+  const getBookingStoreCharges = (booking: Booking) => {
+    return storeOrders.filter(
+      (order) =>
+        order.bookingId === booking.id &&
+        order.paymentMethod === "add-to-bill" &&
+        order.status === "delivered" &&
+        order.isBilled
+    );
+  };
+
+  const getBookingFolio = (booking: Booking) => {
+    const storeCharges = getBookingStoreCharges(booking);
+    const storeTotal = storeCharges.reduce((sum, order) => sum + order.totalAmount, 0);
+    const paymentsTotal = getBookingPaymentsTotal(booking);
+    const grandTotal = booking.totalPrice + storeTotal;
+    return {
+      storeCharges,
+      storeTotal,
+      paymentsTotal,
+      grandTotal,
+      balance: grandTotal - paymentsTotal
+    };
+  };
+
+  const syncSelectedBooking = (updates: Partial<Booking>) => {
+    if (!selectedBooking) return;
+    updateBookingStatus(selectedBooking.id, selectedBooking.status, updates);
+    setSelectedBooking(prev => prev ? { ...prev, ...updates } : null);
+  };
+
+  const handleGuestIdUpload = async (file: File | undefined) => {
+    if (!file || !selectedBooking) return;
+
+    try {
+      setGuestIdUploadStatus("Compressing guest ID image...");
+      const image = await compressImageFile(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
+      syncSelectedBooking({ guestIdPhotoUrl: image.dataUrl });
+      setGuestIdUploadStatus(`ID image ready: ${Math.max(1, Math.round(image.compressedSize / 1024))} KB.`);
+    } catch (error) {
+      setGuestIdUploadStatus(error instanceof Error ? error.message : "Unable to process guest ID image.");
+    }
+  };
+
+  const handleRegistrationSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    syncSelectedBooking({
+      guestRegistration: {
+        nationality: String(formData.get("nationality") || "").trim(),
+        address: String(formData.get("address") || "").trim(),
+        dateOfBirth: String(formData.get("dateOfBirth") || ""),
+        gender: String(formData.get("gender") || ""),
+        idType: String(formData.get("idType") || ""),
+        idNumber: String(formData.get("idNumber") || "").trim(),
+        emergencyContact: String(formData.get("emergencyContact") || "").trim(),
+        vehiclePlate: String(formData.get("vehiclePlate") || "").trim(),
+        signatureStatus: formData.get("signatureStatus") === "signed" ? "signed" : "pending"
+      }
+    });
+  };
+
+  const handleBreakfastSelection = (key: string, value: string) => {
+    if (!selectedBooking) return;
+    const selections = {
+      ...(selectedBooking.breakfastSelections || {}),
+      [key]: value
+    };
+    syncSelectedBooking({ breakfastSelections: selections });
   };
 
   const handleAddPaymentSubmit = (e: React.FormEvent) => {
@@ -460,11 +560,12 @@ export function BookingsPage() {
         title={selectedBooking ? `Reference: ${selectedBooking.bookingRef}` : ""}
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
+        className="max-w-[1120px]"
       >
         {selectedBooking && (
-          <div className="space-y-8 text-sm">
+          <div className="space-y-6 text-sm">
             {/* Status overview */}
-            <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200">
+            <div className="grid gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2">
               <div>
                 <p className="text-[10px] uppercase font-bold text-gray-400">Current Status</p>
                 <div className="mt-1">
@@ -472,8 +573,8 @@ export function BookingsPage() {
                 </div>
               </div>
               <div>
-                <p className="text-[10px] uppercase font-bold text-gray-400 text-right">Channel</p>
-                <p className="text-xs font-bold text-gray-900 mt-1 uppercase text-right">{selectedBooking.source}</p>
+                <p className="text-[10px] uppercase font-bold text-gray-400 sm:text-right">Channel</p>
+                <p className="text-xs font-bold text-gray-900 mt-1 uppercase sm:text-right">{selectedBooking.source}</p>
               </div>
             </div>
 
@@ -496,10 +597,182 @@ export function BookingsPage() {
               </div>
             </div>
 
+            {/* Check-in registration workstation */}
+            {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <ClipboardCheck size={14} className="text-primary" />
+                    Check-in Registration
+                  </h3>
+                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                    selectedBooking.guestRegistration?.signatureStatus === "signed"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-orange-50 text-orange-700"
+                  }`}>
+                    {selectedBooking.guestRegistration?.signatureStatus === "signed" ? "Signed" : "Pending"}
+                  </span>
+                </div>
+
+                <form onSubmit={handleRegistrationSubmit} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Nationality
+                      <input
+                        name="nationality"
+                        defaultValue={selectedBooking.guestRegistration?.nationality ?? "Filipino"}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Date of Birth
+                      <input
+                        name="dateOfBirth"
+                        type="date"
+                        defaultValue={selectedBooking.guestRegistration?.dateOfBirth ?? ""}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Gender
+                      <select
+                        name="gender"
+                        defaultValue={selectedBooking.guestRegistration?.gender ?? ""}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      >
+                        <option value="">Select</option>
+                        <option value="female">Female</option>
+                        <option value="male">Male</option>
+                        <option value="prefer-not-to-say">Prefer not to say</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Valid ID Type
+                      <select
+                        name="idType"
+                        defaultValue={selectedBooking.guestRegistration?.idType ?? "passport"}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      >
+                        <option value="passport">Passport</option>
+                        <option value="drivers-license">Driver's License</option>
+                        <option value="national-id">National ID</option>
+                        <option value="umid">UMID</option>
+                        <option value="other">Other Government ID</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                    ID Number
+                    <input
+                      name="idNumber"
+                      defaultValue={selectedBooking.guestRegistration?.idNumber ?? ""}
+                      placeholder="Government ID reference"
+                      className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                    Home Address
+                    <textarea
+                      name="address"
+                      rows={2}
+                      defaultValue={selectedBooking.guestRegistration?.address ?? ""}
+                      placeholder="Guest residential address"
+                      className="rounded border border-gray-200 p-2 text-xs text-gray-800"
+                    />
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Emergency Contact
+                      <input
+                        name="emergencyContact"
+                        defaultValue={selectedBooking.guestRegistration?.emergencyContact ?? ""}
+                        placeholder="Name / Phone"
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Vehicle Plate
+                      <input
+                        name="vehiclePlate"
+                        defaultValue={selectedBooking.guestRegistration?.vehiclePlate ?? ""}
+                        placeholder="Optional"
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex min-h-[38px] items-center gap-2 rounded border border-gray-200 px-2 text-[10px] font-bold text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="signatureStatus"
+                      value="signed"
+                      defaultChecked={selectedBooking.guestRegistration?.signatureStatus === "signed"}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    Guest signed physical registration form
+                  </label>
+                  <div className="flex flex-col gap-2 border-t border-gray-100 pt-3 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                    >
+                      <FileText size={13} />
+                      Preview Registration PDF
+                    </button>
+                    <button
+                      type="submit"
+                      className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                    >
+                      <Save size={13} />
+                      Save Registration
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Guest ID upload */}
+            {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <ImageIcon size={14} className="text-primary" />
+                  Guest ID Attachment
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
+                    <div className="flex h-32 w-full items-center justify-center overflow-hidden rounded-lg bg-gray-100">
+                      {selectedBooking.guestIdPhotoUrl ? (
+                        <img src={selectedBooking.guestIdPhotoUrl} alt="Guest ID preview" className="h-full w-full object-cover" />
+                      ) : (
+                        <ImageIcon size={22} className="text-gray-400" />
+                      )}
+                    </div>
+                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-250 bg-gray-50 px-4 py-4 text-center transition hover:border-primary hover:bg-primary-light/30">
+                      <span className="text-xs font-bold text-gray-800">Attach Guest ID Photo</span>
+                      <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
+                        JPG, PNG, or WebP. Image is compressed before upload.
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={(event) => {
+                          void handleGuestIdUpload(event.currentTarget.files?.[0]);
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {guestIdUploadStatus ? (
+                    <p className="mt-3 rounded bg-gray-50 px-3 py-2 text-[10px] font-semibold text-gray-600">{guestIdUploadStatus}</p>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
             {/* Room stay details */}
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Stay & Accommodation</h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+              <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
                 <div className="flex justify-between">
                   <span className="font-bold text-gray-900">Room {selectedBooking.roomNumber}</span>
                   <span className="text-xs text-gray-500 capitalize">{selectedBooking.roomType.replace("-", " ")}</span>
@@ -523,7 +796,7 @@ export function BookingsPage() {
             {/* Financial totals */}
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Financial Breakdown</h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2 text-xs">
+              <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
                 <div className="flex justify-between">
                   <span>Room Charge ({selectedBooking.numNights} nights)</span>
                   <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
@@ -540,6 +813,59 @@ export function BookingsPage() {
                 </div>
               </div>
             </div>
+
+            {/* Breakfast selections */}
+            {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <Utensils size={14} className="text-primary" />
+                  Breakfast Selections
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
+                  <p className="text-[10px] leading-relaxed text-gray-500">
+                    Front desk records silog selections from the physical registration form. These are shown by guest and date.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-150 text-left text-[9px] font-bold uppercase tracking-wider text-gray-400">
+                          <th className="py-2 pr-3">Guest</th>
+                          {getStayDates(selectedBooking).map((date) => (
+                            <th key={date} className="min-w-[140px] px-2 py-2">{date}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {Array.from({ length: selectedBooking.numGuests }, (_, guestIndex) => (
+                          <tr key={guestIndex}>
+                            <td className="py-2 pr-3 font-semibold text-gray-800">Guest {guestIndex + 1}</td>
+                            {getStayDates(selectedBooking).map((date) => {
+                              const key = `${date}-guest-${guestIndex + 1}`;
+                              return (
+                                <td key={key} className="px-2 py-2">
+                                  <select
+                                    value={selectedBooking.breakfastSelections?.[key] ?? ""}
+                                    onChange={(event) => handleBreakfastSelection(key, event.target.value)}
+                                    className="min-h-[34px] w-full rounded border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700"
+                                  >
+                                    <option value="">Select meal</option>
+                                    {breakfastConfig.silogItems
+                                      .filter((item: { id: string; name: string; isActive: boolean }) => item.isActive)
+                                      .map((item: { id: string; name: string; isActive: boolean }) => (
+                                        <option key={item.id} value={item.name}>{item.name}</option>
+                                      ))}
+                                  </select>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Onsite payments ledger */}
             <div className="space-y-3.5">
@@ -566,7 +892,7 @@ export function BookingsPage() {
                 <form onSubmit={handleAddPaymentSubmit} className="rounded-lg border border-gray-150 p-4 space-y-3 bg-white">
                   <p className="text-xs font-bold text-gray-750">Record Onsite Payment</p>
                   
-                  <div className="grid gap-3 grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1.6fr_auto]">
                     <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
                       Amount (PHP)
                       <input
@@ -591,31 +917,90 @@ export function BookingsPage() {
                         <option value="gcash">GCash Transfer</option>
                       </select>
                     </label>
+                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
+                      Payment Reference / Note
+                      <input
+                        type="text"
+                        value={paymentNote}
+                        onChange={(e) => setPaymentNote(e.target.value)}
+                        placeholder="e.g. Downpayment deposit"
+                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                      />
+                    </label>
+                  
+                    <button
+                      type="submit"
+                      className="min-h-[38px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                    >
+                      Log Payment
+                    </button>
                   </div>
-
-                  <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                    Payment Reference / Note
-                    <input
-                      type="text"
-                      value={paymentNote}
-                      onChange={(e) => setPaymentNote(e.target.value)}
-                      placeholder="e.g. Downpayment deposit"
-                      className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
-                    />
-                  </label>
-
-                  <button
-                    type="submit"
-                    className="min-h-[36px] w-full rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm"
-                  >
-                    Log Payment
-                  </button>
                 </form>
               </div>
             </div>
 
+            {/* Checkout folio */}
+            {(selectedBooking.status === "checked-in" || selectedBooking.status === "checked-out") && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <CreditCard size={14} className="text-primary" />
+                  Checkout Folio Review
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
+                  {(() => {
+                    const folio = getBookingFolio(selectedBooking);
+                    return (
+                      <>
+                        <div className="flex justify-between">
+                          <span>Room and booked add-ons</span>
+                          <span>{formatPrice(selectedBooking.totalPrice)}</span>
+                        </div>
+                        {folio.storeCharges.length > 0 ? (
+                          <div className="space-y-1 border-t border-gray-100 pt-2">
+                            <p className="font-bold text-gray-700">Spark Essentials billed to room</p>
+                            {folio.storeCharges.map((order) => (
+                              <div key={order.id} className="flex justify-between text-gray-500">
+                                <span>{order.orderRef}</span>
+                                <span>{formatPrice(order.totalAmount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="flex justify-between text-gray-400">
+                            <span>No delivered store charges billed yet</span>
+                            <span>{formatPrice(0)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between border-t border-gray-150 pt-2 font-bold text-gray-950">
+                          <span>Folio total</span>
+                          <span>{formatPrice(folio.grandTotal)}</span>
+                        </div>
+                        <div className="flex justify-between text-gray-500">
+                          <span>Payments collected</span>
+                          <span>-{formatPrice(folio.paymentsTotal)}</span>
+                        </div>
+                        <div className={`flex justify-between rounded-lg px-3 py-2 text-sm font-bold ${
+                          folio.balance > 0 ? "bg-red-50 text-red-700" : folio.balance < 0 ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"
+                        }`}>
+                          <span>{folio.balance > 0 ? "Balance due at checkout" : folio.balance < 0 ? "Overpaid amount" : "Fully settled"}</span>
+                          <span>{formatPrice(Math.abs(folio.balance))}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                        >
+                          <FileText size={13} />
+                          Preview Folio / Receipt PDF
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
             {/* Allowed transitions buttons */}
-            <div className="pt-4 border-t border-gray-150 flex flex-col gap-2">
+            <div className="grid gap-2 border-t border-gray-150 pt-4 sm:grid-cols-2">
               {(selectedBooking.status === "pending" || selectedBooking.status === "payment-uploaded") && (
                 <button
                   onClick={() => handleStatusTransition("confirmed")}
@@ -636,7 +1021,13 @@ export function BookingsPage() {
 
               {selectedBooking.status === "checked-in" && (
                 <button
-                  onClick={() => handleStatusTransition("checked-out")}
+                  onClick={() => {
+                    const folio = getBookingFolio(selectedBooking);
+                    if (folio.balance > 0 && !confirm(`This folio still has ${formatPrice(folio.balance)} due. Continue checkout anyway?`)) {
+                      return;
+                    }
+                    handleStatusTransition("checked-out");
+                  }}
                   className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-gray-900 hover:bg-black text-xs font-bold text-white shadow-sm transition active:scale-95"
                 >
                   Check Out Room Folio
@@ -667,6 +1058,7 @@ export function BookingsPage() {
         title={selectedOrder ? `Order Reference: ${selectedOrder.orderRef}` : ""}
         open={isOrderDrawerOpen}
         onClose={() => setIsOrderDrawerOpen(false)}
+        className="max-w-[760px]"
       >
         {selectedOrder && (
           <div className="space-y-8 text-sm">

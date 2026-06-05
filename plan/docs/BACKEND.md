@@ -83,6 +83,9 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `pointsRedeemedAt` | timestamp \| null | When redemption was applied |
 | `hasBreakfast` | boolean | `true` if breakfast add-on purchased |
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
+| `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
+| `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, ID type/number, emergency contact, vehicle plate, signature status |
+| `breakfastSelections` | map | Wire format `yyyy-mm-dd-guest-n` → selected silog item name; may later move to `breakfastSelections` collection |
 | `cancellationReason` | string | |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |

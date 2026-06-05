@@ -120,7 +120,8 @@ Used at check-in by front desk. Generated from booking data.
   - Silog options pulled from `settings/breakfastConfig.silogItems` at PDF generation time
 
 **Checklist:**
-- [ ] Pre-filled from booking data where available (name, room, dates)
+- [x] Wireframe data capture exists in admin booking drawer for guest registry fields, ID photo preview, and breakfast choices
+- [ ] PDF pre-filled from booking data where available (name, room, dates, guest registration fields)
 - [ ] Guest ID photo fetched from `booking.guestIdPhotoUrl` and embedded as base64 image in PDF — fetch via `XMLHttpRequest` or `fetch` before PDF generation, convert to base64, pass to `jsPDF.addImage()`
 - [ ] If `guestIdPhotoUrl` is null/empty — render blank "Attach ID here" placeholder box instead
 - [ ] ID image constrained to max width of half the page, aspect ratio preserved — never overflow page margins
