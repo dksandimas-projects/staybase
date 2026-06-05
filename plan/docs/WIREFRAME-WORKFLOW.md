@@ -183,17 +183,17 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | ID | Screen | Route | Stitch Source | Feature MD |
 |---|---|---|---|---|---|
-| [ ] | A-01 | Admin Login | `/login` | `admin_login_desktop` + `admin_login_mobile` | `plan/features/AUTH-ROLES.md` |
-| [ ] | A-02 | Dashboard Overview | `/` | `admin_dashboard_desktop` + `admin_dashboard_mobile` | `plan/features/DASHBOARD-OVERVIEW.md` |
-| [ ] | A-03 | Bookings Management | `/bookings` | `bookings_management_desktop` + `bookings_management_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
-| [ ] | A-04 | Room Management | `/rooms` | `room_management_desktop_1` + `room_management_desktop_2` + `room_management_mobile` | `plan/features/ROOM-MANAGEMENT.md` |
-| [ ] | A-05 | Rate Management | `/rates` | `rate_management_desktop_1` + `rate_management_desktop_2` + `rate_management_mobile` | `plan/features/RATE-MANAGEMENT.md` |
-| [ ] | A-06 | Reports | `/reports` | `reports_desktop` + `reports_mobile` | `plan/features/REPORTS.md` |
-| [ ] | A-07 | Corporate Inquiries | `/corporate` | `corporate_inquiries_desktop` + `corporate_inquiries_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
-| [ ] | A-08 | Intercom Inbox | `/intercom` | `intercom_inbox_desktop_1` + `intercom_inbox_desktop_2` + `intercom_inbox_mobile` | `plan/features/INTERCOM-INBOX.md` |
-| [ ] | A-09 | QR Management | `/qr` | `qr_management_desktop` + `qr_management_desktop_refined` + `qr_management_mobile` | `plan/features/QR-MANAGEMENT.md` |
-| [ ] | A-10 | Members (Spark Rewards) | `/members` | `member_management_desktop` + `member_management_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | A-11 | Settings | `/settings` | `hotel_settings_desktop` + `hotel_settings_mobile` + `staff_management_desktop` + `staff_management_mobile` | `plan/features/SETTINGS.md` |
+| [x] | A-01 | Admin Login | `/login` | `admin_login_desktop` + `admin_login_mobile` | `plan/features/AUTH-ROLES.md` |
+| [x] | A-02 | Dashboard Overview | `/` | `admin_dashboard_desktop` + `admin_dashboard_mobile` | `plan/features/DASHBOARD-OVERVIEW.md` |
+| [x] | A-03 | Bookings Management | `/bookings` | `bookings_management_desktop` + `bookings_management_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| [x] | A-04 | Room Management | `/rooms` | `room_management_desktop_1` + `room_management_desktop_2` + `room_management_mobile` | `plan/features/ROOM-MANAGEMENT.md` |
+| [x] | A-05 | Rate Management | `/rates` | `rate_management_desktop_1` + `rate_management_desktop_2` + `rate_management_mobile` | `plan/features/RATE-MANAGEMENT.md` |
+| [x] | A-06 | Reports | `/reports` | `reports_desktop` + `reports_mobile` | `plan/features/REPORTS.md` |
+| [x] | A-07 | Corporate Inquiries | `/corporate` | `corporate_inquiries_desktop` + `corporate_inquiries_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
+| [x] | A-08 | Intercom Inbox | `/intercom` | `intercom_inbox_desktop_1` + `intercom_inbox_desktop_2` + `intercom_inbox_mobile` | `plan/features/INTERCOM-INBOX.md` |
+| [x] | A-09 | QR Management | `/qr` | `qr_management_desktop` + `qr_management_desktop_refined` + `qr_management_mobile` | `plan/features/QR-MANAGEMENT.md` |
+| [x] | A-10 | Members (Spark Rewards) | `/members` | `member_management_desktop` + `member_management_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | A-11 | Settings | `/settings` | `hotel_settings_desktop` + `hotel_settings_mobile` + `staff_management_desktop` + `staff_management_mobile` | `plan/features/SETTINGS.md` |
 
 ---
 
@@ -201,13 +201,13 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | ID | Component | Trigger | Stitch Source | Feature MD |
 |---|---|---|---|---|---|
-| [ ] | D-01 | Booking Detail Drawer | Bookings table row click | `booking_detail_drawer_desktop_1` + `booking_detail_drawer_desktop_2` + `booking_detail_drawer_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
-| [ ] | D-02 | Room Edit Drawer | Room Management "Edit" | `room_edit_drawer_desktop` + `room_edit_drawer_mobile_1` + `room_edit_drawer_mobile_2` | `plan/features/ROOM-MANAGEMENT.md` |
-| [ ] | D-03 | Corporate Inquiry Detail Drawer | Corporate Inquiries card click | `inquiry_detail_drawer_desktop` + `inquiry_detail_drawer_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
-| [ ] | D-04 | Member Detail Drawer | Members table row click | `member_detail_drawer_desktop` + `member_detail_drawer_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | D-05 | Store Order Detail Drawer | Intercom / Store Reports | `store_order_detail_drawer_desktop_1` + `store_order_detail_drawer_desktop_2` + `store_order_detail_drawer_mobile` | `plan/features/STORE-MANAGEMENT.md` |
-| [ ] | M-05 | Walk-in Booking Modal | Bookings "+ Walk-in Booking" button | `walk_in_booking_modal_desktop` + `walk_in_booking_modal_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
-| [ ] | M-06 | Add/Edit Voucher Modal | Rate Management Vouchers tab | `add_edit_voucher_modal_desktop` + `add_edit_voucher_modal_mobile` | `plan/features/VOUCHERS.md` |
+| [x] | D-01 | Booking Detail Drawer | Bookings table row click | `booking_detail_drawer_desktop_1` + `booking_detail_drawer_desktop_2` + `booking_detail_drawer_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| [x] | D-02 | Room Edit Drawer | Room Management "Edit" | `room_edit_drawer_desktop` + `room_edit_drawer_mobile_1` + `room_edit_drawer_mobile_2` | `plan/features/ROOM-MANAGEMENT.md` |
+| [x] | D-03 | Corporate Inquiry Detail Drawer | Corporate Inquiries card click | `inquiry_detail_drawer_desktop` + `inquiry_detail_drawer_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
+| [x] | D-04 | Member Detail Drawer | Members table row click | `member_detail_drawer_desktop` + `member_detail_drawer_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | D-05 | Store Order Detail Drawer | Intercom / Store Reports | `store_order_detail_drawer_desktop_1` + `store_order_detail_drawer_desktop_2` + `store_order_detail_drawer_mobile` | `plan/features/STORE-MANAGEMENT.md` |
+| [x] | M-05 | Walk-in Booking Modal | Bookings "+ Walk-in Booking" button | `walk_in_booking_modal_desktop` + `walk_in_booking_modal_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| [x] | M-06 | Add/Edit Voucher Modal | Rate Management Vouchers tab | `add_edit_voucher_modal_desktop` + `add_edit_voucher_modal_mobile` | `plan/features/VOUCHERS.md` |
 
 ---
 
