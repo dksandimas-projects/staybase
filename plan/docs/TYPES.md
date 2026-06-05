@@ -17,11 +17,11 @@ Types are derived from Zod schemas where validation is needed — use `z.infer<t
 
 ```
 // RoomType is NOT a fixed enum — it is a free-form string matching a value
-// in hotel.config.ts → roomTypes[].value
+// managed dynamically in the Admin App Settings UI (prefilled from hotel.config.ts)
 // e.g. "single", "deluxe-sea-view", "garden-suite"
-// Use config.roomTypes[] to populate dropdowns and filters — never hardcode type values
+// Use the roomTypes state list from global context to populate dropdowns and filters — never hardcode type values
 
-RoomType = string   // matches hotel.config.ts → roomTypes[].value
+RoomType = string   // matches AdminContext roomTypes value
 
 RoomStatus = "available" | "occupied" | "blocked"
 HousekeepingStatus = "clean" | "dirty" | "in-progress"

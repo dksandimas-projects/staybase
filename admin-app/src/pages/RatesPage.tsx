@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAdmin, Voucher, CorporateCode } from "../context/AdminContext";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
@@ -24,7 +24,8 @@ export function RatesPage() {
     hotelConfig,
     breakfastConfig,
     updateSettings,
-    updateRoomConfig
+    updateRoomConfig,
+    roomTypes
   } = useAdmin();
 
   // Modal State
@@ -42,18 +43,11 @@ export function RatesPage() {
   // Corporate Code Form States
   const [corpCode, setCorpCode] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [roomRates, setRoomRates] = useState<Record<string, string>>({
-    single: "2880",
-    "standard-double": "2880",
-    "standard-twin": "2880",
-    executive: "4050",
-    family: "6750"
-  });
-
+  
   // Local pricing states per room type (Standard, Weekend, Flat Corporate)
   const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>(() => {
     const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
-    config.roomTypes.forEach(t => {
+    roomTypes.forEach(t => {
       const match = rooms.find(r => r.type === t.value);
       initialPrices[t.value] = {
         base: match?.pricePerNight ?? 3200,
@@ -63,6 +57,42 @@ export function RatesPage() {
     });
     return initialPrices;
   });
+
+  const [roomRates, setRoomRates] = useState<Record<string, string>>(() => {
+    const initialRates: Record<string, string> = {};
+    roomTypes.forEach(t => {
+      initialRates[t.value] = "2880";
+    });
+    return initialRates;
+  });
+
+  // Keep prices and room rates in sync if room types change
+  useEffect(() => {
+    setPrices(prev => {
+      const updated = { ...prev };
+      roomTypes.forEach(t => {
+        if (!updated[t.value]) {
+          const match = rooms.find(r => r.type === t.value);
+          updated[t.value] = {
+            base: match?.pricePerNight ?? 3200,
+            weekend: match?.weekendRate ?? 3700,
+            corporate: match?.corporateRate ?? 2880
+          };
+        }
+      });
+      return updated;
+    });
+
+    setRoomRates(prev => {
+      const updated = { ...prev };
+      roomTypes.forEach(t => {
+        if (!updated[t.value]) {
+          updated[t.value] = "2880";
+        }
+      });
+      return updated;
+    });
+  }, [roomTypes, rooms]);
 
   // Local breakfast rate state
   const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
@@ -320,7 +350,7 @@ export function RatesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {config.roomTypes.map((type) => (
+                  {roomTypes.map((type) => (
                     <tr key={type.value} className="text-xs">
                       <td className="py-3 font-semibold text-gray-800">{type.label}</td>
                       <td className="py-2 pr-4">
@@ -641,7 +671,7 @@ export function RatesPage() {
           <div className="space-y-2">
             <p className="font-semibold text-gray-700">Applicable Room Layouts</p>
             <div className="grid gap-2 sm:grid-cols-2">
-              {config.roomTypes.map((t) => (
+              {roomTypes.map((t) => (
                 <label key={t.value} className="flex items-center gap-2 cursor-pointer font-medium text-gray-600">
                   <input
                     type="checkbox"
@@ -706,7 +736,7 @@ export function RatesPage() {
           <div className="space-y-2.5 pt-2">
             <p className="font-semibold text-gray-700">Set Custom Flat Rate per Room Type (PHP)</p>
             <div className="grid gap-4 sm:grid-cols-2">
-              {config.roomTypes.map((t) => (
+              {roomTypes.map((t) => (
                 <label key={t.value} className="flex flex-col gap-2 font-medium text-gray-600">
                   {t.label} (Base: ₱{rooms.find(r => r.type === t.value)?.pricePerNight || 3200})
                   <input

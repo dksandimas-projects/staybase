@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAdmin, Booking, Room } from "../context/AdminContext";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -18,7 +18,8 @@ export function BookingsPage() {
     addWalkinBooking,
     storeOrders,
     updateStoreOrderStatus,
-    billStoreOrder
+    billStoreOrder,
+    roomTypes
   } = useAdmin();
 
   // Main navigation tab
@@ -52,7 +53,14 @@ export function BookingsPage() {
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [roomType, setRoomType] = useState<string>(config.roomTypes[0].value);
+  const [roomType, setRoomType] = useState<string>(() => roomTypes[0]?.value || "");
+
+  // Sync default roomType when roomTypes load
+  useEffect(() => {
+    if (!roomType && roomTypes.length > 0) {
+      setRoomType(roomTypes[0].value);
+    }
+  }, [roomTypes]);
   const [roomNumber, setRoomNumber] = useState("");
   const [checkInDate, setCheckInDate] = useState(new Date().toISOString().split("T")[0]);
   const [checkOutDate, setCheckOutDate] = useState(() => {
@@ -895,7 +903,7 @@ export function BookingsPage() {
                 }}
                 className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
               >
-                {config.roomTypes.map(t => (
+                {roomTypes.map(t => (
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>

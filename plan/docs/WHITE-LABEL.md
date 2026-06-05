@@ -229,7 +229,7 @@ supportEmail: "sparkinn.reservations@gmail.com"
 - **Font loading** — heading font loaded via `@font-face` in `index.html`; body font loaded via Google Fonts link if `source: "google"`
 - **Logos** — all components reference `config.logos.*` — never hardcoded filenames
 - **Brand name** — all UI copy uses `config.brandName` — never hardcoded strings
-- **Room types** — dropdowns, filters, and rate tables built dynamically from `config.roomTypes[]`
+- **Room types** — dropdowns, filters, and rate tables built dynamically from context state (prefilled from `config.roomTypes[]` initially)
 - **Currency** — all price displays use `config.currencySymbol` + `config.locale` for number formatting
 - **Dates** — all date displays use `config.dateFormat` and `config.timezone`
 - **Booking ref** — format is `{bookingRefPrefix}-{YYYYMMDD}-{NNN}`
@@ -264,7 +264,7 @@ New Firebase project for the client. Enable Auth, Firestore, Storage. Copy confi
 New Vercel project. Connect repo. Set all env vars. Configure custom domains.
 
 ### Step 4 — Fill in `hotel.config.ts`
-Update all fields for the client. Define their room types in `roomTypes[]`.
+Update all fields for the client. Define their default starting room types in `roomTypes[]` (further updates can be managed directly in the Admin App Settings UI).
 
 ### Step 5 — Drop brand assets in `public/brand/`
 Fonts, logos, favicon, OG image. Filenames must match paths in `hotel.config.ts`.

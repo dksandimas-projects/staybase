@@ -39,7 +39,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 28 | Hotel-specific brand assets in `public/brand/` per app — swap folder contents per client deployment |
 | 29 | Room count is dynamic — read from Firestore, never hardcoded in any feature |
 | 30 | `hotel.config.ts` imported via `@config` alias in both apps |
-| 31 | Room types fully flexible — defined as array in `hotel.config.ts → roomTypes[]`, not a fixed enum |
+| 31 | Room types fully flexible — defined dynamically in Settings UI (prefilled from `hotel.config.ts`), not a fixed enum |
 | 32 | Currency, locale, timezone, date format all config-driven — never hardcoded |
 | 33 | Booking reference prefix configurable per hotel in `hotel.config.ts → bookingRefPrefix` |
 | 34 | Deploy-time legal fields (legal name, DPO email, applicable law) in `hotel.config.ts` — require redeploy to change |

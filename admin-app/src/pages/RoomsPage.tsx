@@ -7,7 +7,7 @@ import { BedDouble, Edit3, ShieldAlert, Sparkles, Plus, AlertCircle, EyeOff } fr
 import config from "@config";
 
 export function RoomsPage() {
-  const { rooms, updateRoomConfig, addRoomBlock } = useAdmin();
+  const { rooms, updateRoomConfig, addRoomBlock, roomTypes } = useAdmin();
 
   // Selected Room Drawer States
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -59,13 +59,10 @@ export function RoomsPage() {
     }
   };
 
-  const roomTypesLabels: Record<string, string> = {
-    single: "Single Bed Layout",
-    "standard-double": "Standard Double Layout",
-    "standard-twin": "Standard Twin Layout",
-    executive: "Executive Suite Layout",
-    family: "Family Villa Layout"
-  };
+  const roomTypesLabels = roomTypes.reduce((acc, t) => {
+    acc[t.value] = t.label;
+    return acc;
+  }, {} as Record<string, string>);
 
   return (
     <div className="space-y-8 font-body">
