@@ -943,7 +943,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     visionStatement: "To be Bohol's boutique standard.",
     hotelStory: "A hospitality story built on consistency...",
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
-    notificationSoundUrl: ""
+    notificationSoundUrl: "",
+    bookingPaymentMethods: [
+      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "BDO: 001234567890 (Spark Inn)" },
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "GCash: 09170000000 (Daniel Sandimas)" },
+      { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
+    ]
   });
 
   const [websiteContent, setWebsiteContent] = useState({

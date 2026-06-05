@@ -5,7 +5,10 @@ import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatPrice } from "../utils/format";
-import { Plus, Tag, Gift, Trash2, Calendar, ShieldCheck, Landmark } from "lucide-react";
+import { 
+  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck, 
+  Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone 
+} from "lucide-react";
 import config from "@config";
 
 export function RatesPage() {
@@ -15,7 +18,11 @@ export function RatesPage() {
     addVoucher, 
     toggleVoucherActive, 
     corporateCodes, 
-    addCorporateCode 
+    addCorporateCode,
+    hotelConfig,
+    breakfastConfig,
+    updateSettings,
+    updateRoomConfig
   } = useAdmin();
 
   // Modal State
@@ -39,6 +46,32 @@ export function RatesPage() {
     "standard-twin": "2880",
     executive: "4050",
     family: "6750"
+  });
+
+  // Local pricing states per room type (Standard, Weekend, Flat Corporate)
+  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>(() => {
+    const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
+    config.roomTypes.forEach(t => {
+      const match = rooms.find(r => r.type === t.value);
+      initialPrices[t.value] = {
+        base: match?.pricePerNight ?? 3200,
+        weekend: match?.weekendRate ?? 3700,
+        corporate: match?.corporateRate ?? 2880
+      };
+    });
+    return initialPrices;
+  });
+
+  // Local breakfast rate state
+  const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
+
+  // Local payment gateways states
+  const [paymentMethods, setPaymentMethods] = useState<any[]>(() => {
+    return hotelConfig.bookingPaymentMethods || [
+      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "BDO: 001234567890 (Spark Inn)" },
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "GCash: 09170000000 (Daniel Sandimas)" },
+      { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
+    ];
   });
 
   // Toggle applicable room checkbox
@@ -65,7 +98,6 @@ export function RatesPage() {
       createdBy: "admin"
     });
 
-    // Reset fields
     setVchCode("");
     setDiscountValue("");
     setUsageCap("");
@@ -101,6 +133,52 @@ export function RatesPage() {
     setCompanyName("");
     setIsCorpModalOpen(false);
     alert("Negotiated corporate access code created successfully!");
+  };
+
+  // Save room prices changes
+  const handleSaveRates = (e: React.FormEvent) => {
+    e.preventDefault();
+    rooms.forEach(room => {
+      const typeRates = prices[room.type];
+      if (typeRates) {
+        updateRoomConfig(room.id, {
+          pricePerNight: typeRates.base,
+          weekendRate: typeRates.weekend,
+          corporateRate: typeRates.corporate
+        });
+      }
+    });
+    alert("Dynamic base room rates, weekend surcharges, and flat corporate rates saved successfully!");
+  };
+
+  // Save breakfast pricing changes
+  const handleSaveBreakfastRate = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateSettings("breakfastConfig", {
+      ...breakfastConfig,
+      ratePerPersonPerNight: parseFloat(bfRate) || 300
+    });
+    alert("Breakfast service pricing saved successfully!");
+  };
+
+  // Save payment config changes
+  const handleSavePayments = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateSettings("hotelConfig", {
+      ...hotelConfig,
+      bookingPaymentMethods: paymentMethods
+    });
+    alert("Booking payment gateway configurations saved successfully!");
+  };
+
+  // Toggle payment method enabled/disabled
+  const handleTogglePaymentMethod = (method: string) => {
+    setPaymentMethods(prev => prev.map(m => m.method === method ? { ...m, isEnabled: !m.isEnabled } : m));
+  };
+
+  // Update payment method account details text
+  const handleUpdateAccountInfo = (method: string, text: string) => {
+    setPaymentMethods(prev => prev.map(m => m.method === method ? { ...m, accountInfo: text } : m));
   };
 
   // Voucher Columns
@@ -185,51 +263,232 @@ export function RatesPage() {
   return (
     <div className="space-y-8 font-body">
       <header>
-        <h1 className="font-heading text-3xl text-gray-950 lowercase">rates & promo codes</h1>
-        <p className="text-xs text-gray-500 mt-1">Configure weekend rate surcharges, negotiable corporate partnerships, and public vouchers.</p>
+        <h1 className="font-heading text-3xl text-gray-950 lowercase">rates & promo configuration</h1>
+        <p className="text-xs text-gray-500 mt-1">Configure base room pricing, weekend surcharges, public corporate rates, and payment gateways.</p>
       </header>
 
-      {/* Row: Surcharges info and Corporate Actions */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Base Rate & Weekend surcharges */}
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
-          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5">
+      {/* Grid: Core Pricing Systems */}
+      <div className="grid gap-8 lg:grid-cols-3">
+        {/* Left Column: Room Pricing Grid (2 cols wide on desktop) */}
+        <div className="lg:col-span-2 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5 border-b border-gray-100 pb-3">
             <Landmark size={18} className="text-primary" />
-            Tariff Surcharges Config
+            Tariff Rates Configurator
           </h2>
-          
-          <div className="rounded-lg border border-gray-150 p-4 space-y-3 bg-gray-50/50">
-            <div className="flex justify-between items-center text-xs">
-              <span className="font-bold text-gray-700">Weekend Surcharge</span>
-              <span className="text-xs bg-primary/10 text-primary-dark font-bold px-2 py-0.5 rounded">
-                +₱500 / night
-              </span>
+
+          <form onSubmit={handleSaveRates} className="space-y-5">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-150 text-xs">
+                <thead>
+                  <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                    <th className="py-2.5">Room Type</th>
+                    <th className="py-2.5">Standard Rate (Base)</th>
+                    <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
+                    <th className="py-2.5">Corporate Rate (Flat)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {config.roomTypes.map((type) => (
+                    <tr key={type.value} className="text-xs">
+                      <td className="py-3 font-semibold text-gray-800">{type.label}</td>
+                      <td className="py-2 pr-4">
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            value={prices[type.value]?.base || 0}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setPrices(prev => ({
+                                ...prev,
+                                [type.value]: { ...prev[type.value], base: val }
+                              }));
+                            }}
+                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            value={prices[type.value]?.weekend || 0}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setPrices(prev => ({
+                                ...prev,
+                                [type.value]: { ...prev[type.value], weekend: val }
+                              }));
+                            }}
+                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2">
+                        <div className="relative flex items-center">
+                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            value={prices[type.value]?.corporate || 0}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setPrices(prev => ({
+                                ...prev,
+                                [type.value]: { ...prev[type.value], corporate: val }
+                              }));
+                            }}
+                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <p className="text-[10px] text-gray-500 leading-relaxed font-semibold">
-              Weekend surcharge is automatically added to checking days falling on Friday or Saturday nights. Calculated dynamically.
-            </p>
-          </div>
+
+            <div className="pt-2 border-t border-gray-100 flex justify-between items-center">
+              <span className="text-[10px] text-gray-400 font-semibold leading-relaxed">
+                Changes apply only to new bookings; existing reservations lock rates on creation.
+              </span>
+              <button
+                type="submit"
+                className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+              >
+                <Save size={14} />
+                Save Rates Matrix
+              </button>
+            </div>
+          </form>
         </div>
 
-        {/* Member Discount */}
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
-          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5">
-            <Gift size={18} className="text-primary" />
-            Member Loyalty Discount
-          </h2>
-          
-          <div className="rounded-lg border border-gray-150 p-4 space-y-3 bg-gray-50/50">
-            <div className="flex justify-between items-center text-xs">
-              <span className="font-bold text-gray-700">Spark Member Discount</span>
-              <span className="text-xs bg-green-50 text-green-700 font-bold px-2 py-0.5 rounded border border-green-200">
-                10% Off Base Room
-              </span>
+        {/* Right Column: Breakfast & Discounts */}
+        <div className="space-y-6">
+          {/* Breakfast Card */}
+          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+            <h3 className="text-sm font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5">
+              <Gift size={16} className="text-primary" />
+              Breakfast & Discounts Config
+            </h3>
+
+            <form onSubmit={handleSaveBreakfastRate} className="space-y-4">
+              <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+                Breakfast Service Charge (Per Guest / Night)
+                <div className="relative flex items-center">
+                  <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    value={bfRate}
+                    onChange={(e) => setBfRate(e.target.value)}
+                    className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                  />
+                </div>
+              </label>
+
+              <button
+                type="submit"
+                className="min-h-[38px] w-full rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white transition active:scale-95"
+              >
+                Update Breakfast Rate
+              </button>
+            </form>
+
+            {/* Mandated Discounts (Read-only) */}
+            <div className="border-t border-gray-100 pt-3 space-y-2">
+              <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">OSCA Legally Mandated Deductions</span>
+              <div className="divide-y divide-gray-100 rounded-lg border border-gray-150 p-2.5 bg-gray-50/50 space-y-1.5">
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="font-semibold text-gray-650">Senior Citizen (OSCA)</span>
+                  <span className="font-bold text-green-700">-20% Discount</span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] pt-1.5">
+                  <span className="font-semibold text-gray-655">Persons with Disabilities (PWD)</span>
+                  <span className="font-bold text-green-700">-20% Discount</span>
+                </div>
+              </div>
+              <p className="text-[9px] text-gray-400 leading-normal italic">
+                * Governed by Philippine laws RA 9994 / RA 10754. Hardcoded values are locked from staff changes to maintain strict legal compliance.
+              </p>
             </div>
-            <p className="text-[10px] text-gray-500 leading-relaxed font-semibold">
-              Logged-in loyalty program subscribers receive a flat 10% deduction off base rates. Configured in Settings tab.
-            </p>
           </div>
         </div>
+      </div>
+
+      {/* Payment methods section */}
+      <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+        <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5 border-b border-gray-100 pb-3">
+          <CreditCard size={18} className="text-primary" />
+          Booking Payment Gateways
+        </h2>
+
+        <form onSubmit={handleSavePayments} className="space-y-4">
+          <div className="grid gap-6 md:grid-cols-3">
+            {paymentMethods.map((pm) => {
+              const Icon = pm.method === "bank" ? BankIcon : pm.method === "gcash" ? Smartphone : CreditCard;
+              return (
+                <div key={pm.method} className={`rounded-xl border p-4.5 space-y-3.5 transition ${
+                  pm.isEnabled ? "bg-white border-primary/20 ring-1 ring-primary/5" : "bg-gray-50/50 border-gray-200 opacity-60"
+                }`}>
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2 font-bold text-xs text-gray-800">
+                      <Icon size={16} className="text-primary" />
+                      {pm.label}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePaymentMethod(pm.method)}
+                      className={`h-5 w-9 rounded-full p-0.5 transition shrink-0 ${
+                        pm.isEnabled ? "bg-primary" : "bg-gray-300"
+                      }`}
+                    >
+                      <div className={`h-4 w-4 rounded-full bg-white transition transform ${
+                        pm.isEnabled ? "translate-x-4" : "translate-x-0"
+                      }`} />
+                    </button>
+                  </div>
+
+                  <label className="grid gap-1 text-[9px] font-bold text-gray-400 uppercase">
+                    Account Info & Instructions
+                    <input
+                      type="text"
+                      disabled={!pm.isEnabled}
+                      value={pm.accountInfo}
+                      onChange={(e) => handleUpdateAccountInfo(pm.method, e.target.value)}
+                      className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs text-gray-800 font-medium mt-1 disabled:opacity-50"
+                    />
+                  </label>
+
+                  {pm.method !== "pay-at-hotel" && (
+                    <div className="text-[10px] text-gray-500 font-semibold flex items-center gap-1.5">
+                      <Smartphone size={12} className="text-gray-400" />
+                      Remittance QR upload enabled
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-gray-100">
+            <button
+              type="submit"
+              className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+            >
+              <Save size={14} />
+              Save Payment Gateways
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* Vouchers Panel */}
@@ -341,7 +600,7 @@ export function RatesPage() {
                 type="date"
                 value={expiresAt}
                 onChange={(e) => setExpiresAt(e.target.value)}
-                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm"
+                className="min-h-[44px] w-full rounded border border-gray-255 px-3 text-sm"
               />
             </label>
           </div>
@@ -368,7 +627,7 @@ export function RatesPage() {
             <button
               type="button"
               onClick={() => setIsVchModalOpen(false)}
-              className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              className="min-h-[44px] px-5 rounded-lg border border-gray-255 text-xs font-semibold text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>
@@ -436,7 +695,7 @@ export function RatesPage() {
             <button
               type="button"
               onClick={() => setIsCorpModalOpen(false)}
-              className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              className="min-h-[44px] px-5 rounded-lg border border-gray-255 text-xs font-semibold text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>
