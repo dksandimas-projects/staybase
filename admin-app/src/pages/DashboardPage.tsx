@@ -51,7 +51,7 @@ export function DashboardPage() {
       </div>
 
       {/* Room Grid and Chart grid */}
-      <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_360px] items-start">
         {/* Left: Interactive Room Grid */}
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-6">
           <div className="flex justify-between items-center">
@@ -68,10 +68,15 @@ export function DashboardPage() {
               const isOccupied = room.status === "occupied";
               const isBlocked = room.status === "blocked";
 
+              // Find active guest details
+              const activeBooking = bookings.find(
+                b => b.roomNumber === room.roomNumber && b.status === "checked-in"
+              );
+
               return (
                 <div
                   key={room.id}
-                  className="rounded-card border border-gray-200 bg-white p-4.5 flex flex-col justify-between gap-4.5 shadow-sm transition hover:shadow-md"
+                  className="rounded-card border border-gray-200 bg-white p-4.5 flex flex-col justify-between gap-3 shadow-sm transition hover:shadow-md"
                 >
                   <div className="flex justify-between items-start">
                     <div>
@@ -82,6 +87,27 @@ export function DashboardPage() {
                     </div>
 
                     <StatusBadge label={room.status.replace("-", " ")} status={room.status} />
+                  </div>
+
+                  {/* Live Status Details */}
+                  <div className="py-1 text-xs">
+                    {isOccupied && activeBooking ? (
+                      <div className="space-y-0.5 bg-blue-50/50 p-2 rounded border border-blue-150 text-[10px] text-gray-650 font-semibold">
+                        <p className="text-blue-400 font-bold uppercase tracking-wider text-[8px]">Active Guest</p>
+                        <p className="font-bold text-gray-900 text-xs truncate">{activeBooking.guestName}</p>
+                        <p>Checkout: {activeBooking.checkOut}</p>
+                      </div>
+                    ) : isBlocked ? (
+                      <div className="space-y-0.5 bg-red-50/50 p-2 rounded border border-red-155 text-[10px] text-red-750 font-semibold">
+                        <p className="text-red-400 font-bold uppercase tracking-wider text-[8px]">Blocked Reason</p>
+                        <p className="font-bold truncate mt-0.5">{room.blockReason || "Maintenance"}</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-0.5 bg-green-50/30 p-2 rounded border border-green-150 text-[10px] text-green-700 font-semibold">
+                        <p className="text-green-400 font-bold uppercase tracking-wider text-[8px]">Status Details</p>
+                        <p className="font-bold mt-0.5">Vacant • Ready</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Housekeeping action toggle button */}
