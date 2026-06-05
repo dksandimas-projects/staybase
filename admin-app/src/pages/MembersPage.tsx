@@ -136,7 +136,7 @@ export function MembersPage() {
       </header>
 
       {/* Toolbar filter */}
-      <div className="rounded-card bg-white p-4.5 shadow-sm ring-1 ring-gray-200 flex gap-4">
+      <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex gap-4">
         <div className="flex-1">
           <input
             type="text"

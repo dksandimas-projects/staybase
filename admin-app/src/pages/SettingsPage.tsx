@@ -1,13 +1,25 @@
 import { useState } from "react";
-import { useAdmin } from "../context/AdminContext";
+import { useAdmin, type StoreItem } from "../context/AdminContext";
+import { compressImageFile } from "@spark-inn/shared";
 import { 
   Settings, Globe, Gift, Coffee, ShoppingBag, 
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
-  BedDouble, Plus, Trash2, ShieldAlert
+  BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil
 } from "lucide-react";
 import config from "@config";
+import { formatPrice } from "../utils/format";
+import { Modal } from "../components/Modal";
 
 type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store";
+type StoreCategory = StoreItem["category"];
+
+const storeCategories: { value: StoreCategory; label: string }[] = [
+  { value: "drinks", label: "Drinks" },
+  { value: "snacks", label: "Snacks" },
+  { value: "toiletries", label: "Toiletries" },
+  { value: "rentals", label: "Rentals" },
+  { value: "other", label: "Other" }
+];
 
 export function SettingsPage() {
   const { 
@@ -19,7 +31,11 @@ export function SettingsPage() {
     updateSettings,
     roomTypes,
     addRoomType,
-    deleteRoomType
+    deleteRoomType,
+    storeItems,
+    addStoreItem,
+    updateStoreItem,
+    deleteStoreItem
   } = useAdmin();
 
   // Active Settings Section Tab
@@ -56,6 +72,11 @@ export function SettingsPage() {
   const [storeEnabled, setStoreEnabled] = useState(storeConfig.isEnabled);
   const [lowStockThreshold, setLowStockThreshold] = useState(String(storeConfig.lowStockThreshold));
   const [storePaymentMethods, setStorePaymentMethods] = useState<{ method: string; label: string; isEnabled: boolean }[]>(storeConfig.paymentMethods);
+  const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
+  const [isStoreItemModalOpen, setIsStoreItemModalOpen] = useState(false);
+  const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
+  const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
+  const [storeItemPhotoStatus, setStoreItemPhotoStatus] = useState("");
 
   // Handle Form submissions
   const handleSaveHotel = (e: React.FormEvent) => {
@@ -102,8 +123,7 @@ export function SettingsPage() {
     alert("Breakfast silog menu selections saved successfully!");
   };
 
-  const handleSaveStore = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveStore = () => {
     updateSettings("storeConfig", {
       isEnabled: storeEnabled,
       lowStockThreshold: parseInt(lowStockThreshold) || 3,
@@ -119,6 +139,87 @@ export function SettingsPage() {
 
   const togglePaymentMethod = (method: string) => {
     setStorePaymentMethods(prev => prev.map(m => m.method === method ? { ...m, isEnabled: !m.isEnabled } : m));
+  };
+
+  const editingStoreItem = storeItems.find(item => item.id === editingStoreItemId) ?? null;
+  const filteredStoreItems = storeCategoryFilter === "all"
+    ? storeItems
+    : storeItems.filter(item => item.category === storeCategoryFilter);
+  const selectedStoreCategoryLabel = storeCategoryFilter === "all"
+    ? "All items"
+    : storeCategories.find(category => category.value === storeCategoryFilter)?.label ?? "All items";
+
+  const openStoreItemModal = (itemId: string | null = null) => {
+    const item = storeItems.find(storeItem => storeItem.id === itemId);
+    setEditingStoreItemId(itemId);
+    setStoreItemPhotoDataUrl(item?.imageUrl ?? "");
+    setStoreItemPhotoStatus("");
+    setIsStoreItemModalOpen(true);
+  };
+
+  const closeStoreItemModal = () => {
+    setIsStoreItemModalOpen(false);
+    setEditingStoreItemId(null);
+    setStoreItemPhotoDataUrl("");
+    setStoreItemPhotoStatus("");
+  };
+
+  const getStoreStockLabel = (item: StoreItem) => {
+    if (item.stock === null) return "Unlimited";
+    if (item.stock === 0) return "Out of stock";
+    if (item.stock <= Number(lowStockThreshold || 0)) return `Low stock: ${item.stock}`;
+    return `${item.stock} in stock`;
+  };
+
+  const getStoreStockClass = (item: StoreItem) => {
+    if (item.stock === null) return "bg-blue-50 text-blue-700 border-blue-100";
+    if (item.stock === 0) return "bg-red-50 text-red-700 border-red-100";
+    if (item.stock <= Number(lowStockThreshold || 0)) return "bg-orange-50 text-orange-700 border-orange-100";
+    return "bg-emerald-50 text-emerald-700 border-emerald-100";
+  };
+
+  const handleStorePhotoUpload = async (file: File | undefined) => {
+    if (!file) return;
+
+    try {
+      setStoreItemPhotoStatus("Compressing image...");
+      const image = await compressImageFile(file, { maxWidth: 1200, maxHeight: 1200, quality: 0.84 });
+      setStoreItemPhotoDataUrl(image.dataUrl);
+      setStoreItemPhotoStatus(
+        `Compressed to ${Math.max(1, Math.round(image.compressedSize / 1024))} KB at ${image.width}x${image.height}.`
+      );
+    } catch (error) {
+      setStoreItemPhotoStatus(error instanceof Error ? error.message : "Unable to process image.");
+    }
+  };
+
+  const handleStoreItemSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const hasUnlimitedStock = formData.get("stockMode") === "unlimited";
+    const stockValue = Number(formData.get("stock") || 0);
+    const itemData = {
+      name: String(formData.get("name") || "").trim(),
+      category: String(formData.get("category") || "other") as StoreCategory,
+      description: String(formData.get("description") || "").trim(),
+      price: Number(formData.get("price") || 0),
+      stock: hasUnlimitedStock ? null : Math.max(0, stockValue),
+      imageUrl: storeItemPhotoDataUrl,
+      isActive: formData.get("isActive") === "on"
+    };
+
+    if (!itemData.name || itemData.price <= 0) return;
+
+    if (editingStoreItem) {
+      updateStoreItem(editingStoreItem.id, itemData);
+      closeStoreItemModal();
+    } else {
+      addStoreItem(itemData);
+      closeStoreItemModal();
+    }
+
+    form.reset();
   };
 
   // Nav item tabs helper
@@ -164,7 +265,7 @@ export function SettingsPage() {
         </aside>
 
         {/* Right: Tab content viewports */}
-        <div className="rounded-card bg-white p-6.5 shadow-sm ring-1 ring-gray-200 min-h-[400px]">
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 min-h-[400px] sm:p-7">
           {/* TAB 1: HOTEL METADATA CONFIG */}
           {activeTab === "hotel" && (
             <form onSubmit={handleSaveHotel} className="space-y-6 text-xs">
@@ -345,7 +446,7 @@ export function SettingsPage() {
               </div>
 
               {/* Toggles */}
-              <div className="space-y-3.5 bg-gray-50 p-4.5 rounded-xl border border-gray-150">
+              <div className="space-y-3.5 bg-gray-50 p-5 rounded-xl border border-gray-150">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
@@ -496,7 +597,7 @@ export function SettingsPage() {
 
           {/* TAB 5: IN-ROOM STORE CONFIG */}
           {activeTab === "store" && (
-            <form onSubmit={handleSaveStore} className="space-y-6 text-xs">
+            <div className="space-y-6 text-xs">
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Mini Bar & Store Portal</h3>
                 <p className="text-[10px] text-gray-500 mt-0.5">Control low stock reminders and active cashier payout modes.</p>
@@ -560,17 +661,298 @@ export function SettingsPage() {
                 </div>
               </div>
 
+              <div className="space-y-3 border-t border-gray-150 pt-5">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                      Spark Essentials Catalog
+                    </h4>
+                    <p className="mt-1 text-[10px] leading-relaxed text-gray-500">
+                      Manage item names, photos, descriptions, pricing, and stock counts shown in the guest store.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-[10px] font-bold text-gray-600">
+                      <Package size={12} />
+                      {filteredStoreItems.length} of {storeItems.length} items
+                    </span>
+                    <button
+                      type="button"
+                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white shadow-sm transition hover:bg-primary-dark"
+                      onClick={() => openStoreItemModal()}
+                    >
+                      <Plus size={13} />
+                      Add Item
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={`min-h-[34px] rounded-full border px-3 text-[10px] font-bold transition ${
+                      storeCategoryFilter === "all"
+                        ? "border-primary bg-primary-light text-primary"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-primary"
+                    }`}
+                    onClick={() => setStoreCategoryFilter("all")}
+                  >
+                    All Items
+                  </button>
+                  {storeCategories.map((category) => (
+                    <button
+                      key={category.value}
+                      type="button"
+                      className={`min-h-[34px] rounded-full border px-3 text-[10px] font-bold transition ${
+                        storeCategoryFilter === category.value
+                          ? "border-primary bg-primary-light text-primary"
+                          : "border-gray-200 bg-white text-gray-600 hover:border-primary"
+                      }`}
+                      onClick={() => setStoreCategoryFilter(category.value)}
+                    >
+                      {category.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {filteredStoreItems.map((item) => (
+                    <div key={item.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                      <div className="flex gap-3">
+                        <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100">
+                          {item.imageUrl ? (
+                            <img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" />
+                          ) : (
+                            <ImageIcon size={22} className="text-gray-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h5 className="truncate text-sm font-bold text-gray-950">{item.name}</h5>
+                              <span className="mt-1 inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                                {storeCategories.find(category => category.value === item.category)?.label ?? "Other"}
+                              </span>
+                              <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-gray-500">{item.description}</p>
+                            </div>
+                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                              item.isActive ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-gray-200 bg-gray-100 text-gray-500"
+                            }`}>
+                              {item.isActive ? "Active" : "Inactive"}
+                            </span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-bold text-gray-950">{formatPrice(item.price)}</span>
+                            <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${getStoreStockClass(item)}`}>
+                              {getStoreStockLabel(item)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex justify-end gap-2 border-t border-gray-100 pt-3">
+                        <button
+                          type="button"
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                          onClick={() => openStoreItemModal(item.id)}
+                        >
+                          <Pencil size={13} />
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50"
+                          onClick={() => {
+                            if (confirm(`Delete "${item.name}" from the wireframe catalog?`)) {
+                              deleteStoreItem(item.id);
+                              if (editingStoreItemId === item.id) setEditingStoreItemId(null);
+                            }
+                          }}
+                        >
+                          <Trash2 size={13} />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {filteredStoreItems.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-250 bg-gray-50 p-8 text-center lg:col-span-2">
+                      <Package size={24} className="mx-auto text-gray-400" />
+                      <h5 className="mt-3 text-sm font-bold text-gray-900">No {selectedStoreCategoryLabel.toLowerCase()} yet</h5>
+                      <p className="mx-auto mt-1 max-w-md text-[10px] leading-relaxed text-gray-500">
+                        Add an item in this category or switch back to all items to view the full catalog.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
               <div className="pt-2 border-t border-gray-150 flex justify-end">
                 <button
-                  type="submit"
+                  type="button"
                   className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                  onClick={handleSaveStore}
                 >
                   <Save size={14} />
                   Save Store Settings
                 </button>
               </div>
-            </form>
+            </div>
           )}
+
+          <Modal
+            title={editingStoreItem ? "Edit Store Item" : "Add Store Item"}
+            open={isStoreItemModalOpen}
+            onClose={closeStoreItemModal}
+          >
+            <form onSubmit={handleStoreItemSubmit} className="space-y-4 text-xs">
+              <p className="text-[10px] leading-relaxed text-gray-500">
+                Uploads are compressed in-browser before previewing. Later, the compressed file will be sent to Firebase Storage.
+              </p>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Item Name
+                  <input
+                    key={`modal-name-${editingStoreItem?.id ?? "new"}`}
+                    name="name"
+                    type="text"
+                    required
+                    defaultValue={editingStoreItem?.name ?? ""}
+                    placeholder="Bohol Peanut Kisses"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Category
+                  <select
+                    key={`modal-category-${editingStoreItem?.id ?? "new"}`}
+                    name="category"
+                    defaultValue={editingStoreItem?.category ?? (storeCategoryFilter === "all" ? "snacks" : storeCategoryFilter)}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                  >
+                    {storeCategories.map((category) => (
+                      <option key={category.value} value={category.value}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Price
+                  <input
+                    key={`modal-price-${editingStoreItem?.id ?? "new"}`}
+                    name="price"
+                    type="number"
+                    min="1"
+                    required
+                    defaultValue={editingStoreItem?.price ?? ""}
+                    placeholder="80"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Stock Quantity
+                  <input
+                    key={`modal-stock-${editingStoreItem?.id ?? "new"}`}
+                    name="stock"
+                    type="number"
+                    min="0"
+                    defaultValue={editingStoreItem?.stock ?? 0}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                  />
+                </label>
+              </div>
+
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Description
+                <textarea
+                  key={`modal-description-${editingStoreItem?.id ?? "new"}`}
+                  name="description"
+                  rows={3}
+                  defaultValue={editingStoreItem?.description ?? ""}
+                  placeholder="Short guest-facing description."
+                  className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:bg-white"
+                />
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
+                <div className="flex h-28 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+                  {storeItemPhotoDataUrl ? (
+                    <img src={storeItemPhotoDataUrl} alt="Store item preview" className="h-full w-full object-cover" />
+                  ) : (
+                    <ImageIcon size={24} className="text-gray-400" />
+                  )}
+                </div>
+                <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-250 bg-white px-4 py-5 text-center transition hover:border-primary hover:bg-primary-light/30">
+                  <ImageIcon size={20} className="text-primary" />
+                  <span className="mt-2 text-xs font-bold text-gray-800">Upload item photo</span>
+                  <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
+                    JPG, PNG, or WebP. Compressed automatically for efficient storage.
+                  </span>
+                  <input
+                    key={`modal-image-${editingStoreItem?.id ?? "new"}`}
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={(event) => {
+                      void handleStorePhotoUpload(event.currentTarget.files?.[0]);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </label>
+              </div>
+              {storeItemPhotoStatus ? (
+                <p className="rounded-lg bg-gray-50 px-3 py-2 text-[10px] font-semibold text-gray-600">{storeItemPhotoStatus}</p>
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700">
+                  <input
+                    key={`modal-stock-mode-${editingStoreItem?.id ?? "new"}`}
+                    name="stockMode"
+                    type="checkbox"
+                    value="unlimited"
+                    defaultChecked={editingStoreItem?.stock === null}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  Unlimited stock
+                </label>
+
+                <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700">
+                  <input
+                    key={`modal-active-${editingStoreItem?.id ?? "new"}`}
+                    name="isActive"
+                    type="checkbox"
+                    defaultChecked={editingStoreItem?.isActive ?? true}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  Active in guest store
+                </label>
+              </div>
+
+              <div className="flex flex-col gap-2 border-t border-gray-150 pt-4 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+                  onClick={closeStoreItemModal}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+                >
+                  <Save size={14} />
+                  {editingStoreItem ? "Update Item" : "Add Item"}
+                </button>
+              </div>
+            </form>
+          </Modal>
 
           {/* TAB 1.5: ROOM TYPES CONFIG */}
           {activeTab === "roomtypes" && (
@@ -656,7 +1038,7 @@ export function SettingsPage() {
                     form.reset();
                     alert("New room type classification added successfully!");
                   }}
-                  className="space-y-4 bg-gray-50 p-4.5 rounded-xl border border-gray-150"
+                  className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
                 >
                   <div className="grid gap-4 sm:grid-cols-3">
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">

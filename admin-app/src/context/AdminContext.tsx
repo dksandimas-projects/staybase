@@ -176,6 +176,18 @@ export interface StoreOrderItem {
   quantity: number;
 }
 
+export interface StoreItem {
+  id: string;
+  name: string;
+  category: "drinks" | "snacks" | "toiletries" | "rentals" | "other";
+  description: string;
+  price: number;
+  stock: number | null;
+  imageUrl: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface StoreOrder {
   id: string;
   orderRef: string;
@@ -246,6 +258,10 @@ export interface AdminContextType {
   storeOrders: StoreOrder[];
   updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"]) => void;
   billStoreOrder: (orderId: string) => void;
+  storeItems: StoreItem[];
+  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => void;
+  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => void;
+  deleteStoreItem: (itemId: string) => void;
 
   // Configurations
   hotelConfig: any;
@@ -945,6 +961,71 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  // Store Catalog State
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([
+    {
+      id: "item-1",
+      name: "San Miguel Pale Pilsen",
+      category: "drinks",
+      description: "Ice-cold local pilsner beer, 330ml can.",
+      price: 120,
+      stock: 18,
+      imageUrl: "https://images.unsplash.com/photo-1608270586620-248524c67de9?auto=format&fit=crop&q=80&w=256&h=256",
+      isActive: true,
+      createdAt: "2026-06-01"
+    },
+    {
+      id: "item-2",
+      name: "Spark Still Water",
+      category: "drinks",
+      description: "Premium purified drinking water in a glass bottle.",
+      price: 60,
+      stock: null,
+      imageUrl: "https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&q=80&w=256&h=256",
+      isActive: true,
+      createdAt: "2026-06-01"
+    },
+    {
+      id: "item-3",
+      name: "Bohol Peanut Kisses",
+      category: "snacks",
+      description: "Crisp local peanut cookies shaped like Chocolate Hills.",
+      price: 80,
+      stock: 4,
+      imageUrl: "https://images.unsplash.com/photo-1590080875515-8a3a8dc5735e?auto=format&fit=crop&q=80&w=256&h=256",
+      isActive: true,
+      createdAt: "2026-06-01"
+    },
+    {
+      id: "item-4",
+      name: "Extra Beach Towel",
+      category: "rentals",
+      description: "Large microfiber towel for pool trips and beach days.",
+      price: 150,
+      stock: 0,
+      imageUrl: "",
+      isActive: false,
+      createdAt: "2026-06-01"
+    }
+  ]);
+
+  const addStoreItem = (item: Omit<StoreItem, "id" | "createdAt">) => {
+    const nextItem: StoreItem = {
+      ...item,
+      id: `item-${Date.now()}`,
+      createdAt: new Date().toISOString()
+    };
+    setStoreItems(prev => [nextItem, ...prev]);
+  };
+
+  const updateStoreItem = (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
+    setStoreItems(prev => prev.map(item => item.id === itemId ? { ...item, ...updates } : item));
+  };
+
+  const deleteStoreItem = (itemId: string) => {
+    setStoreItems(prev => prev.filter(item => item.id !== itemId));
+  };
+
   // Settings Mock States
   const [hotelConfig, setHotelConfig] = useState({
     hotelName: config.brandName,
@@ -1092,6 +1173,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         storeOrders,
         updateStoreOrderStatus,
         billStoreOrder,
+        storeItems,
+        addStoreItem,
+        updateStoreItem,
+        deleteStoreItem,
         hotelConfig,
         websiteContent,
         rewardsConfig,

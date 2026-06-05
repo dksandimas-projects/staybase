@@ -820,7 +820,7 @@ export function IntercomPage() {
                   return (
                     <div
                       key={item.id}
-                      className="rounded-card bg-white p-4.5 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between gap-3 transition hover:shadow-md"
+                      className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between gap-3 transition hover:shadow-md"
                     >
                       <div className="space-y-2">
                         {/* Image placeholder simulation */}
