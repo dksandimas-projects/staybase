@@ -142,10 +142,10 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ G-13 Member Profile `/account/profile`
 - ✅ G-14 My Stays `/account/stays`
 - ✅ G-15 My Rewards Portal `/account/rewards`
-- ⬜ G-16 Intercom Guest Chat `/intercom/:roomId`
-- ⬜ G-17 About Us `/about`
-- ⬜ G-18 Contact Us `/contact`
-- ⬜ G-19 404 Not Found `*`
+- ✅ G-16 Intercom Guest Chat `/intercom/:roomId`
+- ✅ G-17 About Us `/about`
+- ✅ G-18 Contact Us `/contact`
+- ✅ G-19 404 Not Found `*`
 - ✅ M-01 Room Detail Modal
 - ✅ M-02 Availability Filter Drawer (mobile)
 - ⬜ M-03 Corporate Access Code Gate
