@@ -19,6 +19,8 @@ export function RatesPage() {
     toggleVoucherActive, 
     corporateCodes, 
     addCorporateCode,
+    toggleCorporateCodeActive,
+    deleteCorporateCode,
     hotelConfig,
     breakfastConfig,
     updateSettings,
@@ -256,6 +258,36 @@ export function RatesPage() {
       header: "Status",
       render: (row) => (
         <StatusBadge label={row.isActive ? "Active" : "Inactive"} status={row.isActive ? "confirmed" : "dirty"} />
+      )
+    },
+    {
+      key: "action",
+      header: "Actions",
+      align: "end",
+      render: (row) => (
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => toggleCorporateCodeActive(row.code)}
+            className={`min-h-[32px] px-3 rounded text-xs font-semibold shadow-sm transition ${
+              row.isActive 
+                ? "bg-red-50 text-red-700 hover:bg-red-100" 
+                : "bg-green-50 text-green-700 hover:bg-green-100"
+            }`}
+          >
+            {row.isActive ? "Deactivate" : "Activate"}
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Are you sure you want to delete corporate code ${row.code}?`)) {
+                deleteCorporateCode(row.code);
+              }
+            }}
+            className="min-h-[32px] px-3.5 inline-flex items-center gap-1 rounded bg-gray-50 text-gray-700 hover:bg-gray-200 text-xs font-semibold shadow-sm transition"
+          >
+            <Trash2 size={12} className="inline mr-1" />
+            Delete
+          </button>
+        </div>
       )
     }
   ];
