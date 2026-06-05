@@ -152,24 +152,24 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ M-04 Voucher Input (inline)
 
 ### Admin App Screens
-- ⬜ A-01 Admin Login `/login`
-- ⬜ A-02 Dashboard Overview `/`
-- ⬜ A-03 Bookings Management `/bookings`
-- ⬜ A-04 Room Management `/rooms`
-- ⬜ A-05 Rate Management `/rates`
-- ⬜ A-06 Reports `/reports`
-- ⬜ A-07 Corporate Inquiries `/corporate`
-- ⬜ A-08 Intercom Inbox `/intercom`
-- ⬜ A-09 QR Management `/qr`
-- ⬜ A-10 Members `/members`
-- ⬜ A-11 Settings `/settings`
-- ⬜ D-01 Booking Detail Drawer
-- ⬜ D-02 Room Edit Drawer
-- ⬜ D-03 Corporate Inquiry Detail Drawer
-- ⬜ D-04 Member Detail Drawer
-- ⬜ D-05 Store Order Detail Drawer
-- ⬜ M-05 Walk-in Booking Modal
-- ⬜ M-06 Add/Edit Voucher Modal
+- ✅ A-01 Admin Login `/login`
+- ✅ A-02 Dashboard Overview `/`
+- ✅ A-03 Bookings Management `/bookings`
+- ✅ A-04 Room Management `/rooms`
+- ✅ A-05 Rate Management `/rates`
+- ✅ A-06 Reports `/reports`
+- ✅ A-07 Corporate Inquiries `/corporate`
+- ✅ A-08 Intercom Inbox `/intercom`
+- ✅ A-09 QR Management `/qr`
+- ✅ A-10 Members `/members`
+- ✅ A-11 Settings `/settings`
+- ✅ D-01 Booking Detail Drawer
+- ✅ D-02 Room Edit Drawer
+- ✅ D-03 Corporate Inquiry Detail Drawer
+- ✅ D-04 Member Detail Drawer
+- ✅ D-05 Store Order Detail Drawer
+- ✅ M-05 Walk-in Booking Modal
+- ✅ M-06 Add/Edit Voucher Modal
 
 ---
 
