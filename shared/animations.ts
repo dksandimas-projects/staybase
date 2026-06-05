@@ -7,7 +7,7 @@ export const fadeUp = {
 
 export const fadeIn = {
   hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { duration: 0.35, ease: "easeOut" } }
+  visible: { opacity: 1, transition: { duration: 0.35, ease: "easeOut" as const } }
 };
 
 export const staggerContainer = {
@@ -28,11 +28,11 @@ export const scaleIn = {
 export const slideInRight = {
   hidden: { opacity: 0, x: 48 },
   visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: premiumEase } },
-  exit: { opacity: 0, x: 48, transition: { duration: 0.2, ease: "easeIn" } }
+  exit: { opacity: 0, x: 48, transition: { duration: 0.2, ease: "easeIn" as const } }
 };
 
 export const slideInBottom = {
   hidden: { opacity: 0, y: 32 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: premiumEase } },
-  exit: { opacity: 0, y: 32, transition: { duration: 0.2, ease: "easeIn" } }
+  exit: { opacity: 0, y: 32, transition: { duration: 0.2, ease: "easeIn" as const } }
 };
