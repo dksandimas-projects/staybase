@@ -3,15 +3,20 @@ import {
   BedDouble,
   CalendarDays,
   Check,
+  CheckCircle2,
+  CreditCard,
   Info,
+  Landmark,
   Mail,
   MessageSquareText,
   Minus,
   Phone,
   Plus,
   ShieldCheck,
+  UploadCloud,
   UserRound,
-  Users
+  Users,
+  Wallet
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
@@ -50,6 +55,8 @@ export function BookingPage() {
   const shouldReduceMotion = useReducedMotion();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
+  const isReviewStep = currentStepKey === "review";
+
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
   const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? "2026-06-14");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
@@ -59,12 +66,12 @@ export function BookingPage() {
     searchParams.get("breakfast") === "yes" ? "room-breakfast" : "room-only"
   );
   const [guestDetails, setGuestDetails] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
+    firstName: searchParams.get("firstName") ?? "",
+    lastName: searchParams.get("lastName") ?? "",
+    email: searchParams.get("email") ?? "",
+    phone: searchParams.get("phone") ?? "",
     guestCount: String(Number(searchParams.get("guests") ?? 2)),
-    requests: "",
+    requests: searchParams.get("requests") ?? "",
     consent: false
   });
   const [touchedFields, setTouchedFields] = useState<Record<GuestField, boolean>>({
@@ -74,6 +81,16 @@ export function BookingPage() {
     phone: false,
     guestCount: false
   });
+
+  // Step 3 State
+  const [voucherCode, setVoucherCode] = useState("");
+  const [voucherApplied, setVoucherApplied] = useState(false);
+  const [voucherError, setVoucherError] = useState("");
+  const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
+  const [discountIdFile, setDiscountIdFile] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank" | "pay-at-hotel">("gcash");
+  const [paymentProofFile, setPaymentProofFile] = useState<string | null>(null);
+  const [termsConsent, setTermsConsent] = useState(false);
 
   const nights = Math.max(getNumNights(checkIn, checkOut), 1);
   const availableRooms = useMemo(
@@ -86,16 +103,25 @@ export function BookingPage() {
   );
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
   const hasBreakfast = breakfastEnabled && rateChoice === "room-breakfast";
+
+  const discountPct = discountType === "none" ? 0 : 20;
+  const roomTotal = selectedRoom ? selectedRoom.pricePerNight * nights : 0;
+  const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
+  const subtotal = roomTotal + breakfastTotal;
+  const voucherDiscount = voucherApplied ? Math.round(subtotal * 0.1) : 0;
+
   const total = selectedRoom
     ? calculateBookingTotal({
         ratePerNight: selectedRoom.pricePerNight,
         numNights: nights,
         numGuests: guests,
         breakfastRate: breakfastRatePerPerson,
-        hasBreakfast
+        hasBreakfast,
+        discountPct,
+        voucherDiscount
       })
     : 0;
-  const nightlyTotal = selectedRoom ? selectedRoom.pricePerNight + (hasBreakfast ? breakfastRatePerPerson * guests : 0) : 0;
+
   const continueParams = new URLSearchParams({
     step: "guest-details",
     checkIn,
@@ -108,6 +134,20 @@ export function BookingPage() {
   reviewParams.set("step", "review");
   reviewParams.set("firstName", guestDetails.firstName);
   reviewParams.set("lastName", guestDetails.lastName);
+  reviewParams.set("email", guestDetails.email);
+  reviewParams.set("phone", guestDetails.phone);
+  reviewParams.set("requests", guestDetails.requests);
+
+  const confirmParams = new URLSearchParams({
+    bookingRef: `${config.bookingRefPrefix}-${new Date().getFullYear()}0612-042`,
+    roomId: selectedRoom?.id ?? "",
+    checkIn,
+    checkOut,
+    guests: String(guests),
+    paymentMethod,
+    total: String(total)
+  });
+
   const guestErrors = {
     firstName: guestDetails.firstName.trim() ? "" : "First name is required.",
     lastName: guestDetails.lastName.trim() ? "" : "Last name is required.",
@@ -120,6 +160,7 @@ export function BookingPage() {
   };
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedRoom);
+  const nightlyTotal = selectedRoom ? selectedRoom.pricePerNight + (hasBreakfast ? breakfastRatePerPerson * guests : 0) : 0;
 
   useEffect(() => {
     if (!selectedRoomId && availableRooms[0]) {
@@ -172,9 +213,56 @@ export function BookingPage() {
     }));
   }
 
+  function handleApplyVoucher(e: React.FormEvent) {
+    e.preventDefault();
+    if (voucherCode.trim().toUpperCase() === "SPARK10") {
+      setVoucherApplied(true);
+      setVoucherError("");
+    } else if (voucherCode.trim() === "") {
+      setVoucherError("Please enter a code.");
+    } else {
+      setVoucherError("Invalid voucher code.");
+      setVoucherApplied(false);
+    }
+  }
+
+  function handleRemoveVoucher() {
+    setVoucherApplied(false);
+    setVoucherCode("");
+  }
+
+  function handleDiscountChange(type: "none" | "senior" | "pwd") {
+    setDiscountType(type);
+    if (type === "none") {
+      setDiscountIdFile(null);
+    }
+  }
+
+  function handleDiscountIdChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files[0]) {
+      setDiscountIdFile(e.target.files[0].name);
+    }
+  }
+
+  function handlePaymentProofChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files[0]) {
+      setPaymentProofFile(e.target.files[0].name);
+    }
+  }
+
+  const getBackToPath = () => {
+    if (isReviewStep) {
+      return `/book?step=guest-details&${continueParams.toString()}`;
+    }
+    if (isGuestDetailsStep) {
+      return `/book?${continueParams.toString()}`;
+    }
+    return "/rooms";
+  };
+
   const bookingShell = (content: React.ReactNode) => (
     <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
-      <BookingHeader backTo={isGuestDetailsStep ? `/book?${continueParams.toString()}` : "/rooms"} />
+      <BookingHeader backTo={getBackToPath()} />
       {content}
     </main>
   );
@@ -326,6 +414,377 @@ export function BookingPage() {
             ) : (
               <PrimaryButton disabled type="button" className="sm:min-w-56">
                 Continue to Step 3
+              </PrimaryButton>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (isReviewStep) {
+    const isIdUploadRequired = discountType !== "none" && !discountIdFile;
+    const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofFile;
+    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedRoom);
+
+    return bookingShell(
+      <>
+        <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <StepIndicator steps={steps} currentStep={3} />
+          </div>
+          <div className="mt-10">
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
+            <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & Pay</h1>
+            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
+              Review your details, select a discount or enter a voucher, and choose your payment method.
+            </p>
+          </div>
+        </section>
+
+        <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
+          <div className="space-y-6">
+            {/* Voucher Section */}
+            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h3 className="text-lg font-semibold text-gray-950">Voucher or Promo Code</h3>
+              <p className="mt-1 text-sm text-gray-600">Apply a promo code to get discounts on your stay. Try entering <span className="font-semibold text-primary">SPARK10</span>.</p>
+              
+              <form onSubmit={handleApplyVoucher} className="mt-4 flex gap-3">
+                <input
+                  type="text"
+                  placeholder="Enter code"
+                  value={voucherCode}
+                  onChange={(e) => {
+                    setVoucherCode(e.target.value);
+                    setVoucherError("");
+                  }}
+                  disabled={voucherApplied}
+                  className="min-h-11 flex-grow rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500"
+                />
+                {voucherApplied ? (
+                  <button
+                    type="button"
+                    onClick={handleRemoveVoucher}
+                    className="min-h-11 rounded-lg border border-red-200 px-5 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500"
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="min-h-11 rounded-lg border border-primary px-6 text-sm font-semibold text-primary transition hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    Apply
+                  </button>
+                )}
+              </form>
+              
+              {voucherApplied && (
+                <p className="mt-3 text-sm font-medium text-status-green-text flex items-center gap-1.5">
+                  <CheckCircle2 size={16} />
+                  Promo code SPARK10 applied successfully! (10% discount)
+                </p>
+              )}
+              {voucherError && (
+                <p className="mt-3 text-sm font-medium text-red-600">
+                  {voucherError}
+                </p>
+              )}
+            </div>
+
+            {/* Discount Section */}
+            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h3 className="text-lg font-semibold text-gray-950">Discount Options</h3>
+              <p className="mt-1 text-sm text-gray-600">Select if you are eligible for government-mandated discounts. A valid ID must be uploaded.</p>
+              
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {(["none", "senior", "pwd"] as const).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => handleDiscountChange(type)}
+                    className={cn(
+                      "flex min-h-11 items-center justify-center rounded-lg border text-sm font-semibold transition px-4",
+                      discountType === type
+                        ? "border-primary bg-primary-light text-primary"
+                        : "border-gray-200 bg-white text-gray-700 hover:border-primary"
+                    )}
+                  >
+                    {type === "none" ? "None" : type === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
+                  </button>
+                ))}
+              </div>
+
+              {discountType !== "none" && (
+                <div className="mt-5">
+                  <p className="text-sm font-semibold text-gray-700">
+                    {discountType === "senior" ? "Upload OSCA Card Photo" : "Upload PWD ID Card Photo"} <span className="text-red-500">*</span>
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">Please upload a photo of your valid ID card. Our front desk will verify it upon check-in.</p>
+                  
+                  <div className="mt-3">
+                    {discountIdFile ? (
+                      <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={18} className="text-status-green-text" />
+                          <span className="text-sm font-medium text-gray-800">{discountIdFile}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setDiscountIdFile(null)}
+                          className="text-xs font-semibold text-red-600 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
+                        <UploadCloud size={28} className="text-gray-400" />
+                        <span className="mt-2 text-sm font-semibold text-gray-700">Click to upload ID photo</span>
+                        <span className="mt-0.5 text-xs text-gray-500">Supports JPG, PNG, WEBP up to 5MB</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleDiscountIdChange}
+                          className="sr-only"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Payment Method Section */}
+            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <h3 className="text-lg font-semibold text-gray-950">Payment Method</h3>
+              <p className="mt-1 text-sm text-gray-600">Select how you would like to pay for your reservation.</p>
+
+              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                {/* GCash */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("gcash")}
+                  className={cn(
+                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                    paymentMethod === "gcash"
+                      ? "border-primary bg-primary-light ring-1 ring-primary"
+                      : "border-gray-200 bg-white hover:border-primary"
+                  )}
+                >
+                  <Wallet size={20} className={paymentMethod === "gcash" ? "text-primary" : "text-gray-500"} />
+                  <span className="mt-3 block text-sm font-bold text-gray-900">Digital Wallet</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">GCash or Maya</span>
+                </button>
+
+                {/* Bank Transfer */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("bank")}
+                  className={cn(
+                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                    paymentMethod === "bank"
+                      ? "border-primary bg-primary-light ring-1 ring-primary"
+                      : "border-gray-200 bg-white hover:border-primary"
+                  )}
+                >
+                  <Landmark size={20} className={paymentMethod === "bank" ? "text-primary" : "text-gray-500"} />
+                  <span className="mt-3 block text-sm font-bold text-gray-900">Bank Transfer</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">Direct Deposit</span>
+                </button>
+
+                {/* Pay at Hotel */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("pay-at-hotel")}
+                  className={cn(
+                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                    paymentMethod === "pay-at-hotel"
+                      ? "border-primary bg-primary-light ring-1 ring-primary"
+                      : "border-gray-200 bg-white hover:border-primary"
+                  )}
+                >
+                  <CreditCard size={20} className={paymentMethod === "pay-at-hotel" ? "text-primary" : "text-gray-500"} />
+                  <span className="mt-3 block text-sm font-bold text-gray-900">Pay at Hotel</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">Upon arrival</span>
+                </button>
+              </div>
+
+              {/* Conditional Instructions Panel */}
+              <div className="mt-6 rounded-xl border border-primary-light bg-section-bg overflow-hidden">
+                {paymentMethod === "gcash" && (
+                  <div className="grid sm:grid-cols-5">
+                    <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
+                      <img
+                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYBsw9jHiKwa9uZlbY7gkxyAiWy9iO8lZGoL0XHN7xvIgaNO7vtr3QzTuUUpa_zti6o6V77lVXpUrBfIxdcwCku-9V2_zJ34vuxteegFyGZ4gCaqLUNSjPW4oFlX7juZojMJzOFBtLH0-TtD5RZlk-kS5FqRBZopVFBvPkfjSRUQofx5VzpEkkdwPiIa0kQXNQw7VhHMmE_HC0DE8lIDCX5aSWJF_3v0N07C1i8nr2Giua6iOdTxTVWNr1aZZhfSvTeu9kbaXNA1xb"
+                        alt="GCash / Maya QR Code"
+                        className="h-40 w-40 object-contain rounded"
+                      />
+                    </div>
+                    <div className="sm:col-span-3 p-5 flex flex-col justify-center">
+                      <h4 className="font-semibold text-primary text-base">Scan to Pay</h4>
+                      <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                        Please use your digital wallet (GCash or Maya) to scan the QR code. Ensure the recipient name is <span className="font-bold text-gray-800">spark inn Bohol</span>.
+                      </p>
+                      <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
+                        <li className="flex items-center gap-1.5">
+                          <Info size={14} className="text-primary" />
+                          Your booking is held for 30 minutes.
+                        </li>
+                        <li className="flex items-center gap-1.5">
+                          <ShieldCheck size={14} className="text-primary" />
+                          Secure transaction via local digital wallets.
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+                {paymentMethod === "bank" && (
+                  <div className="p-5">
+                    <h4 className="font-semibold text-primary text-base">Direct Bank Deposit Details</h4>
+                    <div className="mt-3 grid gap-3 text-xs text-gray-600 sm:grid-cols-3">
+                      <div>
+                        <p className="font-bold text-gray-500 uppercase tracking-wide">Bank Name</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">BPI</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-500 uppercase tracking-wide">Account Name</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">Spark Inn Hotel Corp</p>
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-500 uppercase tracking-wide">Account Number</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">1234-5678-90</p>
+                      </div>
+                    </div>
+                    <ul className="mt-4 space-y-1.5 text-xs text-gray-500">
+                      <li className="flex items-center gap-1.5">
+                        <Info size={14} className="text-primary" />
+                        Please complete transfer within 30 minutes to hold room.
+                      </li>
+                    </ul>
+                  </div>
+                )}
+
+                {paymentMethod === "pay-at-hotel" && (
+                  <div className="p-5 flex items-start gap-3">
+                    <Info size={20} className="text-primary shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-primary text-base">Pay upon Check-in</h4>
+                      <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                        Present your booking reference at the front desk upon arrival. We accept cash, major credit cards, and digital wallet payments.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Proof of Payment Upload box */}
+              {paymentMethod !== "pay-at-hotel" && (
+                <div className="mt-5">
+                  <p className="text-sm font-semibold text-gray-700">
+                    Upload Proof of Payment <span className="text-red-500">*</span>
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful GCash/Maya payment or bank transfer receipt.</p>
+                  
+                  <div className="mt-3">
+                    {paymentProofFile ? (
+                      <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={18} className="text-status-green-text" />
+                          <span className="text-sm font-medium text-gray-800">{paymentProofFile}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentProofFile(null)}
+                          className="text-xs font-semibold text-red-600 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
+                        <UploadCloud size={28} className="text-gray-400" />
+                        <span className="mt-2 text-sm font-semibold text-gray-700">Click to upload receipt photo</span>
+                        <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePaymentProofChange}
+                          className="sr-only"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Honeypot field (hidden from user) */}
+            <input
+              type="text"
+              name="_hp"
+              className="absolute opacity-0 pointer-events-none"
+              tabIndex={-1}
+              autoComplete="off"
+            />
+
+            {/* Terms and conditions */}
+            <div className="mt-6">
+              <label className="flex items-start gap-3 cursor-pointer text-sm leading-6 text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={termsConsent}
+                  onChange={(e) => setTermsConsent(e.target.checked)}
+                  className="mt-1 h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <span>
+                  I have read and agree to {config.brandName}'s{" "}
+                  <Link to="/privacy" target="_blank" className="font-semibold text-primary underline">
+                    Privacy Policy
+                  </Link>{" "}
+                  and Terms of Service. I understand that my booking is subject to the cancellation policy selected.
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <BookingReviewAside
+            checkIn={checkIn}
+            checkOut={checkOut}
+            guests={guests}
+            hasBreakfast={hasBreakfast}
+            nights={nights}
+            room={selectedRoom}
+            total={total}
+            discountPct={discountPct}
+            voucherDiscount={voucherDiscount}
+            discountType={discountType}
+            voucherApplied={voucherApplied}
+          />
+        </section>
+
+        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Review & Pay</p>
+              <p className="text-lg font-semibold text-gray-950">
+                {!termsConsent
+                  ? "Agree to terms and conditions"
+                  : isIdUploadRequired
+                  ? "Please upload your Senior/PWD ID"
+                  : isPaymentProofRequired
+                  ? "Please upload proof of payment"
+                  : "Ready to confirm booking"}
+              </p>
+            </div>
+            {canConfirm ? (
+              <PrimaryButton to={`/book/confirm?${confirmParams.toString()}`} className="sm:min-w-56">
+                Confirm Booking
+              </PrimaryButton>
+            ) : (
+              <PrimaryButton disabled type="button" className="sm:min-w-56">
+                Confirm Booking
               </PrimaryButton>
             )}
           </div>
@@ -625,10 +1084,31 @@ interface BookingReviewAsideProps {
   nights: number;
   room: (typeof rooms)[number] | undefined;
   total: number;
+  discountPct?: number;
+  voucherDiscount?: number;
+  discountType?: "none" | "senior" | "pwd";
+  voucherApplied?: boolean;
 }
 
-function BookingReviewAside({ checkIn, checkOut, guests, hasBreakfast, nights, room, total }: BookingReviewAsideProps) {
+function BookingReviewAside({
+  checkIn,
+  checkOut,
+  guests,
+  hasBreakfast,
+  nights,
+  room,
+  total,
+  discountPct = 0,
+  voucherDiscount = 0,
+  discountType = "none",
+  voucherApplied = false
+}: BookingReviewAsideProps) {
   if (!room) return null;
+
+  const roomTotal = room.pricePerNight * nights;
+  const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
+  const subtotal = roomTotal + breakfastTotal;
+  const discountAmount = subtotal * (discountPct / 100);
 
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">
@@ -646,12 +1126,24 @@ function BookingReviewAside({ checkIn, checkOut, guests, hasBreakfast, nights, r
           <div className="mt-5 space-y-3 text-sm text-gray-600">
             <div className="flex justify-between">
               <span>Room rate</span>
-              <span>{formatPrice(room.pricePerNight * nights)}</span>
+              <span>{formatPrice(roomTotal)}</span>
             </div>
             {hasBreakfast ? (
               <div className="flex justify-between">
                 <span>Breakfast add-on</span>
-                <span>{formatPrice(breakfastRatePerPerson * guests * nights)}</span>
+                <span>{formatPrice(breakfastTotal)}</span>
+              </div>
+            ) : null}
+            {discountPct > 0 ? (
+              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                <span>{discountType === "senior" ? "Senior Citizen" : "PWD"} Discount (20%)</span>
+                <span>-{formatPrice(discountAmount)}</span>
+              </div>
+            ) : null}
+            {voucherApplied ? (
+              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                <span>Voucher (SPARK10)</span>
+                <span>-{formatPrice(voucherDiscount)}</span>
               </div>
             ) : null}
             <div className="flex justify-between border-t border-dashed border-gray-200 pt-3 text-lg font-semibold text-gray-950">
