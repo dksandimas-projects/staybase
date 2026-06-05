@@ -25,7 +25,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 14 | Never commit directly to `main` — merge only at milestones |
 | 15 | Versioning: semantic `v[MAJOR].[MINOR].[PATCH]` starting at `v0.1.0` |
 | 16 | VERSION constant in `shared/VERSION.ts` — displayed in footer of all pages |
-| 17 | Auto version bump: Husky + Conventional Commits — `fix:` PATCH, `feat:` MINOR, `release:` MAJOR |
+| 17 | Auto version bump: Husky + Conventional Commits — `fix:` PATCH, `refactor:` PATCH, `feat:` MINOR, `release:` MAJOR |
 | 18 | Availability locking: Firestore transactions required for booking creation — never read-then-write |
 | 19 | Payment proof screenshots: Storage rules restrict read to authenticated staff only — never public |
 | 20 | Rate limiting required on public API endpoints: booking creation, voucher/code validation, email resend |

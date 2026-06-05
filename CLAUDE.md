@@ -139,7 +139,7 @@ These apply to every file in every app. No exceptions.
 - **Validate corporate codes and vouchers server-side** — never trust client
 - **Always unsubscribe Firestore `onSnapshot` listeners** in `useEffect` cleanup
 - **Named exports for components/hooks** — default exports for pages only
-- **Conventional Commits required** — `fix:` / `feat:` / `release:` prefixes
+- **Conventional Commits required** — `fix:` / `feat:` / `refactor:` / `release:` prefixes
 - **Bump `VERSION` in `shared/` before every merge to `main`** (Husky handles automatically)
 - **Never commit `.env` files**
 - **Never log PII** — no console.log of guest names, emails, or payment data
@@ -186,7 +186,7 @@ If already on a correctly-named branch, continue working on it. If unsure which 
 - `VERSION` constant lives in `shared/` — imported by both apps
 - Displayed in footer of **all pages** (guest + dashboard)
 - Auto-bumped by Husky `commit-msg` hook via Conventional Commits:
-  - `fix:` → PATCH | `feat:` → MINOR | `release:` → MAJOR
+  - `fix:` → PATCH | `refactor:` → PATCH | `feat:` → MINOR | `release:` → MAJOR
 
 ---
 
