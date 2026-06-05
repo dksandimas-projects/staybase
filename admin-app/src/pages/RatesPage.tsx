@@ -497,7 +497,7 @@ export function RatesPage() {
             {paymentMethods.map((pm) => {
               const Icon = pm.method === "bank" ? BankIcon : pm.method === "gcash" ? Smartphone : CreditCard;
               return (
-                <div key={pm.method} className={`rounded-xl border p-4.5 space-y-3.5 transition ${
+                <div key={pm.method} className={`rounded-xl border p-5 space-y-3.5 transition ${
                   pm.isEnabled ? "bg-white border-primary/20 ring-1 ring-primary/5" : "bg-gray-50/50 border-gray-200 opacity-60"
                 }`}>
                   <div className="flex justify-between items-center">

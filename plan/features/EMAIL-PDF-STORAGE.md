@@ -133,22 +133,26 @@ Used at check-in by front desk. Generated from booking data.
 
 ## Firebase Storage Upload Patterns
 
-Used for: room photos, payment proof screenshots, QR notification sounds, website content photos.
+Used for: room photos, payment proof screenshots, QR notification sounds, website content photos, store item photos, and guest/staff ID images.
 
 ### Checklist
 
 - [ ] Always use `uploadBytes(ref, file)` + `getDownloadURL(ref)` pattern
+- [ ] All image uploads must run through shared client compression before upload: `compressImageFile()` from `shared/utils/images.ts`
+- [ ] Default compression target: max `1600x1600`, JPEG/WebP quality around `0.82`; feature screens may use smaller dimensions for thumbnails/catalog images
 - [ ] Storage paths:
   - Room photos: `rooms/{roomId}/{filename}`
   - Payment proof: `bookings/{bookingId}/payment-proof/{filename}`
   - Guest ID photo: `bookings/{bookingId}/guest-id/{filename}` — staff-only read, same rule as payment proof
   - Discount ID photo: `bookings/{bookingId}/discount-id/{filename}` — staff-only read; uploaded by guest at booking Step 3 when Senior/PWD discount is selected
+  - Store item photos: `store-items/{itemId}/{filename}`
   - Website photos: `settings/website-content/{section}/{filename}`
   - Notification sound: `settings/notification-sound/{filename}`
   - Logo/brand assets: `assets/branding/{filename}`
 - [ ] Always store `getDownloadURL` result in Firestore — never reconstruct Storage URLs manually
 - [ ] File type validation before upload (images: jpg/png/webp; audio: mp3/wav)
-- [ ] File size limit enforced client-side before upload (images: 5MB, audio: 2MB)
+- [ ] File size limit enforced client-side before compression and upload (source images: 5MB, audio: 2MB)
+- [ ] Store the compressed `File` in Storage; never upload the original full-size image unless the feature explicitly requires archival quality
 - [ ] Upload progress indicator for user-facing uploads
 - [ ] Firebase Storage CORS must be configured — see `plan/docs/GOTCHAS.md`
 

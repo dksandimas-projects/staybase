@@ -428,7 +428,7 @@ Full rules live in `firebase/firestore.rules`.
 - Use `getFirestore()`, `getAuth()`, `getStorage()` — do not re-initialize
 - Firestore real-time: `onSnapshot` in custom hooks — always unsubscribe in cleanup
 - Firestore one-time: `getDoc` / `getDocs` for non-reactive reads
-- Storage: `uploadBytes` + `getDownloadURL` for file uploads
+- Storage: compress image files with shared `compressImageFile()` before `uploadBytes`, then store the `getDownloadURL` result in Firestore
 - Auth: `onAuthStateChanged` listener in auth hook — unsubscribe on cleanup
 
 See `plan/docs/GOTCHAS.md` for common Firebase pitfalls.

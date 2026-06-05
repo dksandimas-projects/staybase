@@ -73,7 +73,7 @@ export function DashboardPage() {
               return (
                 <div
                   key={room.id}
-                  className="rounded-card border border-gray-200 bg-white p-4.5 flex flex-col justify-between gap-3 shadow-sm transition hover:shadow-md"
+                  className="rounded-card border border-gray-200 bg-white p-5 flex flex-col justify-between gap-3 shadow-sm transition hover:shadow-md"
                 >
                   <div className="flex justify-between items-start">
                     <div>
