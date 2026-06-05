@@ -203,6 +203,7 @@ Split into two groups. Universal rules go in every project unchanged. Stack-spec
 - **Agent branching rule** — always include this in `CLAUDE.md` under the Branching Strategy section:
   1. Before starting any task, run `git branch --show-current`
   2. If not already on the right branch, create one off `dev` using the appropriate prefix:
+     - **Wireframe pass** → one shared branch for the entire phase: `git checkout -b feature/wireframe` — no per-screen branches
      - New feature → `git checkout -b feature/<task-name>`
      - Bug fix → `git checkout -b fix/<task-name>`
      - Docs-only change → `git checkout -b docs/<task-name>`
