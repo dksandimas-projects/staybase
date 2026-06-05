@@ -148,7 +148,7 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 |---|---|---|---|---|---|
 | [ ] | G-01 | Homepage | `/` | `homepage_desktop` + `homepage_mobile` | `plan/features/HOMEPAGE.md` |
 | [x] | G-02 | Rooms Page | `/rooms` | `rooms_rates_desktop` + `rooms_rates_mobile` | `plan/features/ROOMS-PAGE.md` |
-| [ ] | G-03 | Booking Step 1 — Select Room | `/book` | `booking_step_1_desktop` + `booking_step_1_mobile` | `plan/features/BOOKING-FLOW.md` |
+| [x] | G-03 | Booking Step 1 — Select Room | `/book` | `booking_step_1_desktop` + `booking_step_1_mobile` | `plan/features/BOOKING-FLOW.md` |
 | [ ] | G-04 | Booking Step 2 — Guest Details | `/book` | `booking_step_2_desktop` + `booking_step_2_mobile` | `plan/features/BOOKING-FLOW.md` |
 | [ ] | G-05 | Booking Step 3 — Review & Pay | `/book` | `booking_step_3_desktop` + `booking_step_3_mobile` | `plan/features/BOOKING-FLOW.md` |
 | [ ] | G-06 | Booking Step 4 — Confirmation | `/book/confirm` | `booking_confirmation_desktop` + `booking_confirmation_mobile` | `plan/features/BOOKING-FLOW.md` |

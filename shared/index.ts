@@ -1,4 +1,5 @@
 export * from "./VERSION";
+export * from "./animations";
 export * from "./constants";
 export * from "./schemas/booking";
 export * from "./types";
