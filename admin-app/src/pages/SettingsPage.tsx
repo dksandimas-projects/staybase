@@ -169,7 +169,7 @@ export function SettingsPage() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Hotel Display Name
                   <input
                     type="text"
@@ -180,7 +180,7 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Reception Contact Phone
                   <input
                     type="tel"
@@ -192,7 +192,7 @@ export function SettingsPage() {
                 </label>
               </div>
 
-              <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                 Contact Support Email
                 <input
                   type="email"
@@ -204,7 +204,7 @@ export function SettingsPage() {
               </label>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Standard Check-in Time
                   <input
                     type="text"
@@ -215,7 +215,7 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Standard Check-out Time
                   <input
                     type="text"
@@ -227,7 +227,7 @@ export function SettingsPage() {
                 </label>
               </div>
 
-              <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                 Hotel Mission Statement
                 <textarea
                   value={missionStatement}
@@ -237,7 +237,7 @@ export function SettingsPage() {
                 />
               </label>
 
-              <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                 The Spark Story History
                 <textarea
                   value={hotelStory}
@@ -270,7 +270,7 @@ export function SettingsPage() {
               <div className="space-y-4">
                 <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Hero Segment</h4>
                 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Homepage Main Heading Banner
                   <input
                     type="text"
@@ -281,7 +281,7 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Homepage Supporting Tagline
                   <input
                     type="text"
@@ -296,7 +296,7 @@ export function SettingsPage() {
               <div className="space-y-4">
                 <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Corporate Stays Banners</h4>
                 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Corporate Page Hero Heading
                   <input
                     type="text"
@@ -307,7 +307,7 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Corporate Supporting Summary
                   <textarea
                     required
@@ -373,7 +373,7 @@ export function SettingsPage() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Points Granted per ₱100 Spent
                   <input
                     type="number"
@@ -385,7 +385,7 @@ export function SettingsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Member Discount Percentage (%)
                   <input
                     type="number"
@@ -435,7 +435,7 @@ export function SettingsPage() {
                   Enable Guest Daily Breakfast Add-on
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700 max-w-xs">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 max-w-xs">
                   Breakfast Tariff Rate (PHP / Person / Night)
                   <input
                     type="number"
@@ -513,7 +513,7 @@ export function SettingsPage() {
                   Activate In-room Mini Bar Web Catalog
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700 max-w-xs">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 max-w-xs">
                   Low Stock Threshold Reminder Alert
                   <input
                     type="number"

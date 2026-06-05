@@ -411,7 +411,7 @@ export function RatesPage() {
             </h3>
 
             <form onSubmit={handleSaveBreakfastRate} className="space-y-4">
-              <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+              <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                 Breakfast Service Charge (Per Guest / Night)
                 <div className="relative flex items-center">
                   <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
@@ -489,7 +489,7 @@ export function RatesPage() {
                     </button>
                   </div>
 
-                  <label className="grid gap-1 text-[9px] font-bold text-gray-400 uppercase">
+                  <label className="flex flex-col gap-1.5 text-[9px] font-bold text-gray-400 uppercase">
                     Account Info & Instructions
                     <input
                       type="text"
@@ -577,7 +577,7 @@ export function RatesPage() {
       >
         <form onSubmit={handleVoucherSubmit} className="space-y-4 text-xs font-body">
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Voucher Code
               <input
                 type="text"
@@ -589,7 +589,7 @@ export function RatesPage() {
               />
             </label>
 
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Discount Type
               <select
                 value={discountType}
@@ -603,7 +603,7 @@ export function RatesPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Discount Value
               <input
                 type="number"
@@ -615,7 +615,7 @@ export function RatesPage() {
               />
             </label>
 
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Usage Cap (Limit)
               <input
                 type="number"
@@ -626,7 +626,7 @@ export function RatesPage() {
               />
             </label>
 
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Expiration Date
               <input
                 type="date"
@@ -678,7 +678,7 @@ export function RatesPage() {
       >
         <form onSubmit={handleCorpSubmit} className="space-y-4 text-xs font-body">
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Negotiated Access Code
               <input
                 type="text"
@@ -690,7 +690,7 @@ export function RatesPage() {
               />
             </label>
 
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-750">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
               Company Partner Name
               <input
                 type="text"
@@ -707,7 +707,7 @@ export function RatesPage() {
             <p className="font-semibold text-gray-700">Set Custom Flat Rate per Room Type (PHP)</p>
             <div className="grid gap-4 sm:grid-cols-2">
               {config.roomTypes.map((t) => (
-                <label key={t.value} className="grid gap-1.5 font-medium text-gray-600">
+                <label key={t.value} className="flex flex-col gap-2 font-medium text-gray-600">
                   {t.label} (Base: ₱{rooms.find(r => r.type === t.value)?.pricePerNight || 3200})
                   <input
                     type="number"

@@ -111,7 +111,7 @@ export function LoginPage() {
           /* STANDARD LOGIN VIEW */
           <div className="space-y-6">
             <form onSubmit={handleLogin} className="space-y-4">
-              <label className="grid gap-2 text-xs font-semibold text-gray-700">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                 Email Address
                 <span className="relative block">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
@@ -229,7 +229,7 @@ export function LoginPage() {
               </div>
             ) : (
               <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
-                <label className="grid gap-2 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Enter Account Email
                   <span className="relative block">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
