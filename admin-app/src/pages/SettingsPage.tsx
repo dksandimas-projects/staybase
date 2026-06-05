@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useAdmin } from "../context/AdminContext";
 import { 
   Settings, Globe, Gift, Coffee, ShoppingBag, 
-  Save, Landmark, Sparkles, Check, CheckSquare, Square 
+  Save, Landmark, Sparkles, Check, CheckSquare, Square,
+  BedDouble, Plus, Trash2, ShieldAlert
 } from "lucide-react";
 import config from "@config";
 
-type TabId = "hotel" | "website" | "rewards" | "breakfast" | "store";
+type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store";
 
 export function SettingsPage() {
   const { 
@@ -15,7 +16,10 @@ export function SettingsPage() {
     rewardsConfig, 
     breakfastConfig, 
     storeConfig, 
-    updateSettings 
+    updateSettings,
+    roomTypes,
+    addRoomType,
+    deleteRoomType
   } = useAdmin();
 
   // Active Settings Section Tab
@@ -120,6 +124,7 @@ export function SettingsPage() {
   // Nav item tabs helper
   const tabs = [
     { id: "hotel" as const, label: "Hotel Settings", icon: Landmark },
+    { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
     { id: "website" as const, label: "Website Content", icon: Globe },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
@@ -565,6 +570,141 @@ export function SettingsPage() {
                 </button>
               </div>
             </form>
+          )}
+
+          {/* TAB 1.5: ROOM TYPES CONFIG */}
+          {activeTab === "roomtypes" && (
+            <div className="space-y-6 text-xs font-body">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Room Layout Classifications</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Define category keys, descriptive labels, and compact UI abbreviations used across booking screens.</p>
+              </div>
+
+              {/* Warnings / Cautions */}
+              <div className="rounded-lg bg-orange-50 border border-orange-200 p-4 text-[10px] text-orange-700 flex gap-2.5 items-start">
+                <ShieldAlert size={16} className="shrink-0 text-orange-500 mt-0.5" />
+                <div>
+                  <strong className="font-bold">Caution on Deletion:</strong>
+                  <p className="mt-0.5 leading-relaxed font-semibold">
+                    Deleting a room type that is currently active on existing rooms or bookings may result in display mismatches. Remove room associations before deleting layouts.
+                  </p>
+                </div>
+              </div>
+
+              {/* Room Types Listing Table */}
+              <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                <table className="min-w-full divide-y divide-gray-150 text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                      <th className="px-4 py-2.5">Identifier Key</th>
+                      <th className="px-4 py-2.5">Display Label</th>
+                      <th className="px-4 py-2.5">Short Abbreviation</th>
+                      <th className="px-4 py-2.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 font-medium">
+                    {roomTypes.map((type) => (
+                      <tr key={type.value} className="text-gray-800 hover:bg-gray-50/50">
+                        <td className="px-4 py-3 font-mono text-[11px] text-gray-900">{type.value}</td>
+                        <td className="px-4 py-3 text-gray-700">{type.label}</td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-105 text-gray-700 border border-gray-200">
+                            {type.shortLabel}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete the "${type.label}" room type?`)) {
+                                deleteRoomType(type.value);
+                              }
+                            }}
+                            className="text-red-650 hover:text-red-700 font-bold hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Add Room Type Form */}
+              <div className="border-t border-gray-150 pt-5 space-y-4">
+                <h4 className="text-xs font-bold text-gray-750 flex items-center gap-1">
+                  <Plus size={14} className="text-primary" />
+                  Add New Room Classification
+                </h4>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const value = (form.elements.namedItem("val") as HTMLInputElement).value.trim().toLowerCase().replace(/\s+/g, "-");
+                    const label = (form.elements.namedItem("lbl") as HTMLInputElement).value.trim();
+                    const shortLabel = (form.elements.namedItem("shortLbl") as HTMLInputElement).value.trim();
+
+                    if (!value || !label || !shortLabel) return;
+                    if (roomTypes.some(t => t.value === value)) {
+                      alert("A room type with this identifier key already exists.");
+                      return;
+                    }
+
+                    addRoomType({ value, label, shortLabel });
+                    form.reset();
+                    alert("New room type classification added successfully!");
+                  }}
+                  className="space-y-4 bg-gray-50 p-4.5 rounded-xl border border-gray-150"
+                >
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Identifier Key (e.g. deluxe-villa)
+                      <input
+                        name="val"
+                        type="text"
+                        required
+                        placeholder="deluxe-villa"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Full Display Name
+                      <input
+                        name="lbl"
+                        type="text"
+                        required
+                        placeholder="Deluxe Pool Villa"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Short Label (abbreviation)
+                      <input
+                        name="shortLbl"
+                        type="text"
+                        required
+                        placeholder="Deluxe Villa"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      className="min-h-[40px] px-5 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                    >
+                      <Plus size={14} />
+                      Register Room Type
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
           )}
         </div>
       </div>

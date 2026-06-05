@@ -253,6 +253,12 @@ export interface AdminContextType {
   breakfastConfig: any;
   storeConfig: any;
   updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => void;
+
+  // Room Types Config
+  roomTypes: { value: string; label: string; shortLabel: string }[];
+  addRoomType: (rt: { value: string; label: string; shortLabel: string }) => void;
+  updateRoomType: (value: string, updates: Partial<{ label: string; shortLabel: string }>) => void;
+  deleteRoomType: (value: string) => void;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -1017,6 +1023,37 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     if (section === "storeConfig") setStoreConfig(prev => ({ ...prev, ...data }));
   };
 
+  // Room Types State
+  const [roomTypes, setRoomTypes] = useState<{ value: string; label: string; shortLabel: string }[]>(() => {
+    const saved = localStorage.getItem("sim_admin_room_types");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return [...config.roomTypes];
+  });
+
+  const saveRoomTypes = (newTypes: typeof roomTypes) => {
+    setRoomTypes(newTypes);
+    localStorage.setItem("sim_admin_room_types", JSON.stringify(newTypes));
+  };
+
+  const addRoomType = (rt: { value: string; label: string; shortLabel: string }) => {
+    const updated = [...roomTypes, rt];
+    saveRoomTypes(updated);
+  };
+
+  const updateRoomType = (value: string, updates: Partial<{ label: string; shortLabel: string }>) => {
+    const updated = roomTypes.map(t => t.value === value ? { ...t, ...updates } : t);
+    saveRoomTypes(updated);
+  };
+
+  const deleteRoomType = (value: string) => {
+    const updated = roomTypes.filter(t => t.value !== value);
+    saveRoomTypes(updated);
+  };
+
   return (
     <AdminContext.Provider
       value={{
@@ -1059,7 +1096,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         rewardsConfig,
         breakfastConfig,
         storeConfig,
-        updateSettings
+        updateSettings,
+        roomTypes,
+        addRoomType,
+        updateRoomType,
+        deleteRoomType
       }}
     >
       {children}

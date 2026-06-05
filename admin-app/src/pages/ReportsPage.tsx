@@ -13,7 +13,7 @@ import { BarChart3, Download, Calendar, DollarSign, Users, Home, TrendingUp } fr
 import config from "@config";
 
 export function ReportsPage() {
-  const { bookings, rooms } = useAdmin();
+  const { bookings, rooms, roomTypes } = useAdmin();
   const [dateRange, setDateRange] = useState("30");
   const [reportType, setReportType] = useState("bookings");
 
@@ -38,7 +38,7 @@ export function ReportsPage() {
   ];
 
   // Room occupancy distribution
-  const roomTypeDistribution = config.roomTypes.map(rt => {
+  const roomTypeDistribution = roomTypes.map(rt => {
     const totalRoomsOfType = rooms.filter(r => r.type === rt.value).length;
     const occupiedOfType = rooms.filter(r => r.type === rt.value && r.status === "occupied").length;
     const ratio = totalRoomsOfType > 0 ? Math.round((occupiedOfType / totalRoomsOfType) * 100) : 0;

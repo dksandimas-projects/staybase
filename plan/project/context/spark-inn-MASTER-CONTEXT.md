@@ -111,7 +111,7 @@ No open questions remain. Every item below is confirmed:
 | Guest auth | Firebase Auth — Google Sign-In + email/password; separate from admin auth |
 | White-label | One codebase, separate deployment per hotel client — not multi-tenant |
 | Brand config | All brand values (colors, fonts, logos, name) in `hotel.config.ts` — never hardcoded |
-| Room types | Fully flexible — defined in `hotel.config.ts → roomTypes[]`, not a fixed enum |
+| Room types | Fully flexible — defined in Admin App Settings UI (prefilled from hotel.config.ts), not a fixed enum |
 | Currency/locale | Config-driven — `hotel.config.ts` sets currency, locale, timezone, date format |
 | Booking ref prefix | Configurable per client in `hotel.config.ts → bookingRefPrefix` (Spark Inn: "SI") |
 | Legal content | Privacy policy body, cancellation policy, house rules editable from Settings (Firestore) |

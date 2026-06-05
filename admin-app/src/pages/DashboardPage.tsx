@@ -5,7 +5,7 @@ import { BedDouble, Check, RefreshCw, AlertTriangle, ShieldCheck } from "lucide-
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export function DashboardPage() {
-  const { rooms, bookings, toggleHousekeepingStatus } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes } = useAdmin();
 
   // Metrics Calculations
   const totalRoomsCount = rooms.length;
@@ -27,13 +27,10 @@ export function DashboardPage() {
   ];
 
   // Helper to format room type labels
-  const roomTypesLabels: Record<string, string> = {
-    single: "Single",
-    "standard-double": "Std Double",
-    "standard-twin": "Std Twin",
-    executive: "Executive",
-    family: "Family"
-  };
+  const roomTypesLabels = roomTypes.reduce((acc, t) => {
+    acc[t.value] = t.shortLabel;
+    return acc;
+  }, {} as Record<string, string>);
 
   return (
     <div className="space-y-8 font-body">
