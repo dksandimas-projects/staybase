@@ -1,5 +1,6 @@
 import { VERSION } from "@spark-inn/shared";
 import {
+  Award,
   BarChart3,
   BedDouble,
   CalendarDays,
@@ -24,6 +25,7 @@ const navItems = [
   { label: "Corporate", to: "/corporate", icon: Users },
   { label: "Intercom", to: "/intercom", icon: MessageSquare },
   { label: "QR", to: "/qr", icon: QrCode },
+  { label: "Members", to: "/members", icon: Award },
   { label: "Settings", to: "/settings", icon: Settings }
 ];
 
