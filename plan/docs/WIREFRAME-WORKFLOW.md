@@ -154,7 +154,7 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 | [x] | G-06 | Booking Step 4 — Confirmation | `/book/confirm` | `booking_confirmation_desktop` + `booking_confirmation_mobile` | `plan/features/BOOKING-FLOW.md` |
 | [x] | G-07 | My Booking Lookup | `/my-booking` | no Stitch source — build from feature MD | `plan/features/BOOKING-LOOKUP.md` |
 | [x] | G-08 | Corporate Stays Marketing | `/corporate` | `corporate_stays_marketing_desktop` + `corporate_stays_marketing_mobile` | `plan/features/STATIC-PAGES.md` |
-| [ ] | G-09 | Corporate Booking Gate + Flow | `/corporate/book` | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
+| [x] | G-09 | Corporate Booking Gate + Flow | `/corporate/book` | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
 | [ ] | G-10 | Spark Rewards Landing | `/rewards` | `spark_rewards_landing_desktop` + `spark_rewards_landing_mobile` | `plan/features/SPARK-REWARDS.md` |
 | [ ] | G-11 | Sign In | `/signin` | `sign_in_desktop` + `sign_in_mobile` | `plan/features/SPARK-REWARDS.md` |
 | [ ] | G-12 | Sign Up | `/signup` | `sign_up_desktop` + `sign_up_mobile` | `plan/features/SPARK-REWARDS.md` |
