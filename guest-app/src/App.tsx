@@ -5,6 +5,7 @@ import { BookingPage } from "./pages/BookingPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
 import { CorporateStaysPage } from "./pages/CorporateStaysPage";
 import { HomePage } from "./pages/HomePage";
+import { IntercomPage } from "./pages/IntercomPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RewardsPage } from "./pages/RewardsPage";
 import { RewardsLandingPage } from "./pages/RewardsLandingPage";
@@ -29,6 +30,7 @@ export function App() {
       <Route path="/account/profile" element={<ProfilePage />} />
       <Route path="/account/stays" element={<StaysPage />} />
       <Route path="/account/rewards" element={<RewardsPage />} />
+      <Route path="/intercom/:roomId" element={<IntercomPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );

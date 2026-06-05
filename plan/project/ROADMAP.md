@@ -139,9 +139,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ G-10 Spark Rewards Landing `/rewards`
 - ✅ G-11 Sign In `/signin`
 - ✅ G-12 Sign Up `/signup`
-- ⬜ G-13 Member Profile `/account/profile`
-- ⬜ G-14 My Stays `/account/stays`
-- ⬜ G-15 My Rewards Portal `/account/rewards`
+- ✅ G-13 Member Profile `/account/profile`
+- ✅ G-14 My Stays `/account/stays`
+- ✅ G-15 My Rewards Portal `/account/rewards`
 - ⬜ G-16 Intercom Guest Chat `/intercom/:roomId`
 - ⬜ G-17 About Us `/about`
 - ⬜ G-18 Contact Us `/contact`
