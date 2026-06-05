@@ -215,7 +215,7 @@ Split into two groups. Universal rules go in every project unchanged. Stack-spec
 - **Never duplicate information across MDs** — each piece of information lives in exactly one MD; others reference it
 - **Never hardcode brand values** (colors, logos, fonts, names) in UI components — always use a config or token
 - **Validate sensitive inputs server-side** — never trust client-submitted values for pricing, discounts, roles, or permissions
-- **Conventional commits required** — `feat:` / `fix:` / `release:` / `docs:` / `chore:` prefixes
+- **Conventional commits required** — `feat:` / `fix:` / `refactor:` / `release:` / `docs:` / `chore:` prefixes
 - **Test critical financial and transactional logic** — even if the rest of the project is manual QA only, write unit tests for anything that touches money, inventory, or concurrent writes
 - **All public pages have a per-page meta description** — never rely solely on the site-wide default
 - **Every decision has a home** — architecture decisions in `DECISIONS-ARCH.md`, product/feature decisions in `DECISIONS-FEATURES.md`; never scatter decisions across feature MDs

@@ -70,7 +70,7 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | `release:` | Production release | MAJOR |
 | `docs:` | MD or documentation update only | None |
 | `chore:` | Tooling, config, dependencies | None |
-| `refactor:` | Code change with no behavior change | None |
+| `refactor:` | Code change with no behavior change | PATCH |
 | `style:` | Formatting, whitespace | None |
 
 Husky's `commit-msg` hook auto-bumps `shared/VERSION.ts` based on the prefix.
