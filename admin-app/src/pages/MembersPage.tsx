@@ -251,7 +251,7 @@ export function MembersPage() {
               </h4>
 
               <div className="grid gap-3 grid-cols-2">
-                <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+                <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                   Points Adjustment Value
                   <input
                     type="number"
@@ -263,7 +263,7 @@ export function MembersPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+                <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                   Transaction Classification
                   <select
                     value={adjustType}
@@ -278,7 +278,7 @@ export function MembersPage() {
                 </label>
               </div>
 
-              <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+              <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                 Audited Reason for Adjustment
                 <input
                   type="text"

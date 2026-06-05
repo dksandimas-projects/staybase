@@ -135,7 +135,7 @@ export function RoomsPage() {
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Room Specifications</h3>
 
               <div className="grid gap-4 grid-cols-2">
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Bed Description
                   <input
                     type="text"
@@ -146,7 +146,7 @@ export function RoomsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Max Capacity
                   <input
                     type="number"
@@ -160,7 +160,7 @@ export function RoomsPage() {
               </div>
 
               <div className="grid gap-4 grid-cols-2">
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Base Rate (PHP)
                   <input
                     type="number"
@@ -171,7 +171,7 @@ export function RoomsPage() {
                   />
                 </label>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Inventory Status
                   <select
                     value={status}
@@ -206,7 +206,7 @@ export function RoomsPage() {
                 </p>
 
                 <div className="grid gap-4 grid-cols-2">
-                  <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                     Block Start
                     <input
                       type="date"
@@ -217,7 +217,7 @@ export function RoomsPage() {
                     />
                   </label>
 
-                  <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                     Block End
                     <input
                       type="date"
@@ -229,7 +229,7 @@ export function RoomsPage() {
                   </label>
                 </div>
 
-                <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Block Reason note
                   <input
                     type="text"

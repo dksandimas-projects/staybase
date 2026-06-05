@@ -559,7 +559,7 @@ export function BookingsPage() {
                   <p className="text-xs font-bold text-gray-750">Record Onsite Payment</p>
                   
                   <div className="grid gap-3 grid-cols-2">
-                    <label className="grid gap-1.5 text-[10px] font-semibold text-gray-500">
+                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
                       Amount (PHP)
                       <input
                         type="number"
@@ -571,7 +571,7 @@ export function BookingsPage() {
                       />
                     </label>
                     
-                    <label className="grid gap-1.5 text-[10px] font-semibold text-gray-500">
+                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
                       Payment Method
                       <select
                         value={paymentMethod}
@@ -585,7 +585,7 @@ export function BookingsPage() {
                     </label>
                   </div>
 
-                  <label className="grid gap-1.5 text-[10px] font-semibold text-gray-500">
+                  <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
                     Payment Reference / Note
                     <input
                       type="text"
@@ -843,7 +843,7 @@ export function BookingsPage() {
       >
         <form onSubmit={handleWalkinSubmit} className="space-y-5 text-sm">
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Guest Full Name
               <input
                 type="text"
@@ -855,7 +855,7 @@ export function BookingsPage() {
               />
             </label>
 
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Guest Phone
               <input
                 type="tel"
@@ -867,7 +867,7 @@ export function BookingsPage() {
             </label>
           </div>
 
-          <label className="grid gap-2 text-xs font-semibold text-gray-700">
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Email Address
             <input
               type="email"
@@ -879,7 +879,7 @@ export function BookingsPage() {
           </label>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Room Type
               <select
                 value={roomType}
@@ -901,7 +901,7 @@ export function BookingsPage() {
               </select>
             </label>
 
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Select Available Room Number
               <select
                 value={roomNumber}
@@ -921,7 +921,7 @@ export function BookingsPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Check-In Date
               <input
                 type="date"
@@ -932,7 +932,7 @@ export function BookingsPage() {
               />
             </label>
 
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Check-Out Date
               <input
                 type="date"
@@ -943,7 +943,7 @@ export function BookingsPage() {
               />
             </label>
 
-            <label className="grid gap-2 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Number of Guests
               <input
                 type="number"
@@ -978,7 +978,7 @@ export function BookingsPage() {
             </label>
           </div>
 
-          <label className="grid gap-2 text-xs font-semibold text-gray-700">
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Payment Term
             <select
               value={walkinPayment}

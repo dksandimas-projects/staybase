@@ -185,7 +185,7 @@ export function CorporateInquiriesPage() {
                 </div>
                 
                 {/* Pipeline Mutator selection */}
-                <label className="grid gap-1 text-[10px] font-bold text-gray-450 uppercase">
+                <label className="flex flex-col gap-1.5 text-[10px] font-bold text-gray-450 uppercase">
                   Update Stage
                   <select
                     value={selectedInquiry.status}
@@ -266,7 +266,7 @@ export function CorporateInquiriesPage() {
                 </p>
                 
                 <div className="grid gap-3 grid-cols-2">
-                  <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                     Negotiated Promo Code
                     <input
                       type="text"
@@ -277,7 +277,7 @@ export function CorporateInquiriesPage() {
                     />
                   </label>
                   
-                  <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                     Std Double Rate (PHP)
                     <input
                       type="number"
@@ -290,7 +290,7 @@ export function CorporateInquiriesPage() {
                 </div>
 
                 <div className="grid gap-3 grid-cols-2">
-                  <label className="grid gap-1.5 text-[10px] font-bold text-gray-500">
+                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                     Exec Suite Rate (PHP)
                     <input
                       type="number"

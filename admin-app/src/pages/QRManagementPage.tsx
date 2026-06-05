@@ -258,7 +258,7 @@ export function QRManagementPage() {
               Target Live Host Domain
             </h2>
             
-            <label className="grid gap-1.5 text-xs font-semibold text-gray-700">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Host Destination Endpoint
               <input
                 type="url"
