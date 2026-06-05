@@ -161,7 +161,7 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 | [x] | G-13 | Member Profile | `/account/profile` | no Stitch source — build from feature MD | `plan/features/SPARK-REWARDS.md` |
 | [x] | G-14 | My Stays | `/account/stays` | `my_stays_desktop` + `my_stays_mobile` | `plan/features/SPARK-REWARDS.md` |
 | [x] | G-15 | My Rewards Portal | `/account/rewards` | `my_rewards_desktop` + `my_rewards_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-16 | Intercom Guest Chat | `/intercom/:roomId` | `intercom_guest_chat_desktop` + `intercom_guest_chat_mobile_1` + `intercom_guest_chat_mobile_2` | `plan/features/INTERCOM-GUEST.md` |
+| [x] | G-16 | Intercom Guest Chat | `/intercom/:roomId` | `intercom_guest_chat_desktop` + `intercom_guest_chat_mobile_1` + `intercom_guest_chat_mobile_2` | `plan/features/INTERCOM-GUEST.md` |
 | [ ] | G-17 | About Us | `/about` | `about_us_desktop` + `about_us_mobile` | `plan/features/STATIC-PAGES.md` |
 | [ ] | G-18 | Contact Us | `/contact` | `contact_us_desktop` + `contact_us_mobile` | `plan/features/STATIC-PAGES.md` |
 | [ ] | G-19 | 404 Not Found | `*` | `404_not_found_desktop` + `404_not_found_mobile` | `plan/features/STATIC-PAGES.md` |
