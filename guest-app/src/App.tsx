@@ -5,10 +5,13 @@ import { BookingPage } from "./pages/BookingPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
 import { CorporateStaysPage } from "./pages/CorporateStaysPage";
 import { HomePage } from "./pages/HomePage";
+import { ProfilePage } from "./pages/ProfilePage";
+import { RewardsPage } from "./pages/RewardsPage";
 import { RewardsLandingPage } from "./pages/RewardsLandingPage";
 import { RoomsPage } from "./pages/RoomsPage";
 import { SignInPage } from "./pages/SignInPage";
 import { SignUpPage } from "./pages/SignUpPage";
+import { StaysPage } from "./pages/StaysPage";
 
 export function App() {
   return (
@@ -23,10 +26,14 @@ export function App() {
       <Route path="/rewards" element={<RewardsLandingPage />} />
       <Route path="/signin" element={<SignInPage />} />
       <Route path="/signup" element={<SignUpPage />} />
+      <Route path="/account/profile" element={<ProfilePage />} />
+      <Route path="/account/stays" element={<StaysPage />} />
+      <Route path="/account/rewards" element={<RewardsPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );
 }
+
 
 
 

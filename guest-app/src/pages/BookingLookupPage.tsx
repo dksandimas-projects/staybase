@@ -1,7 +1,7 @@
 import { ArrowLeft, Calendar, FileText, Landmark, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { scaleIn } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
@@ -33,25 +33,84 @@ interface BookingData {
   specialRequests: string;
 }
 
-const mockBooking: BookingData = {
-  bookingRef: "SI-20260612-042",
-  guestName: "Maria Santos",
-  guestEmail: "maria@example.com",
-  guestPhone: "+63 917 000 0000",
-  roomName: "Executive Queen",
-  roomNumber: "201",
-  roomType: "executive",
-  checkIn: "2026-06-12",
-  checkOut: "2026-06-14",
-  numNights: 2,
-  numGuests: 2,
-  ratePerNight: 3200,
-  totalPrice: 6400,
-  paymentMethod: "gcash",
-  status: "pending",
-  hasBreakfast: false,
-  specialRequests: "Late check-in around 8 PM, please."
-};
+const mockBookingsList: BookingData[] = [
+  {
+    bookingRef: "SI-20260612-042",
+    guestName: "Maria Santos",
+    guestEmail: "maria@example.com",
+    guestPhone: "+63 917 000 0000",
+    roomName: "Executive Queen",
+    roomNumber: "201",
+    roomType: "executive",
+    checkIn: "2026-06-12",
+    checkOut: "2026-06-14",
+    numNights: 2,
+    numGuests: 2,
+    ratePerNight: 3200,
+    totalPrice: 6400,
+    paymentMethod: "gcash",
+    status: "pending",
+    hasBreakfast: false,
+    specialRequests: "Late check-in around 8 PM, please."
+  },
+  {
+    bookingRef: "SI-09214",
+    guestName: "Alex Mercer",
+    guestEmail: "member@sparkinn.com",
+    guestPhone: "+63 912 345 6789",
+    roomName: "The Riverview Suite",
+    roomNumber: "305",
+    roomType: "executive",
+    checkIn: "2026-10-12",
+    checkOut: "2026-10-15",
+    numNights: 3,
+    numGuests: 2,
+    ratePerNight: 4500,
+    totalPrice: 13500,
+    paymentMethod: "bank",
+    status: "confirmed",
+    hasBreakfast: true,
+    specialRequests: "High floor, quiet room please."
+  },
+  {
+    bookingRef: "SI-08103",
+    guestName: "Alex Mercer",
+    guestEmail: "member@sparkinn.com",
+    guestPhone: "+63 912 345 6789",
+    roomName: "Garden Sanctuary Villa",
+    roomNumber: "102",
+    roomType: "family",
+    checkIn: "2025-08-05",
+    checkOut: "2025-08-09",
+    numNights: 4,
+    numGuests: 4,
+    ratePerNight: 7500,
+    totalPrice: 30000,
+    paymentMethod: "gcash",
+    status: "checked-out",
+    hasBreakfast: true,
+    specialRequests: "Vegetarian breakfast options."
+  },
+  {
+    bookingRef: "SI-07524",
+    guestName: "Alex Mercer",
+    guestEmail: "member@sparkinn.com",
+    guestPhone: "+63 912 345 6789",
+    roomName: "Sky Loft",
+    roomNumber: "401",
+    roomType: "single",
+    checkIn: "2025-07-10",
+    checkOut: "2025-07-12",
+    numNights: 2,
+    numGuests: 2,
+    ratePerNight: 5500,
+    totalPrice: 11000,
+    paymentMethod: "pay-at-hotel",
+    status: "cancelled",
+    hasBreakfast: false,
+    specialRequests: ""
+  }
+];
 
 function formatStayDate(value: string) {
   if (!value) return "";
@@ -64,6 +123,7 @@ function formatStayDate(value: string) {
 
 export function BookingLookupPage() {
   const shouldReduceMotion = useReducedMotion();
+  const [searchParams] = useSearchParams();
 
   // Search state
   const [refInput, setRefInput] = useState("");
@@ -77,16 +137,45 @@ export function BookingLookupPage() {
   const [cancelReason, setCancelReason] = useState("");
   const [resendStatus, setResendStatus] = useState("");
 
+  // Check URL parameters for direct lookup
+  useEffect(() => {
+    const ref = searchParams.get("ref");
+    const email = searchParams.get("email");
+    if (ref && email) {
+      setRefInput(ref);
+      setEmailInput(email);
+      setHasSearched(true);
+      
+      const found = mockBookingsList.find(
+        (b) =>
+          b.bookingRef === ref.trim().toUpperCase() &&
+          b.guestEmail.toLowerCase() === email.trim().toLowerCase()
+      );
+
+      if (found) {
+        setActiveBooking({ ...found });
+      } else {
+        setActiveBooking(null);
+        setSearchError(
+          "We couldn't find a booking with those details. Please check your reference number and email."
+        );
+      }
+    }
+  }, [searchParams]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError("");
     setHasSearched(true);
 
-    const refMatches = refInput.trim().toUpperCase() === mockBooking.bookingRef;
-    const emailMatches = emailInput.trim().toLowerCase() === mockBooking.guestEmail;
+    const found = mockBookingsList.find(
+      (b) =>
+        b.bookingRef === refInput.trim().toUpperCase() &&
+        b.guestEmail.toLowerCase() === emailInput.trim().toLowerCase()
+    );
 
-    if (refMatches && emailMatches) {
-      setActiveBooking({ ...mockBooking });
+    if (found) {
+      setActiveBooking({ ...found });
     } else {
       setActiveBooking(null);
       setSearchError(
