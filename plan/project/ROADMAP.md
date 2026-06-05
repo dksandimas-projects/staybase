@@ -131,8 +131,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ G-02 Rooms Page `/rooms`
 - ✅ G-03 Booking Step 1 — Select Room `/book`
 - ✅ G-04 Booking Step 2 — Guest Details `/book`
-- ⬜ G-05 Booking Step 3 — Review & Pay `/book`
-- ⬜ G-06 Booking Step 4 — Confirmation `/book/confirm`
+- ✅ G-05 Booking Step 3 — Review & Pay `/book`
+- ✅ G-06 Booking Step 4 — Confirmation `/book/confirm`
 - ⬜ G-07 My Booking Lookup `/my-booking`
 - ⬜ G-08 Corporate Stays Marketing `/corporate`
 - ⬜ G-09 Corporate Booking Gate + Flow `/corporate/book`
