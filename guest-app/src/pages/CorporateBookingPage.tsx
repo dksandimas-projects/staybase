@@ -32,7 +32,8 @@ import {
   calculateBookingTotal,
   getNumNights,
   staggerChild,
-  staggerContainer
+  staggerContainer,
+  DEFAULT_ROOM_TYPES
 } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
@@ -603,7 +604,7 @@ export function CorporateBookingPage() {
                 <div>
                   <p className="text-sm font-medium text-gray-700">Room type filter</p>
                   <div className="mt-3 grid gap-2">
-                    {[{ value: "all", label: "All Types" }, ...config.roomTypes].map((type) => (
+                    {[{ value: "all", label: "All Types" }, ...DEFAULT_ROOM_TYPES].map((type) => (
                       <button
                         key={type.value}
                         className={cn(
@@ -642,7 +643,7 @@ export function CorporateBookingPage() {
             >
               {availableRooms.map((room) => {
                 const isSelected = selectedRoomId === room.id;
-                const typeLabel = config.roomTypes.find((t) => t.value === room.type)?.shortLabel ?? room.type;
+                const typeLabel = DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.shortLabel ?? room.type;
                 
                 // Price calculations
                 const baseCorp = room.corporateRate;

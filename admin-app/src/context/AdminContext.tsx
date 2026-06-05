@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode } from "react";
+import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 
 // Interfaces aligning with plan/docs/TYPES.md
@@ -1031,7 +1032,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    return [...config.roomTypes];
+    return [...DEFAULT_ROOM_TYPES];
   });
 
   const saveRoomTypes = (newTypes: typeof roomTypes) => {

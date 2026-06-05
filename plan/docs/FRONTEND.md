@@ -458,7 +458,7 @@ All price, date, and number formatting is config-driven — never hardcoded.
 
 ## Room Types
 
-Room type dropdowns, filters, rate tables, and badges are always built dynamically from context (`roomTypes` in Admin App, `config.roomTypes` fallback on public app). Never hardcode room type strings like `"single"` or `"executive"` in UI components — iterate over room types instead.
+Room type dropdowns, filters, rate tables, and badges are always built dynamically from context (`roomTypes` in Admin App, `DEFAULT_ROOM_TYPES` from `@spark-inn/shared` on guest app). Never hardcode room type strings like `"single"` or `"executive"` in UI components — iterate over room types instead.
 
 ---
 

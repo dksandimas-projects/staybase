@@ -211,9 +211,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ `useRooms` hook — `onSnapshot` on `rooms` collection
 - ⬜ `RoomCard.tsx` — image, name, type badge, amenities, price, availability badge
-- ⬜ Rooms page (`/rooms`) — grid, filters by room type (from `config.roomTypes`), availability badges, detail modal
+- ⬜ Rooms page (`/rooms`) — grid, filters by room type (from `DEFAULT_ROOM_TYPES`), availability badges, detail modal
 - ⬜ Room Management page (`/rooms` admin) — list, edit form, photo upload, status, block reason
-- ⬜ Rate Management page (`/rates`) — dynamic rows from `config.roomTypes`, weekend rates, corporate rates, payment methods
+- ⬜ Rate Management page (`/rates`) — dynamic rows from `roomTypes` context, weekend rates, corporate rates, payment methods
 
 ---
 

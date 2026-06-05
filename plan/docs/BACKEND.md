@@ -19,7 +19,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 |---|---|---|
 | `name` | string | e.g. "Room 202 — Executive" |
 | `roomNumber` | string | e.g. "202" |
-| `type` | string | Free-form string matching a dynamic room type `value` (prefilled from `hotel.config.ts → roomTypes[]` at setup) e.g. `"single"`, `"deluxe-sea-view"` |
+| `type` | string | Free-form string matching a dynamic room type `value` (defaults defined in `@spark-inn/shared → DEFAULT_ROOM_TYPES`, managed at runtime via Admin UI) e.g. `"single"`, `"deluxe-sea-view"` |
 | `description` | string | |
 | `maxCapacity` | number | |
 | `bedDefinition` | string | e.g. "1 queen size bed" |

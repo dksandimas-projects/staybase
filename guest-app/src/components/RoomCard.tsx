@@ -1,7 +1,7 @@
 import { Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import type { Room } from "@spark-inn/shared";
-import { staggerChild } from "@spark-inn/shared";
+import { staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { GhostButton } from "./GhostButton";
@@ -28,7 +28,7 @@ interface RoomCardProps {
 
 export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) {
   const shouldReduceMotion = useReducedMotion();
-  const typeLabel = config.roomTypes.find((type) => type.value === room.type)?.shortLabel ?? room.type;
+  const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.shortLabel ?? room.type;
 
   return (
     <motion.article

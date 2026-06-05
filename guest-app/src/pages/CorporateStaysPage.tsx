@@ -27,7 +27,7 @@ import { Modal } from "../components/Modal";
 import { rooms } from "../data/rooms";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
-import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
+import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 
 export function CorporateStaysPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -385,7 +385,7 @@ export function CorporateStaysPage() {
             {...entranceProps}
           >
             {uniqueRooms.map((room) => {
-              const typeLabel = config.roomTypes.find((t) => t.value === room.type)?.shortLabel ?? room.type;
+              const typeLabel = DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.shortLabel ?? room.type;
               return (
                 <motion.article
                   key={room.id}
@@ -702,7 +702,7 @@ export function CorporateStaysPage() {
             
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                {config.roomTypes.find((t) => t.value === selectedRoom.type)?.label ?? selectedRoom.type}
+                {DEFAULT_ROOM_TYPES.find((t) => t.value === selectedRoom.type)?.label ?? selectedRoom.type}
               </span>
               <span className="text-xs text-gray-500 font-medium">
                 Corporate Rates Negotiable
