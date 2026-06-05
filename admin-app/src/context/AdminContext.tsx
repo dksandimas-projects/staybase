@@ -219,6 +219,8 @@ export interface AdminContextType {
   toggleVoucherActive: (voucherId: string) => void;
   corporateCodes: CorporateCode[];
   addCorporateCode: (code: CorporateCode) => void;
+  toggleCorporateCodeActive: (code: string) => void;
+  deleteCorporateCode: (code: string) => void;
 
   // Corporate Inquiries
   corporateInquiries: CorporateInquiry[];
@@ -659,6 +661,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setCorporateCodes(prev => [code, ...prev]);
   };
 
+  const toggleCorporateCodeActive = (code: string) => {
+    setCorporateCodes(prev => prev.map(c => c.code === code ? { ...c, isActive: !c.isActive } : c));
+  };
+
+  const deleteCorporateCode = (code: string) => {
+    setCorporateCodes(prev => prev.filter(c => c.code !== code));
+  };
+
   // Corporate Inquiries
   const [corporateInquiries, setCorporateInquiries] = useState<CorporateInquiry[]>([
     {
@@ -1026,6 +1036,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         toggleVoucherActive,
         corporateCodes,
         addCorporateCode,
+        toggleCorporateCodeActive,
+        deleteCorporateCode,
         corporateInquiries,
         updateInquiryStatus,
         addInquiryNote,
