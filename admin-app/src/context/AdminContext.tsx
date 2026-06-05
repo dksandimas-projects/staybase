@@ -79,6 +79,18 @@ export interface Booking {
   cancellationReason: string;
   createdAt: string;
   onsitePayments?: OnsitePayment[];
+  guestRegistration?: {
+    nationality: string;
+    address: string;
+    dateOfBirth: string;
+    gender: string;
+    idType: string;
+    idNumber: string;
+    emergencyContact: string;
+    vehiclePlate: string;
+    signatureStatus: "pending" | "signed";
+  };
+  breakfastSelections?: Record<string, string>;
 }
 
 export interface PointsLog {

@@ -107,6 +107,18 @@ Booking {
   hasBreakfast: boolean
   breakfastRate: number
   guestIdPhotoUrl: string | null      // guest ID photo uploaded by front desk at check-in
+  guestRegistration?: {
+    nationality: string
+    address: string
+    dateOfBirth: Date | string
+    gender: string
+    idType: string
+    idNumber: string
+    emergencyContact: string
+    vehiclePlate: string
+    signatureStatus: "pending" | "signed"
+  }
+  breakfastSelections?: Record<string, string> // key format: yyyy-mm-dd-guest-n → silog item name
   handledBy: string
   cancellationReason: string
   createdAt: Date
