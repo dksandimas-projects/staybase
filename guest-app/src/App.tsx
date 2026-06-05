@@ -7,6 +7,8 @@ import { CorporateStaysPage } from "./pages/CorporateStaysPage";
 import { HomePage } from "./pages/HomePage";
 import { RewardsLandingPage } from "./pages/RewardsLandingPage";
 import { RoomsPage } from "./pages/RoomsPage";
+import { SignInPage } from "./pages/SignInPage";
+import { SignUpPage } from "./pages/SignUpPage";
 
 export function App() {
   return (
@@ -19,10 +21,13 @@ export function App() {
       <Route path="/corporate" element={<CorporateStaysPage />} />
       <Route path="/corporate/book" element={<CorporateBookingPage />} />
       <Route path="/rewards" element={<RewardsLandingPage />} />
+      <Route path="/signin" element={<SignInPage />} />
+      <Route path="/signup" element={<SignUpPage />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );
 }
+
 
 
 

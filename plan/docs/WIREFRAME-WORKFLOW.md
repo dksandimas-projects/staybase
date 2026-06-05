@@ -156,8 +156,8 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 | [x] | G-08 | Corporate Stays Marketing | `/corporate` | `corporate_stays_marketing_desktop` + `corporate_stays_marketing_mobile` | `plan/features/STATIC-PAGES.md` |
 | [x] | G-09 | Corporate Booking Gate + Flow | `/corporate/book` | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
 | [x] | G-10 | Spark Rewards Landing | `/rewards` | `spark_rewards_landing_desktop` + `spark_rewards_landing_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-11 | Sign In | `/signin` | `sign_in_desktop` + `sign_in_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-12 | Sign Up | `/signup` | `sign_up_desktop` + `sign_up_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-11 | Sign In | `/signin` | `sign_in_desktop` + `sign_in_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-12 | Sign Up | `/signup` | `sign_up_desktop` + `sign_up_mobile` | `plan/features/SPARK-REWARDS.md` |
 | [ ] | G-13 | Member Profile | `/account/profile` | no Stitch source — build from feature MD | `plan/features/SPARK-REWARDS.md` |
 | [ ] | G-14 | My Stays | `/account/stays` | `my_stays_desktop` + `my_stays_mobile` | `plan/features/SPARK-REWARDS.md` |
 | [ ] | G-15 | My Rewards Portal | `/account/rewards` | `my_rewards_desktop` + `my_rewards_mobile` | `plan/features/SPARK-REWARDS.md` |
