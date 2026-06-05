@@ -85,6 +85,8 @@ Read these files before doing anything else:
 
 Your task: Build the Spark Inn wireframe pass — all screens as static React components with no backend connections.
 
+First, ensure you are on the wireframe branch: run `git branch --show-current`. If not on `feature/wireframe`, run `git checkout -b feature/wireframe` off `dev`. All wireframe work — components and pages — is committed to this single branch. Do not create per-screen branches.
+
 Start with the component library listed in WIREFRAME-WORKFLOW.md §Component Library — Build First. Do not start any page until all shared components are done. Build guest-app components first, then admin-app components.
 
 After the component library, follow the screen order in WIREFRAME-WORKFLOW.md §Phase Order. For each screen:

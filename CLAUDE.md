@@ -153,10 +153,12 @@ These apply to every file in every app. No exceptions.
 ## Branching Strategy
 
 ```
-main        ← production only — never commit directly
-dev         ← daily working branch
-feature/*   ← branch off dev, merge back to dev
-fix/*       ← bug fixes off dev, merge back to dev
+main              ← production only — never commit directly
+dev               ← daily working branch
+feature/wireframe ← single branch for the entire Phase 0.5 wireframe pass
+feature/*         ← one branch per feature, off dev
+fix/*             ← bug fixes off dev
+docs/*            ← documentation-only changes off dev
 ```
 
 Merge `dev → main` only at milestones: staging demo, production launch.
@@ -166,6 +168,7 @@ Merge `dev → main` only at milestones: staging demo, production launch.
 **Before starting any task, always:**
 1. Verify the current branch — run `git branch --show-current`
 2. If not already on the right branch, create one off `dev` using the appropriate prefix:
+   - **Wireframe pass (Phase 0.5)** → one shared branch: `git checkout -b feature/wireframe` — all screens and components committed here, no per-screen branches
    - New feature → `git checkout -b feature/<task-name>`
    - Bug fix → `git checkout -b fix/<task-name>`
    - Docs-only change → `git checkout -b docs/<task-name>`
