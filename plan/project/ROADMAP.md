@@ -52,7 +52,7 @@
 - ✅ Firebase project created (Auth + Firestore + Storage enabled)
 - ✅ Initial `firestore.rules` written + deployed
 - ✅ Initial `storage.rules` written + deployed
-- ⬜ Firebase Storage CORS configured (`cors.json` deployed)
+- ✅ Firebase Storage CORS configured (`cors.json` deployed)
 - ✅ Firestore collections seeded: `settings/hotelConfig`, `settings/websiteContent`, `settings/rewardsConfig`, `settings/storeConfig`, `settings/breakfastConfig`
 - ✅ All 14 rooms seeded in `rooms` collection
 
@@ -383,7 +383,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 | Phase | Items | Done | Remaining |
 |---|---|---|---|
-| 0 — Foundation | 41 | 40 | 1 |
+| 0 — Foundation | 41 | 41 | 0 |
 | 1 — Guest Shell & Static | 12 | 6 | 6 |
 | 2 — Admin Shell & Auth | 6 | 6 | 0 |
 | 3 — Room System | 5 | 0 | 5 |
@@ -396,7 +396,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **59** | **98** |
+| **Total** | **157** | **60** | **97** |
 
 ---
 
