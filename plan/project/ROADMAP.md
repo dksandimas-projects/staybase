@@ -49,21 +49,21 @@
 - ✅ Inter loaded via Google Fonts in both `index.html` files
 
 ### Firebase
-- ⬜ Firebase project created (Auth + Firestore + Storage enabled)
-- ⬜ Initial `firestore.rules` written + deployed
-- ⬜ Initial `storage.rules` written + deployed
+- ✅ Firebase project created (Auth + Firestore + Storage enabled)
+- ✅ Initial `firestore.rules` written + deployed
+- ✅ Initial `storage.rules` written + deployed
 - ⬜ Firebase Storage CORS configured (`cors.json` deployed)
-- ⬜ Firestore collections seeded: `settings/hotelConfig`, `settings/websiteContent`
-- ⬜ All 14 rooms seeded in `rooms` collection
+- ✅ Firestore collections seeded: `settings/hotelConfig`, `settings/websiteContent`, `settings/rewardsConfig`, `settings/storeConfig`, `settings/breakfastConfig`
+- ✅ All 14 rooms seeded in `rooms` collection
 
 ### Vercel & Environment
-- ⬜ Single Vercel project created for the monorepo
-- ⬜ Guest-app deployment configured (root directory: `guest-app/`)
-- ⬜ Admin-app deployment configured (root directory: `admin-app/`)
-- ⬜ All `.env` files created locally (guest-app, admin-app, api)
-- ⬜ All env vars set in Vercel dashboard
-- ⬜ Cloudflare Turnstile site + secret keys obtained and added to env
-- ⬜ Resend account set up + API key obtained
+- ✅ Single Vercel project created for the monorepo
+- ✅ Guest-app deployment configured (root directory: `guest-app/`)
+- ✅ Admin-app deployment configured (root directory: `admin-app/`)
+- ✅ All `.env` files created locally (guest-app, admin-app, api)
+- ✅ All env vars set in Vercel dashboard
+- ✅ Cloudflare Turnstile site + secret keys obtained and added to env
+- ✅ Resend account set up + API key obtained
 - ✅ `.env.example` files created for each app
 
 ---
@@ -383,19 +383,20 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 | Phase | Items | Done | Remaining |
 |---|---|---|---|
-| 0 — Foundation | 22 | 0 | 22 |
-| 1 — Guest Shell & Static | 13 | 0 | 13 |
+| 0 — Foundation | 41 | 40 | 1 |
+| 1 — Guest Shell & Static | 12 | 4 | 8 |
 | 2 — Admin Shell & Auth | 6 | 0 | 6 |
 | 3 — Room System | 5 | 0 | 5 |
-| 4 — Booking Flow | 12 | 0 | 12 |
-| 5 — Admin Bookings | 9 | 0 | 9 |
-| 6 — Email System | 8 | 0 | 8 |
-| 7 — Corporate & Vouchers | 5 | 0 | 5 |
-| 8 — Intercom | 5 | 0 | 5 |
-| 9 — Remaining Features | 4 | 0 | 4 |
-| 10 — Security & Polish | 11 | 0 | 11 |
-| 11 — Staging & Launch | 15 | 0 | 15 |
-| **Total** | **115** | **0** | **115** |
+| 4 — Booking Flow | 11 | 0 | 11 |
+| 5 — Admin Bookings | 8 | 3 | 5 |
+| 6 — Email System | 9 | 0 | 9 |
+| 7 — Corporate & Vouchers | 12 | 1 | 11 |
+| 8 — Intercom | 10 | 2 | 8 |
+| 9 — Remaining Features | 5 | 1 | 4 |
+| 10 — Security & Polish | 10 | 0 | 10 |
+| 10B — Spark Rewards | 14 | 0 | 14 |
+| 11 — Staging & Launch | 14 | 0 | 14 |
+| **Total** | **157** | **51** | **106** |
 
 ---
 

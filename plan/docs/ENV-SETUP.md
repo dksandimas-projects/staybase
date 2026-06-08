@@ -36,8 +36,8 @@ FIREBASE_PRIVATE_KEY=
 RESEND_API_KEY=
 
 # Email
-RESEND_FROM_EMAIL=sparkinn.reservations@gmail.com
-ADMIN_NOTIFICATION_EMAIL=sparkinn.reservations@gmail.com
+RESEND_FROM_EMAIL=sparkinn.dev@gmail.com
+ADMIN_NOTIFICATION_EMAIL=sparkinn.dev@gmail.com
 
 # Cloudflare Turnstile (secret key — server-side only)
 TURNSTILE_SECRET_KEY=
