@@ -1,11 +1,24 @@
 # Corporate Booking Flow
 > App: guest-app
+> Phase: Phase 7 — Corporate, Vouchers & Breakfast
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, features/BOOKING-FLOW.md, plan/guest-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Corporate Booking
 
 ## Overview
 
 A dedicated booking route at `/corporate/book` for corporate clients. Reuses all 4-step booking flow components but applies a corporate skin, adds company-specific fields, and supports two rate modes: a public flat corporate rate (no code needed) and a negotiated custom rate unlocked via an access code. The route is easy to remember and share with clients.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Back navigation never loses user input
+- [ ] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 

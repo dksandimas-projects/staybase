@@ -1,11 +1,24 @@
 # Rate Management
 > App: admin-app
+> Phase: Phase 3 — Room System
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Rate Management
 
 ## Overview
 
 Admin-only page at `/rates` for managing all pricing and payment configuration. Sets base rates and weekend rates per room type, the public flat corporate rate, discount rules, and payment method setup. Rate changes take effect for new bookings — existing bookings retain their locked rate.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

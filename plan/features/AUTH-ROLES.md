@@ -1,11 +1,24 @@
 # Auth & Roles
 > App: admin-app
+> Phase: Phase 2 — Admin Shell & Auth
 > Requires: CLAUDE.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Login
 
 ## Overview
 
 Firebase Email/Password authentication for all staff. No public registration — admin creates all accounts. Two roles: Front Desk and Admin. Roles stored as Firebase Auth custom claims and enforced both client-side (UI rendering) and server-side (API routes).
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

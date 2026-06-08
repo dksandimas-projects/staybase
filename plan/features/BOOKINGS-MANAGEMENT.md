@@ -1,11 +1,24 @@
 # Bookings Management
 > App: admin-app
+> Phase: Phase 5 — Admin Bookings Management
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Bookings Management
 
 ## Overview
 
 The primary operational tool for front desk staff at `/bookings`. Displays all bookings in a filterable, sortable table. Staff can view booking details in a side drawer, advance booking status, generate receipts, log cancellations, and create walk-in or manual bookings directly from the dashboard.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

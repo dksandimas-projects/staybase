@@ -1,5 +1,6 @@
 # Spark Rewards
 > App: guest-app (member portal + auth) + admin-app (member management)
+> Phase: Phase 10B — Spark Rewards
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, plan/guest-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Spark Rewards
 
@@ -8,6 +9,22 @@
 Spark Rewards is spark inn's guest loyalty program. Guests can register as members after booking or from the homepage. Members earn points per stay, receive discounted rates and perks (early check-in subject to availability), and can view their booking history and points balance via a member portal. Auth uses Firebase Authentication — Google Sign-In and email/password.
 
 > **Phase 1 scope:** Authentication infrastructure, member registration, profile, booking history, points balance display, configurable points earning, configurable member discount, and admin member management. Tiers, points redemption, and tier-based perks are Phase 2.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+**Guest-facing screens:**
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+
+**Admin-facing screens:**
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Destructive actions have a single confirmation step — not buried in menus
 
 ---
 
