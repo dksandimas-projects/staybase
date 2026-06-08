@@ -146,7 +146,7 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | ID | Screen | Route | Stitch Source | Feature MD |
 |---|---|---|---|---|---|
-| [ ] | G-01 | Homepage | `/` | `homepage_desktop` + `homepage_mobile` | `plan/features/HOMEPAGE.md` |
+| [x] | G-01 | Homepage | `/` | `homepage_desktop` + `homepage_mobile` | `plan/features/HOMEPAGE.md` |
 | [x] | G-02 | Rooms Page | `/rooms` | `rooms_rates_desktop` + `rooms_rates_mobile` | `plan/features/ROOMS-PAGE.md` |
 | [x] | G-03 | Booking Step 1 — Select Room | `/book` | `booking_step_1_desktop` + `booking_step_1_mobile` | `plan/features/BOOKING-FLOW.md` |
 | [x] | G-04 | Booking Step 2 — Guest Details | `/book` | `booking_step_2_desktop` + `booking_step_2_mobile` | `plan/features/BOOKING-FLOW.md` |
@@ -174,8 +174,8 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 |---|---|---|---|---|---|
 | [x] | M-01 | Room Detail Modal | Rooms Page "View Details" | `room_detail_modal_desktop` + `room_detail_modal_mobile` | `plan/features/ROOMS-PAGE.md` |
 | [x] | M-02 | Availability Filter Drawer (mobile) | Rooms Page filter bar | `availability_filter_drawer_mobile` | `plan/features/ROOMS-PAGE.md` |
-| [ ] | M-03 | Corporate Access Code Gate | `/corporate/book` landing | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
-| [ ] | M-04 | Voucher Input (inline) | Booking Step 3 | `booking_step_3_with_voucher_desktop` + `booking_step_3_with_voucher_mobile` | `plan/features/BOOKING-FLOW.md` |
+| [x] | M-03 | Corporate Access Code Gate | `/corporate/book` landing | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
+| [x] | M-04 | Voucher Input (inline) | Booking Step 3 | `booking_step_3_with_voucher_desktop` + `booking_step_3_with_voucher_mobile` | `plan/features/BOOKING-FLOW.md` |
 
 ---
 

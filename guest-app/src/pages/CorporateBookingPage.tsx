@@ -33,7 +33,8 @@ import {
   getNumNights,
   staggerChild,
   staggerContainer,
-  DEFAULT_ROOM_TYPES
+  DEFAULT_ROOM_TYPES,
+  VERSION
 } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
@@ -50,6 +51,14 @@ const breakfastEnabled = true;
 
 type RateChoice = "room-only" | "room-breakfast";
 type GuestField = "firstName" | "lastName" | "email" | "phone" | "guestCount" | "designation" | "companyAddress";
+type CorporateCodeIssue = "expired" | "usage-cap" | "inactive" | "invalid";
+
+const corporateCodeMessages: Record<CorporateCodeIssue, string> = {
+  expired: "This corporate access code has expired. You can still continue with the flat corporate rate.",
+  "usage-cap": "This code has reached its usage cap. Please ask your account manager for a refreshed code.",
+  inactive: "This code is currently inactive. Please contact the company travel admin before using it.",
+  invalid: "That code is not recognized. Check the code, or continue without a code."
+};
 
 function formatStayDate(value: string) {
   return new Intl.DateTimeFormat(config.locale, {
@@ -268,8 +277,14 @@ export function CorporateBookingPage() {
         sessionStorage.setItem("corp_isFlatRate", "false");
       } else if (code === "") {
         setCodeError("Please enter an access code.");
+      } else if (code === "EXPIRED") {
+        setCodeError(corporateCodeMessages.expired);
+      } else if (code === "FULL") {
+        setCodeError(corporateCodeMessages["usage-cap"]);
+      } else if (code === "INACTIVE") {
+        setCodeError(corporateCodeMessages.inactive);
       } else {
-        setCodeError("Invalid or expired corporate access code. Please contact your company's travel admin.");
+        setCodeError(corporateCodeMessages.invalid);
       }
     }, 800);
   }
@@ -439,9 +454,9 @@ export function CorporateBookingPage() {
               <span className="text-[10px] uppercase font-bold tracking-widest text-primary bg-primary/10 px-3 py-1 rounded-full">
                 Negotiated Rates Gate
               </span>
-              <h1 className="mt-4 font-heading text-2xl text-white">Enter Corporate Code</h1>
+              <h1 className="mt-4 font-heading text-2xl text-white">Corporate Booking</h1>
               <p className="mt-2 text-sm text-gray-400">
-                Provide your company's negotiated access code to unlock private room rates.
+                Validate a negotiated access code, or continue with the flat corporate rate for business stays.
               </p>
             </div>
 
@@ -496,6 +511,9 @@ export function CorporateBookingPage() {
                     onChange={(e) => setAccessCode(e.target.value)}
                     required
                   />
+                  <span className="text-xs leading-5 text-gray-500">
+                    Wireframe samples: ACME123 and GLOBE2026 validate. EXPIRED, FULL, and INACTIVE show edge states.
+                  </span>
                 </label>
 
                 <div className="flex flex-col gap-4">
@@ -510,7 +528,7 @@ export function CorporateBookingPage() {
                         Validating...
                       </span>
                     ) : (
-                      "Validate Code"
+                      "Validate Access Code"
                     )}
                   </PrimaryButton>
 
@@ -519,7 +537,7 @@ export function CorporateBookingPage() {
                     onClick={handleContinueFlatRate}
                     className="text-sm font-semibold text-primary hover:text-primary-light transition text-center underline decoration-2 py-2"
                   >
-                    Continue with Flat Corporate Rate
+                    Continue without code
                   </button>
                 </div>
               </form>
@@ -534,7 +552,7 @@ export function CorporateBookingPage() {
           </motion.div>
         </div>
         <div className="text-center py-6 text-xs text-gray-600 border-t border-gray-900 bg-gray-950">
-          {config.brandName} Corporate Booking Flow. v{config.timezone ? "0.14.0" : ""}
+          {config.brandName} Corporate Booking Flow. v{VERSION}
         </div>
       </main>
     );
