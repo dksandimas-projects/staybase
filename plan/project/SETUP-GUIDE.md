@@ -1,6 +1,6 @@
 # Project Setup Guide
 > Follow this once per deployment (Spark Inn or any new hotel client).
-> Last updated: June 2, 2026
+> Last updated: June 8, 2026
 
 ---
 
@@ -118,7 +118,7 @@ Create one document per room. Use the `value` keys from `hotel.config.ts → roo
 1. Go to [resend.com](https://resend.com) → Sign up
 2. Add a domain → follow DNS verification steps for `sparkinnbohol.com`
 3. API Keys → Create API key → copy it → goes in `RESEND_API_KEY`
-4. Verified sending address: `sparkinn.reservations@gmail.com`
+4. Verified sending address: `sparkinn.dev@gmail.com`
 
 ---
 
@@ -138,8 +138,8 @@ FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 RESEND_API_KEY=
-RESEND_FROM_EMAIL=sparkinn.reservations@gmail.com
-ADMIN_NOTIFICATION_EMAIL=sparkinn.reservations@gmail.com
+RESEND_FROM_EMAIL=sparkinn.dev@gmail.com
+ADMIN_NOTIFICATION_EMAIL=sparkinn.dev@gmail.com
 TURNSTILE_SECRET_KEY=
 ```
 
@@ -267,4 +267,4 @@ See `plan/docs/WHITE-LABEL.md` for the full client deployment checklist.
 
 ---
 
-*Setup Guide — Spark Inn v1.0 — June 2, 2026*
+*Setup Guide — Spark Inn v1.0 — June 8, 2026*

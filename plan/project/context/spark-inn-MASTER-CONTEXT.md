@@ -24,7 +24,7 @@
 |---|---|
 | Legal Name | Spark Inn Hotel Corp |
 | Address | J. Borja St, Tagbilaran City, Bohol, Philippines 6300 |
-| Email | sparkinn.reservations@gmail.com |
+| Email | sparkinn.dev@gmail.com |
 | Facebook | Spark Inn |
 | Instagram | @sparkinn_official |
 | Domain | sparkinnbohol.com (DK purchases as part of project) |
@@ -450,7 +450,7 @@ createdAt: timestamp
 ```
 hotelName: string         "Spark Inn Hotel Corp"
 address: string           "J. Borja St, Tagbilaran City, Bohol, Philippines 6300"
-contactEmail: string      "sparkinn.reservations@gmail.com"
+contactEmail: string      "sparkinn.dev@gmail.com"
 contactPhone: string
 facebookUrl: string
 instagramUrl: string

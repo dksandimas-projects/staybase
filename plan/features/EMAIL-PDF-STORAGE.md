@@ -12,7 +12,7 @@ Covers three related concerns: Resend email flows via Vercel API routes, jsPDF r
 
 ## Email Flows (Resend via Vercel API)
 
-All email sent through Vercel API routes. From address: `sparkinn.reservations@gmail.com` via Resend.
+All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com` via Resend.
 
 | Trigger | API Route | Recipient | When |
 |---|---|---|---|

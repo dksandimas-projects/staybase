@@ -196,7 +196,7 @@ timezone: "Asia/Manila"
 dateFormat: "MMM DD, YYYY"
 phoneCountryCode: "+63"
 
-dpoEmail: "sparkinn.reservations@gmail.com"
+dpoEmail: "sparkinn.dev@gmail.com"
 privacyPolicyLastUpdated: "June 2, 2026"
 applicableLaw: "Republic Act No. 10173 (Data Privacy Act of 2012)"
 
@@ -217,7 +217,7 @@ whatsappNumber: ""
 
 domain: "sparkinnbohol.com"
 adminDomain: "admin.sparkinnbohol.com"
-supportEmail: "sparkinn.reservations@gmail.com"
+supportEmail: "sparkinn.dev@gmail.com"
 ```
 
 ---

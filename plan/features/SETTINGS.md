@@ -51,7 +51,7 @@ Admin-only page at `/settings`. Organized into tabs. Covers hotel information, p
 
 ### 3. Email
 
-- [ ] From email address (Resend sender — `sparkinn.reservations@gmail.com`)
+- [ ] From email address (Resend sender — `sparkinn.dev@gmail.com`)
 - [ ] Admin notification email (for new corporate inquiries)
 - [ ] Preview of each email trigger type (read-only label list)
 - [ ] Source: `api/.env` — note to admin: "Email settings require a code deploy to change"
