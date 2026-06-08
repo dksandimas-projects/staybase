@@ -221,44 +221,44 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 4 — Booking Flow (P0)
 > Goal: Guest can complete a booking end-to-end. Most critical feature.
 
-- ⬜ `DateRangePicker.tsx` — blocks past dates, min 1 night
-- ⬜ `BookingSummary.tsx` — read-only recap component
-- ⬜ Booking context/state — persists across 4 steps
-- ⬜ Step 1 — Select Room: date pickers, guest count, availability query, rate display
-- ⬜ Step 2 — Guest Details: form + Zod validation + privacy consent checkbox
-- ⬜ Step 3 — Review & Pay: summary, discount selector, voucher input, payment method, screenshot upload, cancellation policy, Turnstile, honeypot
-- ⬜ Step 4 — Confirmation: booking ref, summary, Add to Calendar, payment instructions
-- ⬜ `/api/bookings/create` — Firestore transaction, availability lock, booking ref generation
-- ⬜ Voucher validation API route (`/api/validate/voucher`)
-- ⬜ Rate limiting on booking creation + voucher validation
-- ⬜ Booking confirmation receipt PDF (jsPDF) — fonts embedded
+- ✅ `DateRangePicker.tsx` — blocks past dates, min 1 night
+- ✅ `BookingSummary.tsx` — read-only recap component
+- ✅ Booking context/state — persists across 4 steps
+- ✅ Step 1 — Select Room: date pickers, guest count, availability query, rate display
+- ✅ Step 2 — Guest Details: form + Zod validation + privacy consent checkbox
+- ✅ Step 3 — Review & Pay: summary, discount selector, voucher input, payment method, screenshot upload, cancellation policy, Turnstile, honeypot
+- ✅ Step 4 — Confirmation: booking ref, summary, Add to Calendar, payment instructions
+- ✅ `/api/bookings/create` — Firestore transaction, availability lock, booking ref generation
+- ✅ Voucher validation API route (`/api/validate/voucher`)
+- ✅ Rate limiting on booking creation + voucher validation
+- ✅ Booking confirmation receipt PDF (jsPDF) — fonts embedded
 
 ---
 
 ## Phase 5 — Admin Bookings Management (P0)
 > Goal: Front desk can view, manage, and create bookings from the dashboard.
 
-- ⬜ `useBookings` hook — `onSnapshot` on `bookings` collection
-- ⬜ `BookingTable.tsx` — filterable, sortable, clickable rows
+- ✅ `useBookings` hook — `onSnapshot` on `bookings` collection
+- ✅ `BookingTable.tsx` — filterable, sortable, clickable rows
 - ✅ Booking detail drawer wireframe — full details, status actions, payments, check-in workstation, checkout folio
 - ✅ Status transition actions wireframe — context-aware buttons per current status
 - ✅ Walk-in / manual booking creation modal wireframe
-- ⬜ Cancellation flow — confirmation modal, reason, cancellation email
-- ⬜ Receipt PDF — print + download from drawer
-- ⬜ Dashboard Overview — stat cards, room grid, housekeeping toggles, pending payments, today's arrivals/checkouts
+- ✅ Cancellation flow — confirmation modal, reason, cancellation email
+- ✅ Receipt PDF — print + download from drawer
+- ✅ Dashboard Overview — stat cards, room grid, housekeeping toggles, pending payments, today's arrivals/checkouts
 
 ---
 
 ## Phase 6 — Email System (P0)
 > Goal: All 6 email triggers working via Resend + Vercel API.
 
-- ⬜ Resend client setup in `api/lib/resend.ts`
-- ⬜ Firebase Admin SDK setup in `api/lib/firebase-admin.ts`
-- ⬜ Email: booking acknowledgment / submitted (warning guest of manual review)
+- ✅ Resend client setup in `api/lib/resend.ts`
+- ✅ Firebase Admin SDK setup in `api/lib/firebase-admin.ts`
+- ✅ Email: booking acknowledgment / submitted (warning guest of manual review)
 - ⬜ Email: payment confirmed
 - ⬜ Email: booking confirmed
 - ⬜ Email: check-in reminder (scheduled — cron or trigger)
-- ⬜ Email: booking cancelled
+- ✅ Email: booking cancelled
 - ⬜ Email: new corporate inquiry (to staff)
 - ⬜ Email branding — logo, primary color, hotel name from config
 
