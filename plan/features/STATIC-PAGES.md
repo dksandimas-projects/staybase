@@ -1,11 +1,24 @@
 # Static Pages
 > App: guest-app
+> Phase: Phase 1 — Guest App Shell & Static Pages
 > Requires: CLAUDE.md, docs/FRONTEND.md, plan/guest-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §About, §Corporate, §Contact, §404
 
 ## Overview
 
 Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and 404. About and Corporate hero/content are editable from admin Settings → Website Content. Contact details are shared with `settings/hotelConfig`.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Back navigation never loses user input
+- [ ] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 

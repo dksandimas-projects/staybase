@@ -1,11 +1,24 @@
 # Dashboard Overview
 > App: admin-app
+> Phase: Phase 5 — Admin Bookings Management
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Dashboard Overview
 
 ## Overview
 
 The main dashboard at `/` — the first screen staff see after login. Designed for rapid scanning: glanceable stats, live room status grid with housekeeping toggles, pending payment alerts, and today's arrivals/departures. No decorative elements — every element is actionable or informational.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

@@ -245,6 +245,39 @@ See `plan/docs/API-ROUTES.md §Rate Limiting`. Rate limiting is the final layer 
 
 ---
 
+## Session Management
+
+### Admin App
+- Firebase Auth persistence set to `browserSessionPersistence` — session clears when the tab or browser closes; staff must re-login each shift
+- Auto-logout after **8 hours of inactivity** — implemented client-side via a `setTimeout` reset on any user interaction; on timeout, call `signOut()` and redirect to `/login`
+- Rationale: front desk computers may be shared or left unattended; session-scoped auth prevents unauthorized access between shifts
+
+### Guest App (Spark Rewards)
+- Firebase Auth persistence set to `browserLocalPersistence` — guests stay logged in across sessions for convenience
+- No auto-logout — guests expect to stay signed in like any consumer app
+
+### Brute Force Protection
+- Firebase Auth enforces native rate limiting on sign-in attempts — no additional configuration required
+- After repeated failed attempts, Firebase temporarily blocks the IP
+- No custom lockout implementation needed for Phase 1
+
+---
+
+## Content Security Policy (CSP)
+
+Configured in `vercel.json` for both apps. Purpose: prevent XSS by restricting which scripts can execute.
+
+Key directives:
+- `script-src 'self'` + explicit allowlist: Firebase SDK CDN, Cloudflare Turnstile, Sentry
+- `frame-ancestors 'none'` — prevents clickjacking
+- `X-Frame-Options: DENY` — legacy browser support
+- `X-Content-Type-Options: nosniff` — prevents MIME-type sniffing
+- `Referrer-Policy: strict-origin-when-cross-origin`
+
+Note: Framer Motion and all app JS are bundled at build time — no external script tags needed beyond the allowlist above.
+
+---
+
 ## HTTPS & Infrastructure
 
 - **Vercel** handles HTTPS for all deployments automatically — no configuration needed

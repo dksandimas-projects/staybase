@@ -57,6 +57,16 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 46 | PWA is Capacitor-ready by design — if a native iOS/Android app is ever needed, `npx cap init` + `npx cap add ios` wraps the existing web app without a rewrite; no native APIs are used that would break this path |
 | 47 | admin-app is NOT a PWA — it is staff-only, always on a reliable connection, no install or offline use case |
 | 48 | Intercom voice call: WebRTC peer-to-peer audio via browser — signaling over Firestore (`calls/{roomId}` document for SDP offer/answer exchange) — zero third-party cost; fallback is a `tel:` link if WebRTC is unavailable |
+| 49 | CI/CD: Vercel automatic preview deployments on every push to any branch — `dev` branch preview URL serves as staging; no separate staging infrastructure needed |
+| 50 | Rollback: Vercel one-click instant rollback to any previous deployment via Vercel dashboard — no manual git revert needed |
+| 51 | Error monitoring: Sentry free tier on both guest-app and admin-app — captures runtime errors with source maps, alerts DK via email; configured via `VITE_SENTRY_DSN` env var |
+| 52 | Database backup: Firebase scheduled exports to Cloud Storage (weekly, admin-configured in Firebase Console); XLSX manual backup via Reports page serves as operational recovery |
+| 53 | CSP headers: configured in `vercel.json` for both apps — blocks unsafe-inline scripts except Firebase SDK, Cloudflare Turnstile, and Sentry; `X-Frame-Options: DENY`; `X-Content-Type-Options: nosniff` |
+| 54 | Dependency scanning: `npm audit --audit-level=high` run as part of pre-deploy checklist before every merge to `main` — no Dependabot for solo project |
+| 55 | Accessibility: WCAG 2.1 AA target across all public pages — AI-assisted checks during build; 10-item checklist in `FRONTEND.md §Accessibility`; critical for PWD/Senior users who receive government-mandated discounts |
+| 56 | Analytics: 8 key GA4 events for product decisions — full event list in `FRONTEND.md §Analytics Events`; GA4 only loads when `config.analyticsId` is non-empty |
+| 57 | Post-launch support: DK offers a monthly maintenance retainer — critical bugs fixed within 24 hours, minor bugs within 5 business days; full terms in `plan/docs/LEGAL.md` |
+| 58 | UX Philosophy: "It Just Works" — Apple-inspired approach applied to every screen. 10 tenets: zero friction, progressive disclosure, smart defaults, optimistic UI, skeleton loaders, inline validation, no dead ends, purposeful delight, consistency, and forgiving interactions. Full spec + per-app checklists in `FRONTEND.md §UX Philosophy` |
 
 ---
 

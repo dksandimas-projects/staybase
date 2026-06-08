@@ -1,11 +1,24 @@
 # Rooms Page
 > App: guest-app
+> Phase: Phase 3 — Room System
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/guest-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Our Rooms
 
 ## Overview
 
 The `/rooms` page displays all active rooms in a grid. Guests can filter by room type and guest count, view real-time availability badges, and open a room detail modal before proceeding to book. This is the primary room discovery surface.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Back navigation never loses user input
+- [ ] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 

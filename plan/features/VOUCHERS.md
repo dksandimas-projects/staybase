@@ -1,11 +1,28 @@
 # Vouchers
 > App: admin-app (management) + guest-app (redemption)
+> Phase: Phase 7 — Corporate, Vouchers & Breakfast
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, features/BOOKING-FLOW.md
 > Design ref: spark-inn-design-spec.md §Vouchers
 
 ## Overview
 
 Promo vouchers allow staff to create discount codes redeemable during the guest booking flow at Step 3. Vouchers support percentage or flat ₱ discounts with optional usage caps, expiry dates, and room type restrictions. Management lives in Settings. Redemption calls a server-side validation API to prevent abuse.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+**Guest-facing screens:**
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+
+**Admin-facing screens:**
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Destructive actions have a single confirmation step — not buried in menus
 
 ---
 

@@ -11,6 +11,65 @@
 
 ---
 
+## UX Philosophy — It Just Works
+
+Spark Inn should feel effortless — like an Apple product. Users should never have to think about how to use it. Every screen, every interaction, every state is designed to guide the user forward without friction, confusion, or dead ends. This philosophy applies to every screen built in both apps.
+
+### Core Tenets
+
+**1. Zero friction to the goal**
+Every screen has one obvious primary action. The user's next step is never ambiguous. The booking flow gets a guest from "I want a room" to "booking confirmed" in as few taps as possible. The admin app gets staff from "I need to update this" to "done" without navigating away.
+
+**2. Progressive disclosure**
+Show only what the user needs right now. Don't front-load every option, field, or action on a screen. Reveal details, secondary actions, and advanced options only when the context calls for it. Booking flow is the best example: collect info one step at a time, never all at once.
+
+**3. Smart defaults**
+Pre-fill what we know. Availability checker defaults to tomorrow check-in, 1 night, 2 guests (most common pattern). Admin drawers open with current values pre-populated. Forms remember the last selections when it helps. Never make the user type what we can infer.
+
+**4. Optimistic UI**
+Don't make users wait to feel success. On booking submission, show the confirmation UI immediately while the request is processing — roll back only on actual failure. Status changes in the admin app update instantly in the UI before the Firestore write confirms. Speed is a feature.
+
+**5. Skeleton loaders, never spinners**
+Empty states and loading states always use skeleton screens that match the shape of the real content — never a spinner in the middle of the page. The layout never jumps or reflows when data arrives.
+
+**6. Inline validation, not submit errors**
+Validate fields as the user completes them (on `blur`), not on form submit. The user never fills out 5 fields, hits submit, and gets a wall of errors. Each field gives immediate, specific, friendly feedback.
+
+**7. Every error has a next step**
+No dead ends. If something fails, the user always sees what went wrong in plain language and what to do next. Never show a raw error code or a generic "something went wrong" message without guidance.
+
+**8. Delight at the right moments**
+Micro-interactions and animations are used purposefully at emotional peaks — booking confirmation, first login, successful status change. Not on every button tap. Delight should feel earned, not cheap.
+
+**9. Consistency is trust**
+The same action always looks and behaves the same way across every screen. Drawers open the same way. Badges use the same colors. Primary CTAs are always `primary`. Toasts always appear in the same position. Predictability builds confidence.
+
+**10. Forgiveness over caution**
+Destructive actions (cancel booking, block room, delete voucher) require a single confirmation — not a multi-step process. Non-destructive actions (edit, update, toggle) are instant with an undo toast. Never make users afraid to explore the app.
+
+---
+
+### Guest App — UX Checklist (apply to every guest-facing screen)
+
+- [ ] Single primary CTA visible above the fold on mobile
+- [ ] No required field that isn't genuinely necessary for the booking
+- [ ] Back navigation never loses user input
+- [ ] Loading state matches the shape of the real content (skeleton)
+- [ ] Confirmation/success state feels celebratory — not just "OK"
+- [ ] Error messages are in plain Filipino/English with a clear next action
+- [ ] Page answers "where am I and what do I do next?" within 3 seconds of load
+
+### Admin App — UX Checklist (apply to every staff-facing screen)
+
+- [ ] Most common action for this screen is reachable in ≤ 2 clicks from the sidebar
+- [ ] Data tables are scannable — status, name, date visible without horizontal scroll on 1440px
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do (not just "No results")
+- [ ] Keyboard-navigable for power users (Tab order is logical, Enter submits forms)
+
+---
+
 ## Config-Driven Tokens
 
 All brand colors, fonts, and logo paths come from `hotel.config.ts` — never hardcoded in components or Tailwind config. See `plan/docs/WHITE-LABEL.md` for full config schema.
@@ -592,10 +651,50 @@ Injected as `<script type="application/ld+json">` in `<head>` on the relevant pa
 - `HotelRoom` schema injected only when rooms are loaded from Firestore — not on skeleton state
 - Validate output with Google's Rich Results Test before launch
 
-### Analytics
+### Analytics Events
 
-- GA4 script injected in `index.html` only when `config.analyticsId` is non-empty
-- No analytics on admin-app — staff usage should not pollute guest data
+GA4 script injected only when `config.analyticsId` is non-empty. No analytics on admin-app — staff usage pollutes guest data.
+
+Track these 8 events. Every event must have a clear product decision it informs:
+
+| Event name | Trigger | Decision it informs |
+|---|---|---|
+| `availability_searched` | Guest submits dates on availability checker | Are guests finding available dates? High drop-off here = pricing or availability problem |
+| `room_selected` | Guest clicks a room card to start booking | Which room types convert best? Informs featured rooms and rate strategy |
+| `booking_step_completed` | Guest advances past each of Steps 1–3 | Step-by-step funnel — where do guests drop off? |
+| `booking_submitted` | Guest clicks Confirm Booking on Step 3 | Direct conversion event — the money metric |
+| `voucher_applied` | Guest successfully applies a promo code | Are vouchers driving bookings? Informs marketing campaigns |
+| `payment_method_selected` | Guest selects GCash / PayPal / Pay at Hotel | Which payment methods are most used? Informs which to prioritize in Phase 2 |
+| `corporate_inquiry_submitted` | Corporate inquiry form submitted | Corporate pipeline lead volume |
+| `rewards_member_registered` | New Spark Rewards member completes registration | Loyalty program growth rate |
+
+Fire events using GA4's `gtag('event', name, params)`. Include `room_type` and `num_nights` as params on booking events where relevant.
+
+---
+
+## Accessibility
+
+**Target:** WCAG 2.1 AA — the international standard, and the ethical minimum given the app explicitly serves PWD guests who receive a government-mandated discount.
+
+AI agents should run through this checklist on every new screen before marking it complete:
+
+| # | Check | Why it matters |
+|---|---|---|
+| 1 | Color contrast ≥ 4.5:1 for body text, ≥ 3:1 for large text and UI components | Spark Orange on white passes; always verify new combinations |
+| 2 | All interactive elements reachable and operable via keyboard (Tab / Enter / Space / Arrow) | Motor disability support; also caught by screen readers |
+| 3 | All images have descriptive `alt` text; decorative images have `alt=""` | Screen reader support |
+| 4 | All form inputs have associated `<label>` elements (not just placeholder text) | Screen readers read labels, not placeholders |
+| 5 | Error messages are programmatically associated with their inputs (`aria-describedby`) | Screen reader users must hear the error, not just see it |
+| 6 | Modals and drawers trap focus while open; focus returns to trigger on close | Keyboard users must not get lost behind overlays |
+| 7 | All icon-only buttons have `aria-label` | An icon alone is meaningless to a screen reader |
+| 8 | Page has a logical heading hierarchy (one `<h1>`, then `<h2>`, then `<h3>`) | Screen reader navigation relies on heading structure |
+| 9 | Motion respects `prefers-reduced-motion` — Framer Motion animations disabled when set | Some users experience nausea from motion |
+| 10 | Touch targets are minimum 44×44px on mobile | Motor accessibility; also already in Hard Rules |
+
+**How to check during build (AI-assisted):**
+- Contrast: use the WebAIM Contrast Checker or browser DevTools accessibility panel
+- Keyboard nav: Tab through the screen manually or ask AI to review for missing `tabIndex` / focus traps
+- Screen reader: use macOS VoiceOver (`Cmd+F5`) or NVDA on Windows for a quick smoke test before phase sign-off
 
 ---
 

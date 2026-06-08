@@ -1,11 +1,24 @@
 # Spark Essentials — Store Management
 > App: admin-app
+> Phase: Phase 8 — Intercom (Spark Essentials)
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Store Management
 
 ## Overview
 
 The admin-side of the in-room store feature (named "Spark Essentials" for Spark Inn — display name is always `config.storeName`). Front desk staff manage the product catalog, view and process orders, update order statuses, and handle store billing at checkout. Reports cover sales, revenue, and stock. Accessible to both Front Desk and Admin roles.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

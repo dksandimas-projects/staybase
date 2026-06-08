@@ -1,11 +1,24 @@
 # Corporate Inquiries
 > App: admin-app
+> Phase: Phase 7 — Corporate, Vouchers & Breakfast
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Corporate Inquiries
 
 ## Overview
 
 The `/corporate` dashboard page manages the corporate inquiry pipeline from initial contact through to a converted booking or declined inquiry. Staff can move inquiries through stages, log timestamped notes, convert to a booking, and generate access codes for negotiated rates at the Negotiating or Converted stage.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

@@ -1,5 +1,6 @@
 # Email, PDF & Storage
 > App: both
+> Phase: Phase 6 — Email System
 > Requires: CLAUDE.md, docs/BACKEND.md, docs/API-ROUTES.md
 > Design ref: N/A — backend + utility logic
 
