@@ -1,11 +1,24 @@
 # Settings
 > App: admin-app
+> Phase: Phase 9 — Remaining Features
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Settings
 
 ## Overview
 
 Admin-only page at `/settings`. Organized into tabs. Covers hotel information, payment methods, email configuration, staff account management, discount rules, voucher management, intercom quick requests, and website content editing for all public pages.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

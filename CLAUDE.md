@@ -80,7 +80,8 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/docs/DECISIONS-FEATURES.md` — Feature scope, product, business rules, compliance decisions
 - `plan/docs/GOTCHAS.md` — What agents must never do
 - `plan/docs/CONTRIBUTING.md` — How to update MDs, sync protocol, deploy checklist
-- `plan/docs/SECURITY.md` — Firestore/Storage rules, PII handling, RA 10173 compliance, intercom security model
+- `plan/docs/SECURITY.md` — Firestore/Storage rules, PII handling, RA 10173 compliance, session management, CSP headers
+- `plan/docs/LEGAL.md` — IP ownership, guest ToS, GDPR awareness, accessibility commitment, white-label licensing, post-launch support
 - `plan/docs/WHITE-LABEL.md` — Hotel config schema, per-client deployment guide, asset checklist
 
 ### App CLAUDEs
@@ -139,7 +140,7 @@ These apply to every file in every app. No exceptions.
 - **Validate corporate codes and vouchers server-side** — never trust client
 - **Always unsubscribe Firestore `onSnapshot` listeners** in `useEffect` cleanup
 - **Named exports for components/hooks** — default exports for pages only
-- **Conventional Commits required** — `fix:` / `feat:` / `release:` prefixes
+- **Conventional Commits required** — `fix:` / `feat:` / `refactor:` / `release:` prefixes
 - **Bump `VERSION` in `shared/` before every merge to `main`** (Husky handles automatically)
 - **Never commit `.env` files**
 - **Never log PII** — no console.log of guest names, emails, or payment data
@@ -163,19 +164,22 @@ docs/*            ← documentation-only changes off dev
 
 Merge `dev → main` only at milestones: staging demo, production launch.
 
-### Agent branching rule
+### Agent task-start order
 
-**Before starting any task, always:**
-1. Verify the current branch — run `git branch --show-current`
-2. If not already on the right branch, create one off `dev` using the appropriate prefix:
-   - **Wireframe pass (Phase 0.5)** → one shared branch: `git checkout -b feature/wireframe` — all screens and components committed here, no per-screen branches
+**Every task — no exceptions — follows this exact sequence before writing a single line of code:**
+
+1. **Check branch** — run `git branch --show-current`. If not on the right branch, create one off `dev`:
+   - Wireframe pass (Phase 0.5) → `git checkout -b feature/wireframe` (one shared branch, no per-screen branches)
    - New feature → `git checkout -b feature/<task-name>`
    - Bug fix → `git checkout -b fix/<task-name>`
-   - Docs-only change → `git checkout -b docs/<task-name>`
-3. Never work directly on `dev` or `main`
-4. Commit work to the branch — do not merge back to `dev` without DK's explicit instruction
+   - Docs-only → `git checkout -b docs/<task-name>`
+   - Never work directly on `dev` or `main`
+2. **Load read bundle** — identify your task type in the Read Bundles table above and load only those MDs. Do not load all MDs.
+3. **Read GOTCHAS.md** — always, every task. Check for rules that apply to this specific feature area before writing any code.
+4. **Build** — implement against the feature MD checklist. Apply `plan/docs/FRONTEND.md §UX Philosophy` to every UI screen.
+5. **Update MDs** — if you made any decision that changes or extends an MD (schema field, new edge case, new rule), update the relevant MD before closing the task. Never drift from the docs.
 
-If already on a correctly-named branch, continue working on it. If unsure which prefix to use, ask before starting.
+Do not skip steps 2–3 even if the task seems simple — they exist to prevent the most common and most expensive agent mistakes.
 
 ---
 
@@ -186,7 +190,7 @@ If already on a correctly-named branch, continue working on it. If unsure which 
 - `VERSION` constant lives in `shared/` — imported by both apps
 - Displayed in footer of **all pages** (guest + dashboard)
 - Auto-bumped by Husky `commit-msg` hook via Conventional Commits:
-  - `fix:` → PATCH | `feat:` → MINOR | `release:` → MAJOR
+  - `fix:` → PATCH | `refactor:` → PATCH | `feat:` → MINOR | `release:` → MAJOR
 
 ---
 

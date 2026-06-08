@@ -234,10 +234,13 @@ Project management assets. Partially gitignored.
 
 ```
 project/
-├── branding/          ← Logos, fonts (.otf, .ai, .eps, .png) — tracked
-├── design/            ← spark-inn-design-spec.md, DESIGN.md, Stitch mockups — tracked
-├── documents/         ← Proposals, PRD, Excel files (.docx, .xlsx) — tracked
-└── context/           ← spark-inn-MASTER-CONTEXT.md, spark-inn-MD-PLAN.md — tracked
+├── ROADMAP.md                          ← Prioritized build checklist, phase by phase, with AI starter prompts
+├── SETUP-GUIDE.md                      ← Step-by-step local + production setup, emulator instructions
+├── AI-MD-SYSTEM-PROMPT.md              ← Reusable prompt template for bootstrapping MD systems on new projects
+├── branding/                           ← Logos, fonts (.otf, .ai, .eps, .png) — tracked
+├── design/                             ← spark-inn-design-spec.md, DESIGN.md, Stitch mockups — tracked
+├── documents/                          ← Proposals, PRD, Excel files (.docx, .xlsx) — tracked
+└── context/                            ← spark-inn-MASTER-CONTEXT.md, spark-inn-MD-PLAN.md — tracked
 ```
 
 ---

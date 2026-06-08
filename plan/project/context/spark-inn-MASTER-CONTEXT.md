@@ -70,7 +70,151 @@ Two surfaces sharing one Firebase backend:
 
 ---
 
-## 6. ALL DECISIONS — FULLY RESOLVED
+## 6. PROBLEM STATEMENT
+
+**What's broken today:**
+The hotel runs all operations through two Excel files — a booking monitor and a guest registration form. Bookings arrive via Facebook message, phone call, and walk-ins. Staff manually copy entries into the spreadsheet, cross-check availability by eye, and confirm with guests over chat. This causes:
+- Overbooking risk — no real-time lock, two staff can accept the same room simultaneously
+- Zero automated communication — every email or message is typed manually per booking
+- No payment tracking — staff note GCash or PayPal receipts in free-text cells, no audit trail
+- No guest data structure — repeat guests have no history, loyalty is unrecognized
+- High admin overhead — front desk spends significant hours per week on tasks the system will automate
+
+**What success looks like:**
+Guests can find, check availability, and book a room on their phone in under 3 minutes, receive automated confirmations, and check in without paperwork. Front desk sees today's arrivals, housekeeping status, and pending payments on one screen. The owner has a live report of occupancy and revenue without opening Excel.
+
+---
+
+## 7. TARGET AUDIENCE & USER PERSONAS
+
+### Primary — Domestic Tourist
+| Field | Detail |
+|---|---|
+| Who | Filipino traveler visiting Bohol for leisure (Chocolate Hills, beaches, Loboc River) |
+| Age range | 22–45 |
+| Device | Mobile-first (80%+ of bookings expected via smartphone) |
+| Tech comfort | High — uses Grab, Shopee, Facebook daily |
+| Goal | Book a clean, affordable, reliable room quickly without calling anyone |
+| Pain point | Doesn't know if the hotel is available without messaging on Facebook and waiting for a reply |
+| What they care about | Clear photos, honest pricing, easy payment (GCash), fast confirmation |
+
+### Secondary — Corporate / Business Traveler
+| Field | Detail |
+|---|---|
+| Who | Government employees, NGO workers, business delegates visiting Tagbilaran City |
+| Age range | 28–55 |
+| Device | Mix of mobile and desktop |
+| Tech comfort | Moderate |
+| Goal | Book multiple rooms, get a confirmed receipt for reimbursement or billing |
+| Pain point | Needs a formal booking reference and consistent pricing — not a handshake deal |
+| What they care about | Corporate rates, reliable confirmation, proximity to city center |
+
+### Tertiary — International Tourist
+| Field | Detail |
+|---|---|
+| Who | Foreign visitors (primarily Korean, Chinese, Australian) on Bohol tours |
+| Age range | 25–60 |
+| Device | Mobile |
+| Tech comfort | High |
+| Goal | Find a boutique hotel that feels local, not a chain |
+| Pain point | Can't easily confirm availability or price without language barriers via phone |
+| What they care about | English-language site, clear photos, online booking without calling |
+
+### Admin User — Front Desk Staff
+| Field | Detail |
+|---|---|
+| Who | 2–3 hotel staff (rotation) |
+| Device | Desktop / tablet at front desk |
+| Tech comfort | Moderate — comfortable with Excel, learning new tools |
+| Goal | See today's arrivals, confirm payments, handle walk-ins without errors |
+| Pain point | Current Excel workflow is slow, error-prone, and requires manual updates across multiple sheets |
+| What they care about | Speed, clarity, no double-booking, easy receipt printing |
+
+---
+
+## 8. BUSINESS GOALS & SUCCESS METRICS
+
+| Goal | Metric | Target |
+|---|---|---|
+| Eliminate overbooking | Overbooking incidents per month | 0 from launch day |
+| Increase direct bookings | % of bookings via website vs phone/Facebook | 50% within 3 months of launch |
+| Reduce admin overhead | Hours/week spent on manual booking admin | Reduce by 60% |
+| Guest communication | % of confirmation emails sent automatically | 100% — zero manual emails |
+| Payment tracking | Outstanding payment visibility | Real-time — zero missed payments |
+| Guest loyalty | Spark Rewards member signups in first 6 months | 50+ members |
+| Corporate pipeline | Corporate inquiries converted to bookings | Track conversion rate from month 1 |
+
+---
+
+## 9. COMPETITIVE POSITIONING
+
+**Direct competitors in Bohol:**
+- Large chain hotels (Bohol Beach Club, Henann, Amorita) — higher price, full amenities, OTA-listed
+- Budget guesthouses and hostels — lower price, minimal service, inconsistent quality
+- Airbnb/Agoda-listed apartments — self-service, no front desk
+
+**Spark Inn's position:**
+Boutique mid-range hotel for travelers who want a clean, consistent, and genuinely hospitable stay without paying chain hotel prices. Not the cheapest option, not the flashiest — the most *reliable* one.
+
+**Key differentiators:**
+- Location in Tagbilaran City center — walking distance to city hall, banks, terminals
+- Warm, intentional service — staff know guests by name, not room number
+- Direct booking with no OTA markup — best price guaranteed on the website
+- Corporate-ready — dedicated rates and pipeline for business travelers
+- QR-based in-room communication — guests request anything without calling the front desk
+
+**Positioning statement:**
+*"A peaceful, consistent stay where comfort is felt and care is intentional — Bohol's boutique hotel for travelers who value reliability over spectacle."*
+
+---
+
+## 10. MARKETING & GROWTH PLAN
+
+**Phase 1 — Launch (Month 1–2):**
+- Facebook Page — primary discovery channel for domestic tourists; posts, room photos, booking CTA linking to the website
+- Google Business Profile — local SEO for "hotel in Tagbilaran", "hotel in Bohol" searches
+- On-site SEO — JSON-LD structured data, per-page meta descriptions, sitemap (built into the app)
+- Existing guests — announce new direct booking website to repeat guests via personal message
+
+**Phase 2 — Growth (Month 3–6):**
+- OTA listings (Booking.com, Agoda) — listed as a secondary channel with a "book direct for best price" note on the website
+- Corporate outreach — target local government offices, NGOs, and businesses in Tagbilaran City
+- Spark Rewards launch — encourage repeat bookings via loyalty points; promote on website and at check-in
+- Instagram — secondary channel for brand aesthetics and travel audience
+
+**Phase 3 — Scale:**
+- PayMongo integration — frictionless online payment for guests who don't want to upload screenshots
+- WhatsApp business integration — for international guests who prefer WhatsApp over Facebook
+- White-label expansion — offer the same system to other boutique hotels in Visayas/Mindanao
+
+**Who manages marketing:** Hotel owner/admin — DK provides the website, SEO foundation, and social media link structure. Content creation and posting is the client's responsibility.
+
+---
+
+## 11. POST-LAUNCH SUPPORT & IP OWNERSHIP
+
+### Post-Launch Support Plan
+DK provides the following support after launch:
+
+| Type | Response time | Scope |
+|---|---|---|
+| Critical bugs (broken flows, data loss) | Within 24 hours | Included for 30 days post-launch |
+| Minor bugs (UI glitches, non-blocking errors) | Within 5 business days | Included for 30 days post-launch |
+| New features / scope changes | Quoted separately | Not included in base project |
+
+After the 30-day warranty period, continued support requires a monthly maintenance retainer covering minor fixes, `npm audit` dependency updates, and one minor change request per month.
+
+### IP Ownership
+- DK retains full intellectual property rights over the codebase and white-label system
+- Spark Inn Hotel Corp receives a perpetual, non-transferable license to use the deployed instance
+- Client assets (logos, photos, brand) remain property of Spark Inn Hotel Corp
+- DK may white-label the same codebase for other hotel clients — this is documented in the project contract
+
+See `plan/docs/LEGAL.md` for full licensing terms and guest ToS summary.
+
+---
+
+## 12. ALL DECISIONS — FULLY RESOLVED
 
 No open questions remain. Every item below is confirmed:
 
@@ -111,7 +255,7 @@ No open questions remain. Every item below is confirmed:
 | Guest auth | Firebase Auth — Google Sign-In + email/password; separate from admin auth |
 | White-label | One codebase, separate deployment per hotel client — not multi-tenant |
 | Brand config | All brand values (colors, fonts, logos, name) in `hotel.config.ts` — never hardcoded |
-| Room types | Fully flexible — defined in `hotel.config.ts → roomTypes[]`, not a fixed enum |
+| Room types | Fully flexible — defined in Admin App Settings UI (prefilled from hotel.config.ts), not a fixed enum |
 | Currency/locale | Config-driven — `hotel.config.ts` sets currency, locale, timezone, date format |
 | Booking ref prefix | Configurable per client in `hotel.config.ts → bookingRefPrefix` (Spark Inn: "SI") |
 | Legal content | Privacy policy body, cancellation policy, house rules editable from Settings (Firestore) |
@@ -119,7 +263,7 @@ No open questions remain. Every item below is confirmed:
 
 ---
 
-## 7. TECH STACK & ARCHITECTURE
+## 13. TECH STACK & ARCHITECTURE
 
 ### Confirmed Stack
 
@@ -235,7 +379,7 @@ spark-inn/
 
 ---
 
-## 8. FIRESTORE DATA MODEL
+## 14. FIRESTORE DATA MODEL
 
 ### `rooms/{roomId}`
 ```
@@ -411,7 +555,7 @@ settings/storeConfig: read = public | write = admin only
 
 ---
 
-## 9. FEATURE SCOPE
+## 15. FEATURE SCOPE
 
 ### Public Website — 9 Pages
 
@@ -524,7 +668,7 @@ Pending → Payment Uploaded → Payment Confirmed → Confirmed → Checked In 
 
 ---
 
-## 10. DEVELOPMENT PHASES & TIMELINE
+## 16. DEVELOPMENT PHASES & TIMELINE
 
 | Phase | Focus | Target |
 |---|---|---|
@@ -536,7 +680,7 @@ Pending → Payment Uploaded → Payment Confirmed → Confirmed → Checked In 
 
 ---
 
-## 11. EMAIL NOTIFICATIONS
+## 17. EMAIL NOTIFICATIONS
 
 All emails sent via Resend through Vercel API routes.
 
@@ -551,7 +695,7 @@ All emails sent via Resend through Vercel API routes.
 
 ---
 
-## 12. BRAND IDENTITY
+## 18. BRAND IDENTITY
 
 ### Core
 
@@ -642,7 +786,7 @@ Headlines: sentence case
 
 ---
 
-## 13. DESIGN SYSTEM (SUMMARY)
+## 19. DESIGN SYSTEM (SUMMARY)
 
 > **Full screen-by-screen specs** are in `/Spark Inn/spark-inn-design-spec.md` — reference that file for all detailed layout work.
 
@@ -650,6 +794,8 @@ Headlines: sentence case
 
 **Public Website:** Warm Minimal — boutique hotel premium, not budget, not flashy luxury.
 **Dashboard:** Efficiency first — front desk scans, not reads. Clean data hierarchy.
+
+**UX Philosophy — "It Just Works":** Every screen follows an Apple-inspired approach — zero friction to the goal, progressive disclosure, smart defaults, optimistic UI, skeleton loaders, inline validation, no dead ends, purposeful delight, consistency, and forgiving interactions. Full spec + per-app checklists in `plan/docs/FRONTEND.md §UX Philosophy`. Logged as Decision #58.
 
 ### Key Design Tokens
 
@@ -704,7 +850,7 @@ Headlines: sentence case
 
 ---
 
-## 14. BOOKING CONFIRMATION RECEIPT
+## 20. BOOKING CONFIRMATION RECEIPT
 
 > The system does NOT generate BIR official receipts. Staff issue those manually with physical booklets.
 
@@ -725,7 +871,7 @@ Headlines: sentence case
 
 ---
 
-## 15. EXCEL WORKFLOW — WHAT THE SYSTEM REPLACES
+## 21. EXCEL WORKFLOW — WHAT THE SYSTEM REPLACES
 
 The client currently runs operations via two Excel files. Every feature maps to a replacement:
 
@@ -750,7 +896,7 @@ The client currently runs operations via two Excel files. Every feature maps to 
 
 ---
 
-## 16. NON-FUNCTIONAL REQUIREMENTS
+## 22. NON-FUNCTIONAL REQUIREMENTS
 
 | Requirement | Target |
 |---|---|
@@ -765,7 +911,7 @@ The client currently runs operations via two Excel files. Every feature maps to 
 
 ---
 
-## 17. FILES IN THE `/SPARK INN/` FOLDER
+## 23. FILES IN THE `/SPARK INN/` FOLDER
 
 ```
 /Spark Inn/
@@ -801,7 +947,7 @@ The client currently runs operations via two Excel files. Every feature maps to 
 
 ---
 
-## 18. HOW TO START A NEW SESSION WITH THIS CONTEXT
+## 24. HOW TO START A NEW SESSION WITH THIS CONTEXT
 
 1. Attach `spark-inn-MASTER-CONTEXT.md` (this file) to the new Claude session
 2. Attach or reference `spark-inn-design-spec.md` when doing any design/UI work
@@ -810,7 +956,7 @@ The client currently runs operations via two Excel files. Every feature maps to 
 
 ---
 
-*Spark Inn Master Context File — v2.0 — June 2, 2026*
+*Spark Inn Master Context File — v2.2 — June 7, 2026 — 24 sections*
 *Compiled from: v1.0 master context + spark-inn-features.md (fully merged)*
 *Single source of truth for all project decisions and context*
 *`spark-inn-features.md` is now superseded by this file*

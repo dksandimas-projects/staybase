@@ -1,5 +1,7 @@
 import { Users } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import type { Room } from "@spark-inn/shared";
+import { staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { GhostButton } from "./GhostButton";
@@ -25,12 +27,24 @@ interface RoomCardProps {
 }
 
 export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) {
-  const typeLabel = config.roomTypes.find((type) => type.value === room.type)?.shortLabel ?? room.type;
+  const shouldReduceMotion = useReducedMotion();
+  const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.shortLabel ?? room.type;
 
   return (
-    <article className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-      <div className="aspect-[4/3] bg-section-bg">
-        <img src={room.imageUrls[0]} alt={room.name} className="h-full w-full object-cover" />
+    <motion.article
+      className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200"
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      variants={staggerChild}
+      whileHover={shouldReduceMotion ? undefined : { y: -4 }}
+    >
+      <div className="aspect-[4/3] overflow-hidden bg-section-bg">
+        <motion.img
+          src={room.imageUrls[0]}
+          alt={room.name}
+          className="h-full w-full object-cover"
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
+        />
       </div>
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
@@ -70,6 +84,6 @@ export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) 
           </div>
         </div>
       </div>
-    </article>
+    </motion.article>
   );
 }

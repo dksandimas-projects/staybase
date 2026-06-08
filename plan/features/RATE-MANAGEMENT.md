@@ -1,5 +1,6 @@
 # Rate Management
 > App: admin-app
+> Phase: Phase 3 — Room System
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Rate Management
 
@@ -9,9 +10,21 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 
 ---
 
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
+
+---
+
 ## UI Checklist
 
-- [ ] Base rates section — one row per room type, rows generated dynamically from `config.roomTypes[]` — never hardcoded
+- [ ] Base rates section — one row per room type, rows generated dynamically from `roomTypes` context state (seeded from `DEFAULT_ROOM_TYPES` in `@spark-inn/shared`) — never hardcoded
 - [ ] Weekend rates section — one row per room type (same dynamic list)
 - [ ] Flat corporate rate section — one row per room type; note: "This is the public rate at `/corporate/book`. Custom rates are set per inquiry via access codes."
 - [ ] All price inputs display `config.currencySymbol` prefix

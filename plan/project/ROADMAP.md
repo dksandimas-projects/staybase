@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 5, 2026
+> Last updated: June 8, 2026
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -127,49 +127,50 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ `QuickRequestChip` — pill button in quick-select row
 
 ### Guest App Screens
-- 🔄 G-01 Homepage `/`
+- ✅ G-01 Homepage `/`
 - ✅ G-02 Rooms Page `/rooms`
 - ✅ G-03 Booking Step 1 — Select Room `/book`
-- ⬜ G-04 Booking Step 2 — Guest Details `/book`
-- ⬜ G-05 Booking Step 3 — Review & Pay `/book`
-- ⬜ G-06 Booking Step 4 — Confirmation `/book/confirm`
-- ⬜ G-07 My Booking Lookup `/my-booking`
-- ⬜ G-08 Corporate Stays Marketing `/corporate`
-- ⬜ G-09 Corporate Booking Gate + Flow `/corporate/book`
-- ⬜ G-10 Spark Rewards Landing `/rewards`
-- ⬜ G-11 Sign In `/signin`
-- ⬜ G-12 Sign Up `/signup`
-- ⬜ G-13 Member Profile `/account/profile`
-- ⬜ G-14 My Stays `/account/stays`
-- ⬜ G-15 My Rewards Portal `/account/rewards`
-- ⬜ G-16 Intercom Guest Chat `/intercom/:roomId`
-- ⬜ G-17 About Us `/about`
-- ⬜ G-18 Contact Us `/contact`
-- ⬜ G-19 404 Not Found `*`
+- ✅ G-04 Booking Step 2 — Guest Details `/book`
+- ✅ G-05 Booking Step 3 — Review & Pay `/book`
+- ✅ G-06 Booking Step 4 — Confirmation `/book/confirm`
+- ✅ G-07 My Booking Lookup `/my-booking`
+- ✅ G-08 Corporate Stays Marketing `/corporate`
+- ✅ G-09 Corporate Booking Gate + Flow `/corporate/book`
+- ✅ G-10 Spark Rewards Landing `/rewards`
+- ✅ G-11 Sign In `/signin`
+- ✅ G-12 Sign Up `/signup`
+- ✅ G-13 Member Profile `/account/profile`
+- ✅ G-14 My Stays `/account/stays`
+- ✅ G-15 My Rewards Portal `/account/rewards`
+- ✅ G-16 Intercom Guest Chat `/intercom/:roomId`
+- ✅ G-17 About Us `/about`
+- ✅ G-18 Contact Us `/contact`
+- ✅ G-19 404 Not Found `*`
 - ✅ M-01 Room Detail Modal
 - ✅ M-02 Availability Filter Drawer (mobile)
-- ⬜ M-03 Corporate Access Code Gate
-- ⬜ M-04 Voucher Input (inline)
+- ✅ M-03 Corporate Access Code Gate
+- ✅ M-04 Voucher Input (inline)
 
 ### Admin App Screens
-- ⬜ A-01 Admin Login `/login`
-- ⬜ A-02 Dashboard Overview `/`
-- ⬜ A-03 Bookings Management `/bookings`
-- ⬜ A-04 Room Management `/rooms`
-- ⬜ A-05 Rate Management `/rates`
-- ⬜ A-06 Reports `/reports`
-- ⬜ A-07 Corporate Inquiries `/corporate`
-- ⬜ A-08 Intercom Inbox `/intercom`
-- ⬜ A-09 QR Management `/qr`
-- ⬜ A-10 Members `/members`
-- ⬜ A-11 Settings `/settings`
-- ⬜ D-01 Booking Detail Drawer
-- ⬜ D-02 Room Edit Drawer
-- ⬜ D-03 Corporate Inquiry Detail Drawer
-- ⬜ D-04 Member Detail Drawer
-- ⬜ D-05 Store Order Detail Drawer
-- ⬜ M-05 Walk-in Booking Modal
-- ⬜ M-06 Add/Edit Voucher Modal
+- ✅ A-01 Admin Login `/login`
+- ✅ A-02 Dashboard Overview `/`
+- ✅ A-03 Bookings Management `/bookings`
+- ✅ A-04 Room Management `/rooms`
+- ✅ A-05 Rate Management `/rates`
+- ✅ A-06 Reports `/reports`
+- ✅ A-07 Corporate Inquiries `/corporate`
+- ✅ A-08 Intercom Inbox `/intercom`
+- ✅ A-09 QR Management `/qr`
+- ✅ A-10 Members `/members`
+- ✅ A-11 Settings `/settings`
+- ✅ D-01 Booking Detail Drawer
+- ✅ D-02 Room Edit Drawer
+- ✅ D-03 Corporate Inquiry Detail Drawer
+- ✅ D-04 Member Detail Drawer
+- ✅ D-05 Store Order Detail Drawer
+- ✅ M-05 Walk-in Booking Modal
+- ✅ M-06 Add/Edit Voucher Modal
+- ✅ Check-in workstation wireframe — guest registration form, compressed ID upload, breakfast selections, checkout folio review
 
 ---
 
@@ -211,9 +212,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ `useRooms` hook — `onSnapshot` on `rooms` collection
 - ⬜ `RoomCard.tsx` — image, name, type badge, amenities, price, availability badge
-- ⬜ Rooms page (`/rooms`) — grid, filters by room type (from `config.roomTypes`), availability badges, detail modal
+- ⬜ Rooms page (`/rooms`) — grid, filters by room type (from `DEFAULT_ROOM_TYPES`), availability badges, detail modal
 - ⬜ Room Management page (`/rooms` admin) — list, edit form, photo upload, status, block reason
-- ⬜ Rate Management page (`/rates`) — dynamic rows from `config.roomTypes`, weekend rates, corporate rates, payment methods
+- ⬜ Rate Management page (`/rates`) — dynamic rows from `roomTypes` context, weekend rates, corporate rates, payment methods
 
 ---
 
@@ -239,9 +240,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ `useBookings` hook — `onSnapshot` on `bookings` collection
 - ⬜ `BookingTable.tsx` — filterable, sortable, clickable rows
-- ⬜ Booking detail drawer — full details, payment proof, status actions, notes
-- ⬜ Status transition actions — context-aware buttons per current status
-- ⬜ Walk-in / manual booking creation modal
+- ✅ Booking detail drawer wireframe — full details, status actions, payments, check-in workstation, checkout folio
+- ✅ Status transition actions wireframe — context-aware buttons per current status
+- ✅ Walk-in / manual booking creation modal wireframe
 - ⬜ Cancellation flow — confirmation modal, reason, cancellation email
 - ⬜ Receipt PDF — print + download from drawer
 - ⬜ Dashboard Overview — stat cards, room grid, housekeeping toggles, pending payments, today's arrivals/checkouts
@@ -275,7 +276,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Breakfast add-on — Rate Management (rate per person per night)
 - ⬜ Breakfast add-on — Step 1 room card (Room Only vs Room + Breakfast option)
 - ⬜ Breakfast add-on — booking creation stores `hasBreakfast`, `breakfastRate`
-- ⬜ Breakfast selections panel — booking detail drawer (front desk enters at check-in)
+- ✅ Breakfast selections panel wireframe — booking detail drawer (front desk enters at check-in)
 - ⬜ Guest registration form PDF — breakfast section with silog options grid
 - ⬜ Breakfast reports — daily kitchen prep report + breakfast revenue
 
@@ -290,8 +291,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Tab title unread count
 - ⬜ QR Management page — QR grid, regenerate, print single/all
 - ⬜ Spark Essentials — guest store panel (item grid, cart, checkout, order tracking)
-- ⬜ Spark Essentials — catalog management in Settings → Store tab
-- ⬜ Spark Essentials — order management page/section (admin)
+- ✅ Spark Essentials — catalog management wireframe in Settings → Store tab
+- ✅ Spark Essentials — order management wireframe page/section (admin)
 - ⬜ Spark Essentials — store order API route (stock check + order creation transaction)
 - ⬜ Spark Essentials — store reports in Reports page
 
@@ -303,6 +304,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Booking Lookup page (`/my-booking`) — ref + email lookup, cancel, resend email
 - ⬜ Reports page — occupancy, revenue, bookings by source, PDF/CSV export
 - ⬜ Settings page — all 9 tabs (Hotel Info, Payment Methods, Email, Staff Accounts, Discounts, Vouchers, Intercom, Website Content, Legal Content)
+- ✅ Guest registration data capture wireframe — booking drawer at check-in
 - ⬜ Guest Registration PDF (jsPDF) — pre-filled from booking, printable at check-in
 
 ---

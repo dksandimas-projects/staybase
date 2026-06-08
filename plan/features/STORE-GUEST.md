@@ -1,5 +1,6 @@
 # Spark Essentials — Guest Store
 > App: guest-app
+> Phase: Phase 8 — Intercom (Spark Essentials)
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, features/INTERCOM-GUEST.md
 > Design ref: spark-inn-design-spec.md §Spark Essentials
 
@@ -8,6 +9,18 @@
 "Spark Essentials" is the Spark Inn deployment name for the in-room shop feature. The display name shown to guests in the UI is always `config.storeName` — never hardcoded. For Spark Inn: "Spark Essentials". For other hotel deployments: whatever is set in their `hotel.config.ts`.
 
 The store is accessible from the guest intercom page via QR scan. Guests browse available items and place orders for delivery to their room. Only accessible via QR — not from the public website directly. Orders are linked to the guest's room and active booking.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Back navigation never loses user input
+- [ ] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 

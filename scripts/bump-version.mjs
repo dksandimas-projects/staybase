@@ -7,6 +7,7 @@ const firstLine = message.split("\n")[0] ?? "";
 const match = firstLine.match(/^([a-z]+)(\([^)]+\))?: .+/);
 const bumpByPrefix = {
   fix: "patch",
+  refactor: "patch",
   feat: "minor",
   release: "major"
 };

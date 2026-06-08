@@ -1,11 +1,24 @@
 # QR Code Management
 > App: admin-app
+> Phase: Phase 8 — Intercom
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §QR Management
 
 ## Overview
 
 The `/qr` dashboard page manages QR codes that link to the guest intercom for each room. Staff can view all room QR codes, regenerate individual codes, and print single codes or all codes in a 4-up A4 layout for physical placement in rooms.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 
