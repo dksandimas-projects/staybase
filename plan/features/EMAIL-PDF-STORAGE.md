@@ -27,7 +27,7 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 ### Email Content Checklist
 
 - [ ] All emails include: spark inn logo, hotel name, address, contact
-- [ ] Booking submitted: booking ref, room, dates, payment instructions, link to `/my-booking`
+- [ ] Booking submitted: acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under review and a final confirmation email will follow after manual verification; includes booking ref, room, dates, payment instructions, link to `/my-booking`
 - [ ] Payment confirmed: receipt of payment, full booking summary
 - [ ] Booking confirmed: final confirmation, check-in time, check-in instructions
 - [ ] Check-in reminder: room details, check-in time, hotel address, contact
