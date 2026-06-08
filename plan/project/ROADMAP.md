@@ -178,12 +178,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > Goal: Public website loads with correct branding, navigation works, static pages done.
 
 ### App Shell
-- ⬜ `App.tsx` + React Router setup (all routes from `plan/guest-app/CLAUDE.md`)
+- ✅ `App.tsx` + React Router setup (all routes from `plan/guest-app/CLAUDE.md`)
 - ⬜ `Navbar.tsx` — horizontal logo, transparent/solid on scroll, mobile menu
 - ⬜ `Footer.tsx` — dark bg, white logo, address, social links, version display
-- ⬜ Page `<title>` tags: `{config.pageTitle} | {Page Name}`
-- ⬜ Open Graph meta tags on all public pages
-- ⬜ Google Analytics 4 injection (conditional on `config.analyticsId`)
+- ✅ Page `<title>` tags: `{config.pageTitle} | {Page Name}`
+- ✅ Open Graph meta tags on all public pages
+- ✅ Google Analytics 4 injection (conditional on `config.analyticsId`)
 - ⬜ 404 page (`NotFoundPage.tsx`)
 
 ### Static Pages
