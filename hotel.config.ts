@@ -61,7 +61,9 @@ export const config = {
   frontDeskPhone: "+63-38-000-0000",
   domain: "sparkinnbohol.com",
   adminDomain: "admin.sparkinnbohol.com",
-  supportEmail: "sparkinn.reservations@gmail.com"
+  supportEmail: "sparkinn.dev@gmail.com",
+  facebookUrl: "https://www.facebook.com/sparkinnbohol",
+  instagramUrl: "https://www.instagram.com/sparkinnbohol"
 } as const;
 
 export type HotelConfig = typeof config;

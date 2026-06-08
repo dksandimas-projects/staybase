@@ -133,7 +133,8 @@ export function ContactPage() {
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Follow Us</p>
                       <div className="flex gap-3 mt-2">
                         <a 
-                          href={`https://facebook.com/${config.brandName.replace(/\s+/g, "")}`}
+                          aria-label={`${config.brandName} on Facebook`}
+                          href={config.facebookUrl}
                           target="_blank" 
                           rel="noreferrer"
                           className="h-8 w-8 rounded-full border border-gray-250 hover:border-primary hover:text-primary flex items-center justify-center text-gray-600 transition"
@@ -141,7 +142,8 @@ export function ContactPage() {
                           <Facebook size={14} />
                         </a>
                         <a 
-                          href={`https://instagram.com/${config.brandName.replace(/\s+/g, "")}`}
+                          aria-label={`${config.brandName} on Instagram`}
+                          href={config.instagramUrl}
                           target="_blank" 
                           rel="noreferrer"
                           className="h-8 w-8 rounded-full border border-gray-250 hover:border-primary hover:text-primary flex items-center justify-center text-gray-600 transition"
