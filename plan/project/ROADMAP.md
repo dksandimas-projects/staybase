@@ -179,8 +179,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### App Shell
 - ✅ `App.tsx` + React Router setup (all routes from `plan/guest-app/CLAUDE.md`)
-- ⬜ `Navbar.tsx` — horizontal logo, transparent/solid on scroll, mobile menu
-- ⬜ `Footer.tsx` — dark bg, white logo, address, social links, version display
+- ✅ `Navbar.tsx` — horizontal logo, transparent/solid on scroll, mobile menu
+- ✅ `Footer.tsx` — dark bg, white logo, address, social links, version display
 - ✅ Page `<title>` tags: `{config.pageTitle} | {Page Name}`
 - ✅ Open Graph meta tags on all public pages
 - ✅ Google Analytics 4 injection (conditional on `config.analyticsId`)
@@ -384,7 +384,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | Phase | Items | Done | Remaining |
 |---|---|---|---|
 | 0 — Foundation | 41 | 40 | 1 |
-| 1 — Guest Shell & Static | 12 | 4 | 8 |
+| 1 — Guest Shell & Static | 12 | 6 | 6 |
 | 2 — Admin Shell & Auth | 6 | 0 | 6 |
 | 3 — Room System | 5 | 0 | 5 |
 | 4 — Booking Flow | 11 | 0 | 11 |
@@ -396,7 +396,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **51** | **106** |
+| **Total** | **157** | **53** | **104** |
 
 ---
 

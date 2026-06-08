@@ -1,6 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import config from "@config";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
@@ -18,6 +18,7 @@ interface NavbarProps {
 }
 
 export function Navbar({ overHero = false }: NavbarProps) {
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(!overHero);
   const solid = !overHero || isScrolled || isOpen;
@@ -30,6 +31,10 @@ export function Navbar({ overHero = false }: NavbarProps) {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, [overHero]);
+
+  useEffect(() => {
+    setIsOpen(false);
+  }, [location.pathname]);
 
   return (
     <header
@@ -62,8 +67,13 @@ export function Navbar({ overHero = false }: NavbarProps) {
         </div>
 
         <button
+          aria-controls="guest-mobile-menu"
+          aria-expanded={isOpen}
           aria-label="Toggle menu"
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-900 md:hidden"
+          className={cn(
+            "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg transition md:hidden",
+            solid ? "text-gray-900 hover:bg-gray-100" : "text-white hover:bg-white/10"
+          )}
           type="button"
           onClick={() => setIsOpen((value) => !value)}
         >
@@ -72,7 +82,7 @@ export function Navbar({ overHero = false }: NavbarProps) {
       </nav>
 
       {isOpen ? (
-        <div className="border-t border-gray-100 bg-white px-4 py-4 shadow-sm md:hidden">
+        <div id="guest-mobile-menu" className="border-t border-gray-100 bg-white px-4 py-4 shadow-sm md:hidden">
           <div className="flex flex-col gap-2">
             {navItems.map((item) => (
               <NavLink
