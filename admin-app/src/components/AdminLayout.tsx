@@ -4,8 +4,20 @@ import { Sidebar } from "./Sidebar";
 import { useAdmin } from "../context/AdminContext";
 
 export function AdminLayout() {
-  const { currentUser, signOut } = useAdmin();
+  const { authLoading, currentUser, signOut } = useAdmin();
   const location = useLocation();
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 font-body text-gray-900">
+        <div className="w-full max-w-sm rounded-card-lg border border-gray-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto h-12 w-12 rounded-full bg-primary-light" />
+          <p className="mt-5 text-sm font-semibold text-gray-950">Checking staff session...</p>
+          <p className="mt-2 text-xs leading-5 text-gray-500">Preparing the dashboard.</p>
+        </div>
+      </div>
+    );
+  }
 
   // Guard: Redirect to login if not logged in
   if (!currentUser) {
@@ -51,7 +63,7 @@ export function AdminLayout() {
             <div className="h-6 w-px bg-gray-200" />
 
             <button
-              onClick={signOut}
+              onClick={() => void signOut()}
               className="min-h-[36px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white hover:bg-red-50 hover:text-red-600 text-xs font-bold text-gray-600 transition"
               title="Sign Out"
             >

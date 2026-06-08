@@ -198,12 +198,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 2 — Admin App Shell & Auth
 > Goal: Admin app loads, login works, sidebar navigation renders correctly per role.
 
-- ⬜ `App.tsx` + React Router + protected route wrapper
-- ⬜ `LoginPage.tsx` — email/password, Firebase Auth
-- ⬜ Auth context — `onAuthStateChanged`, role from custom claims
-- ⬜ `Sidebar.tsx` — role-aware nav, orange active state, version in footer
-- ⬜ Role-based access (Front Desk vs Admin) — redirect on unauthorized access
-- ⬜ Dashboard shell — layout with sidebar + main content area
+- ✅ `App.tsx` + React Router + protected route wrapper
+- ✅ `LoginPage.tsx` — email/password, Firebase Auth
+- ✅ Auth context — `onAuthStateChanged`, role from custom claims
+- ✅ `Sidebar.tsx` — role-aware nav, orange active state, version in footer
+- ✅ Role-based access (Front Desk vs Admin) — restricted pages show access denied for non-admin staff
+- ✅ Dashboard shell — layout with sidebar + main content area
 
 ---
 
@@ -385,7 +385,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 |---|---|---|---|
 | 0 — Foundation | 41 | 40 | 1 |
 | 1 — Guest Shell & Static | 12 | 6 | 6 |
-| 2 — Admin Shell & Auth | 6 | 0 | 6 |
+| 2 — Admin Shell & Auth | 6 | 6 | 0 |
 | 3 — Room System | 5 | 0 | 5 |
 | 4 — Booking Flow | 11 | 0 | 11 |
 | 5 — Admin Bookings | 8 | 3 | 5 |
@@ -396,7 +396,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **53** | **104** |
+| **Total** | **157** | **59** | **98** |
 
 ---
 
