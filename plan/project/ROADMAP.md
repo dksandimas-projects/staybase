@@ -184,14 +184,14 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Page `<title>` tags: `{config.pageTitle} | {Page Name}`
 - ✅ Open Graph meta tags on all public pages
 - ✅ Google Analytics 4 injection (conditional on `config.analyticsId`)
-- ⬜ 404 page (`NotFoundPage.tsx`)
+- ✅ 404 page (`NotFoundPage.tsx`)
 
 ### Static Pages
-- ⬜ Homepage — hero, availability checker, featured rooms, amenities grid, map
-- ⬜ About Us — mission, vision, hotel story (from Firestore)
-- ⬜ Corporate Stays — dark hero, perks, rooms overview, inquiry form + Turnstile
-- ⬜ Contact Us — address, phone, email, map embed, social links
-- ⬜ Privacy Policy — body from Firestore `settings/websiteContent.privacyPolicyBody`
+- ✅ Homepage — hero, availability checker, featured rooms, amenities grid, map
+- ✅ About Us — mission, vision, hotel story
+- ✅ Corporate Stays — dark hero, perks, rooms overview, inquiry form
+- ✅ Contact Us — address, phone, email, map embed, social links
+- ✅ Privacy Policy — RA 10173 sections, DPO contact, versioned footer
 
 ---
 

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Shield, Mail, ArrowLeft, Calendar, FileText } from "lucide-react";
+import { VERSION } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 
@@ -40,7 +41,7 @@ export function PrivacyPage() {
               </span>
               <span className="flex items-center gap-1.5 font-medium">
                 <FileText size={14} />
-                Version {VERSION_MOCK}
+                Version {VERSION}
               </span>
             </div>
           </header>
@@ -147,6 +148,3 @@ export function PrivacyPage() {
     </main>
   );
 }
-
-// Simulated mock version imports matching config constraints
-const VERSION_MOCK = "0.19.0";

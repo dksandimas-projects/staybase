@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Route, Routes } from "react-router-dom";
+import config from "@config";
 import { Analytics } from "./components/Analytics";
 import { PageMeta } from "./components/PageMeta";
 import { AboutPage } from "./pages/AboutPage";
@@ -29,7 +30,7 @@ export function App() {
         <Route
           path="/"
           element={
-            <WithMeta title="spark inn" description="Book a peaceful, consistent boutique hotel stay in Bohol.">
+            <WithMeta title={config.pageTitle} description={`Book a peaceful, consistent boutique hotel stay at ${config.brandName}.`}>
               <HomePage />
             </WithMeta>
           }
@@ -37,7 +38,7 @@ export function App() {
         <Route
           path="/rooms"
           element={
-            <WithMeta title="Rooms" description="Explore room options, amenities, and direct booking rates at spark inn.">
+            <WithMeta title="Rooms" description={`Explore room options, amenities, and direct booking rates at ${config.brandName}.`}>
               <RoomsPage />
             </WithMeta>
           }
@@ -45,7 +46,7 @@ export function App() {
         <Route
           path="/book"
           element={
-            <WithMeta title="Book a Stay" description="Choose dates, select a room, and review your direct booking at spark inn." noIndex>
+            <WithMeta title="Book a Stay" description={`Choose dates, select a room, and review your direct booking at ${config.brandName}.`} noIndex>
               <BookingPage />
             </WithMeta>
           }
@@ -53,7 +54,7 @@ export function App() {
         <Route
           path="/book/confirm"
           element={
-            <WithMeta title="Booking Confirmation" description="Review your spark inn booking confirmation and next steps." noIndex>
+            <WithMeta title="Booking Confirmation" description={`Review your ${config.brandName} booking confirmation and next steps.`} noIndex>
               <BookingConfirmPage />
             </WithMeta>
           }
@@ -61,7 +62,7 @@ export function App() {
         <Route
           path="/my-booking"
           element={
-            <WithMeta title="My Booking" description="Look up your spark inn reservation using your booking reference and email." noIndex>
+            <WithMeta title="My Booking" description={`Look up your ${config.brandName} reservation using your booking reference and email.`} noIndex>
               <BookingLookupPage />
             </WithMeta>
           }
@@ -93,7 +94,7 @@ export function App() {
         <Route
           path="/signin"
           element={
-            <WithMeta title="Sign In" description="Sign in to your spark inn account." noIndex>
+            <WithMeta title="Sign In" description={`Sign in to your ${config.brandName} account.`} noIndex>
               <SignInPage />
             </WithMeta>
           }
@@ -101,7 +102,7 @@ export function App() {
         <Route
           path="/signup"
           element={
-            <WithMeta title="Sign Up" description="Create your spark inn guest account." noIndex>
+            <WithMeta title="Sign Up" description={`Create your ${config.brandName} guest account.`} noIndex>
               <SignUpPage />
             </WithMeta>
           }
@@ -109,7 +110,7 @@ export function App() {
         <Route
           path="/account/profile"
           element={
-            <WithMeta title="Profile" description="Manage your spark inn guest profile." noIndex>
+            <WithMeta title="Profile" description={`Manage your ${config.brandName} guest profile.`} noIndex>
               <ProfilePage />
             </WithMeta>
           }
@@ -117,7 +118,7 @@ export function App() {
         <Route
           path="/account/stays"
           element={
-            <WithMeta title="My Stays" description="Review your previous and upcoming spark inn stays." noIndex>
+            <WithMeta title="My Stays" description={`Review your previous and upcoming ${config.brandName} stays.`} noIndex>
               <StaysPage />
             </WithMeta>
           }
@@ -141,7 +142,7 @@ export function App() {
         <Route
           path="/about"
           element={
-            <WithMeta title="About Us" description="Learn the story, mission, and hospitality promise behind spark inn.">
+            <WithMeta title="About Us" description={`Learn the story, mission, and hospitality promise behind ${config.brandName}.`}>
               <AboutPage />
             </WithMeta>
           }
@@ -149,7 +150,7 @@ export function App() {
         <Route
           path="/contact"
           element={
-            <WithMeta title="Contact Us" description="Find spark inn contact details, address, and map location in Tagbilaran City.">
+            <WithMeta title="Contact Us" description={`Find ${config.brandName} contact details, address, and map location in Tagbilaran City.`}>
               <ContactPage />
             </WithMeta>
           }
@@ -157,7 +158,7 @@ export function App() {
         <Route
           path="/privacy"
           element={
-            <WithMeta title="Privacy Policy" description="Read how spark inn handles guest personal data and privacy rights.">
+            <WithMeta title="Privacy Policy" description={`Read how ${config.brandName} handles guest personal data and privacy rights.`}>
               <PrivacyPage />
             </WithMeta>
           }
@@ -165,7 +166,7 @@ export function App() {
         <Route
           path="*"
           element={
-            <WithMeta title="Page Not Found" description="This spark inn page could not be found." noIndex>
+            <WithMeta title="Page Not Found" description={`This ${config.brandName} page could not be found.`} noIndex>
               <NotFoundPage />
             </WithMeta>
           }
