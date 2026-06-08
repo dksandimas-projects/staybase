@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "spark-inn-stg-7a7ad",
+    "staging": "spark-inn-stg-7a7ad"
+  }
+}
