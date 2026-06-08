@@ -26,13 +26,14 @@ import {
   getNumNights,
   staggerChild,
   staggerContainer,
-  DEFAULT_ROOM_TYPES
+  DEFAULT_ROOM_TYPES,
+  Room
 } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StepIndicator } from "../components/StepIndicator";
-import { rooms } from "../data/rooms";
+import { useRooms } from "../hooks/useRooms";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
@@ -62,6 +63,7 @@ function formatStayDate(value: string) {
 export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
+  const { rooms, loading } = useRooms();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
@@ -108,7 +110,7 @@ export function BookingPage() {
         const typeMatches = selectedType === "all" || room.type === selectedType;
         return room.isActive && room.status === "available" && room.maxCapacity >= guests && typeMatches;
       }),
-    [guests, selectedType]
+    [rooms, guests, selectedType]
   );
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
   const hasBreakfast = breakfastEnabled && rateChoice === "room-breakfast";
@@ -286,6 +288,17 @@ export function BookingPage() {
       {content}
     </main>
   );
+
+  if (loading) {
+    return bookingShell(
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <div className="h-12 w-12 rounded-full bg-primary-light" />
+          <p className="text-sm font-semibold text-gray-505">Checking room availability...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isGuestDetailsStep) {
     return bookingShell(
@@ -1109,7 +1122,7 @@ interface BookingReviewAsideProps {
   guests: number;
   hasBreakfast: boolean;
   nights: number;
-  room: (typeof rooms)[number] | undefined;
+  room: Room | undefined;
   total: number;
   discountPct?: number;
   voucherDiscount?: number;

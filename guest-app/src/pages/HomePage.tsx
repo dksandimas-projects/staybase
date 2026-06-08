@@ -1,6 +1,6 @@
 import { BedDouble, Car, Gift, MapPin, Palmtree, Search, Sparkles, Star, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { fadeUp, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
@@ -10,7 +10,8 @@ import { GhostButton } from "../components/GhostButton";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
-import { amenities, featuredRooms, homepageHeroImage, rewardPerks, services } from "../data/homepage";
+import { useRooms } from "../hooks/useRooms";
+import { amenities, homepageHeroImage, rewardPerks, services } from "../data/homepage";
 
 function sectionTitle(eyebrow: string, title: string, description: string) {
   return (
@@ -25,9 +26,17 @@ function sectionTitle(eyebrow: string, title: string, description: string) {
 export function HomePage() {
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion();
+  const { rooms, loading } = useRooms();
   const [checkIn, setCheckIn] = useState("2026-06-12");
   const [checkOut, setCheckOut] = useState("2026-06-14");
   const [guests, setGuests] = useState(2);
+
+  const featured = useMemo(() => {
+    const ids = ["room-201", "room-204", "room-301"];
+    const matched = rooms.filter((r) => ids.includes(r.id));
+    if (matched.length > 0) return matched;
+    return rooms.slice(0, 3);
+  }, [rooms]);
 
   function searchAvailability() {
     const params = new URLSearchParams({
@@ -123,15 +132,38 @@ export function HomePage() {
           "Unassuming comfort, carefully kept",
           "Rooms are intentionally simple: good rest, easy amenities, and the calm you want after exploring Bohol."
         )}
-        <motion.div
-          className="mx-auto mt-12 grid max-w-7xl gap-6 lg:grid-cols-3"
-          variants={staggerContainer}
-          {...entranceProps}
-        >
-          {featuredRooms.map((room) => (
-            <RoomCard key={room.id} room={room} />
-          ))}
-        </motion.div>
+        {loading ? (
+          <div className="mx-auto mt-12 grid max-w-7xl gap-6 lg:grid-cols-3">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="animate-pulse overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
+                <div className="aspect-[4/3] bg-gray-200" />
+                <div className="p-5 space-y-4">
+                  <div className="h-4 bg-gray-200 rounded w-1/4" />
+                  <div className="h-6 bg-gray-200 rounded w-3/4" />
+                  <div className="space-y-2">
+                    <div className="h-4 bg-gray-200 rounded w-full" />
+                    <div className="h-4 bg-gray-200 rounded w-5/6" />
+                  </div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2" />
+                  <div className="flex justify-between items-center pt-2">
+                    <div className="h-6 bg-gray-200 rounded w-1/4" />
+                    <div className="h-10 bg-gray-200 rounded w-1/3" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <motion.div
+            className="mx-auto mt-12 grid max-w-7xl gap-6 lg:grid-cols-3"
+            variants={staggerContainer}
+            {...entranceProps}
+          >
+            {featured.map((room) => (
+              <RoomCard key={room.id} room={room} />
+            ))}
+          </motion.div>
+        )}
       </section>
 
       <section className="bg-section-bg px-4 py-16 sm:px-6 lg:px-8">

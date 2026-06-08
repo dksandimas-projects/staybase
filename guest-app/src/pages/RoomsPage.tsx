@@ -13,13 +13,14 @@ import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { rooms } from "../data/rooms";
+import { useRooms } from "../hooks/useRooms";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
 export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { rooms, loading } = useRooms();
   const [selectedType, setSelectedType] = useState("all");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
@@ -33,7 +34,7 @@ export function RoomsPage() {
         const typeMatches = selectedType === "all" || room.type === selectedType;
         return room.isActive && typeMatches && room.maxCapacity >= guests;
       }),
-    [guests, selectedType]
+    [rooms, guests, selectedType]
   );
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
   const bookingQuery = `&checkIn=${checkIn}&checkOut=${checkOut}`;
@@ -183,7 +184,7 @@ export function RoomsPage() {
           >
             <div>
               <p className="font-semibold text-gray-950">{filteredRooms.length} rooms match your stay</p>
-              <p className="text-sm text-gray-600">Static wireframe data, shaped like Firestore rooms.</p>
+              <p className="text-sm text-gray-600">Real-time room availability streamed from Firestore.</p>
             </div>
             <GhostButton type="button" className="lg:hidden" onClick={() => setIsFilterOpen(true)}>
               <SlidersHorizontal size={16} />
@@ -191,7 +192,28 @@ export function RoomsPage() {
             </GhostButton>
           </motion.div>
 
-          {filteredRooms.length > 0 ? (
+          {loading ? (
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="animate-pulse overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
+                  <div className="aspect-[4/3] bg-gray-200" />
+                  <div className="p-5 space-y-4">
+                    <div className="h-4 bg-gray-200 rounded w-1/4" />
+                    <div className="h-6 bg-gray-200 rounded w-3/4" />
+                    <div className="space-y-2">
+                      <div className="h-4 bg-gray-200 rounded w-full" />
+                      <div className="h-4 bg-gray-200 rounded w-5/6" />
+                    </div>
+                    <div className="h-4 bg-gray-200 rounded w-1/2" />
+                    <div className="flex justify-between items-center pt-2">
+                      <div className="h-6 bg-gray-200 rounded w-1/4" />
+                      <div className="h-10 bg-gray-200 rounded w-1/3" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filteredRooms.length > 0 ? (
             <motion.div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" variants={staggerContainer} {...entranceProps}>
               {filteredRooms.map((room) => (
                 <RoomCard
