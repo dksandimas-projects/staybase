@@ -210,11 +210,11 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 3 — Room System
 > Goal: Rooms visible on guest site, manageable from admin.
 
-- ⬜ `useRooms` hook — `onSnapshot` on `rooms` collection
-- ⬜ `RoomCard.tsx` — image, name, type badge, amenities, price, availability badge
-- ⬜ Rooms page (`/rooms`) — grid, filters by room type (from `DEFAULT_ROOM_TYPES`), availability badges, detail modal
-- ⬜ Room Management page (`/rooms` admin) — list, edit form, photo upload, status, block reason
-- ⬜ Rate Management page (`/rates`) — dynamic rows from `roomTypes` context, weekend rates, corporate rates, payment methods
+- ✅ `useRooms` hook — `onSnapshot` on `rooms` collection
+- ✅ `RoomCard.tsx` — image, name, type badge, amenities, price, availability badge
+- ✅ Rooms page (`/rooms`) — grid, filters by room type (from `DEFAULT_ROOM_TYPES`), availability badges, detail modal
+- ✅ Room Management page (`/rooms` admin) — list, edit form, photo upload, status, block reason
+- ✅ Rate Management page (`/rates`) — dynamic rows from `roomTypes` context, weekend rates, corporate rates, payment methods
 
 ---
 
@@ -386,7 +386,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 0 — Foundation | 41 | 41 | 0 |
 | 1 — Guest Shell & Static | 12 | 6 | 6 |
 | 2 — Admin Shell & Auth | 6 | 6 | 0 |
-| 3 — Room System | 5 | 0 | 5 |
+| 3 — Room System | 5 | 5 | 0 |
 | 4 — Booking Flow | 11 | 0 | 11 |
 | 5 — Admin Bookings | 8 | 3 | 5 |
 | 6 — Email System | 9 | 0 | 9 |
@@ -396,7 +396,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **60** | **97** |
+| **Total** | **157** | **65** | **92** |
 
 ---
 
