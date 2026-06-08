@@ -11,6 +11,8 @@ import {
 import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
+import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase/config";
 
 type StaffRole = "front-desk" | "admin";
 
@@ -248,9 +250,9 @@ export interface AdminContextType {
 
   // Rooms
   rooms: Room[];
-  toggleHousekeepingStatus: (roomId: string) => void;
-  updateRoomConfig: (roomId: string, updates: Partial<Room>) => void;
-  addRoomBlock: (roomId: string, dates: { from: string; to: string }, reason: string) => void;
+  toggleHousekeepingStatus: (roomId: string) => void | Promise<void>;
+  updateRoomConfig: (roomId: string, updates: Partial<Room>) => void | Promise<void>;
+  addRoomBlock: (roomId: string, dates: { from: string; to: string }, reason: string) => void | Promise<void>;
 
   // Bookings
   bookings: Booking[];
@@ -378,129 +380,88 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   // Rooms Data State
-  const [rooms, setRooms] = useState<Room[]>([
-    {
-      id: "rm-101",
-      name: "Standard Double 101",
-      roomNumber: "101",
-      type: "standard-double",
-      description: "Comfortable standard room on first floor.",
-      maxCapacity: 2,
-      bedDefinition: "1 Double Bed",
-      pricePerNight: 3200,
-      weekendRate: 3700,
-      corporateRate: 2880,
-      amenities: ["TV", "Wifi", "AC", "Hot Shower"],
-      imageUrls: [],
-      isActive: true,
-      status: "available",
-      housekeepingStatus: "clean",
-      blockReason: "",
-      remarks: ""
-    },
-    {
-      id: "rm-102",
-      name: "Family Suite 102",
-      roomNumber: "102",
-      type: "family",
-      description: "Spacious pool access room for family stays.",
-      maxCapacity: 4,
-      bedDefinition: "2 Queen Beds",
-      pricePerNight: 7500,
-      weekendRate: 8500,
-      corporateRate: 6750,
-      amenities: ["TV", "Wifi", "AC", "Hot Shower", "Mini Fridge", "Pool Access"],
-      imageUrls: [],
-      isActive: true,
-      status: "occupied", // matches stay history in My Stays
-      housekeepingStatus: "clean",
-      blockReason: "",
-      remarks: "Requested vegetarian breakfast options"
-    },
-    {
-      id: "rm-201",
-      name: "Standard Twin 201",
-      roomNumber: "201",
-      type: "standard-twin",
-      description: "Cozy standard room with twin beds.",
-      maxCapacity: 2,
-      bedDefinition: "2 Single Beds",
-      pricePerNight: 3200,
-      weekendRate: 3700,
-      corporateRate: 2880,
-      amenities: ["TV", "Wifi", "AC", "Hot Shower"],
-      imageUrls: [],
-      isActive: true,
-      status: "available",
-      housekeepingStatus: "dirty",
-      blockReason: "",
-      remarks: ""
-    },
-    {
-      id: "rm-305",
-      name: "Executive Suite 305",
-      roomNumber: "305",
-      type: "executive",
-      description: "Luxury suite overlooking the river.",
-      maxCapacity: 2,
-      bedDefinition: "1 King Bed",
-      pricePerNight: 4500,
-      weekendRate: 5000,
-      corporateRate: 4050,
-      amenities: ["TV", "Wifi", "AC", "Hot Shower", "Balcony", "Coffee Maker"],
-      imageUrls: [],
-      isActive: true,
-      status: "occupied", // Confirmed stay in stays page
-      housekeepingStatus: "clean",
-      blockReason: "",
-      remarks: "High floor requested"
-    },
-    {
-      id: "rm-401",
-      name: "Sky Loft 401",
-      roomNumber: "401",
-      type: "single",
-      description: "Top floor penthouse layout.",
-      maxCapacity: 2,
-      bedDefinition: "1 Queen Bed",
-      pricePerNight: 5500,
-      weekendRate: 6200,
-      corporateRate: 4950,
-      amenities: ["TV", "Wifi", "AC", "Hot Shower", "Mini Bar", "Bath Tub"],
-      imageUrls: [],
-      isActive: true,
-      status: "available",
-      housekeepingStatus: "clean",
-      blockReason: "",
-      remarks: ""
+  const [rooms, setRooms] = useState<Room[]>([]);
+
+  useEffect(() => {
+    const roomsRef = collection(db, "rooms");
+    const unsubscribe = onSnapshot(roomsRef, (snapshot) => {
+      const roomsData: Room[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        roomsData.push({
+          id: doc.id,
+          name: data.name || "",
+          roomNumber: data.roomNumber || "",
+          type: data.type || "",
+          description: data.description || "",
+          maxCapacity: data.maxCapacity || 0,
+          bedDefinition: data.bedDefinition || "",
+          pricePerNight: data.pricePerNight || 0,
+          weekendRate: data.weekendRate || 0,
+          corporateRate: data.corporateRate || 0,
+          amenities: data.amenities || [],
+          imageUrls: data.imageUrls || [],
+          isActive: data.isActive !== false,
+          status: data.status || "available",
+          housekeepingStatus: data.housekeepingStatus || "clean",
+          blockReason: data.blockReason || "",
+          remarks: data.remarks || ""
+        });
+      });
+
+      // Consistent natural sort by room number
+      roomsData.sort((a, b) =>
+        a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
+      );
+
+      setRooms(roomsData);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const toggleHousekeepingStatus = async (roomId: string) => {
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return;
+    const nextHK: Room["housekeepingStatus"] = room.housekeepingStatus === "clean" ? "dirty" : "clean";
+
+    try {
+      const roomRef = doc(db, "rooms", roomId);
+      await updateDoc(roomRef, {
+        housekeepingStatus: nextHK,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error updating housekeeping status in Firestore:", error);
     }
-  ]);
-
-  const toggleHousekeepingStatus = (roomId: string) => {
-    setRooms(prev => prev.map(rm => {
-      if (rm.id === roomId) {
-        const nextHK: Room["housekeepingStatus"] = rm.housekeepingStatus === "clean" ? "dirty" : "clean";
-        return { ...rm, housekeepingStatus: nextHK };
-      }
-      return rm;
-    }));
   };
 
-  const updateRoomConfig = (roomId: string, updates: Partial<Room>) => {
-    setRooms(prev => prev.map(rm => rm.id === roomId ? { ...rm, ...updates } : rm));
+  const updateRoomConfig = async (roomId: string, updates: Partial<Room>) => {
+    try {
+      const roomRef = doc(db, "rooms", roomId);
+      const dataToUpdate: Record<string, any> = {
+        ...updates,
+        updatedAt: serverTimestamp()
+      };
+      delete dataToUpdate.id; // Exclude ID from updates payload
+
+      await updateDoc(roomRef, dataToUpdate);
+    } catch (error) {
+      console.error("Error updating room config in Firestore:", error);
+    }
   };
 
-  const addRoomBlock = (roomId: string, dates: { from: string; to: string }, reason: string) => {
-    setRooms(prev => prev.map(rm => {
-      if (rm.id === roomId) {
-        return {
-          ...rm,
-          status: "blocked",
-          blockReason: `${reason} (${dates.from} to ${dates.to})`
-        };
-      }
-      return rm;
-    }));
+  const addRoomBlock = async (roomId: string, dates: { from: string; to: string }, reason: string) => {
+    try {
+      const roomRef = doc(db, "rooms", roomId);
+      await updateDoc(roomRef, {
+        status: "blocked",
+        blockReason: `${reason} (${dates.from} to ${dates.to})`,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Error adding room block in Firestore:", error);
+    }
   };
 
   // Bookings Data State
@@ -654,11 +615,17 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const updateBookingStatus = (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
     setBookings(prev => prev.map(bk => {
       if (bk.id === bookingId) {
-        // Automatically check-in / check-out matching rooms
+        // Automatically check-in / check-out matching rooms in Firestore
         if (status === "checked-in") {
-          setRooms(roomsPrev => roomsPrev.map(r => r.roomNumber === bk.roomNumber ? { ...r, status: "occupied" } : r));
+          const matchedRoom = rooms.find(r => r.roomNumber === bk.roomNumber);
+          if (matchedRoom) {
+            void updateRoomConfig(matchedRoom.id, { status: "occupied" });
+          }
         } else if (status === "checked-out") {
-          setRooms(roomsPrev => roomsPrev.map(r => r.roomNumber === bk.roomNumber ? { ...r, status: "available", housekeepingStatus: "dirty" } : r));
+          const matchedRoom = rooms.find(r => r.roomNumber === bk.roomNumber);
+          if (matchedRoom) {
+            void updateRoomConfig(matchedRoom.id, { status: "available", housekeepingStatus: "dirty" });
+          }
         }
         return { ...bk, status, ...details, updatedAt: new Date().toISOString() };
       }
@@ -699,9 +666,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     };
     setBookings(prev => [newBooking, ...prev]);
 
-    // Force update room status if checking in immediately
+    // Force update room status if checking in immediately in Firestore
     if (booking.status === "checked-in") {
-      setRooms(prev => prev.map(r => r.roomNumber === booking.roomNumber ? { ...r, status: "occupied" } : r));
+      const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
+      if (matchedRoom) {
+        void updateRoomConfig(matchedRoom.id, { status: "occupied" });
+      }
     }
   };
 
