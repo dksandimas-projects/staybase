@@ -1,5 +1,6 @@
 # Bookings Management
 > App: admin-app
+> Phase: Phase 5 — Admin Bookings Management
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, docs/API-ROUTES.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Bookings Management
 
@@ -9,13 +10,25 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 
 ---
 
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
+
+---
+
 ## UI Checklist
 
 - [ ] Booking table — columns: Booking Ref, Guest Name, Room, Check-in, Check-out, Source, Payment Method, Status badge, Actions
 - [ ] Table filters — by status, by date range, by source, by room type; search by guest name or booking ref
 - [ ] Table sort — by check-in date (default desc), by created date
-- [ ] Booking detail drawer — slides in from right on row click, full booking details
-- [ ] Drawer — guest info, room, dates, nights, rate, total, discount, voucher, payment method, payment proof (viewable image), discount ID (viewable image), source, notes, status history
+- [x] Booking detail drawer — slides in from right on row click, full booking details
+- [x] Drawer — guest info, room, dates, nights, rate, total, source, notes, status overview
 - [ ] Discount ID photo — shown in drawer when `booking.discountType != ""`:
   - [ ] Thumbnail with "View Full Size" link (opens Firebase Storage URL in new tab)
   - [ ] Label: "OSCA Card" or "PWD ID" depending on `discountType`
@@ -26,34 +39,39 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [ ] Reject action opens a confirmation modal with an optional reason input (e.g. "ID expired", "ID does not match guest name", "Invalid OSCA card") — reason stored and included in rejection email
   - [ ] On rejection: `totalPrice` restored to pre-discount amount; guest is informed to pay full amount at check-in
   - [ ] Once rejected, discount cannot be re-applied from the drawer — guest must contact the hotel if they believe it's a mistake
-- [ ] **Additional Payments panel** — shown in drawer for all bookings with status `confirmed`, `checked-in`, or `checked-out`
-  - [ ] Section heading: "Payments Collected Onsite"
-  - [ ] List of all recorded onsite payments — each row shows: amount (₱), method, note, recorded by, timestamp
-  - [ ] **Total Collected** summary line — sum of all onsite payments
-  - [ ] **Outstanding Balance** line — `booking.totalPrice − totalCollected`; shown in red if > 0, green if 0
-  - [ ] "Record Payment" button — opens inline form:
-    - [ ] Amount input (₱) — required; defaults to outstanding balance for convenience
-    - [ ] Payment method selector — Cash / GCash / PayPal / other enabled methods from `settings/hotelConfig`
-    - [ ] Note field — optional (e.g. "Balance after discount rejection", "Points reversal top-up")
+- [x] **Additional Payments panel** — shown in drawer for all bookings with status `confirmed`, `checked-in`, or `checked-out`
+  - [x] Section heading: "Payments Collected Onsite"
+  - [x] List of all recorded onsite payments — each row shows: amount (₱), method, note, recorded by, timestamp
+  - [x] **Total Collected** summary line — reflected in checkout folio review
+  - [x] **Outstanding Balance** line — `booking.totalPrice − totalCollected`; shown in red if > 0, green if 0
+  - [x] "Record Payment" button — opens inline form:
+    - [x] Amount input (₱) — required
+    - [x] Payment method selector — Cash / card / GCash
+    - [x] Note field — optional (e.g. "Balance after discount rejection", "Points reversal top-up")
     - [ ] Save — `addDoc` to `bookings/{bookingId}/payments` subcollection
   - [ ] Payments list is read-only once saved — no editing, no deletion (audit trail)
   - [ ] When outstanding balance reaches ₱0 — show green "Fully Settled" badge
   - [ ] Walk-in bookings (Pay at Hotel, `status: "confirmed"`) — this panel is how staff confirms cash was received
-- [ ] Status action buttons in drawer — context-aware, show only valid next transitions
-- [ ] Status transitions available per current status (see logic below)
+- [x] Status action buttons in drawer — context-aware, show only valid next transitions
+- [x] Status transitions available per current status (see logic below)
 - [ ] Notes field in drawer — staff can add/edit internal notes, saved to booking
 - [ ] Receipt button — generates and opens printable/downloadable PDF receipt (jsPDF)
 - [ ] Email receipt button — triggers email with receipt to guest
-- [ ] Breakfast selections panel — shown in drawer only if `booking.hasBreakfast: true`
-  - [ ] Grid of dates (one column per night) × guests (one row per guest)
-  - [ ] Each cell: dropdown of active silog items from `settings/breakfastConfig.silogItems`
-  - [ ] Front desk fills this in at check-in after guest completes physical registration form
+- [x] Check-in registration workstation — shown in drawer for `confirmed` / `checked-in`
+  - [x] Guest registry fields: nationality, address, DOB, gender, ID type + number, emergency contact, vehicle plate
+  - [x] Physical registration signature status toggle
+  - [x] Registration PDF preview action placeholder
+- [x] Breakfast selections panel — shown in drawer only if `booking.hasBreakfast: true`
+  - [x] Grid of dates (one column per night) × guests (one row per guest)
+  - [x] Each cell: dropdown of active silog items from `settings/breakfastConfig.silogItems`
+  - [x] Front desk fills this in at check-in after guest completes physical registration form
   - [ ] Save button — `addDoc` / `updateDoc` to `breakfastSelections` per guest per date
-  - [ ] Already-entered selections shown as read-only with edit option
-- [ ] Guest ID upload — shown in drawer when status is `confirmed` or `checked-in`
-  - [ ] Upload button: "Attach Guest ID Photo" — accepts jpg/png/webp, max 5MB
-  - [ ] Thumbnail preview of uploaded ID shown in drawer after upload
-  - [ ] Staff can replace the photo if uploaded incorrectly (re-upload overwrites)
+  - [x] Already-entered selections shown and editable in the wireframe drawer
+- [x] Guest ID upload — shown in drawer when status is `confirmed` or `checked-in`
+  - [x] Upload button: "Attach Guest ID Photo" — accepts jpg/png/webp
+  - [x] Image compression uses shared `compressImageFile()`
+  - [x] Thumbnail preview of uploaded ID shown in drawer after upload
+  - [x] Staff can replace the photo if uploaded incorrectly (re-upload overwrites)
   - [ ] `guestIdPhotoUrl` stored on booking document — viewable only by staff/admin
   - [ ] Stored at `bookings/{bookingId}/guest-id/{filename}` in Firebase Storage (staff-only read rule)
 - [ ] **Spark Rewards — Points Redemption panel** — shown in drawer when booking status is `confirmed`, `checked-in`, or `checked-out` AND `booking.memberId` is set
@@ -68,8 +86,10 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [ ] Undo: removes redemption, restores original `totalPrice`, returns points to member balance — admin only, only available on `confirmed` status (not after check-in)
 - [ ] Unaccompanied minor warning — if booking has `numGuests > 0` and guest age data or staff observation indicates a minor without an adult guardian, show a yellow warning banner in the drawer: "Please verify that minor guests are accompanied by a parent or guardian (RA 11862)." — informational only, does not block actions
 - [ ] Cancellation — opens confirmation modal with optional reason input
-- [ ] Walk-in / manual booking button — "New Booking" CTA opens a creation modal/drawer
-- [ ] Walk-in booking form — all standard booking fields + source selector (Walk-in, Phone, Facebook, Corporate)
+- [x] Checkout folio review — room/add-ons, billed store charges, payments collected, balance due/overpaid/settled state
+- [x] Checkout confirmation guard — warns if staff tries to check out with balance still due
+- [x] Walk-in / manual booking button — "New Booking" CTA opens a creation modal/drawer
+- [x] Walk-in booking form — standard walk-in fields and immediate check-in option
 - [ ] Pagination or infinite scroll on booking table
 - [ ] Loading skeleton on initial data fetch
 

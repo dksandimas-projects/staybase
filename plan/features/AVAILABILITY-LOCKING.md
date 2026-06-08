@@ -1,5 +1,6 @@
 # Availability Locking
 > App: both (enforced server-side)
+> Phase: Phase 4 — Booking Flow (cross-cutting, enforced server-side)
 > Requires: CLAUDE.md, docs/BACKEND.md, docs/API-ROUTES.md, docs/TYPES.md
 > Design ref: N/A — backend logic only
 

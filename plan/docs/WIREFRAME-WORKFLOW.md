@@ -146,25 +146,25 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | ID | Screen | Route | Stitch Source | Feature MD |
 |---|---|---|---|---|---|
-| [ ] | G-01 | Homepage | `/` | `homepage_desktop` + `homepage_mobile` | `plan/features/HOMEPAGE.md` |
+| [x] | G-01 | Homepage | `/` | `homepage_desktop` + `homepage_mobile` | `plan/features/HOMEPAGE.md` |
 | [x] | G-02 | Rooms Page | `/rooms` | `rooms_rates_desktop` + `rooms_rates_mobile` | `plan/features/ROOMS-PAGE.md` |
 | [x] | G-03 | Booking Step 1 — Select Room | `/book` | `booking_step_1_desktop` + `booking_step_1_mobile` | `plan/features/BOOKING-FLOW.md` |
-| [ ] | G-04 | Booking Step 2 — Guest Details | `/book` | `booking_step_2_desktop` + `booking_step_2_mobile` | `plan/features/BOOKING-FLOW.md` |
-| [ ] | G-05 | Booking Step 3 — Review & Pay | `/book` | `booking_step_3_desktop` + `booking_step_3_mobile` | `plan/features/BOOKING-FLOW.md` |
-| [ ] | G-06 | Booking Step 4 — Confirmation | `/book/confirm` | `booking_confirmation_desktop` + `booking_confirmation_mobile` | `plan/features/BOOKING-FLOW.md` |
-| [ ] | G-07 | My Booking Lookup | `/my-booking` | no Stitch source — build from feature MD | `plan/features/BOOKING-LOOKUP.md` |
-| [ ] | G-08 | Corporate Stays Marketing | `/corporate` | `corporate_stays_marketing_desktop` + `corporate_stays_marketing_mobile` | `plan/features/STATIC-PAGES.md` |
-| [ ] | G-09 | Corporate Booking Gate + Flow | `/corporate/book` | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
-| [ ] | G-10 | Spark Rewards Landing | `/rewards` | `spark_rewards_landing_desktop` + `spark_rewards_landing_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-11 | Sign In | `/signin` | `sign_in_desktop` + `sign_in_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-12 | Sign Up | `/signup` | `sign_up_desktop` + `sign_up_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-13 | Member Profile | `/account/profile` | no Stitch source — build from feature MD | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-14 | My Stays | `/account/stays` | `my_stays_desktop` + `my_stays_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-15 | My Rewards Portal | `/account/rewards` | `my_rewards_desktop` + `my_rewards_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | G-16 | Intercom Guest Chat | `/intercom/:roomId` | `intercom_guest_chat_desktop` + `intercom_guest_chat_mobile_1` + `intercom_guest_chat_mobile_2` | `plan/features/INTERCOM-GUEST.md` |
-| [ ] | G-17 | About Us | `/about` | `about_us_desktop` + `about_us_mobile` | `plan/features/STATIC-PAGES.md` |
-| [ ] | G-18 | Contact Us | `/contact` | `contact_us_desktop` + `contact_us_mobile` | `plan/features/STATIC-PAGES.md` |
-| [ ] | G-19 | 404 Not Found | `*` | `404_not_found_desktop` + `404_not_found_mobile` | `plan/features/STATIC-PAGES.md` |
+| [x] | G-04 | Booking Step 2 — Guest Details | `/book` | `booking_step_2_desktop` + `booking_step_2_mobile` | `plan/features/BOOKING-FLOW.md` |
+| [x] | G-05 | Booking Step 3 — Review & Pay | `/book` | `booking_step_3_desktop` + `booking_step_3_mobile` | `plan/features/BOOKING-FLOW.md` |
+| [x] | G-06 | Booking Step 4 — Confirmation | `/book/confirm` | `booking_confirmation_desktop` + `booking_confirmation_mobile` | `plan/features/BOOKING-FLOW.md` |
+| [x] | G-07 | My Booking Lookup | `/my-booking` | no Stitch source — build from feature MD | `plan/features/BOOKING-LOOKUP.md` |
+| [x] | G-08 | Corporate Stays Marketing | `/corporate` | `corporate_stays_marketing_desktop` + `corporate_stays_marketing_mobile` | `plan/features/STATIC-PAGES.md` |
+| [x] | G-09 | Corporate Booking Gate + Flow | `/corporate/book` | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
+| [x] | G-10 | Spark Rewards Landing | `/rewards` | `spark_rewards_landing_desktop` + `spark_rewards_landing_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-11 | Sign In | `/signin` | `sign_in_desktop` + `sign_in_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-12 | Sign Up | `/signup` | `sign_up_desktop` + `sign_up_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-13 | Member Profile | `/account/profile` | no Stitch source — build from feature MD | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-14 | My Stays | `/account/stays` | `my_stays_desktop` + `my_stays_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-15 | My Rewards Portal | `/account/rewards` | `my_rewards_desktop` + `my_rewards_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | G-16 | Intercom Guest Chat | `/intercom/:roomId` | `intercom_guest_chat_desktop` + `intercom_guest_chat_mobile_1` + `intercom_guest_chat_mobile_2` | `plan/features/INTERCOM-GUEST.md` |
+| [x] | G-17 | About Us | `/about` | `about_us_desktop` + `about_us_mobile` | `plan/features/STATIC-PAGES.md` |
+| [x] | G-18 | Contact Us | `/contact` | `contact_us_desktop` + `contact_us_mobile` | `plan/features/STATIC-PAGES.md` |
+| [x] | G-19 | 404 Not Found | `*` | `404_not_found_desktop` + `404_not_found_mobile` | `plan/features/STATIC-PAGES.md` |
 
 ---
 
@@ -174,8 +174,8 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 |---|---|---|---|---|---|
 | [x] | M-01 | Room Detail Modal | Rooms Page "View Details" | `room_detail_modal_desktop` + `room_detail_modal_mobile` | `plan/features/ROOMS-PAGE.md` |
 | [x] | M-02 | Availability Filter Drawer (mobile) | Rooms Page filter bar | `availability_filter_drawer_mobile` | `plan/features/ROOMS-PAGE.md` |
-| [ ] | M-03 | Corporate Access Code Gate | `/corporate/book` landing | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
-| [ ] | M-04 | Voucher Input (inline) | Booking Step 3 | `booking_step_3_with_voucher_desktop` + `booking_step_3_with_voucher_mobile` | `plan/features/BOOKING-FLOW.md` |
+| [x] | M-03 | Corporate Access Code Gate | `/corporate/book` landing | `corporate_access_code_gate_desktop` + `corporate_access_code_gate_mobile` | `plan/features/CORPORATE-BOOKING.md` |
+| [x] | M-04 | Voucher Input (inline) | Booking Step 3 | `booking_step_3_with_voucher_desktop` + `booking_step_3_with_voucher_mobile` | `plan/features/BOOKING-FLOW.md` |
 
 ---
 
@@ -183,17 +183,17 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | ID | Screen | Route | Stitch Source | Feature MD |
 |---|---|---|---|---|---|
-| [ ] | A-01 | Admin Login | `/login` | `admin_login_desktop` + `admin_login_mobile` | `plan/features/AUTH-ROLES.md` |
-| [ ] | A-02 | Dashboard Overview | `/` | `admin_dashboard_desktop` + `admin_dashboard_mobile` | `plan/features/DASHBOARD-OVERVIEW.md` |
-| [ ] | A-03 | Bookings Management | `/bookings` | `bookings_management_desktop` + `bookings_management_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
-| [ ] | A-04 | Room Management | `/rooms` | `room_management_desktop_1` + `room_management_desktop_2` + `room_management_mobile` | `plan/features/ROOM-MANAGEMENT.md` |
-| [ ] | A-05 | Rate Management | `/rates` | `rate_management_desktop_1` + `rate_management_desktop_2` + `rate_management_mobile` | `plan/features/RATE-MANAGEMENT.md` |
-| [ ] | A-06 | Reports | `/reports` | `reports_desktop` + `reports_mobile` | `plan/features/REPORTS.md` |
-| [ ] | A-07 | Corporate Inquiries | `/corporate` | `corporate_inquiries_desktop` + `corporate_inquiries_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
-| [ ] | A-08 | Intercom Inbox | `/intercom` | `intercom_inbox_desktop_1` + `intercom_inbox_desktop_2` + `intercom_inbox_mobile` | `plan/features/INTERCOM-INBOX.md` |
-| [ ] | A-09 | QR Management | `/qr` | `qr_management_desktop` + `qr_management_desktop_refined` + `qr_management_mobile` | `plan/features/QR-MANAGEMENT.md` |
-| [ ] | A-10 | Members (Spark Rewards) | `/members` | `member_management_desktop` + `member_management_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | A-11 | Settings | `/settings` | `hotel_settings_desktop` + `hotel_settings_mobile` + `staff_management_desktop` + `staff_management_mobile` | `plan/features/SETTINGS.md` |
+| [x] | A-01 | Admin Login | `/login` | `admin_login_desktop` + `admin_login_mobile` | `plan/features/AUTH-ROLES.md` |
+| [x] | A-02 | Dashboard Overview | `/` | `admin_dashboard_desktop` + `admin_dashboard_mobile` | `plan/features/DASHBOARD-OVERVIEW.md` |
+| [x] | A-03 | Bookings Management | `/bookings` | `bookings_management_desktop` + `bookings_management_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| [x] | A-04 | Room Management | `/rooms` | `room_management_desktop_1` + `room_management_desktop_2` + `room_management_mobile` | `plan/features/ROOM-MANAGEMENT.md` |
+| [x] | A-05 | Rate Management | `/rates` | `rate_management_desktop_1` + `rate_management_desktop_2` + `rate_management_mobile` | `plan/features/RATE-MANAGEMENT.md` |
+| [x] | A-06 | Reports | `/reports` | `reports_desktop` + `reports_mobile` | `plan/features/REPORTS.md` |
+| [x] | A-07 | Corporate Inquiries | `/corporate` | `corporate_inquiries_desktop` + `corporate_inquiries_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
+| [x] | A-08 | Intercom Inbox | `/intercom` | `intercom_inbox_desktop_1` + `intercom_inbox_desktop_2` + `intercom_inbox_mobile` | `plan/features/INTERCOM-INBOX.md` |
+| [x] | A-09 | QR Management | `/qr` | `qr_management_desktop` + `qr_management_desktop_refined` + `qr_management_mobile` | `plan/features/QR-MANAGEMENT.md` |
+| [x] | A-10 | Members (Spark Rewards) | `/members` | `member_management_desktop` + `member_management_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | A-11 | Settings | `/settings` | `hotel_settings_desktop` + `hotel_settings_mobile` + `staff_management_desktop` + `staff_management_mobile` | `plan/features/SETTINGS.md` |
 
 ---
 
@@ -201,13 +201,13 @@ All Stitch source paths below are relative to `plan/stitch/stitch_spark_inn_fina
 
 | Done | ID | Component | Trigger | Stitch Source | Feature MD |
 |---|---|---|---|---|---|
-| [ ] | D-01 | Booking Detail Drawer | Bookings table row click | `booking_detail_drawer_desktop_1` + `booking_detail_drawer_desktop_2` + `booking_detail_drawer_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
-| [ ] | D-02 | Room Edit Drawer | Room Management "Edit" | `room_edit_drawer_desktop` + `room_edit_drawer_mobile_1` + `room_edit_drawer_mobile_2` | `plan/features/ROOM-MANAGEMENT.md` |
-| [ ] | D-03 | Corporate Inquiry Detail Drawer | Corporate Inquiries card click | `inquiry_detail_drawer_desktop` + `inquiry_detail_drawer_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
-| [ ] | D-04 | Member Detail Drawer | Members table row click | `member_detail_drawer_desktop` + `member_detail_drawer_mobile` | `plan/features/SPARK-REWARDS.md` |
-| [ ] | D-05 | Store Order Detail Drawer | Intercom / Store Reports | `store_order_detail_drawer_desktop_1` + `store_order_detail_drawer_desktop_2` + `store_order_detail_drawer_mobile` | `plan/features/STORE-MANAGEMENT.md` |
-| [ ] | M-05 | Walk-in Booking Modal | Bookings "+ Walk-in Booking" button | `walk_in_booking_modal_desktop` + `walk_in_booking_modal_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
-| [ ] | M-06 | Add/Edit Voucher Modal | Rate Management Vouchers tab | `add_edit_voucher_modal_desktop` + `add_edit_voucher_modal_mobile` | `plan/features/VOUCHERS.md` |
+| [x] | D-01 | Booking Detail Drawer | Bookings table row click | `booking_detail_drawer_desktop_1` + `booking_detail_drawer_desktop_2` + `booking_detail_drawer_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| [x] | D-02 | Room Edit Drawer | Room Management "Edit" | `room_edit_drawer_desktop` + `room_edit_drawer_mobile_1` + `room_edit_drawer_mobile_2` | `plan/features/ROOM-MANAGEMENT.md` |
+| [x] | D-03 | Corporate Inquiry Detail Drawer | Corporate Inquiries card click | `inquiry_detail_drawer_desktop` + `inquiry_detail_drawer_mobile` | `plan/features/CORPORATE-INQUIRIES.md` |
+| [x] | D-04 | Member Detail Drawer | Members table row click | `member_detail_drawer_desktop` + `member_detail_drawer_mobile` | `plan/features/SPARK-REWARDS.md` |
+| [x] | D-05 | Store Order Detail Drawer | Intercom / Store Reports | `store_order_detail_drawer_desktop_1` + `store_order_detail_drawer_desktop_2` + `store_order_detail_drawer_mobile` | `plan/features/STORE-MANAGEMENT.md` |
+| [x] | M-05 | Walk-in Booking Modal | Bookings "+ Walk-in Booking" button | `walk_in_booking_modal_desktop` + `walk_in_booking_modal_mobile` | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| [x] | M-06 | Add/Edit Voucher Modal | Rate Management Vouchers tab | `add_edit_voucher_modal_desktop` + `add_edit_voucher_modal_mobile` | `plan/features/VOUCHERS.md` |
 
 ---
 

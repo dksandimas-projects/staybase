@@ -1,11 +1,24 @@
 # Intercom Inbox
 > App: admin-app
+> Phase: Phase 8 — Intercom
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Intercom Inbox
 
 ## Overview
 
 The `/intercom` dashboard page is the front desk's side of the guest chat system. Staff see a list of active room conversations, open threads to reply, and can mark conversations as resolved. Notification sound alerts staff to new messages when the inbox is not in focus. Quick request badges render distinctly from regular messages.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 

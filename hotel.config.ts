@@ -38,13 +38,6 @@ export const config = {
     wordmark: "TEXT LOGO.png"
   },
   favicon: "ICON LOGO.png",
-  roomTypes: [
-    { value: "single", label: "Single", shortLabel: "Single" },
-    { value: "standard-double", label: "Standard Double", shortLabel: "Std Double" },
-    { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin" },
-    { value: "executive", label: "Executive", shortLabel: "Executive" },
-    { value: "family", label: "Family", shortLabel: "Family" }
-  ],
   currency: "PHP",
   currencySymbol: "₱",
   locale: "en-PH",

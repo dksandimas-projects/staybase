@@ -1,11 +1,24 @@
 # Booking Lookup
 > App: guest-app
+> Phase: Phase 9 — Remaining Features
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/guest-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Booking Lookup
 
 ## Overview
 
 The `/my-booking` page lets guests retrieve their booking using their booking reference number and the email address used at booking. No login required. Guests can view their booking status, cancel (if eligible), and resend their confirmation email.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Single primary action is obvious — user knows what to do next without reading
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Validation is inline (on blur), not on submit
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Back navigation never loses user input
+- [ ] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 

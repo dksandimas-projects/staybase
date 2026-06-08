@@ -1,11 +1,24 @@
 # Reports
 > App: admin-app
+> Phase: Phase 9 — Remaining Features
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Reports
 
 ## Overview
 
 The `/reports` page gives staff visibility into hotel performance and sales over time. Organized into two tabs: **Performance** (occupancy, bookings by source) and **Sales** (all revenue streams consolidated). Both tabs are exportable as PDF and XLSX. Accessible to both Front Desk and Admin roles.
+
+---
+
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
 
 ---
 
@@ -147,8 +160,6 @@ One XLSX file with 4 sheets covering all revenue data.
 - [ ] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
 - [ ] Empty Breakfast sheet with header row only if no breakfast bookings in period
 - [ ] Empty Store Orders sheet with header row only if no store orders in period
-
----
 
 ---
 

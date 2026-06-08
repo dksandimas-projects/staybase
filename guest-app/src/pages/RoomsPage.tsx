@@ -1,6 +1,8 @@
 import { Filter, SlidersHorizontal, Users } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { fadeUp, staggerContainer, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Drawer } from "../components/Drawer";
@@ -16,6 +18,7 @@ import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
 export function RoomsPage() {
+  const shouldReduceMotion = useReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedType, setSelectedType] = useState("all");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
@@ -34,6 +37,13 @@ export function RoomsPage() {
   );
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
   const bookingQuery = `&checkIn=${checkIn}&checkOut=${checkOut}`;
+  const entranceProps = shouldReduceMotion
+    ? {}
+    : {
+        initial: "hidden",
+        whileInView: "visible",
+        viewport: { once: true, margin: "-80px" }
+      };
 
   function updateDateParams(nextCheckIn = checkIn, nextCheckOut = checkOut, nextGuests = guests) {
     setSearchParams({
@@ -100,7 +110,7 @@ export function RoomsPage() {
         <div>
           <p className="text-sm font-medium text-gray-700">Room type</p>
           <div className="mt-3 grid gap-2">
-            {[{ value: "all", label: "All Types" }, ...config.roomTypes].map((type) => (
+            {[{ value: "all", label: "All Types" }, ...DEFAULT_ROOM_TYPES].map((type) => (
               <button
                 key={type.value}
                 className={cn(
@@ -132,7 +142,12 @@ export function RoomsPage() {
     <main className="min-h-screen bg-gray-50 font-body text-gray-900">
       <Navbar />
       <section className="mx-auto max-w-7xl px-4 pb-10 pt-12 sm:px-6 lg:px-8">
-        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+        <motion.div
+          animate="visible"
+          className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end"
+          initial={shouldReduceMotion ? false : "hidden"}
+          variants={fadeUp}
+        >
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Rooms & rates</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Our rooms</h1>
@@ -141,7 +156,7 @@ export function RoomsPage() {
             </p>
           </div>
           <PrimaryButton to={`/book?checkIn=${checkIn}&checkOut=${checkOut}`}>Book selected dates</PrimaryButton>
-        </div>
+        </motion.div>
       </section>
 
       <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[280px_1fr] lg:px-8">
@@ -161,7 +176,11 @@ export function RoomsPage() {
         </aside>
 
         <div>
-          <div className="mb-5 flex flex-col gap-3 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:justify-between">
+          <motion.div
+            className="mb-5 flex flex-col gap-3 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:justify-between"
+            variants={fadeUp}
+            {...entranceProps}
+          >
             <div>
               <p className="font-semibold text-gray-950">{filteredRooms.length} rooms match your stay</p>
               <p className="text-sm text-gray-600">Static wireframe data, shaped like Firestore rooms.</p>
@@ -170,10 +189,10 @@ export function RoomsPage() {
               <SlidersHorizontal size={16} />
               Filters
             </GhostButton>
-          </div>
+          </motion.div>
 
           {filteredRooms.length > 0 ? (
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            <motion.div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" variants={staggerContainer} {...entranceProps}>
               {filteredRooms.map((room) => (
                 <RoomCard
                   key={room.id}
@@ -182,9 +201,9 @@ export function RoomsPage() {
                   onDetails={() => setSelectedRoomId(room.id)}
                 />
               ))}
-            </div>
+            </motion.div>
           ) : (
-            <div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200">
+            <motion.div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200" variants={fadeUp} {...entranceProps}>
               <h2 className="text-xl font-semibold text-gray-950">No rooms match your filters</h2>
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-600">
                 Try a smaller guest count or choose all room types to see more options.
@@ -192,7 +211,7 @@ export function RoomsPage() {
               <PrimaryButton type="button" className="mt-6" onClick={resetFilters}>
                 Reset filters
               </PrimaryButton>
-            </div>
+            </motion.div>
           )}
         </div>
       </section>
@@ -216,7 +235,7 @@ export function RoomsPage() {
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge label={selectedRoom.status === "available" ? "Available" : "Blocked"} status={selectedRoom.status} />
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                {config.roomTypes.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
+                {DEFAULT_ROOM_TYPES.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
               </span>
             </div>
             <p className="leading-7 text-gray-600">{selectedRoom.description}</p>

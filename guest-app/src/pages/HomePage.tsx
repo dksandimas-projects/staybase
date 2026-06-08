@@ -1,6 +1,8 @@
 import { BedDouble, Car, Gift, MapPin, Palmtree, Search, Sparkles, Star, Users } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { fadeUp, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Footer } from "../components/Footer";
@@ -22,6 +24,7 @@ function sectionTitle(eyebrow: string, title: string, description: string) {
 
 export function HomePage() {
   const navigate = useNavigate();
+  const shouldReduceMotion = useReducedMotion();
   const [checkIn, setCheckIn] = useState("2026-06-12");
   const [checkOut, setCheckOut] = useState("2026-06-14");
   const [guests, setGuests] = useState(2);
@@ -37,6 +40,13 @@ export function HomePage() {
 
   const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
   const mapQuery = encodeURIComponent(address);
+  const entranceProps = shouldReduceMotion
+    ? {}
+    : {
+        initial: "hidden",
+        whileInView: "visible",
+        viewport: { once: true, margin: "-80px" }
+      };
 
   return (
     <main className="min-h-screen bg-white font-body text-gray-900">
@@ -49,7 +59,12 @@ export function HomePage() {
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-gray-950/45" />
-        <div className="relative z-10 mx-auto max-w-4xl pt-16">
+        <motion.div
+          animate="visible"
+          className="relative z-10 mx-auto max-w-4xl pt-16"
+          initial={shouldReduceMotion ? false : "hidden"}
+          variants={fadeUp}
+        >
           <p className="font-heading text-lg italic text-white/90 sm:text-2xl">{config.tagline}</p>
           <h1 className="mt-6 font-heading text-5xl leading-tight text-white sm:text-7xl">Your sanctuary in Bohol</h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
@@ -63,11 +78,16 @@ export function HomePage() {
               View rooms
             </GhostButton>
           </div>
-        </div>
+        </motion.div>
       </section>
 
       <section className="relative z-20 mx-auto -mt-20 max-w-5xl px-4 sm:px-6 lg:px-8">
-        <div className="rounded-card-lg bg-white p-4 shadow-xl ring-1 ring-gray-200 sm:p-6">
+        <motion.div
+          animate="visible"
+          className="rounded-card-lg bg-white p-4 shadow-xl ring-1 ring-gray-200 sm:p-6"
+          initial={shouldReduceMotion ? false : "hidden"}
+          variants={fadeUp}
+        >
           <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
             <DateRangePicker
               checkIn={checkIn}
@@ -94,7 +114,7 @@ export function HomePage() {
               Search
             </PrimaryButton>
           </div>
-        </div>
+        </motion.div>
       </section>
 
       <section className="px-4 pb-16 pt-28 sm:px-6 lg:px-8">
@@ -103,11 +123,15 @@ export function HomePage() {
           "Unassuming comfort, carefully kept",
           "Rooms are intentionally simple: good rest, easy amenities, and the calm you want after exploring Bohol."
         )}
-        <div className="mx-auto mt-12 grid max-w-7xl gap-6 lg:grid-cols-3">
+        <motion.div
+          className="mx-auto mt-12 grid max-w-7xl gap-6 lg:grid-cols-3"
+          variants={staggerContainer}
+          {...entranceProps}
+        >
           {featuredRooms.map((room) => (
             <RoomCard key={room.id} room={room} />
           ))}
-        </div>
+        </motion.div>
       </section>
 
       <section className="bg-section-bg px-4 py-16 sm:px-6 lg:px-8">
@@ -116,22 +140,30 @@ export function HomePage() {
           "Everything important, nothing fussy",
           "A boutique hotel should make the basics feel graceful. These are the details we keep steady."
         )}
-        <div className="mx-auto mt-12 grid max-w-6xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <motion.div
+          className="mx-auto mt-12 grid max-w-6xl gap-4 sm:grid-cols-2 lg:grid-cols-4"
+          variants={staggerContainer}
+          {...entranceProps}
+        >
           {amenities.map((amenity, index) => {
             const icons = [BedDouble, MapPin, Users, Sparkles];
             const Icon = icons[index] ?? Sparkles;
 
             return (
-              <article key={amenity.title} className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+              <motion.article
+                key={amenity.title}
+                className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200"
+                variants={staggerChild}
+              >
                 <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary-light text-primary">
                   <Icon size={20} />
                 </span>
                 <h3 className="mt-5 text-lg font-semibold text-gray-950">{amenity.title}</h3>
                 <p className="mt-2 text-sm leading-6 text-gray-600">{amenity.description}</p>
-              </article>
+              </motion.article>
             );
           })}
-        </div>
+        </motion.div>
       </section>
 
       <section className="px-4 py-16 sm:px-6 lg:px-8">
@@ -140,12 +172,20 @@ export function HomePage() {
           "Plans made easier",
           "For tours and transportation, our team can help coordinate the next step. No pressure, no hidden urgency."
         )}
-        <div className="mx-auto mt-12 grid max-w-5xl gap-6 md:grid-cols-2">
+        <motion.div
+          className="mx-auto mt-12 grid max-w-5xl gap-6 md:grid-cols-2"
+          variants={staggerContainer}
+          {...entranceProps}
+        >
           {services.map((service, index) => {
             const Icon = index === 0 ? Palmtree : Car;
 
             return (
-              <article key={service.title} className="rounded-card-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
+              <motion.article
+                key={service.title}
+                className="rounded-card-lg bg-white p-6 shadow-sm ring-1 ring-gray-200"
+                variants={staggerChild}
+              >
                 <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary-light text-primary">
                   <Icon size={22} />
                 </span>
@@ -154,14 +194,18 @@ export function HomePage() {
                 <GhostButton to="/contact" className="mt-6">
                   Contact us
                 </GhostButton>
-              </article>
+              </motion.article>
             );
           })}
-        </div>
+        </motion.div>
       </section>
 
       <section className="bg-sidebar px-4 py-16 text-white sm:px-6 lg:px-8">
-        <div className="mx-auto grid max-w-6xl gap-10 md:grid-cols-[1fr_1.1fr] md:items-center">
+        <motion.div
+          className="mx-auto grid max-w-6xl gap-10 md:grid-cols-[1fr_1.1fr] md:items-center"
+          variants={fadeUp}
+          {...entranceProps}
+        >
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Spark Rewards</p>
             <h2 className="mt-3 font-heading text-3xl sm:text-4xl">Stay often, feel known</h2>
@@ -173,19 +217,27 @@ export function HomePage() {
               Join Spark Rewards
             </PrimaryButton>
           </div>
-          <div className="grid gap-3">
+          <motion.div className="grid gap-3" variants={staggerContainer}>
             {rewardPerks.map((perk) => (
-              <div key={perk} className="flex items-center gap-3 rounded-card bg-white/10 p-4 ring-1 ring-white/10">
+              <motion.div
+                key={perk}
+                className="flex items-center gap-3 rounded-card bg-white/10 p-4 ring-1 ring-white/10"
+                variants={staggerChild}
+              >
                 <Star size={18} className="text-primary" />
                 <span className="font-medium">{perk}</span>
-              </div>
+              </motion.div>
             ))}
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       </section>
 
       <section className="px-4 py-16 sm:px-6 lg:px-8">
-        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
+        <motion.div
+          className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-center"
+          variants={fadeUp}
+          {...entranceProps}
+        >
           <div>
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Location</p>
             <h2 className="mt-3 font-heading text-3xl text-gray-950 sm:text-4xl">A practical base in Tagbilaran</h2>
@@ -202,7 +254,7 @@ export function HomePage() {
               referrerPolicy="no-referrer-when-downgrade"
             />
           </div>
-        </div>
+        </motion.div>
       </section>
 
       <Footer />

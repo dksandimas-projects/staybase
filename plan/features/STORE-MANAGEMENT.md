@@ -1,5 +1,6 @@
 # Spark Essentials — Store Management
 > App: admin-app
+> Phase: Phase 8 — Intercom (Spark Essentials)
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Store Management
 
@@ -9,22 +10,36 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 
 ---
 
+## UX Checklist
+> Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
+
+- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [ ] Loading state uses skeleton, not spinner
+- [ ] Drawers save without full page reload — optimistic update, toast on success
+- [ ] Every error state has a plain-language message and a next step — no dead ends
+- [ ] Destructive actions have a single confirmation step — not buried in menus
+- [ ] Empty states explain why data is missing and what to do
+
+---
+
 ## Catalog Management (within Settings → Store tab)
 
 ### UI Checklist
-- [ ] Item list — name, price, stock (count or "Unlimited"), status badge (Active/Inactive), edit + delete buttons
-- [ ] Add item form — name, description (optional), price, stock quantity (number or toggle for unlimited), photo upload (optional), active toggle
-- [ ] Edit item — same fields as add
-- [ ] Delete item — confirmation modal ("Orders referencing this item will not be affected")
-- [ ] Enable/disable store globally — toggle at top of Store settings tab
-- [ ] Store payment methods — enable/disable CoD, Add to Bill, GCash (with QR upload and account info) — separate from booking payment methods
+- [x] Item list — name, category, price, stock (count or "Unlimited"), status badge (Active/Inactive), edit + delete buttons
+- [x] Category filters — Drinks, Snacks, Toiletries, Rentals, Other
+- [x] Add item modal — name, category, description (optional), price, stock quantity (number or toggle for unlimited), compressed photo upload preview, active toggle
+- [x] Edit item modal — same fields as add
+- [x] Delete item — confirmation prompt ("Orders referencing this item will not be affected")
+- [x] Enable/disable store globally — toggle at top of Store settings tab
+- [x] Store payment methods — enable/disable CoD, Add to Bill, GCash — separate from booking payment methods
+- [ ] GCash QR upload and account info for store payments
 
 ### Data & Logic Checklist
 - [ ] `addDoc` / `updateDoc` / `deleteDoc` on `storeItems` collection
 - [ ] Stock: `null` = unlimited, `0` = out of stock, `n` = n remaining
 - [ ] Deleting an item: soft-delete (`isActive: false`) if it has existing orders — never hard delete referenced items
 - [ ] Store config saved to `settings/storeConfig` — `isEnabled`, `paymentMethods[]`
-- [ ] Item photo: upload to Firebase Storage at `store-items/{itemId}/{filename}`
+- [ ] Item photo: compress with shared `compressImageFile()`, then upload to Firebase Storage at `store-items/{itemId}/{filename}`
 
 ---
 

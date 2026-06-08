@@ -19,7 +19,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 |---|---|---|
 | `name` | string | e.g. "Room 202 — Executive" |
 | `roomNumber` | string | e.g. "202" |
-| `type` | string | Free-form string matching a `value` in `hotel.config.ts → roomTypes[]` e.g. `"single"`, `"deluxe-sea-view"` |
+| `type` | string | Free-form string matching a dynamic room type `value` (defaults defined in `@spark-inn/shared → DEFAULT_ROOM_TYPES`, managed at runtime via Admin UI) e.g. `"single"`, `"deluxe-sea-view"` |
 | `description` | string | |
 | `maxCapacity` | number | |
 | `bedDefinition` | string | e.g. "1 queen size bed" |
@@ -83,6 +83,9 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `pointsRedeemedAt` | timestamp \| null | When redemption was applied |
 | `hasBreakfast` | boolean | `true` if breakfast add-on purchased |
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
+| `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
+| `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, ID type/number, emergency contact, vehicle plate, signature status |
+| `breakfastSelections` | map | Wire format `yyyy-mm-dd-guest-n` → selected silog item name; may later move to `breakfastSelections` collection |
 | `cancellationReason` | string | |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
@@ -428,7 +431,7 @@ Full rules live in `firebase/firestore.rules`.
 - Use `getFirestore()`, `getAuth()`, `getStorage()` — do not re-initialize
 - Firestore real-time: `onSnapshot` in custom hooks — always unsubscribe in cleanup
 - Firestore one-time: `getDoc` / `getDocs` for non-reactive reads
-- Storage: `uploadBytes` + `getDownloadURL` for file uploads
+- Storage: compress image files with shared `compressImageFile()` before `uploadBytes`, then store the `getDownloadURL` result in Firestore
 - Auth: `onAuthStateChanged` listener in auth hook — unsubscribe on cleanup
 
 See `plan/docs/GOTCHAS.md` for common Firebase pitfalls.

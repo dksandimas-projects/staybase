@@ -20,6 +20,7 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | API route surface | `plan/docs/API-ROUTES.md` |
 | Feature UI + logic checklists | Relevant `plan/features/*.md` |
 | Wireframe workflow, screen checklist, Stitch asset map | `plan/docs/WIREFRAME-WORKFLOW.md` |
+| IP ownership, ToS, GDPR, accessibility commitment, licensing, support terms | `plan/docs/LEGAL.md` |
 | Master TOC + read bundles + hard rules | `CLAUDE.md` |
 | Session bootstrapping context | `plan/project/context/spark-inn-MASTER-CONTEXT.md` |
 
@@ -70,7 +71,7 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | `release:` | Production release | MAJOR |
 | `docs:` | MD or documentation update only | None |
 | `chore:` | Tooling, config, dependencies | None |
-| `refactor:` | Code change with no behavior change | None |
+| `refactor:` | Code change with no behavior change | PATCH |
 | `style:` | Formatting, whitespace | None |
 
 Husky's `commit-msg` hook auto-bumps `shared/VERSION.ts` based on the prefix.
@@ -102,6 +103,33 @@ If you find the same information in two MDs, that is a bug. Fix it by:
 1. Identifying which MD owns the information (table above)
 2. Keeping the content only in the owning MD
 3. Replacing the duplicate with a reference line
+
+---
+
+## Definition of Done (per phase)
+
+A phase is not complete until every item below is checked. DK signs off before starting the next phase.
+
+- [ ] All P0 features for this phase are built and manually QA'd against their feature MD checklists
+- [ ] No known critical bugs (broken flows, data errors, security issues)
+- [ ] Accessibility checklist passed on all new screens (see `plan/docs/FRONTEND.md §Accessibility`)
+- [ ] All new Firestore collections have security rules tested in emulator
+- [ ] No `.env` values hardcoded anywhere in committed code
+- [ ] `shared/VERSION.ts` bumped correctly
+- [ ] Staging (Vercel `dev` branch preview) reviewed and approved by DK
+- [ ] Client has seen a demo and given written (chat/email) go-ahead to proceed
+
+---
+
+## Change Request Process
+
+Scope is defined per phase. If the client requests a change mid-phase:
+
+1. **Minor clarification** (same feature, clearer spec) → implement immediately, no process needed
+2. **Small addition** (new field, new email trigger, new status) → log in `DECISIONS-FEATURES.md`, implement if it fits within phase timeline, otherwise defer to next phase
+3. **New feature or significant scope change** → stop, discuss with client, get written confirmation, add to `ROADMAP.md` as a new phase item or separate quote
+
+Rule of thumb: **if it changes the data model, adds a screen, or takes more than 2 hours — it's a change request, not a clarification.** Never implement unconfirmed scope changes silently.
 
 ---
 

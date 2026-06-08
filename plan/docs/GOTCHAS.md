@@ -57,6 +57,7 @@ Things agents must never do. Check this file before implementing any feature.
 
 - **Payment proof uploads go to Firebase Storage** — store the download URL in the booking document's `paymentProofUrl` field.
 - **Never store raw file blobs in Firestore** — Firestore has a 1MB document size limit. Always use Firebase Storage for files.
+- **Compress images before upload** — use the shared `compressImageFile()` utility for room photos, IDs, payment proofs, QR images, store item photos, and website content photos so uploads stay readable but efficient.
 
 ---
 
@@ -101,7 +102,7 @@ Things agents must never do. Check this file before implementing any feature.
 - **Never hardcode room count** — room count is dynamic from Firestore. Do not write `Array(14)` or similar anywhere.
 - **`hotel.config.ts` is deploy-time, not runtime** — changes require a redeploy. It is not the same as `settings/hotelConfig` in Firestore which is runtime-editable.
 - **`public/brand/` filenames must match `hotel.config.ts → logos` paths exactly** — a mismatch causes broken images with no build-time error.
-- **Never hardcode room type strings** like `"single"` or `"executive"` in UI components — always iterate `config.roomTypes[]`. Hardcoded strings will be wrong for every non-Spark Inn client.
+- **Never hardcode room type strings** like `"single"` or `"executive"` in UI components — always iterate the active dynamic room types from context (admin app uses `roomTypes` from `AdminContext`, guest app uses `DEFAULT_ROOM_TYPES` from `@spark-inn/shared`). Hardcoded strings will be wrong for every non-Spark Inn client.
 - **Never hardcode `₱`, `PHP`, `Asia/Manila`, `en-PH`, or `+63`** — use `config.currencySymbol`, `config.currency`, `config.timezone`, `config.locale`, `config.phoneCountryCode`.
 - **Never hardcode `SI-` booking reference prefix** — use `config.bookingRefPrefix`.
 - **`hotel.config.ts` is not editable at runtime** — it requires a redeploy. Do not instruct hotel admins to edit it. Runtime-editable content goes in Firestore Settings.
