@@ -82,3 +82,5 @@ For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 | 60 | Homepage Services section (Tour Packages, Car Rentals) — display only, CTA links to Contact Us — no booking or pricing |
 | 61 | Homepage Spark Rewards section — shows Join CTA for non-members, Welcome back for logged-in members |
 | 62 | Services and Spark Rewards homepage sections editable from Settings → Website Content — sections hidden when disabled |
+| 74 | Email acknowledgment: the booking submitted email acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under manual review and a final confirmation email will follow after verification |
+

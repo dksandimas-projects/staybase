@@ -127,7 +127,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Booking creation via `/api/bookings/create` using Firestore transaction — see `plan/features/AVAILABILITY-LOCKING.md`
 - [ ] Booking reference generated server-side: `{config.bookingRefPrefix}-YYYYMMDD-NNN`
 - [ ] Rate locked at booking creation time — stored in `ratePerNight`
-- [ ] Email triggered via `/api/email/booking-submitted` after successful creation
+- [ ] Email triggered via `/api/email/booking-submitted` after successful creation — acts as an acknowledgment/receipt submission warning the guest that their booking/payment is under review and that an official confirmation will follow once verified
 - [ ] `isCorporate`, `corporateCode`, `companyName` set server-side — never trusted from client
 - [ ] Initial status: `"pending"` (or `"payment-uploaded"` if screenshot provided)
 

@@ -20,14 +20,18 @@ import {
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
   getNumNights,
   staggerChild,
   staggerContainer,
   DEFAULT_ROOM_TYPES,
-  Room
+  Room,
+  compressImageFile
 } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
@@ -60,22 +64,52 @@ function formatStayDate(value: string) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+const getTodayIso = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const getTomorrowIso = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
 export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
-  const { rooms, loading } = useRooms();
+  const { rooms, loading: roomsLoading } = useRooms();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
 
-  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
-  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? "2026-06-14");
+  // Persistent unique booking ID pre-generated client-side
+  const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
+
+  // Dynamic config states loaded from Firestore
+  const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+  const [hotelConfig, setHotelConfig] = useState<any>(null);
+  const [websiteContent, setWebsiteContent] = useState<any>(null);
+  const [allBookings, setAllBookings] = useState<any[]>([]);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+
+  const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getTodayIso());
+  const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getTomorrowIso());
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
   const [selectedType, setSelectedType] = useState("all");
   const [selectedRoomId, setSelectedRoomId] = useState(searchParams.get("roomId") ?? "");
-  const [rateChoice, setRateChoice] = useState<RateChoice>(
+  
+  // RateChoice initially set based on query search params
+  const [rateChoice, setRateChoice] = useState<RateChoice>(() =>
     searchParams.get("breakfast") === "yes" ? "room-breakfast" : "room-only"
   );
+
   const [guestDetails, setGuestDetails] = useState({
     firstName: searchParams.get("firstName") ?? "",
     lastName: searchParams.get("lastName") ?? "",
@@ -83,8 +117,10 @@ export function BookingPage() {
     phone: searchParams.get("phone") ?? "",
     guestCount: String(Number(searchParams.get("guests") ?? 2)),
     requests: searchParams.get("requests") ?? "",
-    consent: false
+    consent: false,
+    _hp: ""
   });
+
   const [touchedFields, setTouchedFields] = useState<Record<GuestField, boolean>>({
     firstName: false,
     lastName: false,
@@ -93,40 +129,96 @@ export function BookingPage() {
     guestCount: false
   });
 
-  // Step 3 State
+  // Step 3 States
   const [voucherCode, setVoucherCode] = useState("");
   const [voucherApplied, setVoucherApplied] = useState(false);
+  const [voucherDiscountValue, setVoucherDiscountValue] = useState(0);
+  const [voucherDiscountType, setVoucherDiscountType] = useState<"percent" | "flat">("flat");
   const [voucherError, setVoucherError] = useState("");
+  const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
+
   const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
   const [discountIdFile, setDiscountIdFile] = useState<string | null>(null);
+  const [discountIdUrl, setDiscountIdUrl] = useState<string | null>(null);
+  const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
+
   const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank" | "pay-at-hotel">("gcash");
   const [paymentProofFile, setPaymentProofFile] = useState<string | null>(null);
+  const [paymentProofUrl, setPaymentProofUrl] = useState<string | null>(null);
+  const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
+
   const [termsConsent, setTermsConsent] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const navigate = useNavigate();
 
   const nights = Math.max(getNumNights(checkIn, checkOut), 1);
-  const availableRooms = useMemo(
-    () =>
-      rooms.filter((room) => {
-        const typeMatches = selectedType === "all" || room.type === selectedType;
-        return room.isActive && room.status === "available" && room.maxCapacity >= guests && typeMatches;
-      }),
-    [rooms, guests, selectedType]
-  );
+
+  // Filter available rooms dynamically by checking active date overlaps client-side
+  const availableRooms = useMemo(() => {
+    const reqStart = new Date(`${checkIn}T00:00:00Z`);
+    const reqEnd = new Date(`${checkOut}T00:00:00Z`);
+
+    return rooms.filter((room) => {
+      const typeMatches = selectedType === "all" || room.type === selectedType;
+      if (!room.isActive || room.status === "blocked" || room.maxCapacity < guests || !typeMatches) {
+        return false;
+      }
+
+      // Check if there is an overlapping active booking
+      const hasOverlap = allBookings.some((booking) => {
+        if (booking.roomId !== room.id) return false;
+        const bStart = booking.checkIn;
+        const bEnd = booking.checkOut;
+        return bStart < reqEnd && bEnd > reqStart;
+      });
+
+      return !hasOverlap;
+    });
+  }, [rooms, allBookings, checkIn, checkOut, guests, selectedType]);
+
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
-  const hasBreakfast = breakfastEnabled && rateChoice === "room-breakfast";
+  const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
+  const breakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
+
+  // Calculate room total client-side, incorporating weekend rates (Saturdays and Sundays)
+  const roomTotal = useMemo(() => {
+    if (!selectedRoom) return 0;
+    let totalRate = 0;
+    const start = new Date(`${checkIn}T00:00:00Z`);
+    for (let i = 0; i < nights; i++) {
+      const date = new Date(start);
+      date.setUTCDate(start.getUTCDate() + i);
+      const day = date.getUTCDay(); // 0 = Sun, 6 = Sat
+      const isWeekend = day === 0 || day === 6;
+      if (isWeekend && selectedRoom.weekendRate) {
+        totalRate += selectedRoom.weekendRate;
+      } else {
+        totalRate += selectedRoom.pricePerNight;
+      }
+    }
+    return totalRate;
+  }, [selectedRoom, checkIn, nights]);
 
   const discountPct = discountType === "none" ? 0 : 20;
-  const roomTotal = selectedRoom ? selectedRoom.pricePerNight * nights : 0;
-  const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
+  const breakfastTotal = hasBreakfast ? breakfastRate * guests * nights : 0;
   const subtotal = roomTotal + breakfastTotal;
-  const voucherDiscount = voucherApplied ? Math.round(subtotal * 0.1) : 0;
+
+  const voucherDiscount = useMemo(() => {
+    if (!voucherApplied) return 0;
+    if (voucherDiscountType === "percent") {
+      return Math.round(subtotal * (voucherDiscountValue / 100));
+    }
+    return voucherDiscountValue;
+  }, [voucherApplied, voucherDiscountType, voucherDiscountValue, subtotal]);
 
   const total = selectedRoom
     ? calculateBookingTotal({
         ratePerNight: selectedRoom.pricePerNight,
         numNights: nights,
         numGuests: guests,
-        breakfastRate: breakfastRatePerPerson,
+        breakfastRate: breakfastRate,
         hasBreakfast,
         discountPct,
         voucherDiscount
@@ -149,16 +241,6 @@ export function BookingPage() {
   reviewParams.set("phone", guestDetails.phone);
   reviewParams.set("requests", guestDetails.requests);
 
-  const confirmParams = new URLSearchParams({
-    bookingRef: `${config.bookingRefPrefix}-${new Date().getFullYear()}0612-042`,
-    roomId: selectedRoom?.id ?? "",
-    checkIn,
-    checkOut,
-    guests: String(guests),
-    paymentMethod,
-    total: String(total)
-  });
-
   const guestErrors = {
     firstName: guestDetails.firstName.trim() ? "" : "First name is required.",
     lastName: guestDetails.lastName.trim() ? "" : "Last name is required.",
@@ -171,7 +253,73 @@ export function BookingPage() {
   };
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedRoom);
-  const nightlyTotal = selectedRoom ? selectedRoom.pricePerNight + (hasBreakfast ? breakfastRatePerPerson * guests : 0) : 0;
+  const nightlyTotal = selectedRoom ? selectedRoom.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0) : 0;
+
+  // Real-time Firestore Listeners and Config Fetches
+  useEffect(() => {
+    async function fetchConfigs() {
+      try {
+        const bSnap = await getDoc(doc(db, "settings", "breakfastConfig"));
+        if (bSnap.exists()) {
+          setBreakfastConfig(bSnap.data() as any);
+        }
+        const hSnap = await getDoc(doc(db, "settings", "hotelConfig"));
+        if (hSnap.exists()) {
+          setHotelConfig(hSnap.data());
+        }
+        const wSnap = await getDoc(doc(db, "settings", "websiteContent"));
+        if (wSnap.exists()) {
+          setWebsiteContent(wSnap.data());
+        }
+      } catch (err) {
+        console.error("Error fetching configs:", err);
+      } finally {
+        setSettingsLoading(false);
+      }
+    }
+
+    fetchConfigs();
+
+    // Subscribe to bookings to track real-time occupancy and prevent client-side double booking selection
+    const q = query(
+      collection(db, "bookings"),
+      where("status", "!=", "cancelled")
+    );
+    const unsubscribeBookings = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        checkIn: (d.data().checkIn as any)?.toDate(),
+        checkOut: (d.data().checkOut as any)?.toDate()
+      }));
+      setAllBookings(list);
+    }, (err) => {
+      console.error("Bookings subscription error:", err);
+    });
+
+    return unsubscribeBookings;
+  }, []);
+
+  // Inject Turnstile script and register token callback
+  useEffect(() => {
+    const scriptId = "turnstile-script";
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+
+    (window as any).onTurnstileSuccess = (token: string) => {
+      setTurnstileToken(token);
+    };
+
+    return () => {
+      delete (window as any).onTurnstileSuccess;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedRoomId && availableRooms[0]) {
@@ -217,59 +365,179 @@ export function BookingPage() {
     }));
   }
 
-  function markTouched(field: GuestField) {
-    setTouchedFields((current) => ({
-      ...current,
-      [field]: true
-    }));
-  }
-
-  function handleApplyVoucher(e: React.FormEvent) {
+  // Real API calls for Voucher validation
+  async function handleApplyVoucher(e: React.FormEvent) {
     e.preventDefault();
-    const code = voucherCode.trim().toUpperCase();
-
-    if (code === "SPARK10") {
-      setVoucherApplied(true);
-      setVoucherError("");
-    } else if (code === "") {
+    const code = voucherCode.trim();
+    if (!code) {
       setVoucherError("Please enter a code.");
-    } else if (code === "EXPIRED") {
-      setVoucherError(voucherMessages.expired);
+      return;
+    }
+
+    setIsValidatingVoucher(true);
+    setVoucherError("");
+
+    try {
+      const response = await fetch("/api/validate/voucher", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          roomType: selectedRoom?.type,
+          turnstileToken: turnstileToken || "mock_token"
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Invalid voucher code.");
+      }
+
+      setVoucherApplied(true);
+      setVoucherDiscountValue(result.data.discountValue);
+      setVoucherDiscountType(result.data.discountType);
+      setVoucherError("");
+    } catch (err: any) {
+      console.error("Voucher error:", err);
+      setVoucherError(err.message || "We could not find that voucher. Check the code and try again.");
       setVoucherApplied(false);
-    } else if (code === "USEDUP") {
-      setVoucherError(voucherMessages["usage-limit"]);
-      setVoucherApplied(false);
-    } else if (code === "ROOMONLY") {
-      setVoucherError(voucherMessages["room-mismatch"]);
-      setVoucherApplied(false);
-    } else {
-      setVoucherError(voucherMessages.invalid);
-      setVoucherApplied(false);
+    } finally {
+      setIsValidatingVoucher(false);
     }
   }
 
   function handleRemoveVoucher() {
     setVoucherApplied(false);
     setVoucherCode("");
+    setVoucherDiscountValue(0);
   }
 
   function handleDiscountChange(type: "none" | "senior" | "pwd") {
     setDiscountType(type);
     if (type === "none") {
       setDiscountIdFile(null);
+      setDiscountIdUrl(null);
     }
   }
 
-  function handleDiscountIdChange(e: React.ChangeEvent<HTMLInputElement>) {
+  // Image upload handlers with compression
+  async function handleDiscountIdChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
-      setDiscountIdFile(e.target.files[0].name);
+      const file = e.target.files[0];
+      setUploadingDiscountId(true);
+      try {
+        const compressed = await compressImageFile(file);
+        const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${compressed.file.name}`);
+        await uploadBytes(storageRef, compressed.file);
+        const url = await getDownloadURL(storageRef);
+        setDiscountIdUrl(url);
+        setDiscountIdFile(file.name);
+      } catch (err) {
+        console.error("Discount ID upload failed:", err);
+        alert("Image upload failed. Please try again.");
+      } finally {
+        setUploadingDiscountId(false);
+      }
     }
   }
 
-  function handlePaymentProofChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePaymentProofChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
-      setPaymentProofFile(e.target.files[0].name);
+      const file = e.target.files[0];
+      setUploadingPaymentProof(true);
+      try {
+        const compressed = await compressImageFile(file);
+        const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
+        await uploadBytes(storageRef, compressed.file);
+        const url = await getDownloadURL(storageRef);
+        setPaymentProofUrl(url);
+        setPaymentProofFile(file.name);
+      } catch (err) {
+        console.error("Payment proof upload failed:", err);
+        alert("Receipt upload failed. Please try again.");
+      } finally {
+        setUploadingPaymentProof(false);
+      }
     }
+  }
+
+  // Confirm booking API request
+  async function handleConfirmBooking() {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const response = await fetch("/api/bookings/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingId,
+          roomId: selectedRoom?.id,
+          checkIn,
+          checkOut,
+          guests,
+          hasBreakfast,
+          guestDetails: {
+            firstName: guestDetails.firstName,
+            lastName: guestDetails.lastName,
+            email: guestDetails.email,
+            phone: guestDetails.phone,
+            requests: guestDetails.requests,
+            consent: guestDetails.consent
+          },
+          discountType: discountType === "none" ? "" : discountType,
+          discountIdPhotoUrl: discountIdUrl,
+          voucherCode: voucherApplied ? voucherCode : "",
+          paymentMethod,
+          paymentProofUrl: paymentProofUrl,
+          isCorporate: false,
+          turnstileToken: turnstileToken || "mock_token",
+          _hp: guestDetails._hp || ""
+        })
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to confirm booking.");
+      }
+
+      // Successful creation, redirect to confirmation page
+      const confirmParams = new URLSearchParams({
+        bookingRef: result.data.bookingRef,
+        roomId: selectedRoom?.id || "",
+        checkIn,
+        checkOut,
+        guests: String(guests),
+        paymentMethod,
+        total: String(total)
+      });
+      navigate(`/book/confirm?${confirmParams.toString()}`);
+    } catch (err: any) {
+      console.error("Confirm booking error:", err);
+      if (err.message === "Room no longer available") {
+        setSubmitError("Sorry, this room is no longer available for your selected dates. Please go back and choose another room.");
+        // Auto redirect to Step 1 after 5 seconds
+        setTimeout(() => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.delete("step");
+          nextParams.delete("roomId");
+          setSearchParams(nextParams);
+          setSubmitError("");
+          setIsSubmitting(false);
+        }, 5000);
+      } else {
+        setSubmitError(err.message || "An unexpected error occurred. Please try again.");
+        setIsSubmitting(false);
+      }
+    }
+  }
+
+  function markTouched(field: GuestField) {
+    setTouchedFields((current) => ({
+      ...current,
+      [field]: true
+    }));
   }
 
   const getBackToPath = () => {
@@ -289,12 +557,14 @@ export function BookingPage() {
     </main>
   );
 
-  if (loading) {
+  const isScreenLoading = roomsLoading || settingsLoading;
+
+  if (isScreenLoading) {
     return bookingShell(
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="animate-pulse flex flex-col items-center gap-4">
           <div className="h-12 w-12 rounded-full bg-primary-light" />
-          <p className="text-sm font-semibold text-gray-505">Checking room availability...</p>
+          <p className="text-sm font-semibold text-gray-500">Checking room availability...</p>
         </div>
       </div>
     );
@@ -417,7 +687,7 @@ export function BookingPage() {
 
             <motion.div className="mt-6 flex gap-3 rounded-lg bg-gray-50 p-4 text-sm text-gray-700" variants={staggerChild}>
               <ShieldCheck size={18} className="mt-0.5 shrink-0 text-primary" />
-              <p>This static wireframe keeps details in local React state only. Booking creation will happen later through the API.</p>
+              <p>Your personal details are collected securely in accordance with the Data Privacy Act of 2012.</p>
             </motion.div>
           </motion.form>
 
@@ -429,6 +699,7 @@ export function BookingPage() {
             nights={nights}
             room={selectedRoom}
             total={total}
+            breakfastRate={breakfastRate}
           />
         </section>
 
@@ -456,9 +727,12 @@ export function BookingPage() {
   }
 
   if (isReviewStep) {
-    const isIdUploadRequired = discountType !== "none" && !discountIdFile;
-    const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofFile;
+    const isIdUploadRequired = discountType !== "none" && !discountIdUrl;
+    const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUrl;
     const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedRoom);
+
+    // Retrieve active payment method details from hotelConfig
+    const activePaymentConfig = hotelConfig?.paymentMethods?.find((p: any) => p.method === paymentMethod);
 
     return bookingShell(
       <>
@@ -481,11 +755,7 @@ export function BookingPage() {
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Voucher or Promo Code</h3>
               <p className="mt-1 text-sm text-gray-600">
-                Apply a promo code to get discounts on your stay. Try{" "}
-                <span className="font-semibold text-primary">SPARK10</span> for a valid state, or{" "}
-                <span className="font-semibold text-gray-700">EXPIRED</span>,{" "}
-                <span className="font-semibold text-gray-700">USEDUP</span>, and{" "}
-                <span className="font-semibold text-gray-700">ROOMONLY</span> for validation states.
+                Apply a promo code to get discounts on your stay.
               </p>
               
               <form onSubmit={handleApplyVoucher} className="mt-4 flex gap-3">
@@ -497,7 +767,7 @@ export function BookingPage() {
                     setVoucherCode(e.target.value);
                     setVoucherError("");
                   }}
-                  disabled={voucherApplied}
+                  disabled={voucherApplied || isValidatingVoucher}
                   className="min-h-11 flex-grow rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500"
                 />
                 {voucherApplied ? (
@@ -511,9 +781,10 @@ export function BookingPage() {
                 ) : (
                   <button
                     type="submit"
-                    className="min-h-11 rounded-lg border border-primary px-6 text-sm font-semibold text-primary transition hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary"
+                    disabled={isValidatingVoucher || !voucherCode.trim()}
+                    className="min-h-11 rounded-lg border border-primary px-6 text-sm font-semibold text-primary transition hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
                   >
-                    Apply
+                    {isValidatingVoucher ? "Applying..." : "Apply"}
                   </button>
                 )}
               </form>
@@ -521,7 +792,7 @@ export function BookingPage() {
               {voucherApplied && (
                 <p className="mt-3 text-sm font-medium text-status-green-text flex items-center gap-1.5">
                   <CheckCircle2 size={16} />
-                  Promo code SPARK10 applied successfully! (10% discount)
+                  Promo code {voucherCode.toUpperCase()} applied successfully! ({voucherDiscountType === "percent" ? `${voucherDiscountValue}%` : formatPrice(voucherDiscountValue)} discount)
                 </p>
               )}
               {voucherError && (
@@ -571,7 +842,10 @@ export function BookingPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setDiscountIdFile(null)}
+                          onClick={() => {
+                            setDiscountIdFile(null);
+                            setDiscountIdUrl(null);
+                          }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
                           Delete
@@ -580,13 +854,16 @@ export function BookingPage() {
                     ) : (
                       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
                         <UploadCloud size={28} className="text-gray-400" />
-                        <span className="mt-2 text-sm font-semibold text-gray-700">Click to upload ID photo</span>
+                        <span className="mt-2 text-sm font-semibold text-gray-700">
+                          {uploadingDiscountId ? "Uploading ID Card..." : "Click to upload ID photo"}
+                        </span>
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPG, PNG, WEBP up to 5MB</span>
                         <input
                           type="file"
                           accept="image/*"
                           onChange={handleDiscountIdChange}
                           className="sr-only"
+                          disabled={uploadingDiscountId}
                         />
                       </label>
                     )}
@@ -634,20 +911,22 @@ export function BookingPage() {
                 </button>
 
                 {/* Pay at Hotel */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("pay-at-hotel")}
-                  className={cn(
-                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
-                    paymentMethod === "pay-at-hotel"
-                      ? "border-primary bg-primary-light ring-1 ring-primary"
-                      : "border-gray-200 bg-white hover:border-primary"
-                  )}
-                >
-                  <CreditCard size={20} className={paymentMethod === "pay-at-hotel" ? "text-primary" : "text-gray-500"} />
-                  <span className="mt-3 block text-sm font-bold text-gray-900">Pay at Hotel</span>
-                  <span className="mt-0.5 block text-xs text-gray-500">Upon arrival</span>
-                </button>
+                {(!hotelConfig || hotelConfig.payAtHotelEnabled) && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod("pay-at-hotel")}
+                    className={cn(
+                      "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                      paymentMethod === "pay-at-hotel"
+                        ? "border-primary bg-primary-light ring-1 ring-primary"
+                        : "border-gray-200 bg-white hover:border-primary"
+                    )}
+                  >
+                    <CreditCard size={20} className={paymentMethod === "pay-at-hotel" ? "text-primary" : "text-gray-500"} />
+                    <span className="mt-3 block text-sm font-bold text-gray-900">Pay at Hotel</span>
+                    <span className="mt-0.5 block text-xs text-gray-500">Upon arrival</span>
+                  </button>
+                )}
               </div>
 
               {/* Conditional Instructions Panel */}
@@ -656,7 +935,7 @@ export function BookingPage() {
                   <div className="grid sm:grid-cols-5">
                     <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
                       <img
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYBsw9jHiKwa9uZlbY7gkxyAiWy9iO8lZGoL0XHN7xvIgaNO7vtr3QzTuUUpa_zti6o6V77lVXpUrBfIxdcwCku-9V2_zJ34vuxteegFyGZ4gCaqLUNSjPW4oFlX7juZojMJzOFBtLH0-TtD5RZlk-kS5FqRBZopVFBvPkfjSRUQofx5VzpEkkdwPiIa0kQXNQw7VhHMmE_HC0DE8lIDCX5aSWJF_3v0N07C1i8nr2Giua6iOdTxTVWNr1aZZhfSvTeu9kbaXNA1xb"
+                        src={activePaymentConfig?.qrUrl || "https://lh3.googleusercontent.com/aida-public/AB6AXuCYBsw9jHiKwa9uZlbY7gkxyAiWy9iO8lZGoL0XHN7xvIgaNO7vtr3QzTuUUpa_zti6o6V77lVXpUrBfIxdcwCku-9V2_zJ34vuxteegFyGZ4gCaqLUNSjPW4oFlX7juZojMJzOFBtLH0-TtD5RZlk-kS5FqRBZopVFBvPkfjSRUQofx5VzpEkkdwPiIa0kQXNQw7VhHMmE_HC0DE8lIDCX5aSWJF_3v0N07C1i8nr2Giua6iOdTxTVWNr1aZZhfSvTeu9kbaXNA1xb"}
                         alt="GCash / Maya QR Code"
                         className="h-40 w-40 object-contain rounded"
                       />
@@ -664,7 +943,10 @@ export function BookingPage() {
                     <div className="sm:col-span-3 p-5 flex flex-col justify-center">
                       <h4 className="font-semibold text-primary text-base">Scan to Pay</h4>
                       <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                        Please use your digital wallet (GCash or Maya) to scan the QR code. Ensure the recipient name is <span className="font-bold text-gray-800">spark inn Bohol</span>.
+                        Please use your digital wallet (GCash or Maya) to scan the QR code. Ensure the recipient name is <span className="font-bold text-gray-800">{activePaymentConfig?.accountName || "spark inn Bohol"}</span>.
+                      </p>
+                      <p className="mt-1 text-xs font-semibold text-gray-800">
+                        Number: {activePaymentConfig?.accountNumber || "0917-000-0000"}
                       </p>
                       <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
                         <li className="flex items-center gap-1.5">
@@ -686,15 +968,15 @@ export function BookingPage() {
                     <div className="mt-3 grid gap-3 text-xs text-gray-600 sm:grid-cols-3">
                       <div>
                         <p className="font-bold text-gray-500 uppercase tracking-wide">Bank Name</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">BPI</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.label || "BPI"}</p>
                       </div>
                       <div>
                         <p className="font-bold text-gray-500 uppercase tracking-wide">Account Name</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">Spark Inn Hotel Corp</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountName || "Spark Inn Hotel Corp"}</p>
                       </div>
                       <div>
                         <p className="font-bold text-gray-500 uppercase tracking-wide">Account Number</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">1234-5678-90</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountNumber || "1234-5678-90"}</p>
                       </div>
                     </div>
                     <ul className="mt-4 space-y-1.5 text-xs text-gray-500">
@@ -725,7 +1007,7 @@ export function BookingPage() {
                   <p className="text-sm font-semibold text-gray-700">
                     Upload Proof of Payment <span className="text-red-500">*</span>
                   </p>
-                  <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful GCash/Maya payment or bank transfer receipt.</p>
+                  <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful digital wallet payment or bank transfer receipt.</p>
                   
                   <div className="mt-3">
                     {paymentProofFile ? (
@@ -736,7 +1018,10 @@ export function BookingPage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setPaymentProofFile(null)}
+                          onClick={() => {
+                            setPaymentProofFile(null);
+                            setPaymentProofUrl(null);
+                          }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
                           Delete
@@ -745,13 +1030,16 @@ export function BookingPage() {
                     ) : (
                       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
                         <UploadCloud size={28} className="text-gray-400" />
-                        <span className="mt-2 text-sm font-semibold text-gray-700">Click to upload receipt photo</span>
+                        <span className="mt-2 text-sm font-semibold text-gray-700">
+                          {uploadingPaymentProof ? "Uploading Receipt..." : "Click to upload receipt photo"}
+                        </span>
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
                         <input
                           type="file"
                           accept="image/*"
                           onChange={handlePaymentProofChange}
                           className="sr-only"
+                          disabled={uploadingPaymentProof}
                         />
                       </label>
                     )}
@@ -764,10 +1052,29 @@ export function BookingPage() {
             <input
               type="text"
               name="_hp"
+              value={guestDetails._hp || ""}
+              onChange={(e) => updateGuestDetail("_hp", e.target.value)}
               className="absolute opacity-0 pointer-events-none"
               tabIndex={-1}
               autoComplete="off"
             />
+
+            {/* Cancellation Policy */}
+            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+              <details className="group">
+                <summary className="flex cursor-pointer items-center justify-between font-semibold text-gray-950 list-none">
+                  <span>Cancellation Policy</span>
+                  <span className="transition group-open:rotate-180">
+                    <svg className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </span>
+                </summary>
+                <div className="mt-3 text-sm text-gray-600 leading-relaxed border-t border-gray-100 pt-3">
+                  {websiteContent?.cancellationPolicy || "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount."}
+                </div>
+              </details>
+            </div>
 
             {/* Terms and conditions */}
             <div className="mt-6">
@@ -787,6 +1094,20 @@ export function BookingPage() {
                 </span>
               </label>
             </div>
+
+            {/* Cloudflare Turnstile Challenge */}
+            <div
+              className="cf-turnstile mt-6 flex justify-center"
+              data-sitekey={import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"}
+              data-callback="onTurnstileSuccess"
+            ></div>
+
+            {submitError && (
+              <div className="flex gap-2 rounded-lg bg-red-50 p-4 text-sm font-medium text-red-700">
+                <Info size={16} className="mt-0.5 shrink-0" />
+                <p>{submitError}</p>
+              </div>
+            )}
           </div>
 
           <BookingReviewAside
@@ -809,7 +1130,13 @@ export function BookingPage() {
             <div>
               <p className="text-sm text-gray-600">Review & Pay</p>
               <p className="text-lg font-semibold text-gray-950">
-                {!termsConsent
+                {isSubmitting
+                  ? "Processing booking request..."
+                  : uploadingDiscountId
+                  ? "Uploading discount ID photo..."
+                  : uploadingPaymentProof
+                  ? "Uploading payment proof receipt..."
+                  : !termsConsent
                   ? "Agree to terms and conditions"
                   : isIdUploadRequired
                   ? "Please upload your Senior/PWD ID"
@@ -818,15 +1145,14 @@ export function BookingPage() {
                   : "Ready to confirm booking"}
               </p>
             </div>
-            {canConfirm ? (
-              <PrimaryButton to={`/book/confirm?${confirmParams.toString()}`} className="sm:min-w-56">
-                Confirm Booking
-              </PrimaryButton>
-            ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Confirm Booking
-              </PrimaryButton>
-            )}
+            <button
+              type="button"
+              onClick={handleConfirmBooking}
+              disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
+              className="flex min-h-11 items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
+            >
+              {isSubmitting ? "Processing..." : "Confirm Booking"}
+            </button>
           </div>
         </div>
       </>
@@ -1128,6 +1454,7 @@ interface BookingReviewAsideProps {
   voucherDiscount?: number;
   discountType?: "none" | "senior" | "pwd";
   voucherApplied?: boolean;
+  breakfastRate?: number;
 }
 
 function BookingReviewAside({
@@ -1141,12 +1468,30 @@ function BookingReviewAside({
   discountPct = 0,
   voucherDiscount = 0,
   discountType = "none",
-  voucherApplied = false
+  voucherApplied = false,
+  breakfastRate
 }: BookingReviewAsideProps) {
   if (!room) return null;
 
-  const roomTotal = room.pricePerNight * nights;
-  const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
+  const roomTotal = useMemo(() => {
+    let totalRate = 0;
+    const start = new Date(`${checkIn}T00:00:00Z`);
+    for (let i = 0; i < nights; i++) {
+      const date = new Date(start);
+      date.setUTCDate(start.getUTCDate() + i);
+      const day = date.getUTCDay(); // 0 = Sun, 6 = Sat
+      const isWeekend = day === 0 || day === 6;
+      if (isWeekend && room.weekendRate) {
+        totalRate += room.weekendRate;
+      } else {
+        totalRate += room.pricePerNight;
+      }
+    }
+    return totalRate;
+  }, [room, checkIn, nights]);
+
+  const activeBreakfastRate = breakfastRate ?? 350;
+  const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;
   const subtotal = roomTotal + breakfastTotal;
   const discountAmount = subtotal * (discountPct / 100);
 
@@ -1182,7 +1527,7 @@ function BookingReviewAside({
             ) : null}
             {voucherApplied ? (
               <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
-                <span>Voucher (SPARK10)</span>
+                <span>Voucher Discount</span>
                 <span>-{formatPrice(voucherDiscount)}</span>
               </div>
             ) : null}

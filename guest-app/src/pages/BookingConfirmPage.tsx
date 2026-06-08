@@ -46,6 +46,8 @@ export function BookingConfirmPage() {
     alert("Adding reservation to your local calendar...");
   }
 
+  const isOnlinePayment = rawPaymentMethod === "gcash" || rawPaymentMethod === "bank";
+
   const entranceProps = shouldReduceMotion
     ? {}
     : {
@@ -67,9 +69,13 @@ export function BookingConfirmPage() {
           <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-light text-primary shadow-lg shadow-primary-light/50">
             <CheckCircle2 size={48} className="animate-pulse" />
           </div>
-          <h1 className="mt-6 font-heading text-4xl text-gray-950 sm:text-5xl">Your booking is confirmed.</h1>
+          <h1 className="mt-6 font-heading text-4xl text-gray-950 sm:text-5xl">
+            {isOnlinePayment ? "Booking submitted for review" : "Your booking is confirmed."}
+          </h1>
           <p className="mt-3 text-base text-gray-600 sm:text-lg">
-            We're looking forward to hosting you at {config.brandName}.
+            {isOnlinePayment
+              ? "We have received your details. Our team is verifying your payment and will send an official confirmation shortly."
+              : `We're looking forward to hosting you at ${config.brandName}.`}
           </p>
         </motion.div>
 
@@ -135,7 +141,11 @@ export function BookingConfirmPage() {
           transition={{ delay: 0.35, duration: 0.4 }}
         >
           <Mail size={16} className="text-primary" />
-          <span>A confirmation has been sent to your email. See you soon!</span>
+          <span>
+            {isOnlinePayment
+              ? "An acknowledgment email has been sent. Official confirmation will follow after payment verification."
+              : "A confirmation has been sent to your email. See you soon!"}
+          </span>
         </motion.div>
 
         {/* Action Buttons */}

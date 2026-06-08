@@ -254,7 +254,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ Resend client setup in `api/lib/resend.ts`
 - ⬜ Firebase Admin SDK setup in `api/lib/firebase-admin.ts`
-- ⬜ Email: booking submitted
+- ⬜ Email: booking acknowledgment / submitted (warning guest of manual review)
 - ⬜ Email: payment confirmed
 - ⬜ Email: booking confirmed
 - ⬜ Email: check-in reminder (scheduled — cron or trigger)

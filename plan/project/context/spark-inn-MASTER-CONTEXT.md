@@ -686,7 +686,7 @@ All emails sent via Resend through Vercel API routes.
 
 | Trigger | Recipient | Content |
 |---|---|---|
-| Booking submitted | Guest | Booking reference, summary, payment instructions |
+| Booking submitted | Guest | Booking reference, summary, payment instructions, manual review warning |
 | Payment confirmed by staff | Guest | Confirmation payment received, full booking details |
 | Booking confirmed | Guest | Final confirmation, check-in instructions |
 | Check-in reminder | Guest | Sent 1 day before check-in date |
