@@ -387,16 +387,16 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 1 — Guest Shell & Static | 12 | 6 | 6 |
 | 2 — Admin Shell & Auth | 6 | 6 | 0 |
 | 3 — Room System | 5 | 5 | 0 |
-| 4 — Booking Flow | 11 | 0 | 11 |
-| 5 — Admin Bookings | 8 | 3 | 5 |
-| 6 — Email System | 9 | 0 | 9 |
+| 4 — Booking Flow | 11 | 11 | 0 |
+| 5 — Admin Bookings | 8 | 8 | 0 |
+| 6 — Email System | 9 | 4 | 5 |
 | 7 — Corporate & Vouchers | 12 | 1 | 11 |
 | 8 — Intercom | 10 | 2 | 8 |
 | 9 — Remaining Features | 5 | 1 | 4 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **65** | **92** |
+| **Total** | **157** | **85** | **72** |
 
 ---
 
