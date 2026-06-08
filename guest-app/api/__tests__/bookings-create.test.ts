@@ -23,26 +23,68 @@ vi.mock("../lib/resend", () => ({
 
 // Mock Firebase Admin SDK
 vi.mock("../lib/firebase-admin", () => {
-  const createDocRef = (path: string) => ({
-    path,
-    firestore: {
-      valueType: true
-    }
-  });
+  const createDocRef = (path: string) => {
+    const [coll, docId] = path.split("/");
+    return {
+      path,
+      firestore: {
+        valueType: true
+      },
+      get: async () => {
+        if (coll === "bookings") {
+          const found = mockBookings.find(b => b.id === docId || b.bookingId === docId || b.bookingRef === docId);
+          if (found) {
+            return {
+              exists: true,
+              data: () => found
+            };
+          }
+        }
+        return { exists: false };
+      },
+      update: async (upd: any) => {
+        if (coll === "bookings") {
+          const found = mockBookings.find(b => b.id === docId || b.bookingId === docId || b.bookingRef === docId);
+          if (found) {
+            Object.assign(found, upd);
+            updateCalls.push({ path, data: upd });
+          }
+        }
+      },
+      collection: (sub: string) => ({
+        add: async (subData: any) => {
+          setCalls.push({ path: `${path}/${sub}`, data: subData });
+          return { id: "mock_sub_id" };
+        }
+      })
+    };
+  };
 
   const mockCollection = (collName: string) => ({
     isQuery: collName === "bookings",
     path: collName,
     where: function () { return this; },
+    limit: function () { return this; },
     doc: (docId: string) => {
       return createDocRef(`${collName}/${docId}`);
+    },
+    get: async function () {
+      const docs = mockBookings.map(b => ({
+        data: () => b,
+        exists: true,
+        id: b.id || b.bookingId || "mock_id",
+        ref: createDocRef(`bookings/${b.id || b.bookingId || b.bookingRef}`)
+      }));
+      return {
+        empty: docs.length === 0,
+        docs
+      };
     }
   });
 
   const mockTransaction = {
     get: vi.fn().mockImplementation(async (ref: any) => {
       if (ref && ref.isQuery) {
-        // Query snapshot mock
         const docs = mockBookings.map(b => ({
           data: () => b,
           exists: true,
@@ -98,6 +140,17 @@ vi.mock("../lib/firebase-admin", () => {
         return { exists: false };
       }
 
+      if (coll === "bookings") {
+        const found = mockBookings.find(b => b.id === docId || b.bookingId === docId || b.bookingRef === docId);
+        if (found) {
+          return {
+            exists: true,
+            data: () => found
+          };
+        }
+        return { exists: false };
+      }
+
       return { exists: false };
     }),
     set: vi.fn().mockImplementation((ref: any, data: any) => {
@@ -136,13 +189,14 @@ const mockResponse = () => {
   return res;
 };
 
-const mockRequest = (body: any, method = "POST", url = "/api/bookings/create") => {
+const mockRequest = (body: any, method = "POST", url = "/api/bookings/create", customHeaders = {}) => {
   return {
     method,
     body,
     url,
     headers: {
-      host: "localhost"
+      host: "localhost",
+      ...customHeaders
     },
     socket: {
       remoteAddress: "127.0.0.1"
@@ -404,5 +458,211 @@ describe("/api/bookings/create", () => {
       error: "Bot verification token is missing."
     });
     expect(setCalls.length).toBe(0);
+  });
+
+  describe("staff actions (walk-ins, payments, discount rejections, cancellations)", () => {
+    test("POST /api/bookings/create-walkin: creates booking with override", async () => {
+      const walkinBody = {
+        bookingId: "walkin_123",
+        roomId: "room_101",
+        checkIn: "2026-06-15",
+        checkOut: "2026-06-18",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Walk-in",
+          lastName: "Guest",
+          email: "walkin@guest.com",
+          phone: "09171112222"
+        },
+        paymentMethod: "cash",
+        status: "confirmed",
+        totalPriceOverride: 5000 // overridden price
+      };
+
+      const req = mockRequest(walkinBody, "POST", "/api/bookings/create-walkin");
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          bookingId: "walkin_123"
+        })
+      }));
+
+      const createdWalkin = setCalls.find(call => call.path === "bookings/walkin_123")?.data;
+      expect(createdWalkin).toBeDefined();
+      expect(createdWalkin.totalPrice).toBe(5000);
+      expect(createdWalkin.originalTotalPrice).toBe(6000); // standard: 2000 per night * 3 nights = 6000
+      expect(createdWalkin.source).toBe("walk-in");
+    });
+
+    test("POST /api/bookings/create-walkin: blocks unauthenticated requests", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+
+      const walkinBody = {
+        bookingId: "walkin_auth",
+        roomId: "room_101",
+        checkIn: "2026-06-15",
+        checkOut: "2026-06-18",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Auth",
+          lastName: "Test",
+          email: "auth@test.com",
+          phone: "000"
+        },
+        paymentMethod: "cash",
+        status: "confirmed"
+      };
+
+      const req = mockRequest(walkinBody, "POST", "/api/bookings/create-walkin");
+      const res = mockResponse();
+      await handler(req, res);
+
+      process.env.NODE_ENV = originalEnv;
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "Unauthorized: Missing or invalid authorization token."
+      });
+    });
+
+    test("POST /api/bookings/create-walkin: blocks unauthenticated requests", async () => {
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+
+      const walkinBody = {
+        bookingId: "walkin_auth",
+        roomId: "room_101",
+        checkIn: "2026-06-15",
+        checkOut: "2026-06-18",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Auth",
+          lastName: "Test",
+          email: "auth@test.com",
+          phone: "000"
+        },
+        paymentMethod: "cash",
+        status: "confirmed"
+      };
+
+      const req = mockRequest(walkinBody, "POST", "/api/bookings/create-walkin");
+      const res = mockResponse();
+      await handler(req, res);
+
+      process.env.NODE_ENV = originalEnv;
+
+      expect(res.status).toHaveBeenCalledWith(401);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "Unauthorized: Missing or invalid authorization token."
+      });
+    });
+
+    test("POST /api/bookings/add-payment: records onsite payment", async () => {
+      const existingBooking = {
+        id: "booking_to_pay",
+        bookingId: "booking_to_pay",
+        totalPrice: 6000,
+        status: "confirmed"
+      };
+      mockBookings.push(existingBooking);
+
+      const paymentBody = {
+        bookingId: "booking_to_pay",
+        amount: 2500,
+        method: "cash",
+        note: "Folio deposit"
+      };
+
+      const req = mockRequest(paymentBody, "POST", "/api/bookings/add-payment", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true
+      }));
+
+      const loggedPayment = setCalls.find(call => call.path.startsWith("bookings/booking_to_pay/payments"))?.data;
+      expect(loggedPayment).toBeDefined();
+      expect(loggedPayment.amount).toBe(2500);
+      expect(loggedPayment.method).toBe("cash");
+      expect(loggedPayment.recordedBy).toBe("mock_staff@sparkinn.com"); // server-side resolved from staff token info
+    });
+
+    test("POST /api/bookings/reject-discount: rejects government discount and restores full price", async () => {
+      const discountedBooking = {
+        id: "booking_discounted",
+        bookingId: "booking_discounted",
+        bookingRef: "SI-20260608-888",
+        guestName: "Senior Citizen Test",
+        guestEmail: "guest_sr@example.com",
+        discountType: "senior",
+        discountPct: 20,
+        originalTotalPrice: 6000,
+        totalPrice: 4800,
+        status: "pending",
+        checkIn: { toDate: () => new Date("2026-06-12") },
+        checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockBookings.push(discountedBooking);
+
+      const rejectBody = {
+        bookingId: "booking_discounted",
+        reason: "Invalid ID card photo quality"
+      };
+
+      const req = mockRequest(rejectBody, "POST", "/api/bookings/reject-discount", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+
+      // Assert database document was updated correctly
+      expect(discountedBooking.discountRejected).toBe(true);
+      expect(discountedBooking.discountRejectedBy).toBe("mock_staff@sparkinn.com");
+      expect(discountedBooking.discountRejectionReason).toBe("Invalid ID card photo quality");
+      expect(discountedBooking.discountPct).toBe(0);
+      expect(discountedBooking.totalPrice).toBe(6000); // full price restored
+    });
+
+    test("POST /api/bookings/cancel: transitions booking status to cancelled", async () => {
+      const activeBooking = {
+        id: "booking_to_cancel",
+        bookingId: "booking_to_cancel",
+        bookingRef: "SI-20260608-011",
+        guestName: "Guest To Cancel",
+        guestEmail: "cancel@guest.com",
+        status: "confirmed",
+        checkIn: { toDate: () => new Date("2026-06-12") },
+        checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockBookings.push(activeBooking);
+
+      const cancelBody = {
+        bookingId: "booking_to_cancel",
+        reason: "Change of plans"
+      };
+
+      const req = mockRequest(cancelBody, "POST", "/api/bookings/cancel", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+
+      expect(activeBooking.status).toBe("cancelled");
+      expect(activeBooking.cancellationReason).toBe("Change of plans");
+    });
   });
 });

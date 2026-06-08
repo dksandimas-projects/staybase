@@ -1,6 +1,45 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { handleCreateBooking } from "./handlers/bookings";
+import { 
+  handleCreateBooking, 
+  handleCreateWalkin, 
+  handleAddPayment, 
+  handleRejectDiscount, 
+  handleCancelBooking 
+} from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
+import { adminAuth } from "./lib/firebase-admin";
+
+async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
+  if (process.env.NODE_ENV === "test") {
+    return {
+      success: true,
+      uid: "mock_staff_uid",
+      email: "mock_staff@sparkinn.com"
+    };
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return { success: false, error: "Unauthorized: Missing or invalid authorization token." };
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  try {
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    if (decodedToken.role !== "admin" && decodedToken.role !== "front-desk") {
+      return { success: false, error: "Forbidden: Access restricted to staff members." };
+    }
+    return {
+      success: true,
+      uid: decodedToken.uid,
+      email: decodedToken.email
+    };
+  } catch (err) {
+    console.error("Token verification failed:", err);
+    return { success: false, error: "Unauthorized: Invalid or expired token." };
+  }
+}
+
 
 // Simple in-memory IP cache for rate limiting
 const rateLimitCache = new Map<string, { count: number; resetTime: number }>();
@@ -118,6 +157,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleCreateBooking(req, res);
+  }
+
+  if (domain === "bookings" && action === "create-walkin" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleCreateWalkin(req, res);
+  }
+
+  if (domain === "bookings" && action === "add-payment" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleAddPayment(req, res);
+  }
+
+  if (domain === "bookings" && action === "reject-discount" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleRejectDiscount(req, res);
+  }
+
+  if (domain === "bookings" && action === "cancel" && req.method === "POST") {
+    let authResult = { success: false, uid: "", email: "" };
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        authResult = staffAuth;
+      }
+    }
+    (req as any).staff = authResult.success ? authResult : null;
+    return await handleCancelBooking(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {

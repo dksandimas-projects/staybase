@@ -256,9 +256,9 @@ export interface AdminContextType {
 
   // Bookings
   bookings: Booking[];
-  updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void;
-  addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => void;
-  addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt">) => void;
+  updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
+  addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
+  addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
 
   // Vouchers & Corporate Rates
   vouchers: Voucher[];
@@ -423,7 +423,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const toggleHousekeepingStatus = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
-    const nextHK: Room["housekeepingStatus"] = room.housekeepingStatus === "clean" ? "dirty" : "clean";
+    
+    let nextHK: Room["housekeepingStatus"] = "clean";
+    if (room.housekeepingStatus === "clean") {
+      nextHK = "in-progress";
+    } else if (room.housekeepingStatus === "in-progress") {
+      nextHK = "dirty";
+    } else {
+      nextHK = "clean";
+    }
 
     try {
       const roomRef = doc(db, "rooms", roomId);
@@ -465,213 +473,247 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   // Bookings Data State
-  const [bookings, setBookings] = useState<Booking[]>([
-    {
-      id: "bk-1",
-      bookingRef: "SI-20260612-042",
-      roomId: "rm-101",
-      roomNumber: "101",
-      roomType: "standard-double",
-      guestName: "Maria Santos",
-      guestEmail: "maria@example.com",
-      guestPhone: "+63 917 000 0000",
-      numGuests: 2,
-      checkIn: "2026-06-12",
-      checkOut: "2026-06-14",
-      numNights: 2,
-      ratePerNight: 3200,
-      totalPrice: 6400,
-      originalTotalPrice: 6400,
-      discountType: "",
-      discountPct: 0,
-      discountIdPhotoUrl: null,
-      discountVerified: false,
-      discountVerifiedBy: null,
-      discountRejected: false,
-      discountRejectedBy: null,
-      discountRejectionReason: "",
-      voucherCode: "",
-      voucherDiscount: 0,
-      isCorporate: false,
-      corporateCode: "",
-      companyName: "",
-      specialRequests: "Late check-in around 8 PM, please.",
-      status: "pending",
-      paymentMethod: "gcash",
-      paymentProofUrl: "payment-proof-mock.png",
-      source: "online",
-      notes: "Awaiting payment verification.",
-      memberId: null,
-      pointsRedeemed: 0,
-      pointsRedeemedValue: 0,
-      pointsRedeemedBy: null,
-      pointsRedeemedAt: null,
-      hasBreakfast: false,
-      breakfastRate: 0,
-      guestIdPhotoUrl: null,
-      handledBy: "",
-      cancellationReason: "",
-      createdAt: "2026-06-02",
-      onsitePayments: []
-    },
-    {
-      id: "bk-2",
-      bookingRef: "SI-09214",
-      roomId: "rm-305",
-      roomNumber: "305",
-      roomType: "executive",
-      guestName: "Alex Mercer",
-      guestEmail: "member@sparkinn.com",
-      guestPhone: "+63 912 345 6789",
-      numGuests: 2,
-      checkIn: "2026-10-12",
-      checkOut: "2026-10-15",
-      numNights: 3,
-      ratePerNight: 4500,
-      totalPrice: 13500,
-      originalTotalPrice: 13500,
-      discountType: "",
-      discountPct: 0,
-      discountIdPhotoUrl: null,
-      discountVerified: false,
-      discountVerifiedBy: null,
-      discountRejected: false,
-      discountRejectedBy: null,
-      discountRejectionReason: "",
-      voucherCode: "",
-      voucherDiscount: 0,
-      isCorporate: false,
-      corporateCode: "",
-      companyName: "",
-      specialRequests: "High floor, quiet room please.",
-      status: "confirmed",
-      paymentMethod: "bank",
-      paymentProofUrl: "",
-      source: "online",
-      notes: "Member booking.",
-      memberId: "mem-42",
-      pointsRedeemed: 0,
-      pointsRedeemedValue: 0,
-      pointsRedeemedBy: null,
-      pointsRedeemedAt: null,
-      hasBreakfast: true,
-      breakfastRate: 300,
-      guestIdPhotoUrl: null,
-      handledBy: "",
-      cancellationReason: "",
-      createdAt: "2026-06-02",
-      onsitePayments: []
-    },
-    {
-      id: "bk-3",
-      bookingRef: "SI-08103",
-      roomId: "rm-102",
-      roomNumber: "102",
-      roomType: "family",
-      guestName: "Alex Mercer",
-      guestEmail: "member@sparkinn.com",
-      guestPhone: "+63 912 345 6789",
-      numGuests: 4,
-      checkIn: "2025-08-05",
-      checkOut: "2025-08-09",
-      numNights: 4,
-      ratePerNight: 7500,
-      totalPrice: 30000,
-      originalTotalPrice: 30000,
-      discountType: "",
-      discountPct: 0,
-      discountIdPhotoUrl: null,
-      discountVerified: false,
-      discountVerifiedBy: null,
-      discountRejected: false,
-      discountRejectedBy: null,
-      discountRejectionReason: "",
-      voucherCode: "",
-      voucherDiscount: 0,
-      isCorporate: false,
-      corporateCode: "",
-      companyName: "",
-      specialRequests: "Vegetarian breakfast options.",
-      status: "checked-out",
-      paymentMethod: "gcash",
-      paymentProofUrl: "payment-proof-mock2.png",
-      source: "online",
-      notes: "Checked out successfully.",
-      memberId: "mem-42",
-      pointsRedeemed: 0,
-      pointsRedeemedValue: 0,
-      pointsRedeemedBy: null,
-      pointsRedeemedAt: null,
-      hasBreakfast: true,
-      breakfastRate: 300,
-      guestIdPhotoUrl: "guest-id.png",
-      handledBy: "FD-1",
-      cancellationReason: "",
-      createdAt: "2025-07-20",
-      onsitePayments: []
-    }
-  ]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
 
-  const updateBookingStatus = (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
-    setBookings(prev => prev.map(bk => {
-      if (bk.id === bookingId) {
-        // Automatically check-in / check-out matching rooms in Firestore
+  useEffect(() => {
+    const bookingsRef = collection(db, "bookings");
+    const unsubscribe = onSnapshot(
+      bookingsRef,
+      (snapshot) => {
+        const bookingsData: Booking[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          
+          const parseDateString = (val: any) => {
+            if (!val) return "";
+            if (typeof val.toDate === "function") {
+              return val.toDate().toISOString().split("T")[0];
+            }
+            if (val instanceof Date) {
+              return val.toISOString().split("T")[0];
+            }
+            if (typeof val === "string") {
+              return val.split("T")[0];
+            }
+            return "";
+          };
+
+          const parseDateTimeString = (val: any) => {
+            if (!val) return "";
+            if (typeof val.toDate === "function") {
+              return val.toDate().toISOString();
+            }
+            if (val instanceof Date) {
+              return val.toISOString();
+            }
+            if (typeof val === "string") {
+              return val;
+            }
+            return "";
+          };
+
+          bookingsData.push({
+            id: docSnap.id,
+            bookingRef: data.bookingRef || "",
+            roomId: data.roomId || "",
+            roomNumber: data.roomNumber || "",
+            roomType: data.roomType || "",
+            guestName: data.guestName || "",
+            guestEmail: data.guestEmail || "",
+            guestPhone: data.guestPhone || "",
+            numGuests: data.numGuests || 0,
+            checkIn: parseDateString(data.checkIn),
+            checkOut: parseDateString(data.checkOut),
+            numNights: data.numNights || 0,
+            ratePerNight: data.ratePerNight || 0,
+            totalPrice: data.totalPrice || 0,
+            originalTotalPrice: data.originalTotalPrice !== undefined ? data.originalTotalPrice : null,
+            discountType: data.discountType || "",
+            discountPct: data.discountPct || 0,
+            discountIdPhotoUrl: data.discountIdPhotoUrl || null,
+            discountVerified: !!data.discountVerified,
+            discountVerifiedBy: data.discountVerifiedBy || null,
+            discountRejected: !!data.discountRejected,
+            discountRejectedBy: data.discountRejectedBy || null,
+            discountRejectionReason: data.discountRejectionReason || "",
+            voucherCode: data.voucherCode || "",
+            voucherDiscount: data.voucherDiscount || 0,
+            isCorporate: !!data.isCorporate,
+            corporateCode: data.corporateCode || "",
+            companyName: data.companyName || "",
+            specialRequests: data.specialRequests || "",
+            status: data.status || "pending",
+            paymentMethod: data.paymentMethod || "",
+            paymentProofUrl: data.paymentProofUrl || "",
+            source: data.source || "online",
+            notes: data.notes || "",
+            memberId: data.memberId || null,
+            pointsRedeemed: data.pointsRedeemed || 0,
+            pointsRedeemedValue: data.pointsRedeemedValue || 0,
+            pointsRedeemedBy: data.pointsRedeemedBy || null,
+            pointsRedeemedAt: data.pointsRedeemedAt || null,
+            hasBreakfast: !!data.hasBreakfast,
+            breakfastRate: data.breakfastRate || 0,
+            guestIdPhotoUrl: data.guestIdPhotoUrl || null,
+            handledBy: data.handledBy || "",
+            cancellationReason: data.cancellationReason || "",
+            createdAt: parseDateTimeString(data.createdAt),
+            guestRegistration: data.guestRegistration || null,
+            breakfastSelections: data.breakfastSelections || {},
+          });
+        });
+
+        // Natural sort by createdAt descending
+        bookingsData.sort((a, b) => {
+          const aTime = a.createdAt || "";
+          const bTime = b.createdAt || "";
+          if (aTime !== bTime) {
+            return bTime.localeCompare(aTime);
+          }
+          return b.bookingRef.localeCompare(a.bookingRef);
+        });
+
+        setBookings(bookingsData);
+      },
+      (error) => {
+        console.error("Error listening to bookings collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const updateBookingStatus = async (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
+    try {
+      const bookingDocRef = doc(db, "bookings", bookingId);
+
+      if (status === "cancelled") {
+        const token = await auth.currentUser?.getIdToken();
+        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://localhost:3000"
+          : import.meta.env.VITE_GUEST_APP_URL || "";
+
+        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/cancel`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({
+            bookingId,
+            reason: details?.cancellationReason || ""
+          })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to cancel booking via server API.");
+        }
+      } else {
+        const updatePayload: Record<string, any> = {
+          status,
+          ...details,
+          updatedAt: serverTimestamp()
+        };
+
         if (status === "checked-in") {
-          const matchedRoom = rooms.find(r => r.roomNumber === bk.roomNumber);
-          if (matchedRoom) {
-            void updateRoomConfig(matchedRoom.id, { status: "occupied" });
+          const booking = bookings.find(b => b.id === bookingId);
+          if (booking) {
+            const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
+            if (matchedRoom) {
+              void updateRoomConfig(matchedRoom.id, { status: "occupied" });
+            }
           }
         } else if (status === "checked-out") {
-          const matchedRoom = rooms.find(r => r.roomNumber === bk.roomNumber);
-          if (matchedRoom) {
-            void updateRoomConfig(matchedRoom.id, { status: "available", housekeepingStatus: "dirty" });
+          const booking = bookings.find(b => b.id === bookingId);
+          if (booking) {
+            const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
+            if (matchedRoom) {
+              void updateRoomConfig(matchedRoom.id, { status: "available", housekeepingStatus: "dirty" });
+            }
           }
         }
-        return { ...bk, status, ...details, updatedAt: new Date().toISOString() };
+
+        await updateDoc(bookingDocRef, updatePayload);
       }
-      return bk;
-    }));
+    } catch (error) {
+      console.error("Error updating booking status:", error);
+      alert("Failed to update booking status: " + (error instanceof Error ? error.message : String(error)));
+    }
   };
 
-  const addOnsitePayment = (bookingId: string, amount: number, method: string, note: string) => {
-    setBookings(prev => prev.map(bk => {
-      if (bk.id === bookingId) {
-        const nextPayments = bk.onsitePayments || [];
-        const newPayment: OnsitePayment = {
-          id: `pay-${Date.now()}`,
+  const addOnsitePayment = async (bookingId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : import.meta.env.VITE_GUEST_APP_URL || "";
+
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/add-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId,
           amount,
           method,
-          note,
-          recordedBy: currentUser?.email || "staff",
-          recordedAt: new Date().toISOString()
-        };
-        return {
-          ...bk,
-          onsitePayments: [...nextPayments, newPayment]
-        };
+          note
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to record payment" };
       }
-      return bk;
-    }));
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error recording onsite payment:", err);
+      return { success: false, error: err.message };
+    }
   };
 
-  const addWalkinBooking = (booking: Omit<Booking, "id" | "bookingRef" | "createdAt">) => {
-    const bookingId = `bk-${Date.now()}`;
-    const bookingRef = `SI-${Math.floor(100000 + Math.random() * 900000)}`;
-    const newBooking: Booking = {
-      ...booking,
-      id: bookingId,
-      bookingRef,
-      createdAt: new Date().toISOString().split("T")[0],
-      onsitePayments: []
-    };
-    setBookings(prev => [newBooking, ...prev]);
+  const addWalkinBooking = async (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : import.meta.env.VITE_GUEST_APP_URL || "";
 
-    // Force update room status if checking in immediately in Firestore
-    if (booking.status === "checked-in") {
-      const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
-      if (matchedRoom) {
-        void updateRoomConfig(matchedRoom.id, { status: "occupied" });
+      const bookingId = doc(collection(db, "bookings")).id;
+
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/create-walkin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId,
+          roomId: booking.roomId,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut,
+          guests: booking.numGuests,
+          hasBreakfast: booking.hasBreakfast,
+          guestDetails: {
+            firstName: booking.guestName.split(" ")[0] || "Guest",
+            lastName: booking.guestName.split(" ").slice(1).join(" ") || "Walkin",
+            email: booking.guestEmail,
+            phone: booking.guestPhone,
+            requests: booking.specialRequests
+          },
+          paymentMethod: booking.paymentMethod,
+          status: booking.status,
+          totalPriceOverride: booking.totalPriceOverride
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to create walk-in booking." };
       }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error creating walkin booking:", err);
+      return { success: false, error: err.message };
     }
   };
 

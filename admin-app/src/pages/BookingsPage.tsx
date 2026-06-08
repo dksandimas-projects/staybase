@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useAdmin, Booking } from "../context/AdminContext";
+import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
 import { compressImageFile } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -21,9 +21,13 @@ import {
   FileText,
   ImageIcon,
   Utensils,
-  Save
+  Save,
+  ShieldCheck
 } from "lucide-react";
 import config from "@config";
+import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase/config";
+import { auth } from "../firebase/auth";
 
 export function BookingsPage() {
   const { 
@@ -36,7 +40,8 @@ export function BookingsPage() {
     updateStoreOrderStatus,
     billStoreOrder,
     roomTypes,
-    breakfastConfig
+    breakfastConfig,
+    currentUser
   } = useAdmin();
 
   // Main navigation tab
@@ -90,6 +95,42 @@ export function BookingsPage() {
   const [walkinPayment, setWalkinPayment] = useState("pay-at-hotel");
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
+  const [priceOverride, setPriceOverride] = useState("");
+
+  const [selectedBookingPayments, setSelectedBookingPayments] = useState<OnsitePayment[]>([]);
+
+  useEffect(() => {
+    if (!selectedBooking?.id) {
+      setSelectedBookingPayments([]);
+      return;
+    }
+
+    const paymentsRef = collection(db, "bookings", selectedBooking.id, "payments");
+    const unsubscribe = onSnapshot(paymentsRef, (snapshot) => {
+      const paymentsData: OnsitePayment[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        paymentsData.push({
+          id: docSnap.id,
+          amount: data.amount || 0,
+          method: data.method || "",
+          note: data.note || "",
+          recordedBy: data.recordedBy || "staff",
+          recordedAt: data.recordedAt instanceof Date
+            ? data.recordedAt.toISOString()
+            : data.recordedAt?.toDate
+              ? data.recordedAt.toDate().toISOString()
+              : data.recordedAt || ""
+        });
+      });
+      paymentsData.sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
+      setSelectedBookingPayments(paymentsData);
+    }, (error) => {
+      console.error("Error listening to payments subcollection:", error);
+    });
+
+    return unsubscribe;
+  }, [selectedBooking?.id]);
 
   // Filter available rooms based on type selected
   const availableRoomsOfType = rooms.filter(
@@ -265,6 +306,9 @@ export function BookingsPage() {
   };
 
   const getBookingPaymentsTotal = (booking: Booking) => {
+    if (selectedBooking && selectedBooking.id === booking.id) {
+      return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    }
     return (booking.onsitePayments || []).reduce((sum, payment) => sum + payment.amount, 0);
   };
 
@@ -338,93 +382,99 @@ export function BookingsPage() {
     syncSelectedBooking({ breakfastSelections: selections });
   };
 
-  const handleAddPaymentSubmit = (e: React.FormEvent) => {
+  const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedBooking && paymentAmount) {
       const amount = parseFloat(paymentAmount);
-      addOnsitePayment(selectedBooking.id, amount, paymentMethod, paymentNote);
-      // Sync local state
-      const nextPayments = selectedBooking.onsitePayments || [];
-      setSelectedBooking({
-        ...selectedBooking,
-        onsitePayments: [
-          ...nextPayments,
-          {
-            id: `pay-${Date.now()}`,
-            amount,
-            method: paymentMethod,
-            note: paymentNote,
-            recordedBy: "admin-staff",
-            recordedAt: new Date().toISOString()
-          }
-        ]
-      });
-      setPaymentAmount("");
-      setPaymentNote("");
-      alert("Payment recorded successfully.");
+      try {
+        const result = await addOnsitePayment(selectedBooking.id, amount, paymentMethod, paymentNote);
+        if (result.success) {
+          setPaymentAmount("");
+          setPaymentNote("");
+          alert("Payment recorded successfully.");
+        } else {
+          alert(result.error || "Failed to record payment.");
+        }
+      } catch (err: any) {
+        alert("Error: " + err.message);
+      }
     }
   };
 
-  const handleWalkinSubmit = (e: React.FormEvent) => {
+  const [isWalkinSubmitting, setIsWalkinSubmitting] = useState(false);
+
+  const handleWalkinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guestName || !roomNumber) {
       alert("Please fill in the guest name and select an available room.");
       return;
     }
 
-    addWalkinBooking({
-      roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
-      roomNumber,
-      roomType,
-      guestName,
-      guestEmail: guestEmail || "walkin@guest.com",
-      guestPhone: guestPhone || "n/a",
-      numGuests,
-      checkIn: checkInDate,
-      checkOut: checkOutDate,
-      numNights,
-      ratePerNight,
-      totalPrice,
-      originalTotalPrice: totalPrice,
-      discountType: "",
-      discountPct: 0,
-      discountIdPhotoUrl: null,
-      discountVerified: false,
-      discountVerifiedBy: null,
-      discountRejected: false,
-      discountRejectedBy: null,
-      discountRejectionReason: "",
-      voucherCode: "",
-      voucherDiscount: 0,
-      isCorporate: false,
-      corporateCode: "",
-      companyName: "",
-      specialRequests: "Walk-in registration.",
-      status: immediateCheckIn ? "checked-in" : "confirmed",
-      paymentMethod: walkinPayment,
-      paymentProofUrl: "",
-      source: "walk-in",
-      notes: "Created on-site at Front Desk.",
-      memberId: null,
-      pointsRedeemed: 0,
-      pointsRedeemedValue: 0,
-      pointsRedeemedBy: null,
-      pointsRedeemedAt: null,
-      hasBreakfast,
-      breakfastRate: hasBreakfast ? 300 : 0,
-      guestIdPhotoUrl: null,
-      handledBy: "frontdesk-staff",
-      cancellationReason: ""
-    });
+    setIsWalkinSubmitting(true);
+    try {
+      const result = await addWalkinBooking({
+        roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
+        roomNumber,
+        roomType,
+        guestName,
+        guestEmail: guestEmail || "walkin@guest.com",
+        guestPhone: guestPhone || "n/a",
+        numGuests,
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        numNights,
+        ratePerNight,
+        totalPrice: priceOverride !== "" ? Number(priceOverride) : totalPrice,
+        totalPriceOverride: priceOverride !== "" ? Number(priceOverride) : undefined,
+        originalTotalPrice: totalPrice,
+        discountType: "",
+        discountPct: 0,
+        discountIdPhotoUrl: null,
+        discountVerified: false,
+        discountVerifiedBy: null,
+        discountRejected: false,
+        discountRejectedBy: null,
+        discountRejectionReason: "",
+        voucherCode: "",
+        voucherDiscount: 0,
+        isCorporate: false,
+        corporateCode: "",
+        companyName: "",
+        specialRequests: "Walk-in registration.",
+        status: immediateCheckIn ? "checked-in" : "confirmed",
+        paymentMethod: walkinPayment,
+        paymentProofUrl: "",
+        source: "walk-in",
+        notes: "Created on-site at Front Desk.",
+        memberId: null,
+        pointsRedeemed: 0,
+        pointsRedeemedValue: 0,
+        pointsRedeemedBy: null,
+        pointsRedeemedAt: null,
+        hasBreakfast,
+        breakfastRate: hasBreakfast ? 300 : 0,
+        guestIdPhotoUrl: null,
+        handledBy: "frontdesk-staff",
+        cancellationReason: ""
+      });
 
-    // Reset Form & Close Modal
-    setGuestName("");
-    setGuestEmail("");
-    setGuestPhone("");
-    setRoomNumber("");
-    setHasBreakfast(false);
-    setIsModalOpen(false);
-    alert("Walk-in booking created successfully!");
+      if (result.success) {
+        setGuestName("");
+        setGuestEmail("");
+        setGuestPhone("");
+        setRoomNumber("");
+        setPriceOverride("");
+        setHasBreakfast(false);
+        setIsModalOpen(false);
+        alert("Walk-in booking created successfully!");
+      } else {
+        alert(result.error || "Failed to create walk-in booking.");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setIsWalkinSubmitting(false);
+    }
   };
 
   return (
@@ -437,7 +487,7 @@ export function BookingsPage() {
         {activeMainTab === "bookings" && (
           <button
             onClick={() => {
-              // Auto select first available room if none selected
+              setPriceOverride("");
               if (availableRoomsOfType.length > 0) {
                 setRoomNumber(availableRoomsOfType[0].roomNumber);
               } else {
@@ -867,14 +917,166 @@ export function BookingsPage() {
               </div>
             )}
 
+            {/* Government discount verification */}
+            {selectedBooking.discountType && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <ShieldCheck size={14} className="text-primary" />
+                  Government Discount Verification
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+                  <div className="flex items-center justify-between text-xs">
+                    <div>
+                      <p className="font-semibold text-gray-800">
+                        Requested Discount: <span className="uppercase text-primary-dark font-bold">{selectedBooking.discountType}</span> (20% off room rate)
+                      </p>
+                      {selectedBooking.discountIdPhotoUrl ? (
+                        <p className="text-[10px] text-gray-500 mt-1">ID photo uploaded by guest.</p>
+                      ) : (
+                        <p className="text-[10px] text-red-500 mt-1">No ID photo uploaded yet.</p>
+                      )}
+                    </div>
+                    <div>
+                      {selectedBooking.discountVerified ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-green-50 px-2 py-1 text-[10px] font-bold text-green-700">
+                          ✓ Verified
+                        </span>
+                      ) : selectedBooking.discountRejected ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700">
+                          ✗ Rejected
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded bg-yellow-50 px-2 py-1 text-[10px] font-bold text-yellow-700">
+                          ⌛ Pending Review
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedBooking.discountIdPhotoUrl && (
+                    <div className="border border-gray-150 rounded-lg overflow-hidden max-w-[240px]">
+                      <img
+                        src={selectedBooking.discountIdPhotoUrl}
+                        alt={`${selectedBooking.discountType} ID`}
+                        className="w-full h-auto max-h-40 object-cover cursor-pointer hover:opacity-90"
+                        onClick={() => window.open(selectedBooking.discountIdPhotoUrl ?? "", "_blank")}
+                      />
+                      <p className="text-[9px] text-center text-gray-400 py-1 bg-gray-50 border-t border-gray-150">
+                        Click image to open in new tab
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedBooking.discountVerified && (
+                    <div className="text-xs text-green-700 bg-green-50/50 p-3 rounded-lg border border-green-100 leading-relaxed">
+                      <p className="font-semibold">✓ Discount Approved</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">Verified by: {selectedBooking.discountVerifiedBy || "Staff"}</p>
+                    </div>
+                  )}
+
+                  {selectedBooking.discountRejected && (
+                    <div className="text-xs text-red-700 bg-red-50/50 p-3 rounded-lg border border-red-100 leading-relaxed">
+                      <p className="font-semibold">✗ Discount Rejected</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">Rejected by: {selectedBooking.discountRejectedBy || "Staff"}</p>
+                      {selectedBooking.discountRejectionReason && (
+                        <p className="text-[10px] text-gray-600 mt-1 italic">Reason: {selectedBooking.discountRejectionReason}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {!selectedBooking.discountVerified && !selectedBooking.discountRejected && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (confirm("Verify and approve this discount?")) {
+                            try {
+                              const updatedFields = {
+                                discountVerified: true,
+                                discountVerifiedBy: currentUser?.email || "staff",
+                                discountRejected: false
+                              };
+                              
+                              const bookingDocRef = doc(db, "bookings", selectedBooking.id);
+                              await updateDoc(bookingDocRef, {
+                                ...updatedFields,
+                                updatedAt: serverTimestamp()
+                              });
+                              
+                              syncSelectedBooking(updatedFields);
+                              alert("Discount approved successfully!");
+                            } catch (err: any) {
+                              console.error("Failed to verify discount:", err);
+                              alert("Error: " + err.message);
+                            }
+                          }
+                        }}
+                        className="flex-grow min-h-[36px] inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
+                      >
+                        Approve Discount
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const reason = prompt("Enter discount rejection reason:");
+                          if (reason !== null) {
+                            try {
+                              const token = await auth.currentUser?.getIdToken();
+                              const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+                                ? "http://localhost:3000"
+                                : import.meta.env.VITE_GUEST_APP_URL || "";
+                              
+                              const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/reject-discount`, {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                  "Authorization": token ? `Bearer ${token}` : ""
+                                },
+                                body: JSON.stringify({
+                                  bookingId: selectedBooking.id,
+                                  reason
+                                })
+                              });
+                              const data = await res.json();
+                              if (!res.ok || !data.success) {
+                                throw new Error(data.error || "Failed to reject discount");
+                              }
+                              
+                              const updatedFields = {
+                                discountRejected: true,
+                                discountRejectedBy: currentUser?.email || "staff",
+                                discountRejectionReason: reason,
+                                discountVerified: false,
+                                discountPct: 0,
+                                totalPrice: selectedBooking.originalTotalPrice ?? selectedBooking.totalPrice
+                              };
+                              
+                              syncSelectedBooking(updatedFields);
+                              alert("Discount rejected. Full rate restored.");
+                            } catch (err: any) {
+                              console.error("Failed to reject discount:", err);
+                              alert("Error: " + err.message);
+                            }
+                          }
+                        }}
+                        className="flex-grow min-h-[36px] inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-[11px] font-bold text-red-600 transition"
+                      >
+                        Reject Discount
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Onsite payments ledger */}
             <div className="space-y-3.5">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">On-site Payments Ledger</h3>
               
               <div className="space-y-2">
-                {(selectedBooking.onsitePayments || []).length > 0 ? (
+                {selectedBookingPayments.length > 0 ? (
                   <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50/50">
-                    {(selectedBooking.onsitePayments || []).map((pay) => (
+                    {selectedBookingPayments.map((pay) => (
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
                           <p className="font-semibold text-gray-800">{pay.note || "Onsite Payment"}</p>
@@ -987,10 +1189,25 @@ export function BookingsPage() {
                         </div>
                         <button
                           type="button"
-                          className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                          onClick={() => {
+                            const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+                              ? "http://localhost:3000"
+                              : import.meta.env.VITE_GUEST_APP_URL || "";
+                            const params = new URLSearchParams({
+                              bookingRef: selectedBooking.bookingRef,
+                              roomId: selectedBooking.roomId,
+                              checkIn: selectedBooking.checkIn,
+                              checkOut: selectedBooking.checkOut,
+                              guests: String(selectedBooking.numGuests),
+                              paymentMethod: selectedBooking.paymentMethod,
+                              total: String(selectedBooking.totalPrice)
+                            });
+                            window.open(`${baseUrl.replace(/\/$/, "")}/book/confirm?${params.toString()}`, "_blank");
+                          }}
+                          className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-255 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
                         >
                           <FileText size={13} />
-                          Preview Folio / Receipt PDF
+                          Preview Folio / Receipt Page
                         </button>
                       </>
                     );
@@ -1391,6 +1608,17 @@ export function BookingsPage() {
             </select>
           </label>
 
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Manual Price Override (Optional)
+            <input
+              type="number"
+              placeholder={`Standard price: ₱${totalPrice.toLocaleString()}`}
+              value={priceOverride}
+              onChange={(e) => setPriceOverride(e.target.value)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+            />
+          </label>
+
           {/* Pricing Summary display */}
           <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-1 text-xs">
             <div className="flex justify-between">
@@ -1408,8 +1636,8 @@ export function BookingsPage() {
               </div>
             )}
             <div className="flex justify-between border-t border-gray-150 pt-2 text-sm font-bold text-primary-dark">
-              <span>Total calculated:</span>
-              <span>{formatPrice(totalPrice)}</span>
+              <span>Final Total Price:</span>
+              <span>{formatPrice(priceOverride !== "" ? Number(priceOverride) : totalPrice)}</span>
             </div>
           </div>
 
@@ -1424,10 +1652,10 @@ export function BookingsPage() {
             </button>
             <PrimaryButton
               type="submit"
-              disabled={!roomNumber}
+              disabled={!roomNumber || isWalkinSubmitting}
               className="min-w-[150px]"
             >
-              Confirm Reservation
+              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
             </PrimaryButton>
           </div>
         </form>
