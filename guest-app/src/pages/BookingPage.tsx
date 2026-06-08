@@ -42,6 +42,14 @@ const breakfastEnabled = true;
 
 type RateChoice = "room-only" | "room-breakfast";
 type GuestField = "firstName" | "lastName" | "email" | "phone" | "guestCount";
+type VoucherIssue = "expired" | "usage-limit" | "room-mismatch" | "invalid";
+
+const voucherMessages: Record<VoucherIssue, string> = {
+  expired: "This voucher expired already. You can remove it or try another code.",
+  "usage-limit": "This voucher has reached its usage limit. Please choose another code.",
+  "room-mismatch": "This voucher is not valid for the selected room type.",
+  invalid: "We could not find that voucher. Check the code and try again."
+};
 
 function formatStayDate(value: string) {
   return new Intl.DateTimeFormat(config.locale, {
@@ -216,13 +224,24 @@ export function BookingPage() {
 
   function handleApplyVoucher(e: React.FormEvent) {
     e.preventDefault();
-    if (voucherCode.trim().toUpperCase() === "SPARK10") {
+    const code = voucherCode.trim().toUpperCase();
+
+    if (code === "SPARK10") {
       setVoucherApplied(true);
       setVoucherError("");
-    } else if (voucherCode.trim() === "") {
+    } else if (code === "") {
       setVoucherError("Please enter a code.");
+    } else if (code === "EXPIRED") {
+      setVoucherError(voucherMessages.expired);
+      setVoucherApplied(false);
+    } else if (code === "USEDUP") {
+      setVoucherError(voucherMessages["usage-limit"]);
+      setVoucherApplied(false);
+    } else if (code === "ROOMONLY") {
+      setVoucherError(voucherMessages["room-mismatch"]);
+      setVoucherApplied(false);
     } else {
-      setVoucherError("Invalid voucher code.");
+      setVoucherError(voucherMessages.invalid);
       setVoucherApplied(false);
     }
   }
@@ -448,7 +467,13 @@ export function BookingPage() {
             {/* Voucher Section */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Voucher or Promo Code</h3>
-              <p className="mt-1 text-sm text-gray-600">Apply a promo code to get discounts on your stay. Try entering <span className="font-semibold text-primary">SPARK10</span>.</p>
+              <p className="mt-1 text-sm text-gray-600">
+                Apply a promo code to get discounts on your stay. Try{" "}
+                <span className="font-semibold text-primary">SPARK10</span> for a valid state, or{" "}
+                <span className="font-semibold text-gray-700">EXPIRED</span>,{" "}
+                <span className="font-semibold text-gray-700">USEDUP</span>, and{" "}
+                <span className="font-semibold text-gray-700">ROOMONLY</span> for validation states.
+              </p>
               
               <form onSubmit={handleApplyVoucher} className="mt-4 flex gap-3">
                 <input
@@ -487,9 +512,10 @@ export function BookingPage() {
                 </p>
               )}
               {voucherError && (
-                <p className="mt-3 text-sm font-medium text-red-600">
-                  {voucherError}
-                </p>
+                <div className="mt-3 flex gap-2 rounded-lg bg-red-50 p-3 text-sm font-medium text-red-700">
+                  <Info size={16} className="mt-0.5 shrink-0" />
+                  <p>{voucherError}</p>
+                </div>
               )}
             </div>
 

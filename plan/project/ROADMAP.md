@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 5, 2026
+> Last updated: June 8, 2026
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -127,7 +127,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ `QuickRequestChip` — pill button in quick-select row
 
 ### Guest App Screens
-- 🔄 G-01 Homepage `/`
+- ✅ G-01 Homepage `/`
 - ✅ G-02 Rooms Page `/rooms`
 - ✅ G-03 Booking Step 1 — Select Room `/book`
 - ✅ G-04 Booking Step 2 — Guest Details `/book`
@@ -148,8 +148,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ G-19 404 Not Found `*`
 - ✅ M-01 Room Detail Modal
 - ✅ M-02 Availability Filter Drawer (mobile)
-- ⬜ M-03 Corporate Access Code Gate
-- ⬜ M-04 Voucher Input (inline)
+- ✅ M-03 Corporate Access Code Gate
+- ✅ M-04 Voucher Input (inline)
 
 ### Admin App Screens
 - ✅ A-01 Admin Login `/login`
