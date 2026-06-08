@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Mail, Lock, Eye, EyeOff, ShieldCheck, KeyRound, AlertCircle } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
 import config from "@config";
 import { brandAsset } from "../utils/brand";
 import { useAdmin } from "../context/AdminContext";
@@ -8,7 +8,7 @@ import { useAdmin } from "../context/AdminContext";
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signIn, currentUser } = useAdmin();
+  const { authLoading, currentUser, sendPasswordReset, signIn } = useAdmin();
 
   // Inputs
   const [email, setEmail] = useState("");
@@ -24,7 +24,13 @@ export function LoginPage() {
   // Redirect if already logged in
   const from = (location.state as any)?.from?.pathname || "/";
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (currentUser) {
+      navigate(from, { replace: true });
+    }
+  }, [currentUser, from, navigate]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
 
@@ -34,35 +40,17 @@ export function LoginPage() {
     }
 
     setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      // Simple validation for simulation
-      if (email === "admin@sparkinn.com") {
-        signIn(email, "admin");
-        navigate(from, { replace: true });
-      } else if (email === "frontdesk@sparkinn.com") {
-        signIn(email, "front-desk");
-        navigate(from, { replace: true });
-      } else {
-        setErrorMsg("Incorrect email or password. Try frontdesk@sparkinn.com or admin@sparkinn.com.");
-      }
-    }, 1000);
-  };
-
-  const handleQuickLogin = (role: "front-desk" | "admin") => {
-    setErrorMsg("");
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      const email = role === "admin" ? "admin@sparkinn.com" : "frontdesk@sparkinn.com";
-      signIn(email, role);
+    try {
+      await signIn(email, password);
       navigate(from, { replace: true });
-    }, 600);
+    } catch (error) {
+      setErrorMsg(getAuthErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleForgotPasswordSubmit = (e: React.FormEvent) => {
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
       setErrorMsg("Please enter your email address to receive reset link.");
@@ -70,11 +58,17 @@ export function LoginPage() {
     }
     setErrorMsg("");
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      await sendPasswordReset(email);
       setResetSent(true);
-    }, 800);
+    } catch (error) {
+      setErrorMsg(getPasswordResetErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const isSubmitting = isLoading || authLoading;
 
   return (
     <main className="min-h-screen bg-gray-950 font-body text-gray-900 flex items-center justify-center p-4 relative overflow-hidden">
@@ -168,44 +162,13 @@ export function LoginPage() {
               <div className="pt-2">
                 <button
                   type="submit"
-                  disabled={isLoading}
+                  disabled={isSubmitting}
                   className="min-h-[44px] w-full px-6 inline-flex items-center justify-center gap-2 rounded-lg bg-primary hover:bg-primary-dark active:scale-[0.98] text-sm font-semibold text-white shadow-sm transition-all"
                 >
-                  {isLoading ? "Authenticating..." : "Sign In"}
+                  {isSubmitting ? "Authenticating..." : "Sign In"}
                 </button>
               </div>
             </form>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                <div className="w-full border-t border-gray-200"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-3 font-semibold text-gray-400">Quick Testing Links</span>
-              </div>
-            </div>
-
-            {/* Quick access buttons */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("front-desk")}
-                disabled={isLoading}
-                className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white hover:bg-blue-50 hover:border-blue-300 text-xs font-bold text-gray-700 shadow-sm active:scale-95 transition"
-              >
-                <KeyRound size={14} className="text-blue-500" />
-                Login Front Desk
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("admin")}
-                disabled={isLoading}
-                className="min-h-[44px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white hover:bg-red-50 hover:border-red-300 text-xs font-bold text-gray-700 shadow-sm active:scale-95 transition"
-              >
-                <ShieldCheck size={14} className="text-red-500" />
-                Login Admin
-              </button>
-            </div>
           </div>
         ) : (
           /* FORGOT PASSWORD VIEW */
@@ -214,7 +177,7 @@ export function LoginPage() {
               <div className="space-y-4">
                 <div className="rounded-lg bg-green-50 border border-green-200 p-4 text-xs text-green-700">
                   <p className="font-bold">Reset Email Dispatched</p>
-                  <p className="mt-1">Check your email {email} for instructions to reset your password (simulated).</p>
+                  <p className="mt-1">Check your email for instructions to reset your password.</p>
                 </div>
                 <button
                   type="button"
@@ -259,9 +222,10 @@ export function LoginPage() {
                   </button>
                   <button
                     type="submit"
-                    className="flex-[2] min-h-[44px] rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm flex items-center justify-center transition"
+                    disabled={isSubmitting}
+                    className="flex-[2] min-h-[44px] rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm flex items-center justify-center transition disabled:cursor-not-allowed disabled:opacity-70"
                   >
-                    Send Reset Link
+                    {isSubmitting ? "Sending..." : "Send Reset Link"}
                   </button>
                 </div>
               </form>
@@ -271,4 +235,40 @@ export function LoginPage() {
       </div>
     </main>
   );
+}
+
+function getAuthErrorMessage(error: unknown) {
+  const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "Incorrect email or password.";
+  }
+
+  if (code === "auth/too-many-requests") {
+    return "Too many sign-in attempts. Please wait a moment, then try again.";
+  }
+
+  if (code === "auth/network-request-failed") {
+    return "Unable to connect. Check your internet connection.";
+  }
+
+  if (code === "auth/user-disabled") {
+    return "This staff account has been disabled. Please contact the administrator.";
+  }
+
+  return "Unable to sign in right now. Please check your details and try again.";
+}
+
+function getPasswordResetErrorMessage(error: unknown) {
+  const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+
+  if (code === "auth/user-not-found" || code === "auth/invalid-email") {
+    return "No account found with that email.";
+  }
+
+  if (code === "auth/network-request-failed") {
+    return "Unable to connect. Check your internet connection.";
+  }
+
+  return "Unable to send the reset link right now. Please try again.";
 }

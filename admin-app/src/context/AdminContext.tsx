@@ -1,6 +1,24 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import {
+  browserSessionPersistence,
+  getIdTokenResult,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  setPersistence,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut
+} from "firebase/auth";
 import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
+import { auth } from "../firebase/auth";
+
+type StaffRole = "front-desk" | "admin";
+
+interface AdminUser {
+  uid: string;
+  email: string;
+  role: StaffRole;
+}
 
 // Interfaces aligning with plan/docs/TYPES.md
 export interface Room {
@@ -222,9 +240,11 @@ export interface StoreOrder {
 
 export interface AdminContextType {
   // Authentication
-  currentUser: { email: string; role: "front-desk" | "admin" } | null;
-  signIn: (email: string, role: "front-desk" | "admin") => void;
-  signOut: () => void;
+  authLoading: boolean;
+  currentUser: AdminUser | null;
+  sendPasswordReset: (email: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
 
   // Rooms
   rooms: Room[];
@@ -292,30 +312,69 @@ export interface AdminContextType {
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
 
+function isStaffRole(role: unknown): role is StaffRole {
+  return role === "admin" || role === "front-desk";
+}
+
 export function AdminProvider({ children }: { children: ReactNode }) {
   // Auth State
-  const [currentUser, setCurrentUser] = useState<AdminContextType["currentUser"]>(() => {
-    const authState = sessionStorage.getItem("sim_admin_auth_state");
-    const role = sessionStorage.getItem("sim_admin_role") as "front-desk" | "admin";
-    const email = sessionStorage.getItem("sim_admin_email") || "";
-    if (authState === "logged-in" && role) {
-      return { email, role };
-    }
-    return null;
-  });
+  const [authLoading, setAuthLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<AdminContextType["currentUser"]>(null);
 
-  const signIn = (email: string, role: "front-desk" | "admin") => {
-    sessionStorage.setItem("sim_admin_auth_state", "logged-in");
-    sessionStorage.setItem("sim_admin_role", role);
-    sessionStorage.setItem("sim_admin_email", email);
-    setCurrentUser({ email, role });
+  useEffect(() => {
+    void setPersistence(auth, browserSessionPersistence).catch(() => undefined);
+
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setCurrentUser(null);
+        setAuthLoading(false);
+        return;
+      }
+
+      try {
+        const tokenResult = await getIdTokenResult(firebaseUser, true);
+        const role = isStaffRole(tokenResult.claims.role) ? tokenResult.claims.role : "front-desk";
+
+        setCurrentUser({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email ?? "",
+          role
+        });
+      } catch {
+        setCurrentUser(null);
+      } finally {
+        setAuthLoading(false);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const signIn = async (email: string, password: string) => {
+    setAuthLoading(true);
+    try {
+      await setPersistence(auth, browserSessionPersistence);
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      const tokenResult = await getIdTokenResult(credential.user, true);
+      const role = isStaffRole(tokenResult.claims.role) ? tokenResult.claims.role : "front-desk";
+
+      setCurrentUser({
+        uid: credential.user.uid,
+        email: credential.user.email ?? email,
+        role
+      });
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const signOut = () => {
-    sessionStorage.removeItem("sim_admin_auth_state");
-    sessionStorage.removeItem("sim_admin_role");
-    sessionStorage.removeItem("sim_admin_email");
+  const signOut = async () => {
+    await firebaseSignOut(auth);
     setCurrentUser(null);
+  };
+
+  const sendPasswordReset = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
   };
 
   // Rooms Data State
@@ -1152,6 +1211,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     <AdminContext.Provider
       value={{
         currentUser,
+        authLoading,
+        sendPasswordReset,
         signIn,
         signOut,
         rooms,
