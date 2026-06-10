@@ -34,7 +34,8 @@ import {
   staggerChild,
   staggerContainer,
   DEFAULT_ROOM_TYPES,
-  VERSION
+  VERSION,
+  type Room
 } from "@spark-inn/shared";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
 import config from "@config";
@@ -42,7 +43,7 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
-import { rooms } from "../data/rooms";
+import { useRooms } from "../hooks/useRooms";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
@@ -93,6 +94,9 @@ export function CorporateBookingPage() {
 
   // Breakfast config fetched from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+
+  // Live rooms from Firestore
+  const { rooms, loading: roomsLoading } = useRooms();
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -703,14 +707,30 @@ export function CorporateBookingPage() {
           <div>
             <div className="mb-5 flex flex-col gap-3 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-semibold text-gray-950">{availableRooms.length} corporate options found</p>
+                <p className="font-semibold text-gray-950">
+                  {roomsLoading ? "Loading rooms..." : `${availableRooms.length} corporate options found`}
+                </p>
                 <p className="text-xs text-gray-600">Locked to company contract terms.</p>
               </div>
             </div>
 
-            <motion.div 
-              className="grid gap-6 md:grid-cols-2" 
-              variants={staggerContainer} 
+            {roomsLoading ? (
+              <div className="grid gap-6 md:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="rounded-card bg-white shadow-sm ring-1 ring-gray-200 overflow-hidden animate-pulse">
+                    <div className="aspect-[16/10] bg-gray-200" />
+                    <div className="p-5 space-y-3">
+                      <div className="h-5 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                      <div className="h-8 bg-gray-100 rounded w-full" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+            <motion.div
+              className="grid gap-6 md:grid-cols-2"
+              variants={staggerContainer}
               initial={shouldReduceMotion ? false : "hidden"}
               animate="visible"
             >
@@ -808,6 +828,7 @@ export function CorporateBookingPage() {
                 );
               })}
             </motion.div>
+            )}
           </div>
         </section>
 
@@ -1455,7 +1476,7 @@ interface BookingReviewAsideProps {
   guests: number;
   hasBreakfast: boolean;
   nights: number;
-  room: (typeof rooms)[number] | undefined;
+  room: Room | undefined;
   total: number;
   ratePerNight: number;
   breakfastRatePerPerson?: number;
