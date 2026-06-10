@@ -31,11 +31,11 @@ service firebase.storage {
 
     match /settings/website-content/{allPaths=**} {
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if signedIn() && request.auth.token.role == "admin";
     }
 
     match /settings/notification-sound/{fileName} {
-      allow read: if true;
+      allow read: if isStaff();
       allow write: if isStaff();
     }
 
@@ -44,7 +44,7 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
-    match /store/{itemId}/{fileName} {
+    match /store-items/{itemId}/{fileName} {
       allow read: if true;
       allow write: if isStaff();
     }

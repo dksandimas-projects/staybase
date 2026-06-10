@@ -83,8 +83,8 @@ service cloud.firestore {
     }
 
     match /storeOrders/{orderId} {
-      allow read, update: if isStaff();
-      allow create: if true;
+      allow read, create: if true;
+      allow update: if isStaff();
       allow delete: if isAdmin();
     }
 
