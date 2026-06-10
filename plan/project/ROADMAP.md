@@ -267,7 +267,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 7 — Corporate, Vouchers & Breakfast (P1)
 > Goal: Corporate booking flow + voucher system + breakfast add-on working end-to-end.
 
-- ✅ Corporate Booking page (`/corporate/book`) — wired to live API for access code validation + Firestore for breakfast config + booking creation
+- ✅ Corporate Booking page (`/corporate/book`) — wired to live Firestore (`useRooms` onSnapshot) for room data, live API for access code validation + Firestore for breakfast config + booking creation
 - ✅ Corporate code validation API route (`/api/validate/corporate-code`) — with Turnstile, rate limiting, shared utility
 - ✅ Corporate Inquiries pipeline (admin) — live Firestore via onSnapshot, status updates, notes, code generation
 - ✅ Voucher management (admin) — live Firestore via onSnapshot, create, toggle active
