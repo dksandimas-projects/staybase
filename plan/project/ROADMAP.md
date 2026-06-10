@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 8, 2026
+> Last updated: June 10, 2026
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -272,13 +272,13 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Corporate Inquiries pipeline (admin) — live Firestore via onSnapshot, status updates, notes, code generation
 - ✅ Voucher management (admin) — live Firestore via onSnapshot, create, toggle active
 - ✅ Voucher redemption wired into booking flow Step 3 — existing (already built)
-- ⬜ Breakfast add-on — Settings → Breakfast tab (silog menu management, enable/disable)
-- ⬜ Breakfast add-on — Rate Management (rate per person per night)
+- ✅ Breakfast add-on — Settings → Breakfast tab (silog menu management, enable/disable) — wired to live Firestore
+- ✅ Breakfast add-on — Rate Management (rate per person per night) — wired to live Firestore
 - ✅ Breakfast add-on — Step 1 room card (Room Only vs Room + Breakfast option) — already existing in standard booking flow
 - ✅ Breakfast add-on — booking creation stores `hasBreakfast`, `breakfastRate` — existing server-side logic
-- ✅ Breakfast selections panel wireframe — booking detail drawer (front desk enters at check-in)
-- ⬜ Guest registration form PDF — breakfast section with silog options grid
-- ⬜ Breakfast reports — daily kitchen prep report + breakfast revenue
+- ✅ Breakfast selections panel — booking detail drawer wired to Firestore (front desk enters at check-in)
+- ✅ Guest registration form PDF — breakfast section with silog options grid via jsPDF
+- ✅ Breakfast reports — daily kitchen prep report + breakfast revenue + CSV export
 
 ---
 
@@ -390,13 +390,13 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 4 — Booking Flow | 11 | 11 | 0 |
 | 5 — Admin Bookings | 8 | 8 | 0 |
 | 6 — Email System | 9 | 4 | 5 |
-| 7 — Corporate & Vouchers | 12 | 7 | 5 |
+| 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 10 | 2 | 8 |
 | 9 — Remaining Features | 5 | 1 | 4 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **91** | **66** |
+| **Total** | **157** | **96** | **61** |
 
 ---
 
