@@ -7,6 +7,7 @@ import {
   handleCancelBooking 
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
+import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { adminAuth } from "./lib/firebase-admin";
 
 async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
@@ -211,6 +212,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleValidateVoucher(req, res);
+  }
+
+  if (domain === "validate" && action === "corporate-code" && req.method === "POST") {
+    // 10 requests / IP / minute
+    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
+    }
+
+    // Turnstile Bot Check
+    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleValidateCorporateCode(req, res);
   }
 
   // Fallback 404

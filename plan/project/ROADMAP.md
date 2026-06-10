@@ -267,15 +267,15 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 7 — Corporate, Vouchers & Breakfast (P1)
 > Goal: Corporate booking flow + voucher system + breakfast add-on working end-to-end.
 
-- ⬜ Corporate Booking page (`/corporate/book`) — landing, access code input, corporate skin
-- ⬜ Corporate code validation API route (`/api/validate/corporate-code`)
-- ⬜ Corporate Inquiries pipeline (admin) — kanban, notes log, access code generation
-- ⬜ Voucher management (admin, within Settings)
-- ⬜ Voucher redemption wired into booking flow Step 3
+- ✅ Corporate Booking page (`/corporate/book`) — wired to live API for access code validation + Firestore for breakfast config + booking creation
+- ✅ Corporate code validation API route (`/api/validate/corporate-code`) — with Turnstile, rate limiting, shared utility
+- ✅ Corporate Inquiries pipeline (admin) — live Firestore via onSnapshot, status updates, notes, code generation
+- ✅ Voucher management (admin) — live Firestore via onSnapshot, create, toggle active
+- ✅ Voucher redemption wired into booking flow Step 3 — existing (already built)
 - ⬜ Breakfast add-on — Settings → Breakfast tab (silog menu management, enable/disable)
 - ⬜ Breakfast add-on — Rate Management (rate per person per night)
-- ⬜ Breakfast add-on — Step 1 room card (Room Only vs Room + Breakfast option)
-- ⬜ Breakfast add-on — booking creation stores `hasBreakfast`, `breakfastRate`
+- ✅ Breakfast add-on — Step 1 room card (Room Only vs Room + Breakfast option) — already existing in standard booking flow
+- ✅ Breakfast add-on — booking creation stores `hasBreakfast`, `breakfastRate` — existing server-side logic
 - ✅ Breakfast selections panel wireframe — booking detail drawer (front desk enters at check-in)
 - ⬜ Guest registration form PDF — breakfast section with silog options grid
 - ⬜ Breakfast reports — daily kitchen prep report + breakfast revenue
@@ -390,13 +390,13 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 4 — Booking Flow | 11 | 11 | 0 |
 | 5 — Admin Bookings | 8 | 8 | 0 |
 | 6 — Email System | 9 | 4 | 5 |
-| 7 — Corporate & Vouchers | 12 | 1 | 11 |
+| 7 — Corporate & Vouchers | 12 | 7 | 5 |
 | 8 — Intercom | 10 | 2 | 8 |
 | 9 — Remaining Features | 5 | 1 | 4 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **85** | **72** |
+| **Total** | **157** | **91** | **66** |
 
 ---
 
