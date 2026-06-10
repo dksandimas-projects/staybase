@@ -136,7 +136,6 @@ export function RatesPage() {
     setExpiresAt("");
     setApplicableRooms([]);
     setIsVchModalOpen(false);
-    alert("Promo voucher created successfully!");
   };
 
   const handleCorpSubmit = (e: React.FormEvent) => {
@@ -164,43 +163,41 @@ export function RatesPage() {
     setCorpCode("");
     setCompanyName("");
     setIsCorpModalOpen(false);
-    alert("Negotiated corporate access code created successfully!");
   };
 
   // Save room prices changes
-  const handleSaveRates = (e: React.FormEvent) => {
+  const handleSaveRates = async (e: React.FormEvent) => {
     e.preventDefault();
-    rooms.forEach(room => {
+    const updates = rooms.map(room => {
       const typeRates = prices[room.type];
       if (typeRates) {
-        updateRoomConfig(room.id, {
+        return updateRoomConfig(room.id, {
           pricePerNight: typeRates.base,
           weekendRate: typeRates.weekend,
           corporateRate: typeRates.corporate
         });
       }
+      return Promise.resolve();
     });
-    alert("Dynamic base room rates, weekend surcharges, and flat corporate rates saved successfully!");
+    await Promise.all(updates);
   };
 
   // Save breakfast pricing changes
-  const handleSaveBreakfastRate = (e: React.FormEvent) => {
+  const handleSaveBreakfastRate = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("breakfastConfig", {
+    await updateSettings("breakfastConfig", {
       ...breakfastConfig,
       ratePerPersonPerNight: parseFloat(bfRate) || 300
     });
-    alert("Breakfast service pricing saved successfully!");
   };
 
   // Save payment config changes
-  const handleSavePayments = (e: React.FormEvent) => {
+  const handleSavePayments = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("hotelConfig", {
+    await updateSettings("hotelConfig", {
       ...hotelConfig,
       bookingPaymentMethods: paymentMethods
     });
-    alert("Booking payment gateway configurations saved successfully!");
   };
 
   // Toggle payment method enabled/disabled

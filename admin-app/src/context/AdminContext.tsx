@@ -303,7 +303,7 @@ export interface AdminContextType {
   rewardsConfig: any;
   breakfastConfig: any;
   storeConfig: any;
-  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => void;
+  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<void>;
 
   // Room Types Config
   roomTypes: { value: string; label: string; shortLabel: string }[];
@@ -1265,12 +1265,49 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     ]
   });
 
-  const updateSettings = (section: any, data: any) => {
-    if (section === "hotelConfig") setHotelConfig(prev => ({ ...prev, ...data }));
-    if (section === "websiteContent") setWebsiteContent(prev => ({ ...prev, ...data }));
-    if (section === "rewardsConfig") setRewardsConfig(prev => ({ ...prev, ...data }));
-    if (section === "breakfastConfig") setBreakfastConfig(prev => ({ ...prev, ...data }));
-    if (section === "storeConfig") setStoreConfig(prev => ({ ...prev, ...data }));
+  // Subscribe to all settings documents from Firestore
+  useEffect(() => {
+    const settingsRef = collection(db, "settings");
+    const unsubscribe = onSnapshot(
+      settingsRef,
+      (snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const docId = docSnap.id;
+          switch (docId) {
+            case "hotelConfig":
+              setHotelConfig(data as typeof hotelConfig);
+              break;
+            case "websiteContent":
+              setWebsiteContent(data as typeof websiteContent);
+              break;
+            case "rewardsConfig":
+              setRewardsConfig(data as typeof rewardsConfig);
+              break;
+            case "breakfastConfig":
+              setBreakfastConfig(data as typeof breakfastConfig);
+              break;
+            case "storeConfig":
+              setStoreConfig(data as typeof storeConfig);
+              break;
+          }
+        });
+      },
+      (error) => {
+        console.error("Error listening to settings collection:", error);
+      }
+    );
+    return unsubscribe;
+  }, []);
+
+  const updateSettings = async (section: string, data: any) => {
+    try {
+      const docRef = doc(db, "settings", section);
+      await setDoc(docRef, data, { merge: true });
+    } catch (error) {
+      console.error(`Error updating ${section}:`, error);
+      alert(`Failed to save settings: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
   };
 
   // Room Types State
