@@ -368,6 +368,45 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ---
 
+## Plan Audit Fixes — June 10, 2026
+> Source: mid-build plan audit (see `Spark Inn/mid-audit.md`)
+> Fix these before or during the phase they block. Grouped by priority.
+
+### 🔴 Fix before Phase 8 — Intercom
+
+- ⬜ **[AUDIT-1]** Build `api/handlers/email.ts` — all 7 email triggers (booking-submitted, payment-confirmed, booking-confirmed, checkin-reminder, booking-cancelled, corporate-inquiry, discount-rejected); wire all routes in `[...route].ts`
+- ⬜ **[AUDIT-2]** Build `api/handlers/reference.ts` — `/api/reference/generate`; wire in `[...route].ts`
+- ⬜ **[AUDIT-3]** Fix `storeOrders` Firestore rule — change to `allow read, create: if true; allow update: if isStaff();` so guests can read their own order status
+- ⬜ **[AUDIT-4]** Fix storage path mismatch — storage.rules has `store/{itemId}` but spec is `store-items/{itemId}`; align to `store-items/`
+- ⬜ **[AUDIT-5]** Fix storage rule — `settings/notification-sound` should be `allow read: if isStaff()` (not public)
+- ⬜ **[AUDIT-15]** Fix storage rule — `settings/website-content` write should be `allow write: if isAdmin()` (not isStaff)
+
+### 🔴 Fix before Phase 10B — Spark Rewards
+
+- ⬜ **[AUDIT-6]** Add `api/handlers/members.ts` and define `/api/members/register`, `/api/members/redeem-points`, `/api/members/undo-redemption` in API-ROUTES.md
+- ⬜ **[AUDIT-6b]** Add `api/handlers/store.ts` and define `/api/store/create-order` in API-ROUTES.md
+- ⬜ **[AUDIT-6c]** Add `api/handlers/admin.ts` and define `/api/admin/create-staff`, `/api/admin/disable-staff` in API-ROUTES.md
+- ⬜ **[AUDIT-7]** Add `isEarlyCheckInRequest?: boolean` to `IntercomMessage` type in `TYPES.md` and `BACKEND.md §intercoms`
+- ⬜ **[AUDIT-8]** Decide on `SparkRewardsPromo.perks` field — add to type in `TYPES.md` and schema in `BACKEND.md §settings/websiteContent`
+
+### 🟡 Fix before Phase 10 — Security & Polish
+
+- ⬜ **[AUDIT-9]** Add `VITE_SENTRY_DSN=` to both app sections in `ENV-SETUP.md`
+- ⬜ **[AUDIT-10]** Add `html2canvas` to the stack table in `CLAUDE.md` and `DECISIONS-ARCH.md`
+- ⬜ **[AUDIT-11]** Decide and document check-in reminder mechanism in `EMAIL-PDF-STORAGE.md` (recommend Vercel cron); add `vercel.json` cron entry spec
+- ⬜ **[AUDIT-12]** Create `vercel.json` at repo root with CSP headers, X-Frame-Options, X-Content-Type-Options, Referrer-Policy; document in `FILE-STRUCTURE.md`
+
+### 🟢 Anytime — Doc polish
+
+- ⬜ **[AUDIT-13]** Add `corporate-codes.ts` to `FILE-STRUCTURE.md §shared/utils/`; add as U-6 test in `DECISIONS-ARCH.md §Testing Strategy`
+- ⬜ **[AUDIT-14]** Add `images.ts` to `FILE-STRUCTURE.md §shared/utils/`
+- ⬜ **[AUDIT-16]** Add PWA icons (192×192 + 512×512 PNG) to `FILE-STRUCTURE.md §public/brand/` and `WHITE-LABEL.md §Asset Checklist`
+- ⬜ **[AUDIT-17]** Fix duplicate tab numbering in `SETTINGS.md` — Tab 10 = Store, Tab 11 = Spark Rewards, Tab 12 = Legal Content
+- ⬜ **[AUDIT-18]** Fix broken reference in `REPORTS.md` — change `plan/docs/DECISIONS.md` to `plan/docs/DECISIONS-ARCH.md`
+- ⬜ **[AUDIT-19]** Update ROADMAP.md Phase 10B progress — auth routes + page shells are already wired from wireframe pass; credit ~4–5 items as done
+
+---
+
 ## Phase 12 — Post-Launch (Phase 2, Deferred)
 > Goal: Enhancements after stable v1.0.0.
 
@@ -396,7 +435,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| **Total** | **157** | **96** | **61** |
+| Audit Fixes | 19 | 0 | 19 |
+| **Total** | **176** | **96** | **80** |
 
 ---
 
