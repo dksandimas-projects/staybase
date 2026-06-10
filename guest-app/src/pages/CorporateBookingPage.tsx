@@ -36,6 +36,7 @@ import {
   DEFAULT_ROOM_TYPES,
   VERSION
 } from "@spark-inn/shared";
+import { doc, getDoc, getFirestore } from "firebase/firestore";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -44,10 +45,7 @@ import { StepIndicator } from "../components/StepIndicator";
 import { rooms } from "../data/rooms";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
-
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
-const breakfastRatePerPerson = 350;
-const breakfastEnabled = true;
 
 type RateChoice = "room-only" | "room-breakfast";
 type GuestField = "firstName" | "lastName" | "email" | "phone" | "guestCount" | "designation" | "companyAddress";
@@ -92,6 +90,9 @@ export function CorporateBookingPage() {
   const [rateChoice, setRateChoice] = useState<RateChoice>(
     searchParams.get("breakfast") === "yes" ? "room-breakfast" : "room-only"
   );
+
+  // Breakfast config fetched from Firestore
+  const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -142,6 +143,22 @@ export function CorporateBookingPage() {
     }
   }, [currentStepKey, companyName, isFlatRate, searchParams, setSearchParams]);
 
+  // Fetch breakfast config from Firestore on mount
+  useEffect(() => {
+    const db = getFirestore();
+    getDoc(doc(db, "settings", "breakfastConfig")).then((snap) => {
+      if (snap.exists()) {
+        const d = snap.data() as any;
+        setBreakfastConfig({
+          isEnabled: d.isEnabled !== false,
+          ratePerPersonPerNight: d.ratePerPersonPerNight || 250,
+        });
+      }
+    }).catch(() => {
+      // Keep defaults on error
+    });
+  }, []);
+
   const nights = Math.max(getNumNights(checkIn, checkOut), 1);
 
   // Rooms list
@@ -155,7 +172,8 @@ export function CorporateBookingPage() {
   );
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
-  const hasBreakfast = breakfastEnabled && rateChoice === "room-breakfast";
+  const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
+  const breakfastRatePerPerson = breakfastConfig.ratePerPersonPerNight;
 
   // Calculate pricing
   const baseRate = selectedRoom ? selectedRoom.corporateRate : 0;
@@ -249,44 +267,37 @@ export function CorporateBookingPage() {
   }
 
   // Code validation logic
-  function handleValidateCode(e: React.FormEvent) {
+  async function handleValidateCode(e: React.FormEvent) {
     e.preventDefault();
     setCodeError("");
     setIsValidating(true);
 
-    setTimeout(() => {
-      setIsValidating(false);
+    try {
       const code = accessCode.trim().toUpperCase();
-      if (code === "ACME123") {
-        setCompanyName("Acme Corp");
-        setActiveCode("ACME123");
-        setDiscountPercent(15);
+      const response = await fetch("/api/validate/corporate-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, turnstileToken: "mock_token" })
+      });
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        setCompanyName(result.data.companyName);
+        setActiveCode(result.data.code);
+        setDiscountPercent(0);
         setIsFlatRate(false);
-        sessionStorage.setItem("corp_companyName", "Acme Corp");
-        sessionStorage.setItem("corp_code", "ACME123");
-        sessionStorage.setItem("corp_discount", "15");
+        sessionStorage.setItem("corp_companyName", result.data.companyName);
+        sessionStorage.setItem("corp_code", result.data.code);
+        sessionStorage.setItem("corp_discount", "0");
         sessionStorage.setItem("corp_isFlatRate", "false");
-      } else if (code === "GLOBE2026") {
-        setCompanyName("Globe Telecom");
-        setActiveCode("GLOBE2026");
-        setDiscountPercent(10);
-        setIsFlatRate(false);
-        sessionStorage.setItem("corp_companyName", "Globe Telecom");
-        sessionStorage.setItem("corp_code", "GLOBE2026");
-        sessionStorage.setItem("corp_discount", "10");
-        sessionStorage.setItem("corp_isFlatRate", "false");
-      } else if (code === "") {
-        setCodeError("Please enter an access code.");
-      } else if (code === "EXPIRED") {
-        setCodeError(corporateCodeMessages.expired);
-      } else if (code === "FULL") {
-        setCodeError(corporateCodeMessages["usage-cap"]);
-      } else if (code === "INACTIVE") {
-        setCodeError(corporateCodeMessages.inactive);
       } else {
-        setCodeError(corporateCodeMessages.invalid);
+        setCodeError(result.error || corporateCodeMessages.invalid);
       }
-    }, 800);
+    } catch {
+      setCodeError("Unable to validate code. Please check your connection and try again.");
+    } finally {
+      setIsValidating(false);
+    }
   }
 
   function handleContinueFlatRate() {
@@ -317,7 +328,6 @@ export function CorporateBookingPage() {
     sessionStorage.removeItem("corp_isFlatRate");
   }
 
-  // Handle mock file upload
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       setBillingFile(e.target.files[0].name);
@@ -347,17 +357,8 @@ export function CorporateBookingPage() {
   reviewParams.set("billingArrangement", guestDetails.billingArrangement);
   reviewParams.set("requests", guestDetails.requests);
 
-  const confirmParams = new URLSearchParams({
-    step: "confirm",
-    bookingRef: `SI-CORP-20260612-${activeCode ? "AC" : "FR"}01`,
-    roomId: selectedRoom?.id ?? "",
-    checkIn,
-    checkOut,
-    guests: String(guests),
-    companyName: guestDetails.companyName,
-    billingArrangement: guestDetails.billingArrangement,
-    total: String(total)
-  });
+  const [bookingResponse, setBookingResponse] = useState<{ ref: string } | null>(null);
+  const [submitError, setSubmitError] = useState("");
 
   function getBackToPath() {
     if (currentStepKey === "confirm") return "/corporate";
@@ -373,15 +374,69 @@ export function CorporateBookingPage() {
     return "/corporate";
   }
 
-  const handleConfirmSubmit = (e: React.FormEvent) => {
+  const handleConfirmSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
-    // Simulate booking creation
-    setTimeout(() => {
+    setSubmitError("");
+
+    try {
+      const body = {
+        bookingId: `corp-${Date.now()}`,
+        roomId: selectedRoom?.id ?? "",
+        checkIn,
+        checkOut,
+        guests: Number(guestDetails.guestCount) || guests,
+        hasBreakfast: hasBreakfast,
+        guestDetails: {
+          firstName: guestDetails.firstName,
+          lastName: guestDetails.lastName,
+          email: guestDetails.email,
+          phone: guestDetails.phone,
+          requests: guestDetails.requests,
+          consent: guestDetails.consent,
+          companyName: guestDetails.companyName,
+          designation: guestDetails.designation,
+          companyAddress: guestDetails.companyAddress,
+          purposeOfStay: guestDetails.purposeOfStay,
+          preferredBillingArrangement: guestDetails.billingArrangement === "personal" ? "personal" : "chargeback",
+        },
+        discountType: "" as const,
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        isCorporate: true,
+        corporateCode: activeCode || undefined,
+        _hp: "",
+      };
+
+      const response = await fetch("/api/bookings/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        setBookingResponse({ ref: result.data.bookingRef });
+        const params = new URLSearchParams({
+          step: "confirm",
+          bookingRef: result.data.bookingRef,
+          roomId: selectedRoom?.id ?? "",
+          checkIn,
+          checkOut,
+          guests: String(guests),
+          companyName: guestDetails.companyName,
+          billingArrangement: guestDetails.billingArrangement,
+          total: String(total || result.data.totalPrice || 0),
+        });
+        setSearchParams(params);
+      } else {
+        setSubmitError(result.error || "Booking submission failed. Please try again.");
+        setIsSubmitting(false);
+      }
+    } catch {
+      setSubmitError("Unable to submit booking. Please check your connection and try again.");
       setIsSubmitting(false);
-      setSearchParams(confirmParams);
-    }, 1500);
+    }
   };
 
   const bookingShell = (content: React.ReactNode) => (
@@ -512,7 +567,7 @@ export function CorporateBookingPage() {
                     required
                   />
                   <span className="text-xs leading-5 text-gray-500">
-                    Wireframe samples: ACME123 and GLOBE2026 validate. EXPIRED, FULL, and INACTIVE show edge states.
+                    Enter the access code provided by your company.
                   </span>
                 </label>
 
@@ -1005,6 +1060,7 @@ export function CorporateBookingPage() {
             room={selectedRoom}
             total={total}
             ratePerNight={ratePerNight}
+            breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
           />
         </section>
 
@@ -1199,6 +1255,14 @@ export function CorporateBookingPage() {
                 <span className="text-[10px] text-gray-400 font-bold uppercase">Cloudflare</span>
               </div>
             </div>
+
+            {/* Submit error */}
+            {submitError && (
+              <div className="rounded-card bg-red-50 border border-red-200 p-4 text-sm text-red-700 flex gap-2">
+                <Info size={18} className="shrink-0 mt-0.5" />
+                <span>{submitError}</span>
+              </div>
+            )}
           </div>
 
           {/* Right side review aside */}
@@ -1211,6 +1275,7 @@ export function CorporateBookingPage() {
             room={selectedRoom}
             total={total}
             ratePerNight={ratePerNight}
+            breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
           />
         </section>
 
@@ -1253,7 +1318,7 @@ export function CorporateBookingPage() {
   // ==================== STEP 4: CONFIRMATION ====================
   if (currentStepKey === "confirm") {
     const isPersonalPay = searchParams.get("billingArrangement") === "personal";
-    const refCode = searchParams.get("bookingRef") ?? "SI-CORP-20260612-FR01";
+    const refCode = searchParams.get("bookingRef") ?? (bookingResponse?.ref || "Pending");
     const validatedCompany = searchParams.get("companyName") ?? companyName;
     const finalCost = Number(searchParams.get("total") ?? total);
 
@@ -1393,6 +1458,7 @@ interface BookingReviewAsideProps {
   room: (typeof rooms)[number] | undefined;
   total: number;
   ratePerNight: number;
+  breakfastRatePerPerson?: number;
 }
 
 function BookingReviewAside({
@@ -1403,7 +1469,8 @@ function BookingReviewAside({
   nights,
   room,
   total,
-  ratePerNight
+  ratePerNight,
+  breakfastRatePerPerson = 250
 }: BookingReviewAsideProps) {
   if (!room) return null;
 

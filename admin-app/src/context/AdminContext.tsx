@@ -11,7 +11,7 @@ import {
 import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 type StaffRole = "front-desk" | "admin";
@@ -717,112 +717,197 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Vouchers & Corporate codes
-  const [vouchers, setVouchers] = useState<Voucher[]>([
-    {
-      id: "vch-1",
-      code: "WELCOME10",
-      discountType: "percent",
-      discountValue: 10,
-      usageCap: 100,
-      usageCount: 42,
-      expiresAt: "2526-12-31",
-      applicableRoomTypes: ["standard-double", "standard-twin"],
-      isActive: true,
-      createdBy: "admin",
-      createdAt: "2026-06-01"
-    }
-  ]);
+  // Vouchers — live from Firestore
+  const [vouchers, setVouchers] = useState<Voucher[]>([]);
 
-  const addVoucher = (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => {
-    const newVch: Voucher = {
-      ...voucher,
-      id: `vch-${Date.now()}`,
-      usageCount: 0,
-      createdAt: new Date().toISOString()
-    };
-    setVouchers(prev => [newVch, ...prev]);
-  };
+  useEffect(() => {
+    const vouchersRef = collection(db, "vouchers");
+    const unsubscribe = onSnapshot(
+      vouchersRef,
+      (snapshot) => {
+        const voucherData: Voucher[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          voucherData.push({
+            id: docSnap.id,
+            code: data.code || "",
+            discountType: data.discountType || "flat",
+            discountValue: data.discountValue || 0,
+            usageCap: data.usageCap ?? null,
+            usageCount: data.usageCount || 0,
+            expiresAt: data.expiresAt ? (typeof data.expiresAt.toDate === "function" ? data.expiresAt.toDate().toISOString() : String(data.expiresAt)) : null,
+            applicableRoomTypes: data.applicableRoomTypes || [],
+            isActive: data.isActive !== false,
+            createdBy: data.createdBy || "",
+            createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
+          });
+        });
 
-  const toggleVoucherActive = (voucherId: string) => {
-    setVouchers(prev => prev.map(v => v.id === voucherId ? { ...v, isActive: !v.isActive } : v));
-  };
-
-  const [corporateCodes, setCorporateCodes] = useState<CorporateCode[]>([
-    {
-      code: "ACME123",
-      companyName: "ACME Corp",
-      ratePerRoomType: { "standard-double": 2720, executive: 3825 },
-      expiresAt: "2027-12-31",
-      usageCap: null,
-      usageCount: 12,
-      linkedInquiryId: "inq-1",
-      createdBy: "admin",
-      createdAt: "2026-06-01",
-      isActive: true
-    }
-  ]);
-
-  const addCorporateCode = (code: CorporateCode) => {
-    setCorporateCodes(prev => [code, ...prev]);
-  };
-
-  const toggleCorporateCodeActive = (code: string) => {
-    setCorporateCodes(prev => prev.map(c => c.code === code ? { ...c, isActive: !c.isActive } : c));
-  };
-
-  const deleteCorporateCode = (code: string) => {
-    setCorporateCodes(prev => prev.filter(c => c.code !== code));
-  };
-
-  // Corporate Inquiries
-  const [corporateInquiries, setCorporateInquiries] = useState<CorporateInquiry[]>([
-    {
-      id: "inq-1",
-      companyName: "ACME Corp",
-      contactPerson: "Jane Smith",
-      email: "jsmith@acme.com",
-      phone: "+63 918 111 2222",
-      numRooms: 5,
-      preferredDates: { from: "2026-11-10", to: "2026-11-15" },
-      specialRequirements: "Requires project screen facilities in suite.",
-      status: "converted",
-      handler: "admin",
-      notes: [{ text: "Discussed corporate rates. Set up code ACME123.", by: "admin", at: "2026-06-02" }],
-      accessCodeId: "ACME123",
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "inq-2",
-      companyName: "Globex Corporation",
-      contactPerson: "Hank Scorpio",
-      email: "hscorpio@globex.com",
-      phone: "+63 919 333 4444",
-      numRooms: 10,
-      preferredDates: { from: "2026-12-01", to: "2026-12-07" },
-      specialRequirements: "Full floor booking, custom security clearances.",
-      status: "new",
-      handler: "",
-      notes: [],
-      accessCodeId: "",
-      createdAt: "2026-06-04"
-    }
-  ]);
-
-  const updateInquiryStatus = (inquiryId: string, status: CorporateInquiry["status"]) => {
-    setCorporateInquiries(prev => prev.map(inq => inq.id === inquiryId ? { ...inq, status } : inq));
-  };
-
-  const addInquiryNote = (inquiryId: string, text: string) => {
-    setCorporateInquiries(prev => prev.map(inq => {
-      if (inq.id === inquiryId) {
-        return {
-          ...inq,
-          notes: [...inq.notes, { text, by: currentUser?.email || "staff", at: new Date().toISOString() }]
-        };
+        voucherData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        setVouchers(voucherData);
+      },
+      (error) => {
+        console.error("Error listening to vouchers collection:", error);
       }
-      return inq;
-    }));
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const addVoucher = async (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => {
+    try {
+      const staff = currentUser;
+      await addDoc(collection(db, "vouchers"), {
+        ...voucher,
+        usageCount: 0,
+        createdBy: staff?.uid || "unknown",
+        createdAt: Timestamp.now(),
+      });
+    } catch (error) {
+      console.error("Error adding voucher:", error);
+    }
+  };
+
+  const toggleVoucherActive = async (voucherId: string) => {
+    try {
+      const vchRef = doc(db, "vouchers", voucherId);
+      const vch = vouchers.find(v => v.id === voucherId);
+      if (vch) {
+        await updateDoc(vchRef, { isActive: !vch.isActive });
+      }
+    } catch (error) {
+      console.error("Error toggling voucher active:", error);
+    }
+  };
+
+  // Corporate Codes — live from Firestore
+  const [corporateCodes, setCorporateCodes] = useState<CorporateCode[]>([]);
+
+  useEffect(() => {
+    const corpCodesRef = collection(db, "corporateCodes");
+    const unsubscribe = onSnapshot(
+      corpCodesRef,
+      (snapshot) => {
+        const codes: CorporateCode[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          codes.push({
+            code: docSnap.id,
+            companyName: data.companyName || "",
+            ratePerRoomType: data.ratePerRoomType || {},
+            expiresAt: data.expiresAt ? (typeof data.expiresAt.toDate === "function" ? data.expiresAt.toDate().toISOString() : String(data.expiresAt)) : null,
+            usageCap: data.usageCap ?? null,
+            usageCount: data.usageCount || 0,
+            linkedInquiryId: data.linkedInquiryId || "",
+            createdBy: data.createdBy || "",
+            createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
+            isActive: data.isActive !== false,
+          });
+        });
+
+        codes.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        setCorporateCodes(codes);
+      },
+      (error) => {
+        console.error("Error listening to corporateCodes collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const addCorporateCode = async (code: CorporateCode) => {
+    try {
+      const { code: codeValue, ...rest } = code;
+      await setDoc(doc(db, "corporateCodes", code.code), {
+        ...rest,
+        isActive: true,
+      });
+    } catch (error) {
+      console.error("Error adding corporate code:", error);
+    }
+  };
+
+  const toggleCorporateCodeActive = async (code: string) => {
+    try {
+      const codeRef = doc(db, "corporateCodes", code);
+      const existing = corporateCodes.find(c => c.code === code);
+      if (existing) {
+        await updateDoc(codeRef, { isActive: !existing.isActive });
+      }
+    } catch (error) {
+      console.error("Error toggling corporate code active:", error);
+    }
+  };
+
+  const deleteCorporateCode = async (code: string) => {
+    try {
+      await deleteDoc(doc(db, "corporateCodes", code));
+    } catch (error) {
+      console.error("Error deleting corporate code:", error);
+    }
+  };
+
+  // Corporate Inquiries — live from Firestore
+  const [corporateInquiries, setCorporateInquiries] = useState<CorporateInquiry[]>([]);
+
+  useEffect(() => {
+    const inquiriesRef = collection(db, "corporateInquiries");
+    const unsubscribe = onSnapshot(
+      inquiriesRef,
+      (snapshot) => {
+        const inquiries: CorporateInquiry[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          inquiries.push({
+            id: docSnap.id,
+            companyName: data.companyName || "",
+            contactPerson: data.contactPerson || "",
+            email: data.email || "",
+            phone: data.phone || "",
+            numRooms: data.numRooms || 0,
+            preferredDates: data.preferredDates || { from: "", to: "" },
+            specialRequirements: data.specialRequirements || "",
+            status: data.status || "new",
+            handler: data.handler || "",
+            notes: data.notes || [],
+            accessCodeId: data.accessCodeId || "",
+            createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
+          });
+        });
+
+        inquiries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        setCorporateInquiries(inquiries);
+      },
+      (error) => {
+        console.error("Error listening to corporateInquiries collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const updateInquiryStatus = async (inquiryId: string, status: CorporateInquiry["status"]) => {
+    try {
+      await updateDoc(doc(db, "corporateInquiries", inquiryId), { status });
+    } catch (error) {
+      console.error("Error updating inquiry status:", error);
+    }
+  };
+
+  const addInquiryNote = async (inquiryId: string, text: string) => {
+    try {
+      const inquiryRef = doc(db, "corporateInquiries", inquiryId);
+      const inquiry = corporateInquiries.find(i => i.id === inquiryId);
+      if (inquiry) {
+        const newNote = { text, by: currentUser?.email || "staff", at: new Date().toISOString() };
+        await updateDoc(inquiryRef, {
+          notes: [...inquiry.notes, newNote],
+        });
+      }
+    } catch (error) {
+      console.error("Error adding inquiry note:", error);
+    }
   };
 
   // Members Data State
