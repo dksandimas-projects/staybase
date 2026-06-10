@@ -25,6 +25,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import config from "@config";
+import { jsPDF } from "jspdf";
 import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { auth } from "../firebase/auth";
@@ -150,7 +151,8 @@ export function BookingsPage() {
     return Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   };
   const numNights = getNumNights();
-  const totalPrice = ratePerNight * numNights + (hasBreakfast ? 300 * numGuests * numNights : 0);
+  const brekkieRate = breakfastConfig.ratePerPersonPerNight || 300;
+  const totalPrice = ratePerNight * numNights + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
 
   // Table Columns Setup
   const columns: Array<DataTableColumn<Booking>> = [
@@ -305,6 +307,209 @@ export function BookingsPage() {
     });
   };
 
+  const printRegistrationPDF = () => {
+    if (!selectedBooking) return;
+    const b = selectedBooking;
+    const reg = b.guestRegistration;
+
+    const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    const pageW = 210;
+    let y = 15;
+
+    // ── Header ──
+    pdf.setFontSize(18);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Guest Registration Form", pageW / 2, y, { align: "center" });
+    y += 8;
+
+    // Divider line
+    pdf.setDrawColor(241, 101, 34); // primary orange
+    pdf.setLineWidth(0.5);
+    pdf.line(15, y, pageW - 15, y);
+    y += 8;
+
+    // Booking info row
+    pdf.setFontSize(9);
+    pdf.setTextColor(80, 80, 80);
+    pdf.text(`Booking: ${b.bookingRef}`, 15, y);
+    pdf.text(`Room: ${b.roomNumber} (${b.roomType})`, pageW / 2, y);
+    y += 5;
+    pdf.text(`Check-in: ${b.checkIn}`, 15, y);
+    pdf.text(`Check-out: ${b.checkOut}`, pageW / 2, y);
+    y += 5;
+    pdf.text(`Guests: ${b.numGuests}`, 15, y);
+    pdf.text(`Nights: ${b.numNights}`, pageW / 2, y);
+    y += 8;
+
+    // Divider
+    pdf.setDrawColor(200, 200, 200);
+    pdf.setLineWidth(0.2);
+    pdf.line(15, y, pageW - 15, y);
+    y += 8;
+
+    // Guest details
+    pdf.setFontSize(13);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Guest Information", 15, y);
+    y += 7;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(60, 60, 60);
+    pdf.text(`Guest Name: ${b.guestName}`, 20, y);
+    y += 5.5;
+    pdf.text(`Email: ${b.guestEmail}`, 20, y);
+    y += 5.5;
+    pdf.text(`Phone: ${b.guestPhone}`, 20, y);
+    y += 8;
+
+    // Registration data
+    pdf.setFontSize(13);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Registration Details", 15, y);
+    y += 7;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(60, 60, 60);
+
+    const regFields: [string, string][] = [
+      ["Nationality", reg?.nationality || "—"],
+      ["Date of Birth", reg?.dateOfBirth || "—"],
+      ["Gender", reg?.gender || "—"],
+      ["ID Type", reg?.idType || "—"],
+      ["ID Number", reg?.idNumber || "—"],
+      ["Address", reg?.address || "—"],
+      ["Emergency Contact", reg?.emergencyContact || "—"],
+      ["Vehicle Plate", reg?.vehiclePlate || "—"],
+      ["Signature Status", reg?.signatureStatus === "signed" ? "Signed" : "Pending"],
+    ];
+
+    for (const [label, value] of regFields) {
+      pdf.setFontSize(9);
+      pdf.setTextColor(100, 100, 100);
+      pdf.text(`${label}:`, 20, y);
+      pdf.setFontSize(10);
+      pdf.setTextColor(50, 50, 50);
+      // Truncate long values
+      const displayValue = value.length > 55 ? value.substring(0, 52) + "..." : value;
+      pdf.text(displayValue, 55, y);
+      y += 5.5;
+    }
+    y += 5;
+
+    // ── Breakfast Selections ──
+    if (b.hasBreakfast) {
+      // Check if we need a new page
+      if (y > 200) {
+        pdf.addPage();
+        y = 15;
+      }
+
+      // Divider
+      pdf.setDrawColor(241, 101, 34); // primary
+      pdf.setLineWidth(0.5);
+      pdf.line(15, y, pageW - 15, y);
+      y += 8;
+
+      pdf.setFontSize(13);
+      pdf.setTextColor(30, 30, 30);
+      pdf.text("Breakfast Silog Selections", 15, y);
+      y += 7;
+
+      const stayDates = getStayDates(b);
+      const activeSilogItems = breakfastConfig.silogItems.filter(
+        (item: { id: string; name: string; isActive: boolean }) => item.isActive
+      );
+
+      if (activeSilogItems.length === 0) {
+        pdf.setFontSize(10);
+        pdf.setTextColor(150, 150, 150);
+        pdf.text("No active silog items configured.", 20, y);
+        y += 6;
+      } else {
+        // Build a table grid: rows = guests, columns = dates
+        const colW = Math.min(38, (pageW - 40) / (stayDates.length + 1));
+        const startX = 20;
+        const rowH = 7;
+
+        // Header row
+        pdf.setFillColor(241, 101, 34);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(8);
+        pdf.rect(startX, y, colW, rowH, "F");
+        pdf.text("Guest", startX + 2, y + 4.5);
+
+        let cx = startX + colW;
+        for (const date of stayDates) {
+          pdf.rect(cx, y, colW, rowH, "F");
+          // Short date format: Jun 15
+          const d = new Date(date);
+          const shortDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          pdf.text(shortDate, cx + 2, y + 4.5);
+          cx += colW;
+        }
+        y += rowH;
+
+        // Guest rows
+        for (let g = 0; g < b.numGuests; g++) {
+          // Alternate row background
+          if (g % 2 === 0) {
+            pdf.setFillColor(248, 248, 248);
+            pdf.rect(startX, y, colW + stayDates.length * colW, rowH, "F");
+          }
+
+          pdf.setFontSize(9);
+          pdf.setTextColor(50, 50, 50);
+          pdf.text(`Guest ${g + 1}`, startX + 2, y + 4.5);
+
+          cx = startX + colW;
+          for (const date of stayDates) {
+            const key = `${date}-guest-${g + 1}`;
+            const selection = b.breakfastSelections?.[key] || "—";
+            pdf.setFontSize(8);
+            pdf.text(selection, cx + 2, y + 4.5);
+            cx += colW;
+          }
+          y += rowH;
+        }
+
+        y += 4;
+
+        // Silog menu legend
+        pdf.setFontSize(8);
+        pdf.setTextColor(120, 120, 120);
+        pdf.text("Available Items:", 20, y);
+        y += 4.5;
+        const legendText = activeSilogItems
+          .map((item: { name: string }) => item.name)
+          .join("  •  ");
+        pdf.setFontSize(8);
+        pdf.setTextColor(150, 150, 150);
+        pdf.text(legendText, 22, y);
+      }
+    }
+
+    // ── Footer ──
+    y = 280;
+    pdf.setDrawColor(200, 200, 200);
+    pdf.setLineWidth(0.2);
+    pdf.line(15, y, pageW - 15, y);
+    y += 6;
+    pdf.setFontSize(7);
+    pdf.setTextColor(160, 160, 160);
+    pdf.text(
+      `Generated by ${config.brandName} guest registration system — ${new Date().toISOString().split("T")[0]}`,
+      pageW / 2,
+      y,
+      { align: "center" }
+    );
+    pdf.text(`Booking Ref: ${b.bookingRef} | Room ${b.roomNumber}`, pageW / 2, y + 4, { align: "center" });
+
+    // Open PDF in new tab
+    const blob = pdf.output("blob");
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  };
+
   const getBookingPaymentsTotal = (booking: Booking) => {
     if (selectedBooking && selectedBooking.id === booking.id) {
       return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -452,7 +657,7 @@ export function BookingsPage() {
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
         hasBreakfast,
-        breakfastRate: hasBreakfast ? 300 : 0,
+        breakfastRate: hasBreakfast ? (breakfastConfig.ratePerPersonPerNight || 300) : 0,
         guestIdPhotoUrl: null,
         handledBy: "frontdesk-staff",
         cancellationReason: ""
@@ -763,6 +968,7 @@ export function BookingsPage() {
                   <div className="flex flex-col gap-2 border-t border-gray-100 pt-3 sm:flex-row sm:justify-end">
                     <button
                       type="button"
+                      onClick={printRegistrationPDF}
                       className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
                     >
                       <FileText size={13} />
@@ -854,7 +1060,7 @@ export function BookingsPage() {
                 {selectedBooking.hasBreakfast && (
                   <div className="flex justify-between text-gray-500">
                     <span>Breakfast Service charge</span>
-                    <span>{formatPrice(300 * selectedBooking.numGuests * selectedBooking.numNights)}</span>
+                    <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
                   </div>
                 )}
                 <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
@@ -1581,7 +1787,7 @@ export function BookingsPage() {
                 onChange={(e) => setHasBreakfast(e.target.checked)}
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
               />
-              Include Daily Breakfast (+₱300/guest/night)
+              Include Daily Breakfast (+₱{breakfastConfig.ratePerPersonPerNight || 300}/guest/night)
             </label>
 
             <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
@@ -1632,7 +1838,7 @@ export function BookingsPage() {
             {hasBreakfast && (
               <div className="flex justify-between text-gray-500">
                 <span>Breakfast Surcharges:</span>
-                <span>{formatPrice(300 * numGuests * numNights)}</span>
+                <span>{formatPrice(brekkieRate * numGuests * numNights)}</span>
               </div>
             )}
             <div className="flex justify-between border-t border-gray-150 pt-2 text-sm font-bold text-primary-dark">
