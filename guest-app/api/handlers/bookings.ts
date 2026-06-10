@@ -1,6 +1,5 @@
 import { adminDb } from "../lib/firebase-admin";
-import { resend } from "../lib/resend";
-import { calculateBookingTotal } from "@spark-inn/shared";
+import { sendBookingTrigger } from "./email";
 import config from "../../../hotel.config";
 
 interface GuestDetails {
@@ -337,72 +336,11 @@ export async function handleCreateBooking(req: any, res: any) {
 
     // Send acknowledgment email outside the transaction via Resend
     try {
-      const { guestName, email, roomName, roomNumber } = computedData;
-      const paymentMsg = paymentMethod === "pay-at-hotel"
-        ? "<p><strong>Payment Method:</strong> Pay at Hotel (Present this confirmation at check-in. Payment is due upon arrival.)</p>"
-        : `<p><strong>Payment Method:</strong> ${paymentMethod.toUpperCase()}</p>
-           <p><strong>⚠️ Payment Verification:</strong> Your uploaded proof of payment is under review. Our team will verify it within 24 hours.</p>`;
-
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background-color: #111827; padding: 24px; text-align: center;">
-            <h1 style="color: #EA8A1A; margin: 0; font-size: 24px; text-transform: lowercase;">${config.brandName || "spark inn"}</h1>
-          </div>
-          <div style="padding: 24px;">
-            <h2 style="color: #111827; margin-top: 0;">Booking Request Submitted</h2>
-            <p>Dear ${guestName},</p>
-            <p>Thank you for choosing <strong>${config.brandName || "spark inn"}</strong>. We have received your booking request, and it is currently <strong>under review</strong>.</p>
-            
-            <div style="background-color: #FEF3E2; border-left: 4px solid #EA8A1A; padding: 16px; margin: 20px 0; border-radius: 4px;">
-              <p style="margin: 0; font-weight: bold; color: #C4720E;">⚠️ Review Notice</p>
-              <p style="margin: 4px 0 0 0; font-size: 14px;">Your booking status is currently <strong>Pending Manual Review</strong>. We will review your reservation details and verify any payment receipts/discount IDs submitted. An official confirmation email will be sent once verified.</p>
-            </div>
-
-            <h3 style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; color: #111827;">Reservation Details</h3>
-            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Booking Reference</td>
-                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${finalBookingRef}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Room</td>
-                <td style="padding: 6px 0; text-align: right;">Room ${roomNumber} — ${roomName}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-in Date</td>
-                <td style="padding: 6px 0; text-align: right;">${checkIn} (from ${config.checkInTime || "14:00"})</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-out Date</td>
-                <td style="padding: 6px 0; text-align: right;">${checkOut} (by ${config.checkOutTime || "12:00"})</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Nights</td>
-                <td style="padding: 6px 0; text-align: right;">${numNights} night(s)</td>
-              </tr>
-              <tr style="border-top: 1px dashed #e5e7eb;">
-                <td style="padding: 10px 0; font-weight: bold; color: #111827;">Total Price</td>
-                <td style="padding: 10px 0; font-weight: bold; text-align: right; color: #EA8A1A; font-size: 16px;">₱${finalTotalPrice.toLocaleString()}</td>
-              </tr>
-            </table>
-
-            <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
-              ${paymentMsg}
-            </div>
-
-            <p style="margin-top: 30px; font-size: 13px; color: #6b7280; text-align: center;">
-              J. Borja St, Tagbilaran City, Bohol, 6300<br/>
-              dpo: ${config.dpoEmail || "sparkinn.reservations@gmail.com"} | support: ${config.supportEmail || "sparkinn.dev@gmail.com"}
-            </p>
-          </div>
-        </div>
-      `;
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "sparkinn.dev@gmail.com",
-        to: email,
-        subject: `[${config.brandName || "spark inn"}] Acknowledgment: Booking Submission ${finalBookingRef}`,
-        html: emailHtml
+      await sendBookingTrigger("booking-submitted", {
+        ...computedData,
+        bookingRef: finalBookingRef,
+        guestEmail: computedData.email,
+        paymentMethod
       });
     } catch (emailErr) {
       // Log email error, but do not fail the request since booking document is already written successfully
@@ -666,57 +604,10 @@ export async function handleRejectDiscount(req: any, res: any) {
     await bookingRef.update(updates);
 
     try {
-      const discountTypeLabel = bookingData.discountType === "senior" ? "Senior Citizen" : "PWD";
-      const idLabel = bookingData.discountType === "senior" ? "OSCA Card" : "PWD ID";
-      
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background-color: #111827; padding: 24px; text-align: center;">
-            <h1 style="color: #EA8A1A; margin: 0; font-size: 24px; text-transform: lowercase;">${config.brandName || "spark inn"}</h1>
-          </div>
-          <div style="padding: 24px;">
-            <h2 style="color: #DC2626; margin-top: 0;">Discount Verification Update</h2>
-            <p>Dear ${bookingData.guestName},</p>
-            <p>Thank you for your booking at <strong>${config.brandName || "spark inn"}</strong>. We have reviewed your submitted ID for the ${discountTypeLabel} discount on Booking <strong>${bookingData.bookingRef}</strong>.</p>
-            
-            <p>Unfortunately, we were unable to verify your ${discountTypeLabel} ID.</p>
-            ${reason ? `<p style="background-color: #F9FAFB; padding: 12px; border-left: 4px solid #DC2626; border-radius: 4px; font-size: 14px;"><strong>Reason for rejection:</strong> ${reason}</p>` : ""}
-            
-            <p>Your booking remains confirmed. The full rate of <strong>₱${originalTotalPrice.toLocaleString()}</strong> will be collected upon check-in. Please note that we still welcome you to present a valid ${idLabel} at check-in for our team's manual review.</p>
-            
-            <h3 style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; color: #111827; margin-top: 24px;">Reservation Summary</h3>
-            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Booking Reference</td>
-                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${bookingData.bookingRef}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-in Date</td>
-                <td style="padding: 6px 0; text-align: right;">${bookingData.checkIn instanceof Date ? bookingData.checkIn.toISOString().split("T")[0] : bookingData.checkIn.toDate().toISOString().split("T")[0]}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-out Date</td>
-                <td style="padding: 6px 0; text-align: right;">${bookingData.checkOut instanceof Date ? bookingData.checkOut.toISOString().split("T")[0] : bookingData.checkOut.toDate().toISOString().split("T")[0]}</td>
-              </tr>
-              <tr style="border-top: 1px dashed #e5e7eb;">
-                <td style="padding: 10px 0; font-weight: bold; color: #111827;">Updated Total Price</td>
-                <td style="padding: 10px 0; font-weight: bold; text-align: right; color: #EA8A1A; font-size: 16px;">₱${originalTotalPrice.toLocaleString()}</td>
-              </tr>
-            </table>
-
-            <p style="margin-top: 30px; font-size: 13px; color: #6b7280; text-align: center;">
-              J. Borja St, Tagbilaran City, Bohol, 6300<br/>
-              dpo: ${config.dpoEmail || "sparkinn.reservations@gmail.com"} | support: ${config.supportEmail || "sparkinn.dev@gmail.com"}
-            </p>
-          </div>
-        </div>
-      `;
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "sparkinn.dev@gmail.com",
-        to: bookingData.guestEmail,
-        subject: `[${config.brandName || "spark inn"}] Discount Verification Update: ${bookingData.bookingRef}`,
-        html: emailHtml
+      await sendBookingTrigger("discount-rejected", {
+        ...bookingData,
+        discountRejectionReason: reason || "",
+        totalPrice: originalTotalPrice
       });
     } catch (emailErr) {
       console.error("Failed to send discount rejection email:", emailErr);
@@ -785,43 +676,9 @@ export async function handleCancelBooking(req: any, res: any) {
     });
 
     try {
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background-color: #111827; padding: 24px; text-align: center;">
-            <h1 style="color: #EA8A1A; margin: 0; font-size: 24px; text-transform: lowercase;">${config.brandName || "spark inn"}</h1>
-          </div>
-          <div style="padding: 24px;">
-            <h2 style="color: #DC2626; margin-top: 0;">Booking Cancelled</h2>
-            <p>Dear ${bookingData.guestName},</p>
-            <p>This email confirms that your reservation at <strong>${config.brandName || "spark inn"}</strong> has been <strong>cancelled</strong>.</p>
-            
-            <h3 style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; color: #111827;">Cancellation Details</h3>
-            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Booking Reference</td>
-                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${bookingData.bookingRef}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Reason for Cancellation</td>
-                <td style="padding: 6px 0; text-align: right; font-style: italic;">${reason || "Not provided"}</td>
-              </tr>
-            </table>
-
-            <p>If you did not request this cancellation or believe this is an error, please contact our support team immediately at ${config.supportEmail || "sparkinn.dev@gmail.com"}.</p>
-            
-            <p style="margin-top: 30px; font-size: 13px; color: #6b7280; text-align: center;">
-              J. Borja St, Tagbilaran City, Bohol, 6300<br/>
-              support: ${config.supportEmail || "sparkinn.dev@gmail.com"}
-            </p>
-          </div>
-        </div>
-      `;
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "sparkinn.dev@gmail.com",
-        to: bookingData.guestEmail,
-        subject: `[${config.brandName || "spark inn"}] Booking Cancelled: ${bookingData.bookingRef}`,
-        html: emailHtml
+      await sendBookingTrigger("booking-cancelled", {
+        ...bookingData,
+        cancellationReason: reason || ""
       });
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);

@@ -8,7 +8,20 @@ import {
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
+import { handleGenerateReference } from "./handlers/reference";
+import { handleEmailTrigger } from "./handlers/email";
 import { adminAuth } from "./lib/firebase-admin";
+
+const staffOnlyEmailActions = new Set(["payment-confirmed", "booking-confirmed", "discount-rejected"]);
+const publicEmailActions = new Set([
+  "booking-submitted",
+  "payment-confirmed",
+  "booking-confirmed",
+  "checkin-reminder",
+  "booking-cancelled",
+  "corporate-inquiry",
+  "discount-rejected"
+]);
 
 async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
@@ -227,6 +240,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleValidateCorporateCode(req, res);
+  }
+
+  if (domain === "reference" && action === "generate" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleGenerateReference(req, res);
+  }
+
+  if (domain === "email" && publicEmailActions.has(action) && req.method === "POST") {
+    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 3600000)) {
+      return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
+    }
+
+    const cronSecret = req.headers["x-cron-secret"];
+    const isCronRequest =
+      action === "checkin-reminder" &&
+      process.env.CRON_SECRET &&
+      typeof cronSecret === "string" &&
+      cronSecret === process.env.CRON_SECRET;
+
+    if (staffOnlyEmailActions.has(action) || (action === "checkin-reminder" && !isCronRequest)) {
+      const authResult = await authenticateStaff(req);
+      if (!authResult.success) {
+        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+      }
+      (req as any).staff = authResult;
+    } else if (req.headers.authorization) {
+      const authResult = await authenticateStaff(req);
+      if (!authResult.success) {
+        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+      }
+      (req as any).staff = authResult;
+    }
+
+    return await handleEmailTrigger(req, res, action as Parameters<typeof handleEmailTrigger>[2]);
   }
 
   // Fallback 404

@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 10, 2026
+> Last updated: June 11, 2026
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -374,12 +374,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### 🔴 Fix before Phase 8 — Intercom
 
-- ⬜ **[AUDIT-1]** Build `api/handlers/email.ts` — all 7 email triggers (booking-submitted, payment-confirmed, booking-confirmed, checkin-reminder, booking-cancelled, corporate-inquiry, discount-rejected); wire all routes in `[...route].ts`
-- ⬜ **[AUDIT-2]** Build `api/handlers/reference.ts` — `/api/reference/generate`; wire in `[...route].ts`
-- ⬜ **[AUDIT-3]** Fix `storeOrders` Firestore rule — change to `allow read, create: if true; allow update: if isStaff();` so guests can read their own order status
-- ⬜ **[AUDIT-4]** Fix storage path mismatch — storage.rules has `store/{itemId}` but spec is `store-items/{itemId}`; align to `store-items/`
-- ⬜ **[AUDIT-5]** Fix storage rule — `settings/notification-sound` should be `allow read: if isStaff()` (not public)
-- ⬜ **[AUDIT-15]** Fix storage rule — `settings/website-content` write should be `allow write: if isAdmin()` (not isStaff)
+- ✅ **[AUDIT-1]** Build `api/handlers/email.ts` — all 7 email triggers (booking-submitted, payment-confirmed, booking-confirmed, checkin-reminder, booking-cancelled, corporate-inquiry, discount-rejected); wire all routes in `[...route].ts`
+- ✅ **[AUDIT-2]** Build `api/handlers/reference.ts` — `/api/reference/generate`; wire in `[...route].ts`
+- ✅ **[AUDIT-3]** Fix `storeOrders` Firestore rule — change to `allow read, create: if true; allow update: if isStaff();` so guests can read their own order status
+- ✅ **[AUDIT-4]** Fix storage path mismatch — storage.rules has `store/{itemId}` but spec is `store-items/{itemId}`; align to `store-items/`
+- ✅ **[AUDIT-5]** Fix storage rule — `settings/notification-sound` should be `allow read: if isStaff()` (not public)
+- ✅ **[AUDIT-15]** Fix storage rule — `settings/website-content` write should be `allow write: if isAdmin()` (not isStaff)
 
 ### 🔴 Fix before Phase 10B — Spark Rewards
 
@@ -435,8 +435,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 19 | 0 | 19 |
-| **Total** | **176** | **96** | **80** |
+| Audit Fixes | 19 | 6 | 13 |
+| **Total** | **176** | **102** | **74** |
 
 ---
 
