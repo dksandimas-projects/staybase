@@ -79,9 +79,9 @@ export function SettingsPage() {
   const [storeItemPhotoStatus, setStoreItemPhotoStatus] = useState("");
 
   // Handle Form submissions
-  const handleSaveHotel = (e: React.FormEvent) => {
+  const handleSaveHotel = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("hotelConfig", {
+    await updateSettings("hotelConfig", {
       hotelName,
       contactEmail,
       contactPhone,
@@ -90,37 +90,33 @@ export function SettingsPage() {
       missionStatement,
       hotelStory
     });
-    alert("Hotel metadata configurations saved successfully!");
   };
 
-  const handleSaveWebsite = (e: React.FormEvent) => {
+  const handleSaveWebsite = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("websiteContent", {
+    await updateSettings("websiteContent", {
       homepage: { ...websiteContent.homepage, heroHeading, heroSubtext },
       corporate: { ...websiteContent.corporate, heroHeading: corpHeading, heroSubtext: corpSubtext }
     });
-    alert("Website content configurations saved successfully!");
   };
 
-  const handleSaveRewards = (e: React.FormEvent) => {
+  const handleSaveRewards = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("rewardsConfig", {
+    await updateSettings("rewardsConfig", {
       pointsEnabled,
       pointsPerHundred: parseFloat(pointsPerHundred) || 0,
       memberDiscountEnabled,
       memberDiscountPct: parseFloat(memberDiscountPct) || 0
     });
-    alert("Loyalty rewards rules configurations saved successfully!");
   };
 
-  const handleSaveBreakfast = (e: React.FormEvent) => {
+  const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("breakfastConfig", {
+    await updateSettings("breakfastConfig", {
       isEnabled: breakfastEnabled,
       ratePerPersonPerNight: parseFloat(breakfastRate) || 300,
       silogItems
     });
-    alert("Breakfast silog menu selections saved successfully!");
   };
 
   const handleSaveStore = () => {
@@ -129,7 +125,6 @@ export function SettingsPage() {
       lowStockThreshold: parseInt(lowStockThreshold) || 3,
       paymentMethods: storePaymentMethods
     });
-    alert("In-room store configurations saved successfully!");
   };
 
   // Toggle item status in local states
