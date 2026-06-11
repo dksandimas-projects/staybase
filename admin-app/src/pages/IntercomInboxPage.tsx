@@ -14,13 +14,20 @@ export function IntercomInboxPage() {
     incomingCall, 
     acceptCall, 
     declineCall,
-    rooms
+    rooms,
+    hotelConfig
   } = useAdmin();
 
   // Active chat selection
   const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("");
   const [replyText, setReplyText] = useState("");
+  const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
+  const [isNotificationAudioUnlocked, setIsNotificationAudioUnlocked] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const notificationBufferRef = useRef<AudioBuffer | null>(null);
+  const notificationInitializedRef = useRef(false);
+  const previousUnreadGuestIdsRef = useRef<Set<string>>(new Set());
 
   // Call timer simulation state
   const [callDuration, setCallDuration] = useState(0);
@@ -30,6 +37,64 @@ export function IntercomInboxPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [intercoms, selectedRoomNumber]);
+
+  useEffect(() => {
+    const updateFocusState = () => {
+      setIsInboxFocused(!document.hidden && document.hasFocus());
+    };
+
+    window.addEventListener("focus", updateFocusState);
+    window.addEventListener("blur", updateFocusState);
+    document.addEventListener("visibilitychange", updateFocusState);
+
+    return () => {
+      window.removeEventListener("focus", updateFocusState);
+      window.removeEventListener("blur", updateFocusState);
+      document.removeEventListener("visibilitychange", updateFocusState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlockNotificationAudio = () => {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+      void audioContextRef.current.resume().then(() => setIsNotificationAudioUnlocked(true));
+    };
+
+    window.addEventListener("pointerdown", unlockNotificationAudio, { once: true });
+    window.addEventListener("keydown", unlockNotificationAudio, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockNotificationAudio);
+      window.removeEventListener("keydown", unlockNotificationAudio);
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const soundUrl = hotelConfig?.notificationSoundUrl;
+    notificationBufferRef.current = null;
+    if (!soundUrl || !audioContextRef.current || !isNotificationAudioUnlocked) return;
+
+    let isCancelled = false;
+    fetch(soundUrl)
+      .then((response) => response.arrayBuffer())
+      .then((arrayBuffer) => audioContextRef.current?.decodeAudioData(arrayBuffer))
+      .then((audioBuffer) => {
+        if (!isCancelled && audioBuffer) {
+          notificationBufferRef.current = audioBuffer;
+        }
+      })
+      .catch(() => {
+        notificationBufferRef.current = null;
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hotelConfig?.notificationSoundUrl, isNotificationAudioUnlocked]);
 
   // Handle active call duration timer
   useEffect(() => {
@@ -81,6 +146,13 @@ export function IntercomInboxPage() {
 
   // Current chat logs
   const activeChatMessages = intercoms[selectedRoomNumber] || [];
+  const unreadGuestMessages = useMemo(
+    () => Object.values(intercoms)
+      .flat()
+      .filter((message) => message.sender === "guest" && !message.isRead),
+    [intercoms]
+  );
+  const unreadGuestCount = unreadGuestMessages.length;
   const selectedUnreadSignature = activeChatMessages
     .filter((message) => message.sender === "guest" && !message.isRead)
     .map((message) => message.id)
@@ -92,9 +164,37 @@ export function IntercomInboxPage() {
   }, [activeRooms, selectedRoomNumber]);
 
   useEffect(() => {
-    if (!selectedRoomNumber || !selectedUnreadSignature) return;
+    if (!isInboxFocused || !selectedRoomNumber || !selectedUnreadSignature) return;
     void markChatAsRead(selectedRoomNumber);
-  }, [markChatAsRead, selectedRoomNumber, selectedUnreadSignature]);
+  }, [isInboxFocused, markChatAsRead, selectedRoomNumber, selectedUnreadSignature]);
+
+  useEffect(() => {
+    const baseTitle = "Intercom Inbox";
+    document.title = unreadGuestCount > 0 ? `(${unreadGuestCount}) ${baseTitle}` : baseTitle;
+
+    return () => {
+      document.title = config.brandName;
+    };
+  }, [unreadGuestCount]);
+
+  useEffect(() => {
+    const currentUnreadGuestIds = new Set(unreadGuestMessages.map((message) => message.id));
+    const hasNewUnreadGuestMessage = unreadGuestMessages.some((message) => !previousUnreadGuestIdsRef.current.has(message.id));
+
+    if (notificationInitializedRef.current && hasNewUnreadGuestMessage && !isInboxFocused) {
+      const audioContext = audioContextRef.current;
+      const notificationBuffer = notificationBufferRef.current;
+      if (audioContext && notificationBuffer && audioContext.state === "running") {
+        const source = audioContext.createBufferSource();
+        source.buffer = notificationBuffer;
+        source.connect(audioContext.destination);
+        source.start();
+      }
+    }
+
+    notificationInitializedRef.current = true;
+    previousUnreadGuestIdsRef.current = currentUnreadGuestIds;
+  }, [isInboxFocused, unreadGuestMessages]);
 
   return (
     <div className="space-y-8 font-body">
