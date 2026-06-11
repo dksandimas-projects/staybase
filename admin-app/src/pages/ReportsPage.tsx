@@ -3,19 +3,41 @@ import { useAdmin } from "../context/AdminContext";
 import {
   AreaChart, Area,
   BarChart, Bar,
+  PieChart, Pie,
   Cell,
   ResponsiveContainer,
   XAxis, YAxis,
   CartesianGrid, Tooltip, Legend
 } from "recharts";
 import { formatPrice } from "../utils/format";
-import { BarChart3, Download, Calendar, DollarSign, Users, Home, TrendingUp, Utensils, Coffee } from "lucide-react";
+import { AlertTriangle, BarChart3, Download, DollarSign, Users, Home, TrendingUp, Utensils, Coffee, Package, ShoppingBag } from "lucide-react";
 import config from "@config";
 
 export function ReportsPage() {
-  const { bookings, rooms, roomTypes, breakfastConfig } = useAdmin();
+  const { bookings, rooms, roomTypes, breakfastConfig, storeOrders, storeItems } = useAdmin();
   const [dateRange, setDateRange] = useState("30");
   const [reportType, setReportType] = useState("bookings");
+  const chartColors = [
+    config.colors.primary,
+    config.colors.primaryDark,
+    config.colors.primaryLight,
+    config.colors.sidebar,
+    config.colors.sectionBg
+  ];
+
+  const periodStart = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (Number(dateRange) - 1));
+    return start;
+  }, [dateRange]);
+
+  const isWithinSelectedRange = (value: string | Date | null | undefined) => {
+    if (!value) return false;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return false;
+    return date >= periodStart;
+  };
 
   // Calculate stats based on context bookings
   const totalRevenue = bookings
@@ -91,6 +113,84 @@ export function ReportsPage() {
     })).sort((a, b) => b.revenue - a.revenue);
   }, [breakfastBookings]);
 
+  // Spark Essentials store reports
+  const storeOrdersInRange = useMemo(() =>
+    storeOrders.filter(order => isWithinSelectedRange(order.createdAt)),
+    [storeOrders, periodStart]
+  );
+
+  const deliveredStoreOrders = useMemo(() =>
+    storeOrdersInRange.filter(order => order.status === "delivered"),
+    [storeOrdersInRange]
+  );
+
+  const storeRevenue = useMemo(() =>
+    deliveredStoreOrders.reduce((sum, order) => sum + order.totalAmount, 0),
+    [deliveredStoreOrders]
+  );
+
+  const topStoreItems = useMemo(() => {
+    const itemMap = new Map<string, { name: string; quantity: number; revenue: number }>();
+
+    deliveredStoreOrders.forEach(order => {
+      order.items.forEach(item => {
+        const current = itemMap.get(item.itemId) || { name: item.name, quantity: 0, revenue: 0 };
+        current.quantity += item.quantity;
+        current.revenue += item.price * item.quantity;
+        itemMap.set(item.itemId, current);
+      });
+    });
+
+    return Array.from(itemMap.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10);
+  }, [deliveredStoreOrders]);
+
+  const storeOrdersByPayment = useMemo(() => {
+    const labels: Record<string, string> = {
+      cod: "Cash on Delivery",
+      "add-to-bill": "Add to Bill",
+      gcash: "GCash"
+    };
+
+    return Object.entries(
+      storeOrdersInRange.reduce((methods, order) => {
+        methods[order.paymentMethod] = (methods[order.paymentMethod] || 0) + 1;
+        return methods;
+      }, {} as Record<string, number>)
+    ).map(([method, count]) => ({
+      name: labels[method] || method,
+      count
+    }));
+  }, [storeOrdersInRange]);
+
+  const storeOrdersByStatus = useMemo(() => {
+    const labels: Record<string, string> = {
+      placed: "Placed",
+      confirmed: "Confirmed",
+      "out-for-delivery": "Out for Delivery",
+      delivered: "Delivered",
+      cancelled: "Cancelled"
+    };
+
+    return Object.entries(
+      storeOrdersInRange.reduce((statuses, order) => {
+        statuses[order.status] = (statuses[order.status] || 0) + 1;
+        return statuses;
+      }, {} as Record<string, number>)
+    ).map(([status, count]) => ({
+      name: labels[status] || status,
+      count
+    }));
+  }, [storeOrdersInRange]);
+
+  const lowStockItems = useMemo(() =>
+    storeItems
+      .filter(item => item.stock !== null && item.stock <= 5)
+      .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0)),
+    [storeItems]
+  );
+
   const getStayDates = (booking: typeof bookings[0]) => {
     return Array.from({ length: booking.numNights }, (_, index) => {
       const date = new Date(booking.checkIn);
@@ -147,6 +247,13 @@ export function ReportsPage() {
         const cellValues = items.map(item => dayCounts[item] || 0);
         csvContent += `${date},${cellValues.join(",")},${rowTotal}\n`;
       }
+    } else if (reportType === "store") {
+      csvContent = "Order Ref,Room,Items,Quantity,Total,Payment Method,Status,Date\n";
+      storeOrdersInRange.forEach(order => {
+        const itemNames = order.items.map(item => `${item.quantity}x ${item.name}`).join("; ");
+        const quantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
+        csvContent += `"${order.orderRef}","${order.roomNumber}","${itemNames}",${quantity},${order.totalAmount},"${order.paymentMethod}","${order.status}","${order.createdAt}"\n`;
+      });
     } else {
       csvContent = "Room Number,Room Type,Max Capacity,Price Per Night,Weekend Rate,Status,Housekeeping\n";
       rooms.forEach(r => {
@@ -183,6 +290,7 @@ export function ReportsPage() {
               <option value="bookings">Bookings Ledger</option>
               <option value="rooms">Room Inventories</option>
               <option value="breakfast">Breakfast & Dining</option>
+              <option value="store">Store Reports</option>
             </select>
           </div>
           
@@ -518,6 +626,214 @@ export function ReportsPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spark Essentials store reports */}
+      {reportType === "store" && (
+        <div className="space-y-8">
+          <div className="grid gap-6 sm:grid-cols-3">
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Store Revenue</span>
+                <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{formatPrice(storeRevenue)}</p>
+                <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
+                  Delivered orders only
+                </span>
+              </div>
+              <div className="h-12 w-12 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+                <ShoppingBag size={20} />
+              </div>
+            </div>
+
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Orders in Range</span>
+                <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{storeOrdersInRange.length}</p>
+                <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
+                  {deliveredStoreOrders.length} delivered
+                </span>
+              </div>
+              <div className="h-12 w-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+                <Package size={20} />
+              </div>
+            </div>
+
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Low Stock Items</span>
+                <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{lowStockItems.length}</p>
+                <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
+                  Finite stock at or below 5
+                </span>
+              </div>
+              <div className="h-12 w-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+                <AlertTriangle size={20} />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+              <div>
+                <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Top-Selling Store Items</h2>
+                <p className="text-[10px] text-gray-500">Delivered order revenue by item for the selected period.</p>
+              </div>
+              {topStoreItems.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <ShoppingBag size={32} className="mx-auto mb-3 opacity-40" />
+                  <p className="text-xs font-semibold">No delivered store orders in this range.</p>
+                  <p className="text-[10px] mt-1">Delivered orders will appear here after front desk completes them.</p>
+                </div>
+              ) : (
+                <div className="h-72 w-full pt-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={topStoreItems} layout="vertical" margin={{ top: 10, right: 20, left: 18, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" width={84} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                        formatter={(value, name) => [name === "revenue" ? formatPrice(Number(value)) : value, name === "revenue" ? "Revenue" : "Quantity"]}
+                      />
+                      <Bar dataKey="revenue" fill={config.colors.primary} radius={[0, 4, 4, 0]} barSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+              <div>
+                <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Orders by Status</h2>
+                <p className="text-[10px] text-gray-500">Operational count of placed, active, delivered, and cancelled orders.</p>
+              </div>
+              {storeOrdersByStatus.length === 0 ? (
+                <p className="text-xs text-gray-400 py-8 text-center">No store orders in this range.</p>
+              ) : (
+                <div className="h-72 w-full pt-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={storeOrdersByStatus} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                        formatter={(value) => [value, "Orders"]}
+                      />
+                      <Bar dataKey="count" fill={config.colors.primary} radius={[4, 4, 0, 0]} barSize={24} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+              <div>
+                <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Payment Methods</h2>
+                <p className="text-[10px] text-gray-500">Store order mix by guest payment choice.</p>
+              </div>
+              {storeOrdersByPayment.length === 0 ? (
+                <p className="text-xs text-gray-400 py-8 text-center">No payment data yet.</p>
+              ) : (
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={storeOrdersByPayment} dataKey="count" nameKey="name" innerRadius={48} outerRadius={82} paddingAngle={4}>
+                        {storeOrdersByPayment.map((entry, index) => (
+                          <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                        formatter={(value) => [value, "Orders"]}
+                      />
+                      <Legend iconType="circle" wrapperStyle={{ fontSize: "10px" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4 lg:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Low Stock Alerts</h2>
+                  <p className="text-[10px] text-gray-500">Items with finite stock at or below the default threshold of 5.</p>
+                </div>
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                  Inventory
+                </span>
+              </div>
+
+              {lowStockItems.length === 0 ? (
+                <div className="rounded-lg border border-gray-150 bg-gray-50/70 p-6 text-center">
+                  <p className="text-xs font-semibold text-gray-600">No low-stock items right now.</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Finite stock items will appear here as they approach zero.</p>
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {lowStockItems.slice(0, 8).map(item => (
+                    <div key={item.id} className="rounded-lg border border-gray-150 bg-gray-50/60 p-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-bold text-gray-900">{item.name}</p>
+                        <p className="text-[10px] text-gray-500 capitalize">{item.category}</p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-[10px] font-bold ${item.stock === 0 ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
+                        {item.stock === 0 ? "Out" : `${item.stock} left`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+            <div>
+              <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Store Order Ledger</h2>
+              <p className="text-[10px] text-gray-500">All store orders in the selected period, including non-revenue statuses for operational review.</p>
+            </div>
+
+            {storeOrdersInRange.length === 0 ? (
+              <p className="text-xs text-gray-400 py-8 text-center">No store orders in this range.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b-2 border-primary/20 text-left">
+                      <th className="py-2.5 pr-4 text-[10px] font-bold uppercase tracking-wider text-gray-400">Order</th>
+                      <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Room</th>
+                      <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Items</th>
+                      <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Payment</th>
+                      <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</th>
+                      <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {storeOrdersInRange.slice(0, 20).map(order => (
+                      <tr key={order.id} className="hover:bg-gray-50/50">
+                        <td className="py-2.5 pr-4 font-semibold text-gray-900">{order.orderRef}</td>
+                        <td className="px-3 py-2.5 text-gray-600">{order.roomNumber}</td>
+                        <td className="px-3 py-2.5 text-gray-600">
+                          {order.items.map(item => `${item.quantity}x ${item.name}`).join(", ")}
+                        </td>
+                        <td className="px-3 py-2.5 text-gray-600">{order.paymentMethod}</td>
+                        <td className="px-3 py-2.5">
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700">
+                            {order.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(order.totalAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

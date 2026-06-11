@@ -73,18 +73,18 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 ## Store Reports (within Reports page)
 
 ### UI Checklist
-- [ ] Sales by item — bar chart, most ordered items in selected period
-- [ ] Store revenue — total revenue from store per month (Recharts)
-- [ ] Orders by payment method — pie chart (CoD, Add to Bill, GCash)
-- [ ] Orders by status — count of delivered vs cancelled vs pending
-- [ ] Low stock alert — list of items with stock ≤ threshold (configurable, default 5) or out of stock
-- [ ] Export store report as PDF or CSV
+- [x] Sales by item — bar chart, most ordered items in selected period
+- [x] Store revenue — total revenue from delivered store orders in selected period
+- [x] Orders by payment method — pie chart (CoD, Add to Bill, GCash)
+- [x] Orders by status — count of delivered vs cancelled vs pending
+- [x] Low stock alert — list of items with stock ≤ threshold (default 5) or out of stock
+- [x] Export store report as CSV
 
 ### Data & Logic Checklist
-- [ ] Query `storeOrders` for selected date range — exclude `cancelled` orders for revenue
-- [ ] Revenue: sum of `totalAmount` for `delivered` orders in period
-- [ ] Low stock: query `storeItems` where `stock <= threshold` AND `stock != null`
-- [ ] All aggregation client-side from Firestore results
+- [x] Query `storeOrders` for selected date range — exclude `cancelled` orders for revenue
+- [x] Revenue: sum of `totalAmount` for `delivered` orders in period
+- [x] Low stock: query `storeItems` where `stock <= threshold` AND `stock != null`
+- [x] All aggregation client-side from Firestore results
 
 ---
 
