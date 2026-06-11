@@ -299,7 +299,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Spark Essentials — order management wireframe page/section (admin)
 - ✅ Spark Essentials — store order API route (stock check + order creation transaction)
 - ✅ Spark Essentials — placed order cancellation with idempotent stock restore
-- ⬜ Spark Essentials — store reports in Reports page
+- ✅ Spark Essentials — store reports in Reports page
 
 ---
 

@@ -185,8 +185,9 @@ Separate from the Sales tab — this is an operational tool for kitchen prep, no
 
 Operational view for store inventory — separate from Sales tab revenue figures.
 
-- [ ] Low stock alert list — items at or below `settings/storeConfig.lowStockThreshold` or out of stock
-- [ ] Orders by status — delivered vs cancelled vs pending count for today
+- [x] Low stock alert list — items at or below the default threshold of 5 or out of stock
+- [x] Orders by status — delivered vs cancelled vs pending count for selected report range
+- [x] Store report view — revenue, top-selling items, payment method mix, status counts, order ledger, and CSV export
 
 > Store **revenue** figures, top-selling items chart, and order history live in the Sales Report tab.
 
