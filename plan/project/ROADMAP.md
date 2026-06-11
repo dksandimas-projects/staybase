@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 11, 2026
+> Last updated: June 11, 2026 (added Plan Audit Fixes — June 11, 2026, AUDIT-20–34)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -411,6 +411,42 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ---
 
+## Plan Audit Fixes — June 11, 2026
+> Source: cross-feature flow audit of ROADMAP.md against all feature MDs — focused on connections between phases and end-to-end user flows (guest, corporate, Spark Rewards member, front desk/admin), not new features.
+> Fix these before or during the phase they block. Grouped by priority.
+
+### 🔴 Fix before Phase 9 — Remaining Features
+
+- ⬜ **[AUDIT-20]** Add `/api/bookings/cancel` to `API-ROUTES.md` and as a Phase 9 checklist item — required by `BOOKING-LOOKUP.md` (`/my-booking` cancel action); currently undocumented anywhere
+- ⬜ **[AUDIT-21]** Add `/api/bookings/reject-discount` to `API-ROUTES.md` — required by `BOOKINGS-MANAGEMENT.md` discount rejection flow (Phase 5 marked done, but route was never added to the API surface)
+- ⬜ **[AUDIT-22]** Add "Email: discount rejected" as its own checklist item under Phase 6 — `api/handlers/email.ts` already implements this trigger per AUDIT-1 (done), but Phase 6's progress count doesn't track it, so it reads as untested/unwired
+- ⬜ **[AUDIT-23]** Add `discount-rejected` and `early-checkin-request` rows to the email routes table in `API-ROUTES.md` — table currently lists only 6 of the 7+ triggers defined in `EMAIL-PDF-STORAGE.md`
+- ⬜ **[AUDIT-24]** Define `storeCharges[]` on `bookings/{bookingId}` in `BACKEND.md §bookings` — `STORE-MANAGEMENT.md` references "Add to Booking Bill" writing to this field, but it doesn't exist in the schema; blocks the Phase 8 store billing → Phase 5 checkout folio link
+- ⬜ **[AUDIT-25]** Flag dependency in Phase 4 (closed) — Step 3 cancellation policy display and `/privacy` page should source from `settings/websiteContent.cancellationPolicy` / `.privacyPolicyBody`, both edited via Settings → Legal Content (Phase 9, not started). Until Phase 9 ships, these are either hardcoded (violates white-label rule) or only editable via Firebase console
+
+### 🔴 Fix before Phase 10B — Spark Rewards
+
+- ⬜ **[AUDIT-26]** Add `/api/email/early-checkin-request` route + handler to `API-ROUTES.md` and Phase 10B checklist — fallback staff notification for early check-in requests; `INTERCOM-INBOX.md` only "preserves metadata" with no concrete staff-facing action tracked
+- ⬜ **[AUDIT-27]** Add "Member discount auto-apply at booking Step 1" as an explicit Phase 10B checklist item, noting it requires reopening the Phase 4 (closed) Step 1 component
+- ⬜ **[AUDIT-28]** Add "Award points on checkout (`status → checked-out` trigger)" as a Phase 10B checklist item — server-side logic not covered by AUDIT-6's register/redeem/undo routes
+- ⬜ **[AUDIT-29]** Add `/members` to the Admin role's accessible pages in `AUTH-ROLES.md §Roles` table — admin-app route table includes `/members` (admin-only) but the roles table omits it
+
+### 🟡 Fix before Phase 10 — Security & Polish
+
+- ⬜ **[AUDIT-30]** Clarify scope split between Phase 4 (done) and Phase 10 Turnstile/honeypot items — Phase 4 covers the regular booking form only; reword Phase 10's "booking creation + corporate inquiry form" items to "corporate inquiry form" only, so it's clear the corporate form still needs both protections
+
+### 🟢 Fix retroactively — Phase 0 / cross-cutting
+
+- ⬜ **[AUDIT-31]** Add PWA setup checklist items to Phase 0 (manifest.json, `vite-plugin-pwa`, Workbox NetworkFirst/CacheFirst strategies, theme-color meta, apple-touch-icon) — `guest-app/CLAUDE.md` states this "must be wired up during Phase 0 scaffolding — not retrofitted later," but Phase 0 (41/41 done) has zero PWA items and AUDIT-16 only covers the icon assets
+
+### 🟢 Anytime — Doc polish
+
+- ⬜ **[AUDIT-32]** Split the Phase 8 "QR Management page" line item into sub-items reflecting work already done (QR rendering via `qrcode.react`, URL format, route correctness — all ✅ in `QR-MANAGEMENT.md`) vs. remaining (grid view, regenerate, print single/all, download as PNG)
+- ⬜ **[AUDIT-33]** Add a note/checklist item in `CORPORATE-INQUIRIES.md` confirming "Convert to booking" goes through the same availability-locking transaction as `/api/bookings/create` (see `AVAILABILITY-LOCKING.md`) rather than a plain `addDoc`
+- ⬜ **[AUDIT-34]** Document in `QR-MANAGEMENT.md` what happens to an active intercom session on the old `roomId` when a QR code is regenerated mid-stay
+
+---
+
 ## Phase 12 — Post-Launch (Phase 2, Deferred)
 > Goal: Enhancements after stable v1.0.0.
 
@@ -439,8 +475,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 19 | 7 | 12 |
-| **Total** | **176** | **103** | **73** |
+| Audit Fixes | 34 | 7 | 27 |
+| **Total** | **191** | **103** | **88** |
 
 ---
 
