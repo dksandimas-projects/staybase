@@ -33,6 +33,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
 | `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| `""` |
 | `remarks` | string | Internal staff notes |
+| `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 

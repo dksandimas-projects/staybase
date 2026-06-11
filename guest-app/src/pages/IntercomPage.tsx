@@ -175,13 +175,25 @@ export function IntercomPage() {
         } else {
           const roomsQuery = query(collection(db, "rooms"), where("roomNumber", "==", roomId), limit(1));
           const roomsSnapshot = await getDocs(roomsQuery);
-          if (roomsSnapshot.empty) {
+          if (!roomsSnapshot.empty) {
+            resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
+          } else {
+            const tokenQuery = query(collection(db, "rooms"), where("qrToken", "==", roomId), limit(1));
+            const tokenSnapshot = await getDocs(tokenQuery);
+            if (tokenSnapshot.empty) {
+              if (!isMounted) return;
+              setIsValidRoom(false);
+              setIsRoomLoading(false);
+              return;
+            }
+            resolvedRoomNumber = tokenSnapshot.docs[0].data().roomNumber || roomId;
+          }
+          if (!resolvedRoomNumber) {
             if (!isMounted) return;
             setIsValidRoom(false);
             setIsRoomLoading(false);
             return;
           }
-          resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
         }
 
         const [hotelConfigDoc, storeConfigDoc] = await Promise.all([

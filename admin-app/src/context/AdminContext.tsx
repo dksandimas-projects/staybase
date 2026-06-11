@@ -45,6 +45,7 @@ export interface Room {
   housekeepingStatus: "clean" | "dirty" | "in-progress";
   blockReason: string;
   remarks: string;
+  qrToken: string;
 }
 
 export interface OnsitePayment {
@@ -428,7 +429,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           status: data.status || "available",
           housekeepingStatus: data.housekeepingStatus || "clean",
           blockReason: data.blockReason || "",
-          remarks: data.remarks || ""
+          remarks: data.remarks || "",
+          qrToken: data.qrToken || ""
         });
       });
 

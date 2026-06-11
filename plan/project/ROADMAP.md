@@ -293,7 +293,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Tab title unread count
 - ✅ Sidebar unread badge
 - ✅ QR route correctness — generated QR payloads use `/intercom/{roomId}` and real SVG QR rendering
-- ⬜ QR Management page — QR grid, regenerate, print single/all
+- ✅ QR Management page — QR grid, regenerate, print single/all
 - 🔄 Spark Essentials — guest store panel (item grid, cart, checkout, order tracking)
 - ✅ Spark Essentials — catalog management wireframe in Settings → Store tab
 - ✅ Spark Essentials — order management wireframe page/section (admin)
