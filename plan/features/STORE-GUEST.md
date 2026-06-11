@@ -26,43 +26,44 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 
 ## UI Checklist
 
-- [ ] "Shop" tab or panel within the intercom page — alongside the chat interface
-- [ ] Item grid — name, photo (optional), short description, price, stock badge (Available / Out of Stock)
-- [ ] Items with `stock: null` (unlimited) show no stock count — just "Available"
-- [ ] Items with `stock: 0` show "Out of Stock" and are not orderable
-- [ ] Cart — add/remove items, quantity selector per item, running total
-- [ ] Checkout panel:
-  - [ ] Order summary (items, quantities, total)
-  - [ ] Payment method selector — options pulled from `settings/storeConfig.paymentMethods` (enabled only)
-  - [ ] CoD: no extra input needed
-  - [ ] Add to Bill: note "This will be added to your room bill — payment collected at checkout"
-  - [ ] GCash: show hotel's GCash QR code + account info, screenshot upload field
-- [ ] Place Order button (primary color)
-- [ ] Order confirmation — order reference number, estimated delivery note, "Track your order" link
-- [ ] Order status tracker — shows current status of most recent order (Placed → Confirmed → Out for Delivery → Delivered)
-- [ ] Cancel order button — shown only when status is `"placed"`
-- [ ] Order sends a styled badge message in the intercom chat thread (visually distinct — like quick requests)
+- [x] "Shop" tab or panel within the intercom page — alongside the chat interface
+- [x] Item grid — name, photo (optional), short description, price, stock badge (Available / Out of Stock)
+- [x] Items with `stock: null` (unlimited) show no stock count — just "Available"
+- [x] Items with `stock: 0` show "Out of Stock" and are not orderable
+- [x] Cart — add/remove items, quantity selector per item, running total
+- [x] Checkout panel:
+  - [x] Order summary (items, quantities, total)
+  - [x] Payment method selector — options pulled from `settings/storeConfig.paymentMethods` (enabled only)
+  - [x] CoD: no extra input needed
+  - [x] Add to Bill: note "This will be added to your room bill — payment collected at checkout"
+  - [x] GCash: show hotel's GCash QR code + account info, screenshot upload field
+- [x] Place Order button (primary color)
+- [x] Order confirmation — order reference number, estimated delivery note, "Track your order" link
+- [x] Order status tracker — shows current status of most recent order (Placed → Confirmed → Out for Delivery → Delivered)
+- [x] Cancel order button — shown only when status is `"placed"`
+- [x] Order sends a styled badge message in the intercom chat thread (visually distinct — like quick requests)
 
 ## Data & Logic Checklist
 
-- [ ] Room ID from URL param `:roomId` — same as intercom
+- [x] Room ID from URL param `:roomId` — same as intercom
 - [x] Active booking lookup: query `bookings` where `roomNumber` matches room and `status` is in `["confirmed", "checked-in"]` — link order to this booking if found
 - [x] Fetch `storeItems` where `isActive: true` — real-time via `onSnapshot`
-- [ ] Cart state managed in React state (not persisted — clears on page refresh)
+- [x] Cart state managed in React state (not persisted — clears on page refresh)
 - [x] Order creation: API route writes to `storeOrders` — includes `roomId`, `roomNumber`, `bookingId` (if found), `items[]`, `totalAmount`, `paymentMethod`, `status: "placed"`
 - [x] GCash screenshot: upload to Firebase Storage under `store-orders/{roomId}/payment-proof/`, store URL in order document
 - [x] Order confirmation message: `addDoc` to `intercoms/{roomId}/messages` with `isStoreOrder: true`, styled summary of items ordered
 - [x] Cancel order: API route sets status to `"cancelled"` — only allowed when `status === "placed"` and room/order ref match
-- [ ] Payment methods for store fetched from `settings/storeConfig.paymentMethods`
+- [x] Order status refresh: API route returns guest-safe `status` only when room/order ref match; intercom tracker polls while order is active
+- [x] Payment methods for store fetched from `settings/storeConfig.paymentMethods`
 
 ## Edge Cases & States
 
-- [ ] No active booking found for room — allow order but `bookingId` is null; front desk handles manually
-- [ ] Item goes out of stock between page load and order submission — server-side stock check at order creation; return stock error
-- [ ] All store items inactive/out of stock — show "The shop is currently unavailable" empty state
-- [ ] Store disabled entirely (`settings/storeConfig.isEnabled: false`) — hide Shop tab, show "Coming soon" or nothing
-- [ ] GCash screenshot upload fails — show error, do not submit order without it if GCash selected
-- [ ] Cart empty on checkout attempt — disable Place Order button
+- [x] No active booking found for room — allow order but `bookingId` is null; front desk handles manually
+- [x] Item goes out of stock between page load and order submission — server-side stock check at order creation; return stock error
+- [x] All store items inactive/out of stock — show "The shop is currently unavailable" empty state
+- [x] Store disabled entirely (`settings/storeConfig.isEnabled: false`) — hide Shop tab, show "Coming soon" or nothing
+- [x] GCash screenshot upload fails — show error, do not submit order without it if GCash selected
+- [x] Cart empty on checkout attempt — disable Place Order button
 - [x] Order already cancelled — hide cancel button, show cancelled badge
 
 ## Manual QA

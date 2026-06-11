@@ -22,6 +22,12 @@ interface CancelStoreOrderBody {
   cancellationReason?: string;
 }
 
+interface StoreOrderStatusBody {
+  orderId: string;
+  roomNumber: string;
+  orderRef: string;
+}
+
 function getManilaDateInfo() {
   const d = new Date();
   const manilaStr = d.toLocaleString("en-US", { timeZone: "Asia/Manila" });
@@ -267,5 +273,39 @@ export async function handleCancelStoreOrder(req: any, res: any) {
       success: false,
       error: mapped?.message || "Unable to cancel store order. Please contact the front desk."
     });
+  }
+}
+
+export async function handleGetStoreOrderStatus(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const body = req.body as StoreOrderStatusBody;
+  if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
+    return res.status(400).json({ success: false, error: "Missing required order status fields." });
+  }
+
+  try {
+    const orderDoc = await adminDb.collection("storeOrders").doc(body.orderId).get();
+    if (!orderDoc.exists) {
+      return res.status(404).json({ success: false, error: "Store order was not found." });
+    }
+
+    const orderData = orderDoc.data()!;
+    if (orderData.roomNumber !== body.roomNumber || orderData.orderRef !== body.orderRef) {
+      return res.status(403).json({ success: false, error: "This order does not belong to this room." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: orderData.status || "placed",
+        updatedAt: orderData.updatedAt?.toDate ? orderData.updatedAt.toDate().toISOString() : null
+      }
+    });
+  } catch (error) {
+    console.error("Store order status lookup failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to refresh store order status." });
   }
 }
