@@ -60,11 +60,11 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 - [ ] GCash screenshot viewable in drawer
 
 ### Data & Logic Checklist
-- [ ] `onSnapshot` on `storeOrders` — real-time updates
-- [ ] Status update: `updateDoc` on `storeOrders/{orderId}` — update `status` + `updatedAt` + `handledBy`
+- [x] `onSnapshot` on `storeOrders` — real-time updates
+- [x] Status update: `updateDoc` on `storeOrders/{orderId}` — update `status` + `updatedAt` + `handledBy`
 - [ ] Stock decrement: when order status moves to `confirmed`, decrement `storeItems/{itemId}.stock` for each item (skip if stock is null/unlimited) — use Firestore transaction to prevent overselling
 - [ ] Stock restored if order is cancelled before `confirmed` — add back quantities
-- [ ] "Add to Booking Bill": `updateDoc` on order `isBilled: true`, `billedAt: timestamp`; optionally `updateDoc` on `bookings/{bookingId}` to append to a `storeCharges[]` array for checkout reference
+- [x] "Add to Booking Bill": `updateDoc` on order `isBilled: true`, `billedAt: timestamp`; optionally `updateDoc` on `bookings/{bookingId}` to append to a `storeCharges[]` array for checkout reference
 - [ ] Order notification: intercom badge message already sent by guest — admin sees it in intercom thread
 - [ ] New order sound notification — same Web Audio API pattern as intercom (play on new `placed` order if not on store orders page)
 

@@ -312,8 +312,8 @@ export interface AdminContextType {
 
   // Store Orders
   storeOrders: StoreOrder[];
-  updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"]) => void;
-  billStoreOrder: (orderId: string) => void;
+  updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"]) => void | Promise<void>;
+  billStoreOrder: (orderId: string) => void | Promise<void>;
   storeItems: StoreItem[];
   addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => void;
   updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => void;
@@ -1297,47 +1297,67 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Store Orders State
-  const [storeOrders, setStoreOrders] = useState<StoreOrder[]>([
-    {
-      id: "ord-1",
-      orderRef: "ORD-8714",
-      roomId: "rm-305",
-      roomNumber: "305",
-      bookingId: "bk-2",
-      guestName: "Alex Mercer",
-      items: [
-        { itemId: "item-1", name: "San Miguel Pale Pilsen (Can)", price: 120, quantity: 2 },
-        { itemId: "item-3", name: "Bohol Peanut Kisses", price: 80, quantity: 1 }
-      ],
-      totalAmount: 320,
-      paymentMethod: "add-to-bill",
-      paymentProofUrl: "",
-      status: "placed",
-      isBilled: false,
-      billedAt: null,
-      cancellationReason: "",
-      handledBy: "",
-      notes: "Deliver cold pilsen.",
-      createdAt: new Date().toISOString()
-    }
-  ]);
+  // Store Orders State — live from Firestore
+  const [storeOrders, setStoreOrders] = useState<StoreOrder[]>([]);
 
-  const updateStoreOrderStatus = (orderId: string, status: StoreOrder["status"]) => {
-    setStoreOrders(prev => prev.map(ord => ord.id === orderId ? { ...ord, status } : ord));
+  const formatStoreDate = (value: any) => {
+    if (!value) return "";
+    const date = typeof value.toDate === "function" ? value.toDate() : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toISOString();
   };
 
-  const billStoreOrder = (orderId: string) => {
-    setStoreOrders(prev => prev.map(ord => {
-      if (ord.id === orderId) {
-        return {
-          ...ord,
-          isBilled: true,
-          billedAt: new Date().toISOString()
-        };
+  useEffect(() => {
+    const storeOrdersQuery = query(collection(db, "storeOrders"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(
+      storeOrdersQuery,
+      (snapshot) => {
+        setStoreOrders(snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            orderRef: data.orderRef || "",
+            roomId: data.roomId || "",
+            roomNumber: data.roomNumber || "",
+            bookingId: data.bookingId || null,
+            guestName: data.guestName || "",
+            items: Array.isArray(data.items) ? data.items : [],
+            totalAmount: Number(data.totalAmount || 0),
+            paymentMethod: data.paymentMethod || "cod",
+            paymentProofUrl: data.paymentProofUrl || "",
+            status: data.status || "placed",
+            isBilled: !!data.isBilled,
+            billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
+            cancellationReason: data.cancellationReason || "",
+            handledBy: data.handledBy || "",
+            notes: data.notes || "",
+            createdAt: formatStoreDate(data.createdAt)
+          } satisfies StoreOrder;
+        }));
+      },
+      (error) => {
+        console.error("Error listening to store orders:", error);
       }
-      return ord;
-    }));
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"]) => {
+    await updateDoc(doc(db, "storeOrders", orderId), {
+      status,
+      updatedAt: serverTimestamp(),
+      handledBy: currentUser?.uid || currentUser?.email || ""
+    });
+  };
+
+  const billStoreOrder = async (orderId: string) => {
+    await updateDoc(doc(db, "storeOrders", orderId), {
+      isBilled: true,
+      billedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      handledBy: currentUser?.uid || currentUser?.email || ""
+    });
   };
 
   // Store Catalog State

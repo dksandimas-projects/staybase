@@ -20,8 +20,9 @@ import {
   updateDoc,
   where
 } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import config from "@config";
-import { db } from "../firebase/config";
+import { db, storage } from "../firebase/config";
 import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
@@ -67,41 +68,6 @@ interface ActiveOrder {
   estimatedDelivery: string;
 }
 
-const mockStoreItems: StoreItem[] = [
-  {
-    id: "item-1",
-    name: "San Miguel Pale Pilsen (Can)",
-    description: "Ice-cold local Filipino pilsner beer, 330ml.",
-    price: 120,
-    stock: 15,
-    imageUrl: "https://images.unsplash.com/photo-1608270586620-248524c67de9?auto=format&fit=crop&q=80&w=256&h=256"
-  },
-  {
-    id: "item-2",
-    name: "Spark Bottled Mineral Water",
-    description: "Premium purified drinking water in an eco-friendly glass bottle.",
-    price: 60,
-    stock: null, // Unlimited
-    imageUrl: "https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&q=80&w=256&h=256"
-  },
-  {
-    id: "item-3",
-    name: "Bohol Peanut Kisses",
-    description: "Famous crisp Bohol peanut cookies shaped like Chocolate Hills.",
-    price: 80,
-    stock: 5,
-    imageUrl: "https://images.unsplash.com/photo-1590080875515-8a3a8dc5735e?auto=format&fit=crop&q=80&w=256&h=256"
-  },
-  {
-    id: "item-4",
-    name: "Branded Beach Towel",
-    description: "Extra large micro-fiber beach towel with premium hotel embroidering.",
-    price: 450,
-    stock: 0, // Out of stock
-    imageUrl: "https://images.unsplash.com/photo-1576426863848-c28f0ca9ca68?auto=format&fit=crop&q=80&w=256&h=256"
-  }
-];
-
 export function IntercomPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -117,6 +83,7 @@ export function IntercomPage() {
 
   // Chat States
   const [messages, setMessages] = useState<Message[]>([]);
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [typedMessage, setTypedMessage] = useState<string>("");
   const [isRoomLoading, setIsRoomLoading] = useState<boolean>(true);
   const [isValidRoom, setIsValidRoom] = useState<boolean>(false);
@@ -125,6 +92,7 @@ export function IntercomPage() {
   const [isStoreEnabled, setIsStoreEnabled] = useState<boolean>(true);
   const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
   const [messageError, setMessageError] = useState<string>("");
+  const [storeError, setStoreError] = useState<string>("");
 
   // Cart & Shop States
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -290,6 +258,43 @@ export function IntercomPage() {
 
     return unsubscribe;
   }, [isValidRoom, roomNumber]);
+
+  useEffect(() => {
+    if (!isStoreEnabled) {
+      setStoreItems([]);
+      return;
+    }
+
+    const storeItemsQuery = query(
+      collection(db, "storeItems"),
+      where("isActive", "==", true)
+    );
+
+    const unsubscribe = onSnapshot(
+      storeItemsQuery,
+      (snapshot) => {
+        setStoreItems(snapshot.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              name: data.name || "Store item",
+              description: data.description || "",
+              price: Number(data.price || 0),
+              stock: data.stock ?? null,
+              imageUrl: data.imageUrl || data.photoUrl || ""
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name)));
+      },
+      (error) => {
+        console.error("Failed to listen to store items:", error);
+        setStoreError("The shop could not load items. Please try again later.");
+      }
+    );
+
+    return unsubscribe;
+  }, [isStoreEnabled]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -574,7 +579,7 @@ export function IntercomPage() {
   };
 
   // Order placement
-  const handleCheckoutSubmit = (e: React.FormEvent) => {
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
 
@@ -584,11 +589,36 @@ export function IntercomPage() {
     }
 
     setIsUploadingProof(true);
+    setStoreError("");
 
-    setTimeout(() => {
+    try {
+      let paymentProofUrl = "";
+      if (paymentMethod === "gcash" && gcashFile) {
+        const proofRef = ref(storage, `store-orders/${roomNumber}/payment-proof/${Date.now()}-${gcashFile.name}`);
+        const uploadResult = await uploadBytes(proofRef, gcashFile);
+        paymentProofUrl = await getDownloadURL(uploadResult.ref);
+      }
+
+      const response = await fetch("/api/store/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: roomNumber,
+          roomNumber,
+          guestName,
+          items: cart.map(({ item, quantity }) => ({ itemId: item.id, quantity })),
+          paymentMethod: paymentMethod === "bill" ? "add-to-bill" : paymentMethod,
+          paymentProofUrl
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to place store order.");
+      }
+
       setIsUploadingProof(false);
-      const orderRef = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-      const total = getCartSubtotal();
+      const orderRef = result.data.orderRef;
+      const total = result.data.totalAmount;
       const itemsText = cart.map(i => `${i.quantity}x ${i.item.name}`).join(", ");
       
       const paymentLabels: Record<string, string> = {
@@ -619,7 +649,11 @@ export function IntercomPage() {
       setGcashPreview(null);
       setShowCartDrawer(false);
       setCheckoutStep("cart");
-    }, 1500);
+    } catch (error: any) {
+      console.error("Failed to place store order:", error);
+      setStoreError(error.message || "Unable to place order. Please try again.");
+      setIsUploadingProof(false);
+    }
   };
 
   // Cancel order
@@ -1080,7 +1114,21 @@ export function IntercomPage() {
 
               {/* Items Grid */}
               <div className="grid gap-4 sm:grid-cols-2">
-                {mockStoreItems.map((item) => {
+                {storeError && (
+                  <div className="sm:col-span-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                    {storeError}
+                  </div>
+                )}
+
+                {storeItems.length === 0 && !storeError && (
+                  <div className="sm:col-span-2 rounded-card bg-white p-6 text-center shadow-sm ring-1 ring-gray-200">
+                    <ShoppingBag size={28} className="mx-auto text-gray-300" />
+                    <p className="mt-3 text-sm font-bold text-gray-900">The shop is currently unavailable.</p>
+                    <p className="mt-1 text-xs text-gray-500">Please send a chat message for anything you need.</p>
+                  </div>
+                )}
+
+                {storeItems.map((item) => {
                   const cartQty = cart.find(i => i.item.id === item.id)?.quantity || 0;
                   const isOutOfStock = item.stock === 0;
 
@@ -1092,11 +1140,17 @@ export function IntercomPage() {
                       <div className="space-y-2">
                         {/* Image placeholder simulation */}
                         <div className="h-28 w-full rounded-lg overflow-hidden bg-gray-100 border border-gray-100 relative">
-                          <img
-                            src={item.imageUrl}
-                            alt={item.name}
-                            className="h-full w-full object-cover"
-                          />
+                          {item.imageUrl ? (
+                            <img
+                              src={item.imageUrl}
+                              alt={item.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-primary-light text-primary">
+                              <ShoppingBag size={24} />
+                            </div>
+                          )}
                           <div className="absolute top-2 left-2">
                             {isOutOfStock ? (
                               <span className="inline-flex items-center rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 ring-1 ring-inset ring-red-600/10">
