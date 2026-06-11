@@ -206,6 +206,14 @@ export interface IntercomMessage {
   isEarlyCheckInRequest?: boolean;
 }
 
+export interface IntercomThread {
+  roomId: string;
+  roomNumber: string;
+  guestName: string;
+  resolved: boolean;
+  updatedAt: string;
+}
+
 export interface IncomingCall {
   roomId: string;
   guestName: string;
@@ -293,8 +301,10 @@ export interface AdminContextType {
 
   // Intercom Inbox
   intercoms: Record<string, IntercomMessage[]>;
+  intercomThreads: Record<string, IntercomThread>;
   sendIntercomMessage: (roomId: string, text: string, sender?: "guest" | "front-desk") => void;
   markChatAsRead: (roomId: string) => void;
+  setIntercomResolved: (roomId: string, resolved: boolean) => void | Promise<void>;
   incomingCall: IncomingCall | null;
   triggerIncomingCall: (roomId: string, guestName: string) => void | Promise<void>;
   acceptCall: () => void | Promise<void>;
@@ -1002,6 +1012,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Intercom log (inbox) state — live from Firestore, keyed by room number
   const [intercoms, setIntercoms] = useState<Record<string, IntercomMessage[]>>({});
+  const [intercomThreads, setIntercomThreads] = useState<Record<string, IntercomThread>>({});
 
   const formatIntercomTimestamp = (value: any) => {
     if (!value) return "";
@@ -1009,6 +1020,32 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     if (Number.isNaN(date.getTime())) return "";
     return date.toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" });
   };
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "intercoms"),
+      (snapshot) => {
+        const threads: Record<string, IntercomThread> = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const roomNumber = data.roomNumber || docSnap.id;
+          threads[roomNumber] = {
+            roomId: data.roomId || docSnap.id,
+            roomNumber,
+            guestName: data.guestName || "",
+            resolved: !!data.resolved,
+            updatedAt: formatIntercomTimestamp(data.updatedAt)
+          };
+        });
+        setIntercomThreads(threads);
+      },
+      (error) => {
+        console.error("Error listening to intercom thread metadata:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
@@ -1099,6 +1136,22 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       );
     } catch (error) {
       console.error("Error marking intercom messages as read:", error);
+    }
+  };
+
+  const setIntercomResolved = async (roomId: string, resolved: boolean) => {
+    if (!roomId) return;
+
+    try {
+      await setDoc(doc(db, "intercoms", roomId), {
+        roomId,
+        roomNumber: roomId,
+        resolved,
+        resolvedAt: resolved ? serverTimestamp() : null,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error updating intercom resolved status:", error);
     }
   };
 
@@ -1529,8 +1582,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         updateMemberPoints,
         toggleMemberActive,
         intercoms,
+        intercomThreads,
         sendIntercomMessage,
         markChatAsRead,
+        setIntercomResolved,
         incomingCall,
         triggerIncomingCall,
         acceptCall,

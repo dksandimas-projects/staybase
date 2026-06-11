@@ -98,3 +98,12 @@ export interface IntercomMessage {
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
 }
+
+export interface IntercomThread {
+  roomId: string;
+  roomNumber: string;
+  guestName: string;
+  resolved: boolean;
+  updatedAt: Date;
+  resolvedAt?: Date | null;
+}

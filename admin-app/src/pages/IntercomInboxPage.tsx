@@ -2,15 +2,17 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useAdmin, IntercomMessage } from "../context/AdminContext";
 import { 
   MessageSquare, Send, PhoneOff, Phone,
-  Sparkles, CheckCheck, User, Radio, Volume2, Mic 
+  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic
 } from "lucide-react";
 import config from "@config";
 
 export function IntercomInboxPage() {
   const { 
     intercoms, 
+    intercomThreads,
     sendIntercomMessage, 
     markChatAsRead, 
+    setIntercomResolved,
     incomingCall, 
     acceptCall, 
     declineCall,
@@ -20,6 +22,7 @@ export function IntercomInboxPage() {
 
   // Active chat selection
   const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("");
+  const [threadFilter, setThreadFilter] = useState<"active" | "resolved">("active");
   const [replyText, setReplyText] = useState("");
   const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
   const [isNotificationAudioUnlocked, setIsNotificationAudioUnlocked] = useState(false);
@@ -138,14 +141,23 @@ export function IntercomInboxPage() {
     return `${m}:${s}`;
   };
 
-  // Get active rooms list that have intercom history or are currently occupied
-  const activeRooms = useMemo(
-    () => rooms.filter(r => r.status === "occupied" || intercoms[r.roomNumber]),
+  // Get rooms with active occupancy or intercom history, then filter by resolved state
+  const allThreadRooms = useMemo(
+    () => rooms.filter((room) => room.status === "occupied" || intercoms[room.roomNumber]),
     [intercoms, rooms]
+  );
+  const filteredRooms = useMemo(
+    () => allThreadRooms.filter((room) => {
+      const isResolved = !!intercomThreads[room.roomNumber]?.resolved;
+      return threadFilter === "resolved" ? isResolved : !isResolved;
+    }),
+    [allThreadRooms, intercomThreads, threadFilter]
   );
 
   // Current chat logs
   const activeChatMessages = intercoms[selectedRoomNumber] || [];
+  const selectedThread = intercomThreads[selectedRoomNumber];
+  const isSelectedThreadResolved = !!selectedThread?.resolved;
   const unreadGuestMessages = useMemo(
     () => Object.values(intercoms)
       .flat()
@@ -159,9 +171,9 @@ export function IntercomInboxPage() {
     .join(",");
 
   useEffect(() => {
-    if (selectedRoomNumber && activeRooms.some((room) => room.roomNumber === selectedRoomNumber)) return;
-    setSelectedRoomNumber(activeRooms[0]?.roomNumber || "");
-  }, [activeRooms, selectedRoomNumber]);
+    if (selectedRoomNumber && filteredRooms.some((room) => room.roomNumber === selectedRoomNumber)) return;
+    setSelectedRoomNumber(filteredRooms[0]?.roomNumber || "");
+  }, [filteredRooms, selectedRoomNumber]);
 
   useEffect(() => {
     if (!isInboxFocused || !selectedRoomNumber || !selectedUnreadSignature) return;
@@ -195,6 +207,11 @@ export function IntercomInboxPage() {
     notificationInitializedRef.current = true;
     previousUnreadGuestIdsRef.current = currentUnreadGuestIds;
   }, [isInboxFocused, unreadGuestMessages]);
+
+  const handleToggleResolved = async () => {
+    if (!selectedRoomNumber) return;
+    await setIntercomResolved(selectedRoomNumber, !isSelectedThreadResolved);
+  };
 
   return (
     <div className="space-y-8 font-body">
@@ -276,13 +293,34 @@ export function IntercomInboxPage() {
       <div className="grid gap-6 lg:grid-cols-[280px_1fr] min-h-[500px]">
         {/* Left: Chat thread list */}
         <div className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 flex flex-col gap-3">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2">Active Channels</h2>
+          <div className="flex items-center justify-between gap-2 px-2">
+            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Channels</h2>
+            <span className="text-[10px] font-bold text-gray-400">{filteredRooms.length}</span>
+          </div>
+
+          <div className="grid grid-cols-2 rounded-lg bg-gray-100 p-1">
+            {(["active", "resolved"] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setThreadFilter(filter)}
+                className={`min-h-[36px] rounded-md text-[10px] font-bold capitalize transition ${
+                  threadFilter === filter
+                    ? "bg-white text-primary shadow-sm"
+                    : "text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
+          </div>
           
           <div className="space-y-1.5 overflow-y-auto max-h-[440px]">
-            {activeRooms.map((room) => {
+            {filteredRooms.map((room) => {
               const messages = intercoms[room.roomNumber] || [];
               const hasUnread = messages.some(m => !m.isRead && m.sender === "guest");
               const lastMessage = messages[messages.length - 1];
+              const thread = intercomThreads[room.roomNumber];
 
               return (
                 <button
@@ -309,31 +347,64 @@ export function IntercomInboxPage() {
                     <p className="text-[10px] text-gray-500 font-medium truncate mt-0.5">
                       {lastMessage ? lastMessage.text : "No messages yet."}
                     </p>
+                    {thread?.resolved && (
+                      <span className="mt-1 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-green-700">
+                        <CheckCircle2 size={10} />
+                        Resolved
+                      </span>
+                    )}
                   </div>
                 </button>
               );
             })}
+
+            {filteredRooms.length === 0 && (
+              <div className="rounded-lg border border-dashed border-gray-200 px-3 py-8 text-center">
+                <MessageSquare size={22} className="mx-auto text-gray-300" />
+                <p className="mt-2 text-xs font-semibold text-gray-500">
+                  No {threadFilter} conversations.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right: Message dialog box */}
         <div className="rounded-card bg-white shadow-sm ring-1 ring-gray-200 flex flex-col justify-between overflow-hidden min-h-[460px]">
           {/* Header */}
-          <div className="bg-gray-50/50 border-b border-gray-200 p-4 flex justify-between items-center">
+          <div className="bg-gray-50/50 border-b border-gray-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2.5">
               <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-                {selectedRoomNumber}
+                {selectedRoomNumber || "--"}
               </div>
               <div>
-                <h3 className="font-bold text-xs text-gray-900 leading-none">Intercom Feed Room {selectedRoomNumber}</h3>
-                <span className="text-[9px] text-gray-400 capitalize mt-1 inline-block">Active stay room link</span>
+                <h3 className="font-bold text-xs text-gray-900 leading-none">Intercom Feed Room {selectedRoomNumber || "unselected"}</h3>
+                <span className="text-[9px] text-gray-400 capitalize mt-1 inline-block">
+                  {isSelectedThreadResolved ? "Resolved conversation" : "Active stay room link"}
+                </span>
               </div>
             </div>
 
-            <span className="inline-flex items-center gap-1 text-[10px] text-green-700 font-bold bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-              <CheckCheck size={10} />
-              Operational feed online
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold border px-2 py-0.5 rounded ${
+                isSelectedThreadResolved
+                  ? "border-green-200 bg-green-50 text-green-700"
+                  : "border-primary/20 bg-primary/5 text-primary-dark"
+              }`}>
+                <CheckCheck size={10} />
+                {isSelectedThreadResolved ? "Resolved" : "Operational feed online"}
+              </span>
+
+              <button
+                type="button"
+                disabled={!selectedRoomNumber}
+                onClick={() => void handleToggleResolved()}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-[10px] font-bold text-gray-700 transition hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSelectedThreadResolved ? <RotateCcw size={12} /> : <ArchiveRestore size={12} />}
+                {isSelectedThreadResolved ? "Reopen" : "Mark Resolved"}
+              </button>
+            </div>
           </div>
 
           {/* Message History Viewport */}
@@ -374,7 +445,11 @@ export function IntercomInboxPage() {
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 space-y-2">
                 <MessageSquare size={32} className="text-gray-300" />
-                <p className="text-xs italic">No message feeds recorded for Room {selectedRoomNumber}. Send a greeting below.</p>
+                <p className="text-xs italic">
+                  {selectedRoomNumber
+                    ? `No message feeds recorded for Room ${selectedRoomNumber}. Send a greeting below.`
+                    : `No ${threadFilter} conversations to show.`}
+                </p>
               </div>
             )}
             <div ref={messagesEndRef} />

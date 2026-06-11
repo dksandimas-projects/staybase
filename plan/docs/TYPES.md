@@ -397,6 +397,15 @@ IntercomMessage {
   orderRef?: string
   isEarlyCheckInRequest?: boolean
 }
+
+IntercomThread {
+  roomId: string
+  roomNumber: string
+  guestName: string
+  resolved: boolean
+  updatedAt: Date
+  resolvedAt?: Date | null
+}
 ```
 
 ---

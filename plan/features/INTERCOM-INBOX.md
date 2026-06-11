@@ -25,14 +25,14 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 ## UI Checklist
 
 - [ ] Conversation list (left panel) — one row per room with active messages: room number, last message preview, timestamp, unread count badge
-- [ ] Active / Resolved tabs — filter conversations by resolution status
+- [x] Active / Resolved tabs — filter conversations by resolution status
 - [ ] Thread view (right panel) — full message thread for selected room
 - [ ] Messages: guest messages (left-aligned), front desk messages (right-aligned)
 - [ ] Quick request messages render as styled chip/badge — visually distinct from plain text (e.g. pill with icon, different background)
 - [ ] Store order messages render as a distinct order card — shows items, total, payment method, with a "View Order" link to Store Management
 - [ ] New store order notification sound — same Web Audio API pattern as intercom messages
 - [ ] Reply input + Send button at bottom of thread
-- [ ] Mark as Resolved button — available on active conversations
+- [x] Mark as Resolved button — available on active conversations
 - [x] Notification sound — plays on **every** incoming guest message when inbox tab is not focused (not just the first per conversation)
 - [x] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
 - [ ] Unread indicator badge on sidebar nav item
@@ -50,7 +50,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Mark messages as read: `updateDoc` on message documents where `isRead: false` AND `sender: "guest"` when thread is opened/viewed
 - [ ] Reply: `addDoc` to `intercoms/{roomId}/messages` with `sender: "front-desk"`, `isRead: true`
 - [ ] Preserve early check-in request metadata from guest messages so staff-specific actions can be layered in later
-- [ ] Resolved status: stored as a flag on the room-level intercom document or managed by filtering — conversations with no unread messages and manually resolved
+- [x] Resolved status: stored as a flag on the room-level intercom document or managed by filtering — conversations with no unread messages and manually resolved
 - [x] Notification sound implementation:
   - Audio context unlocked on first user interaction after login (browser autoplay policy)
   - Sound plays on every incoming guest message — not just the first per conversation
