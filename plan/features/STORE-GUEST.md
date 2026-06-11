@@ -46,12 +46,12 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 ## Data & Logic Checklist
 
 - [ ] Room ID from URL param `:roomId` — same as intercom
-- [ ] Active booking lookup: query `bookings` where `roomNumber` matches room and `status` is in `["confirmed", "checked-in"]` — link order to this booking if found
-- [ ] Fetch `storeItems` where `isActive: true` — real-time via `onSnapshot`
+- [x] Active booking lookup: query `bookings` where `roomNumber` matches room and `status` is in `["confirmed", "checked-in"]` — link order to this booking if found
+- [x] Fetch `storeItems` where `isActive: true` — real-time via `onSnapshot`
 - [ ] Cart state managed in React state (not persisted — clears on page refresh)
-- [ ] Order creation: `addDoc` to `storeOrders` — includes `roomId`, `roomNumber`, `bookingId` (if found), `items[]`, `totalAmount`, `paymentMethod`, `status: "placed"`
-- [ ] GCash screenshot: upload to Firebase Storage at `store-orders/{orderId}/payment-proof/{filename}`, store URL in order document
-- [ ] Order confirmation message: `addDoc` to `intercoms/{roomId}/messages` with `isStoreOrder: true`, styled summary of items ordered
+- [x] Order creation: API route writes to `storeOrders` — includes `roomId`, `roomNumber`, `bookingId` (if found), `items[]`, `totalAmount`, `paymentMethod`, `status: "placed"`
+- [x] GCash screenshot: upload to Firebase Storage under `store-orders/{roomId}/payment-proof/`, store URL in order document
+- [x] Order confirmation message: `addDoc` to `intercoms/{roomId}/messages` with `isStoreOrder: true`, styled summary of items ordered
 - [ ] Cancel order: `updateDoc` status to `"cancelled"` — only allowed when `status === "placed"`
 - [ ] Payment methods for store fetched from `settings/storeConfig.paymentMethods`
 

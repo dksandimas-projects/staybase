@@ -10,6 +10,7 @@ import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleGenerateReference } from "./handlers/reference";
 import { handleEmailTrigger } from "./handlers/email";
+import { handleCreateStoreOrder } from "./handlers/store";
 import { adminAuth } from "./lib/firebase-admin";
 
 const staffOnlyEmailActions = new Set(["payment-confirmed", "booking-confirmed", "discount-rejected"]);
@@ -249,6 +250,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleGenerateReference(req, res);
+  }
+
+  if (domain === "store" && action === "create-order" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`store:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
+    }
+
+    return await handleCreateStoreOrder(req, res);
   }
 
   if (domain === "email" && publicEmailActions.has(action) && req.method === "POST") {

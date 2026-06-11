@@ -73,6 +73,16 @@ Both routes return the discount/rate details on success. Never expose full vouch
 
 ---
 
+### Store Routes (`/api/store/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/store/create-order` | POST | None | Create store order with server-side stock check, stock decrement, active booking lookup, and order ref generation |
+
+Store order creation MUST use a Firestore transaction to prevent overselling.
+
+---
+
 ### Reference Routes (`/api/reference/*`)
 
 | Route | Method | Auth | Purpose |
