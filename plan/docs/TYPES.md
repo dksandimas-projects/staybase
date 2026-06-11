@@ -44,6 +44,7 @@ Room {
   housekeepingStatus: HousekeepingStatus
   blockReason: string
   remarks: string
+  qrToken?: string             // regenerated QR route token; fallback is room id
   createdAt: Date
   updatedAt: Date
 }

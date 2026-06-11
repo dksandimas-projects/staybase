@@ -24,30 +24,31 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 ## UI Checklist
 
-- [ ] QR grid — one card per room (all rooms), shows room number, room name, and rendered QR code
+- [x] QR grid — one card per room (all rooms), shows room number, room name, and rendered QR code
 - [x] QR code rendered using `qrcode.react` — links to `/intercom/{roomId}` on `www.sparkinnbohol.com`
-- [ ] Regenerate button per room — generates a new unique room ID / QR value, updates Firestore
-- [ ] Regenerate confirmation modal — "This will invalidate the current QR code. Guests with the old QR code will not be able to chat."
-- [ ] Print single QR button — opens print dialog for that room's QR card
-- [ ] Print all QRs button — generates a printable page with 4-up A4 layout (4 QR cards per A4 page, blank cells on last page if room count is not a multiple of 4)
-- [ ] Print layout: each card shows room number, room name, spark inn logo, QR code, brief instruction ("Scan to chat with the front desk")
-- [ ] Download single QR as PNG option
+- [x] Regenerate button per room — generates a new unique room QR token / QR value, updates Firestore
+- [x] Regenerate confirmation modal — "This will invalidate the current QR code. Guests with the old QR code will not be able to chat."
+- [x] Print single QR button — opens print dialog for that room's QR card
+- [x] Print all QRs button — generates a printable page with 4-up A4 layout (4 QR cards per A4 page)
+- [x] Print layout: each card shows room number, room name, spark inn logo, QR code, brief instruction ("Scan to chat with the front desk")
+- [x] Download single QR as PNG option
 
 ## Data & Logic Checklist
 
 - [x] QR code URL format: `https://www.sparkinnbohol.com/intercom/{roomId}`
 - [x] `roomId` is the guest intercom route parameter; room numbers are accepted by the guest route and resolved against Firestore rooms
-- [ ] Regenerate: if using a separate QR token (not the Firestore doc ID), update the token field on the room and regenerate the QR; if using doc ID, generate a new intercom channel by creating a new sub-path
-- [ ] Print all: renders all 14 QR codes in a hidden printable div, triggers `window.print()` — CSS `@media print` controls layout
+- [x] Regenerate: updates optional `rooms/{roomId}.qrToken`; QR falls back to room doc ID when no token exists
+- [x] Guest route resolution: `/intercom/:roomId` accepts room doc ID, room number, or regenerated `qrToken`
+- [x] Print all: renders selected QR codes in a print window, triggers `window.print()` — CSS `@media print` controls layout
 - [x] `qrcode.react` renders SVG or canvas — use SVG for best print quality
-- [ ] Download as PNG: draw QR SVG to canvas, export as PNG via `canvas.toDataURL()`
+- [x] Download as PNG: draw QR SVG to canvas, export as PNG via `canvas.toDataURL()`
 
 ## Edge Cases & States
 
 - [ ] Loading state — skeleton grid while rooms load
-- [ ] Room inactive — still show QR code (front desk may still want to print for future use)
-- [ ] Regenerated QR — old `/intercom/{oldRoomId}` URL shows "QR code no longer valid" on guest side (if roomId-based approach is used)
-- [ ] Print dialog blocked by browser — show instruction to allow popups
+- [x] Room inactive — still show QR code (front desk may still want to print for future use)
+- [x] Regenerated QR — old `/intercom/{oldQrToken}` URL shows "QR code no longer valid" on guest side
+- [x] Print dialog blocked by browser — show instruction to allow popups
 
 ## Manual QA
 
