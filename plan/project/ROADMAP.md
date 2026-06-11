@@ -291,6 +291,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - 🔄 WebRTC voice signaling — Firestore `calls` offer/answer status, ICE exchange, accept/decline/hang up flow
 - ✅ Notification sound — Web Audio API, every message, tab not focused
 - ✅ Tab title unread count
+- ✅ Sidebar unread badge
 - ⬜ QR Management page — QR grid, regenerate, print single/all
 - ⬜ Spark Essentials — guest store panel (item grid, cart, checkout, order tracking)
 - ✅ Spark Essentials — catalog management wireframe in Settings → Store tab
