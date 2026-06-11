@@ -49,6 +49,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] `onSnapshot` on all `intercoms/{roomId}/messages` — or aggregate listener across rooms — real-time
 - [ ] Mark messages as read: `updateDoc` on message documents where `isRead: false` AND `sender: "guest"` when thread is opened/viewed
 - [ ] Reply: `addDoc` to `intercoms/{roomId}/messages` with `sender: "front-desk"`, `isRead: true`
+- [ ] Preserve early check-in request metadata from guest messages so staff-specific actions can be layered in later
 - [ ] Resolved status: stored as a flag on the room-level intercom document or managed by filtering — conversations with no unread messages and manually resolved
 - [ ] Notification sound implementation:
   - Audio context unlocked on first user interaction after login (browser autoplay policy)

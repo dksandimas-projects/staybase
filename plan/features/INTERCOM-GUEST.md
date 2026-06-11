@@ -50,6 +50,7 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 - [ ] Real-time messages via `onSnapshot` on `intercoms/{roomId}/messages` — always unsubscribe on cleanup
 - [ ] Guest sends message: `addDoc` to `intercoms/{roomId}/messages` with `sender: "guest"`, `isRead: false`, `isQuickRequest: false`
 - [ ] Quick request sends: same as above but `isQuickRequest: true`, `text` = quick request label
+- [ ] Spark Rewards early check-in requests keep their early check-in flag on the message for staff handling
 - [ ] Front desk messages with `isRead: false` — client marks `isRead: true` on view
 - [ ] `settings/hotelConfig` fetched once on load for quick request items
 - [ ] No auth required — `intercoms` collection is fully open (see `plan/docs/BACKEND.md §security rules`)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAdmin, IntercomMessage } from "../context/AdminContext";
 import { 
   MessageSquare, Send, PhoneCall, PhoneOff, Phone, 
@@ -19,7 +19,7 @@ export function IntercomInboxPage() {
   } = useAdmin();
 
   // Active chat selection
-  const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("305");
+  const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("");
   const [replyText, setReplyText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -56,7 +56,7 @@ export function IntercomInboxPage() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyText.trim()) return;
+    if (!replyText.trim() || !selectedRoomNumber) return;
 
     sendIntercomMessage(selectedRoomNumber, replyText.trim(), "front-desk");
     setReplyText("");
@@ -75,10 +75,27 @@ export function IntercomInboxPage() {
   };
 
   // Get active rooms list that have intercom history or are currently occupied
-  const activeRooms = rooms.filter(r => r.status === "occupied" || intercoms[r.roomNumber]);
+  const activeRooms = useMemo(
+    () => rooms.filter(r => r.status === "occupied" || intercoms[r.roomNumber]),
+    [intercoms, rooms]
+  );
 
   // Current chat logs
   const activeChatMessages = intercoms[selectedRoomNumber] || [];
+  const selectedUnreadSignature = activeChatMessages
+    .filter((message) => message.sender === "guest" && !message.isRead)
+    .map((message) => message.id)
+    .join(",");
+
+  useEffect(() => {
+    if (selectedRoomNumber && activeRooms.some((room) => room.roomNumber === selectedRoomNumber)) return;
+    setSelectedRoomNumber(activeRooms[0]?.roomNumber || "");
+  }, [activeRooms, selectedRoomNumber]);
+
+  useEffect(() => {
+    if (!selectedRoomNumber || !selectedUnreadSignature) return;
+    void markChatAsRead(selectedRoomNumber);
+  }, [markChatAsRead, selectedRoomNumber, selectedUnreadSignature]);
 
   return (
     <div className="space-y-8 font-body">
@@ -248,8 +265,13 @@ export function IntercomInboxPage() {
                       <div className={`rounded-xl p-3 text-xs leading-relaxed ${
                         isFd 
                           ? "bg-primary text-white font-medium shadow-sm rounded-tr-none" 
-                          : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
+                          : msg.isQuickRequest
+                            ? "bg-primary-light text-primary-dark border border-primary/20 font-bold rounded-tl-none"
+                            : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
                       }`}>
+                        {msg.isQuickRequest && !isFd && (
+                          <span className="mb-1 block text-[9px] uppercase tracking-wider opacity-70">Quick request</span>
+                        )}
                         {msg.text}
                       </div>
                       
@@ -274,14 +296,16 @@ export function IntercomInboxPage() {
             <input
               type="text"
               required
+              disabled={!selectedRoomNumber}
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
-              placeholder={`Type reply statement to Room ${selectedRoomNumber}...`}
+              placeholder={selectedRoomNumber ? `Type reply statement to Room ${selectedRoomNumber}...` : "Select a room conversation first"}
               className="min-h-[44px] flex-1 rounded-lg border border-gray-250 bg-white px-3 text-xs outline-none focus:border-primary"
             />
             
             <button
               type="submit"
+              disabled={!selectedRoomNumber}
               className="min-h-[44px] px-5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm flex items-center gap-1.5 transition active:scale-95"
             >
               <Send size={12} />
