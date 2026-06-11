@@ -35,7 +35,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [x] Mark as Resolved button — available on active conversations
 - [x] Notification sound — plays on **every** incoming guest message when inbox tab is not focused (not just the first per conversation)
 - [x] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
-- [ ] Unread indicator badge on sidebar nav item
+- [x] Unread indicator badge on sidebar nav item
 - [ ] Timestamps on all messages
 - [ ] **Incoming call notification** — when `calls/{roomId}.status == "ringing"`, show a persistent banner at the top of the inbox: "📞 Room {X} — {guestName} is calling" with Accept and Decline buttons
   - [ ] Accept: creates WebRTC answer, writes to `calls/{roomId}.answer`, begins audio connection
@@ -81,7 +81,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Accept call → audio connects within 3 seconds on same network
 - [ ] Tab title shows unread count when messages are unread
 - [ ] Mark as Resolved moves conversation to Resolved tab
-- [ ] Sidebar nav badge shows correct unread count
+- [x] Sidebar nav badge shows correct unread count
 
 ## References
 

@@ -1,4 +1,5 @@
 import { VERSION } from "@spark-inn/shared";
+import { useMemo } from "react";
 import {
   Award,
   BarChart3,
@@ -14,6 +15,7 @@ import {
 import { NavLink } from "react-router-dom";
 import config from "@config";
 import { brandAsset } from "../utils/brand";
+import { useAdmin } from "../context/AdminContext";
 import { cn } from "../utils/cn";
 
 const navItems = [
@@ -30,6 +32,15 @@ const navItems = [
 ];
 
 export function Sidebar() {
+  const { intercoms } = useAdmin();
+  const unreadIntercomCount = useMemo(
+    () => Object.values(intercoms)
+      .flat()
+      .filter((message) => message.sender === "guest" && !message.isRead)
+      .length,
+    [intercoms]
+  );
+
   return (
     <aside className="flex min-h-screen w-60 shrink-0 flex-col bg-sidebar px-4 py-5 text-white">
       <img src={brandAsset(config.logos.white)} alt={config.brandName} className="h-14 w-auto object-contain object-left" />
@@ -49,7 +60,12 @@ export function Sidebar() {
               }
             >
               <Icon size={18} />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {item.to === "/intercom" && unreadIntercomCount > 0 && (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-1 ring-white/20">
+                  {unreadIntercomCount > 99 ? "99+" : unreadIntercomCount}
+                </span>
+              )}
             </NavLink>
           );
         })}
