@@ -33,8 +33,8 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] New store order notification sound — same Web Audio API pattern as intercom messages
 - [ ] Reply input + Send button at bottom of thread
 - [ ] Mark as Resolved button — available on active conversations
-- [ ] Notification sound — plays on **every** incoming guest message when inbox tab is not focused (not just the first per conversation)
-- [ ] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
+- [x] Notification sound — plays on **every** incoming guest message when inbox tab is not focused (not just the first per conversation)
+- [x] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
 - [ ] Unread indicator badge on sidebar nav item
 - [ ] Timestamps on all messages
 - [ ] **Incoming call notification** — when `calls/{roomId}.status == "ringing"`, show a persistent banner at the top of the inbox: "📞 Room {X} — {guestName} is calling" with Accept and Decline buttons
@@ -51,13 +51,13 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Reply: `addDoc` to `intercoms/{roomId}/messages` with `sender: "front-desk"`, `isRead: true`
 - [ ] Preserve early check-in request metadata from guest messages so staff-specific actions can be layered in later
 - [ ] Resolved status: stored as a flag on the room-level intercom document or managed by filtering — conversations with no unread messages and manually resolved
-- [ ] Notification sound implementation:
+- [x] Notification sound implementation:
   - Audio context unlocked on first user interaction after login (browser autoplay policy)
   - Sound plays on every incoming guest message — not just the first per conversation
   - Sound only plays when inbox route is not the active focused tab
   - Sound file URL from `settings/hotelConfig.notificationSoundUrl` (Firebase Storage)
   - Use Web Audio API — no extra library
-- [ ] Tab title: update `document.title` dynamically with unread count
+- [x] Tab title: update `document.title` dynamically with unread count
 - [ ] Unread count: count of messages where `sender: "guest"` AND `isRead: false` across all rooms
 
 ## Edge Cases & States
