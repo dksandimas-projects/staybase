@@ -285,8 +285,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 8 — Intercom (P1)
 > Goal: QR chat working between guests and front desk, including Spark Essentials store.
 
-- ⬜ Guest Intercom page (`/intercom/:roomId`) — chat UI, quick requests, name prompt, Shop tab
-- ⬜ Intercom Inbox (admin) — chat list, thread view, reply, mark resolved, store order cards
+- 🔄 Guest Intercom page (`/intercom/:roomId`) — chat UI, quick requests, name prompt, Shop tab
+- 🔄 Intercom Inbox (admin) — chat list, thread view, reply, mark resolved, store order cards
 - ⬜ Notification sound — Web Audio API, every message, tab not focused
 - ⬜ Tab title unread count
 - ⬜ QR Management page — QR grid, regenerate, print single/all
@@ -386,7 +386,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ **[AUDIT-6]** Add `api/handlers/members.ts` and define `/api/members/register`, `/api/members/redeem-points`, `/api/members/undo-redemption` in API-ROUTES.md
 - ⬜ **[AUDIT-6b]** Add `api/handlers/store.ts` and define `/api/store/create-order` in API-ROUTES.md
 - ⬜ **[AUDIT-6c]** Add `api/handlers/admin.ts` and define `/api/admin/create-staff`, `/api/admin/disable-staff` in API-ROUTES.md
-- ⬜ **[AUDIT-7]** Add `isEarlyCheckInRequest?: boolean` to `IntercomMessage` type in `TYPES.md` and `BACKEND.md §intercoms`
+- ✅ **[AUDIT-7]** Add `isEarlyCheckInRequest?: boolean` to `IntercomMessage` type in `TYPES.md` and `BACKEND.md §intercoms`
 - ⬜ **[AUDIT-8]** Decide on `SparkRewardsPromo.perks` field — add to type in `TYPES.md` and schema in `BACKEND.md §settings/websiteContent`
 
 ### 🟡 Fix before Phase 10 — Security & Polish
@@ -435,8 +435,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 19 | 6 | 13 |
-| **Total** | **176** | **102** | **74** |
+| Audit Fixes | 19 | 7 | 12 |
+| **Total** | **176** | **103** | **73** |
 
 ---
 

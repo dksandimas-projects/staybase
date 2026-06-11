@@ -11,7 +11,7 @@ import {
 import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 type StaffRole = "front-desk" | "admin";
@@ -199,6 +199,7 @@ export interface IntercomMessage {
   isQuickRequest: boolean;
   isStoreOrder: boolean;
   orderRef?: string;
+  isEarlyCheckInRequest?: boolean;
 }
 
 export interface StoreOrderItem {
@@ -988,85 +989,106 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, isActive: !m.isActive } : m));
   };
 
-  // Intercom log (inbox) state
-  const [intercoms, setIntercoms] = useState<Record<string, IntercomMessage[]>>({
-    "305": [
-      {
-        id: "int-1",
-        text: "Mabuhay Alex! Welcome to spark inn. This is the Front Desk. How can we help you in Room 305 today?",
-        sender: "front-desk",
-        guestName: "Front Desk Staff",
-        timestamp: "10:00 AM",
-        isRead: true,
-        isQuickRequest: false,
-        isStoreOrder: false
-      },
-      {
-        id: "int-2",
-        text: "Hi! Can we get an extra blanket for Room 305?",
-        sender: "guest",
-        guestName: "Alex Mercer",
-        timestamp: "10:15 AM",
-        isRead: false,
-        isQuickRequest: false,
-        isStoreOrder: false
-      }
-    ]
-  });
+  // Intercom log (inbox) state — live from Firestore, keyed by room number
+  const [intercoms, setIntercoms] = useState<Record<string, IntercomMessage[]>>({});
 
-  const sendIntercomMessage = (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
-    const activeRoomMsgs = intercoms[roomId] || [];
-    const newMsg: IntercomMessage = {
-      id: `int-${Date.now()}`,
-      text,
-      sender,
-      guestName: sender === "guest" ? "Guest" : "Front Desk",
-      timestamp: new Date().toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" }),
-      isRead: sender === "front-desk",
-      isQuickRequest: false,
-      isStoreOrder: false
+  const formatIntercomTimestamp = (value: any) => {
+    if (!value) return "";
+    const date = typeof value.toDate === "function" ? value.toDate() : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" });
+  };
+
+  useEffect(() => {
+    const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
+    if (roomNumbers.length === 0) {
+      setIntercoms({});
+      return;
+    }
+
+    const unsubscribes = roomNumbers.map((roomNumber) => {
+      const messagesQuery = query(
+        collection(db, "intercoms", roomNumber, "messages"),
+        orderBy("timestamp", "asc")
+      );
+
+      return onSnapshot(
+        messagesQuery,
+        (snapshot) => {
+          const messages: IntercomMessage[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              text: data.text || "",
+              sender: data.sender || "guest",
+              guestName: data.guestName || "",
+              timestamp: formatIntercomTimestamp(data.timestamp),
+              isRead: !!data.isRead,
+              isQuickRequest: !!data.isQuickRequest,
+              isStoreOrder: !!data.isStoreOrder,
+              orderRef: data.orderRef || undefined,
+              isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
+            };
+          });
+
+          setIntercoms((prev) => {
+            if (messages.length === 0) {
+              const { [roomNumber]: _removed, ...rest } = prev;
+              return rest;
+            }
+            return { ...prev, [roomNumber]: messages };
+          });
+        },
+        (error) => {
+          console.error(`Error listening to intercom messages for room ${roomNumber}:`, error);
+        }
+      );
+    });
+
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
+  }, [rooms]);
 
-    setIntercoms(prev => ({
-      ...prev,
-      [roomId]: [...activeRoomMsgs, newMsg]
-    }));
+  const sendIntercomMessage = async (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
+    try {
+      await setDoc(doc(db, "intercoms", roomId), {
+        roomId,
+        roomNumber: roomId,
+        resolved: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
 
-    // Trigger mock automatic guest reply if staff sent the message
-    if (sender === "front-desk") {
-      setTimeout(() => {
-        setIntercoms(prev => {
-          const msgs = prev[roomId] || [];
-          return {
-            ...prev,
-            [roomId]: [
-              ...msgs,
-              {
-                id: `int-guest-reply-${Date.now()}`,
-                text: "Thank you for the quick response! (Simulated Guest)",
-                sender: "guest",
-                guestName: "Guest",
-                timestamp: new Date().toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" }),
-                isRead: false,
-                isQuickRequest: false,
-                isStoreOrder: false
-              }
-            ]
-          };
-        });
-      }, 3500);
+      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+        text,
+        sender,
+        guestName: sender === "guest" ? "Guest" : currentUser?.email || "Front Desk",
+        timestamp: serverTimestamp(),
+        isRead: sender === "front-desk",
+        isQuickRequest: false,
+        isStoreOrder: false,
+        isEarlyCheckInRequest: false
+      });
+    } catch (error) {
+      console.error("Error sending intercom message:", error);
     }
   };
 
-  const markChatAsRead = (roomId: string) => {
-    setIntercoms(prev => {
-      const msgs = prev[roomId];
-      if (!msgs) return prev;
-      return {
-        ...prev,
-        [roomId]: msgs.map(m => ({ ...m, isRead: true }))
-      };
-    });
+  const markChatAsRead = async (roomId: string) => {
+    const unreadGuestMessages = (intercoms[roomId] || []).filter((message) => message.sender === "guest" && !message.isRead);
+    if (unreadGuestMessages.length === 0) return;
+
+    try {
+      await Promise.all(
+        unreadGuestMessages.map((message) =>
+          updateDoc(doc(db, "intercoms", roomId, "messages", message.id), {
+            isRead: true
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Error marking intercom messages as read:", error);
+    }
   };
 
   // Call Signaling state

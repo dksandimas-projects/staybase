@@ -3,10 +3,25 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { 
   Send, Phone, ShoppingBag, MessageSquare, Plus, Minus, Trash2, X, 
   ChevronRight, PhoneOff, Mic, MicOff, AlertCircle, Sparkles, 
-  Upload, Info, Check, HelpCircle, Loader2
+  Upload, Info, Check, Loader2
 } from "lucide-react";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where
+} from "firebase/firestore";
 import config from "@config";
-import { brandAsset } from "../utils/brand";
+import { db } from "../firebase/config";
 import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
@@ -14,12 +29,14 @@ import { GhostButton } from "../components/GhostButton";
 // Interfaces
 interface Message {
   id: string;
-  sender: "guest" | "staff";
+  sender: "guest" | "front-desk";
   text: string;
   timestamp: string;
+  isRead?: boolean;
   isQuickRequest?: boolean;
   isStoreOrder?: boolean;
   orderRef?: string;
+  isEarlyCheckInRequest?: boolean;
   isCancelledOrder?: boolean;
 }
 
@@ -97,7 +114,13 @@ export function IntercomPage() {
   // Chat States
   const [messages, setMessages] = useState<Message[]>([]);
   const [typedMessage, setTypedMessage] = useState<string>("");
-  const [typingState, setTypingState] = useState<boolean>(false);
+  const [isRoomLoading, setIsRoomLoading] = useState<boolean>(true);
+  const [isValidRoom, setIsValidRoom] = useState<boolean>(false);
+  const [roomNumber, setRoomNumber] = useState<string>(roomId || "");
+  const [quickRequests, setQuickRequests] = useState<string[]>([]);
+  const [isStoreEnabled, setIsStoreEnabled] = useState<boolean>(true);
+  const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
+  const [messageError, setMessageError] = useState<string>("");
 
   // Cart & Shop States
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -122,18 +145,136 @@ export function IntercomPage() {
 
   // Init logic
   useEffect(() => {
-    const savedName = sessionStorage.getItem("intercom_guest_name");
-    if (savedName) {
-      setGuestName(savedName);
-      setShowNamePrompt(false);
-      initializeChat(savedName);
-    }
+    setGuestName("");
+    setNameInput("");
+    setShowNamePrompt(true);
+  }, [roomId]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRoomAndSettings() {
+      if (!roomId) {
+        setIsRoomLoading(false);
+        setIsValidRoom(false);
+        return;
+      }
+
+      setIsRoomLoading(true);
+      try {
+        let resolvedRoomNumber = roomId;
+        const directRoom = await getDoc(doc(db, "rooms", roomId));
+        if (directRoom.exists()) {
+          resolvedRoomNumber = directRoom.data().roomNumber || roomId;
+        } else {
+          const roomsQuery = query(collection(db, "rooms"), where("roomNumber", "==", roomId), limit(1));
+          const roomsSnapshot = await getDocs(roomsQuery);
+          if (roomsSnapshot.empty) {
+            if (!isMounted) return;
+            setIsValidRoom(false);
+            setIsRoomLoading(false);
+            return;
+          }
+          resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
+        }
+
+        const [hotelConfigDoc, storeConfigDoc] = await Promise.all([
+          getDoc(doc(db, "settings", "hotelConfig")),
+          getDoc(doc(db, "settings", "storeConfig"))
+        ]);
+
+        if (!isMounted) return;
+        setRoomNumber(resolvedRoomNumber);
+        setIsValidRoom(true);
+        setQuickRequests(
+          hotelConfigDoc.exists() && Array.isArray(hotelConfigDoc.data().intercomQuickRequests)
+            ? hotelConfigDoc.data().intercomQuickRequests.filter(Boolean)
+            : ["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"]
+        );
+        setIsStoreEnabled(storeConfigDoc.exists() ? storeConfigDoc.data().isEnabled !== false : true);
+      } catch (error) {
+        console.error("Failed to load intercom room settings:", error);
+        if (isMounted) {
+          setIsValidRoom(false);
+        }
+      } finally {
+        if (isMounted) {
+          setIsRoomLoading(false);
+        }
+      }
+    }
+
+    void loadRoomAndSettings();
+    return () => {
+      isMounted = false;
+    };
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!isValidRoom || !roomNumber) return;
+
+    const messagesQuery = query(
+      collection(db, "intercoms", roomNumber, "messages"),
+      orderBy("timestamp", "asc")
+    );
+
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        const liveMessages = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          const messageDate = data.timestamp?.toDate ? data.timestamp.toDate() : null;
+          return {
+            id: docSnap.id,
+            sender: data.sender || "guest",
+            text: data.text || "",
+            timestamp: messageDate
+              ? messageDate.toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" })
+              : "",
+            isRead: !!data.isRead,
+            isQuickRequest: !!data.isQuickRequest,
+            isStoreOrder: !!data.isStoreOrder,
+            orderRef: data.orderRef || undefined,
+            isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
+          } satisfies Message;
+        });
+        setMessages(liveMessages);
+
+        const unreadFrontDeskMessages = liveMessages.filter((message) => message.sender === "front-desk" && !message.isRead);
+        unreadFrontDeskMessages.forEach((message) => {
+          void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+        });
+      },
+      (error) => {
+        console.error("Failed to listen to intercom messages:", error);
+        setMessageError("We could not load the chat. Please refresh or call the front desk.");
+      }
+    );
+
+    return unsubscribe;
+  }, [isValidRoom, roomNumber]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typingState]);
+  }, [messages]);
+
+  useEffect(() => {
+    if (!isStoreEnabled && activeTab === "shop") {
+      setActiveTab("chat");
+    }
+  }, [activeTab, isStoreEnabled]);
 
   // Call timer effect
   useEffect(() => {
@@ -147,19 +288,6 @@ export function IntercomPage() {
     }
     return () => clearInterval(interval);
   }, [callState]);
-
-  // Initialize Chat Thread with welcome message
-  const initializeChat = (name: string) => {
-    const defaultMessages: Message[] = [
-      {
-        id: "welcome-1",
-        sender: "staff",
-        text: `Mabuhay ${name}! Welcome to ${config.brandName}. This is the Front Desk. How can we help you in Room ${roomId || "guest"} today?`,
-        timestamp: getFormattedTime()
-      }
-    ];
-    setMessages(defaultMessages);
-  };
 
   const getFormattedTime = () => {
     return new Date().toLocaleTimeString(config.locale, {
@@ -175,70 +303,52 @@ export function IntercomPage() {
 
     const formattedName = nameInput.trim();
     setGuestName(formattedName);
-    sessionStorage.setItem("intercom_guest_name", formattedName);
     setShowNamePrompt(false);
-    initializeChat(formattedName);
   };
 
   // Text message sending
-  const handleSendMessage = (e: React.FormEvent) => {
+  const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean }) => {
+    if (!roomNumber || !guestName.trim()) return;
+    setMessageError("");
+
+    try {
+      await setDoc(doc(db, "intercoms", roomNumber), {
+        roomId: roomNumber,
+        roomNumber,
+        guestName,
+        resolved: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      await addDoc(collection(db, "intercoms", roomNumber, "messages"), {
+        text,
+        sender: "guest",
+        guestName,
+        timestamp: serverTimestamp(),
+        isRead: false,
+        isQuickRequest: !!options?.isQuickRequest,
+        isStoreOrder: !!options?.isStoreOrder,
+        orderRef: options?.orderRef || "",
+        isEarlyCheckInRequest: !!options?.isEarlyCheckInRequest
+      });
+    } catch (error) {
+      console.error("Failed to send intercom message:", error);
+      setMessageError("Your message was not sent. Please try again or call the front desk.");
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!typedMessage.trim()) return;
 
-    const newMessage: Message = {
-      id: `msg-${Date.now()}`,
-      sender: "guest",
-      text: typedMessage.trim(),
-      timestamp: getFormattedTime()
-    };
-
-    setMessages(prev => [...prev, newMessage]);
+    const nextMessage = typedMessage.trim();
     setTypedMessage("");
-
-    // Simulate front desk reply
-    triggerFrontDeskAutoReply(
-      `Thank you, ${guestName}. We have received your message and a front desk agent will get back to you shortly.`
-    );
+    await sendGuestMessage(nextMessage);
   };
 
   // Quick Request Chips
-  const handleQuickRequest = (requestLabel: string) => {
-    const newMessage: Message = {
-      id: `req-${Date.now()}`,
-      sender: "guest",
-      text: `Requested: ${requestLabel}`,
-      timestamp: getFormattedTime(),
-      isQuickRequest: true
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-
-    // Simulate custom replies per request type
-    let responseText = `Received! We have dispatched our housekeeping team to deliver ${requestLabel} to Room ${roomId || ""} shortly. Let us know if you need anything else.`;
-    if (requestLabel === "Do Not Disturb") {
-      responseText = "Understood. We have updated your room status to Do Not Disturb and notified the housekeeping crew.";
-    } else if (requestLabel === "Room Cleaning") {
-      responseText = "Housekeeping team has been scheduled for your room. They will arrive shortly to clean your room.";
-    }
-
-    triggerFrontDeskAutoReply(responseText);
-  };
-
-  // Simulate auto response
-  const triggerFrontDeskAutoReply = (replyText: string) => {
-    setTypingState(true);
-    setTimeout(() => {
-      setTypingState(false);
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `reply-${Date.now()}`,
-          sender: "staff",
-          text: replyText,
-          timestamp: getFormattedTime()
-        }
-      ]);
-    }, 2000);
+  const handleQuickRequest = async (requestLabel: string) => {
+    await sendGuestMessage(requestLabel, { isQuickRequest: true });
   };
 
   // Voice Call Simulation Actions
@@ -371,21 +481,9 @@ export function IntercomPage() {
 
       setActiveOrder(newOrder);
 
-      // Post order summary message into chat thread
-      const orderMessage: Message = {
-        id: `ord-msg-${Date.now()}`,
-        sender: "guest",
-        text: `🛒 Ordered items: ${itemsText}. Total: ${formatPrice(total)} via ${paymentLabels[paymentMethod]}. Ref: ${orderRef}`,
-        timestamp: getFormattedTime(),
-        isStoreOrder: true,
-        orderRef
-      };
-
-      setMessages(prev => [...prev, orderMessage]);
-
-      // Trigger automatic front desk confirmation response
-      triggerFrontDeskAutoReply(
-        `Order received! Reference ${orderRef} is placed and our team is gathering your items for delivery to Room ${roomId || ""}.`
+      void sendGuestMessage(
+        `Ordered items: ${itemsText}. Total: ${formatPrice(total)} via ${paymentLabels[paymentMethod]}. Ref: ${orderRef}`,
+        { isStoreOrder: true, orderRef }
       );
 
       // Clean cart drawer and states
@@ -408,21 +506,10 @@ export function IntercomPage() {
 
     setActiveOrder(updatedOrder);
 
-    // Post cancel message to thread
-    const cancelMessage: Message = {
-      id: `ord-cancel-${Date.now()}`,
-      sender: "guest",
-      text: `🚫 Cancelled Order Ref: ${activeOrder.orderRef}`,
-      timestamp: getFormattedTime(),
-      isCancelledOrder: true,
+    void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
+      isStoreOrder: true,
       orderRef: activeOrder.orderRef
-    };
-
-    setMessages(prev => [...prev, cancelMessage]);
-
-    triggerFrontDeskAutoReply(
-      `Understood. Order ${activeOrder.orderRef} has been cancelled successfully.`
-    );
+    });
   };
 
   // Debug tracker simulation
@@ -448,16 +535,7 @@ export function IntercomPage() {
       
       setActiveOrder(updatedOrder);
 
-      // Trigger status update message from staff
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `status-update-${Date.now()}`,
-          sender: "staff",
-          text: `📦 Update on order ${activeOrder.orderRef}: Status changed to "${statusLabels[nextStatus]}".`,
-          timestamp: getFormattedTime()
-        }
-      ]);
+      void statusLabels[nextStatus];
     }
   };
 
@@ -468,6 +546,58 @@ export function IntercomPage() {
     if (status === "delivered") return 3;
     return -1; // Cancelled
   };
+
+  const displayMessages: Message[] = messages.length > 0
+    ? messages
+    : [
+        {
+          id: "local-welcome",
+          sender: "front-desk",
+          text: `Mabuhay${guestName ? ` ${guestName}` : ""}! You're connected to the front desk for Room ${roomNumber || roomId || "guest"}. How can we help?`,
+          timestamp: getFormattedTime(),
+          isRead: true
+        }
+      ];
+
+  if (isRoomLoading) {
+    return (
+      <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
+        <div className="w-full max-w-md bg-white shadow-2xl flex flex-col border-x border-gray-200">
+          <div className="bg-gray-950 p-4 space-y-3">
+            <div className="h-9 w-44 rounded bg-white/10 animate-pulse" />
+            <div className="h-4 w-64 rounded bg-white/10 animate-pulse" />
+          </div>
+          <div className="flex-1 p-4 space-y-4">
+            <div className="h-16 w-4/5 rounded-2xl bg-gray-100 animate-pulse" />
+            <div className="h-14 w-2/3 rounded-2xl bg-gray-100 animate-pulse ml-auto" />
+            <div className="h-16 w-3/4 rounded-2xl bg-gray-100 animate-pulse" />
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isValidRoom) {
+    return (
+      <main className="min-h-screen bg-gray-100 flex justify-center items-center font-body p-6">
+        <div className="w-full max-w-md rounded-card-lg bg-white p-6 text-center shadow-xl ring-1 ring-gray-200">
+          <div className="mx-auto h-12 w-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center">
+            <AlertCircle size={24} />
+          </div>
+          <h1 className="mt-4 font-heading text-2xl lowercase text-gray-950">Invalid room QR code</h1>
+          <p className="mt-2 text-sm leading-relaxed text-gray-600">
+            This intercom link does not match an active room. Please call or visit the front desk so we can help you.
+          </p>
+          <a
+            href={`tel:${config.frontDeskPhone}`}
+            className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-bold text-white"
+          >
+            Call Front Desk
+          </a>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
@@ -484,7 +614,7 @@ export function IntercomPage() {
                 {config.brandName} Call
               </span>
               <p className="mt-6 text-xl font-heading tracking-tight lowercase">
-                Room {roomId || "Guest"}
+                Room {roomNumber || roomId || "Guest"}
               </p>
             </div>
 
@@ -556,10 +686,12 @@ export function IntercomPage() {
                 {roomId || "G"}
               </div>
               <div>
-                <h1 className="font-bold text-sm leading-tight text-white">Room {roomId || "Guest"}</h1>
+                <h1 className="font-bold text-sm leading-tight text-white">Room {roomNumber || roomId || "Guest"}</h1>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
-                  <span className="text-[10px] text-gray-400 font-semibold tracking-wide">Connected to Front Desk</span>
+                  <span className={`h-1.5 w-1.5 rounded-full ${isOffline ? "bg-amber-400" : "bg-green-500 animate-pulse"}`} />
+                  <span className="text-[10px] text-gray-400 font-semibold tracking-wide">
+                    {isOffline ? "Offline - reconnecting" : "Connected to Front Desk"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -604,17 +736,19 @@ export function IntercomPage() {
               <MessageSquare size={14} />
               Chat Support
             </button>
-            <button
-              onClick={() => setActiveTab("shop")}
-              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
-                activeTab === "shop" 
-                  ? "border-primary text-primary" 
-                  : "border-transparent text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              <ShoppingBag size={14} />
-              {config.storeName}
-            </button>
+            {isStoreEnabled && (
+              <button
+                onClick={() => setActiveTab("shop")}
+                className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
+                  activeTab === "shop"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <ShoppingBag size={14} />
+                {config.storeName}
+              </button>
+            )}
           </div>
         </header>
 
@@ -627,7 +761,19 @@ export function IntercomPage() {
               
               {/* Message scroll thread */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 select-text">
-                {messages.map((msg) => (
+                {isOffline && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                    You're offline. New messages will sync when your connection returns.
+                  </div>
+                )}
+
+                {messageError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                    {messageError}
+                  </div>
+                )}
+
+                {displayMessages.map((msg) => (
                   <div
                     key={msg.id}
                     className={`flex flex-col max-w-[85%] ${
@@ -640,12 +786,17 @@ export function IntercomPage() {
                         msg.sender === "guest"
                           ? msg.isStoreOrder
                             ? "bg-primary-light text-primary-dark border border-primary/20 rounded-tr-none font-medium"
-                            : msg.isCancelledOrder
-                              ? "bg-red-50 text-red-700 border border-red-200 rounded-tr-none font-medium"
-                              : "bg-primary text-white rounded-tr-none"
+                            : msg.isQuickRequest
+                              ? "bg-primary-light text-primary-dark border border-primary/20 rounded-tr-none font-bold"
+                              : msg.isCancelledOrder
+                                ? "bg-red-50 text-red-700 border border-red-200 rounded-tr-none font-medium"
+                                : "bg-primary text-white rounded-tr-none"
                           : "bg-white text-gray-900 border border-gray-200 rounded-tl-none"
                       }`}
                     >
+                      {msg.isQuickRequest && (
+                        <span className="mb-1 block text-[10px] uppercase tracking-wider opacity-70">Quick request</span>
+                      )}
                       {msg.text}
                     </div>
 
@@ -656,17 +807,6 @@ export function IntercomPage() {
                   </div>
                 ))}
 
-                {/* Typing status indicator */}
-                {typingState && (
-                  <div className="flex flex-col items-start mr-auto max-w-[85%]">
-                    <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-4 py-3 flex gap-1 items-center shadow-sm">
-                      <span className="h-1.5 w-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="h-1.5 w-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="h-1.5 w-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
-                  </div>
-                )}
-                
                 <div ref={messagesEndRef} />
               </div>
 
@@ -677,7 +817,7 @@ export function IntercomPage() {
                 <div className="space-y-1.5">
                   <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Quick Requests</p>
                   <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none snap-x">
-                    {["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"].map((req) => (
+                    {quickRequests.map((req) => (
                       <button
                         key={req}
                         onClick={() => handleQuickRequest(req)}

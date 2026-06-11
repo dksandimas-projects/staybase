@@ -394,6 +394,8 @@ IntercomMessage {
   isRead: boolean
   isQuickRequest: boolean
   isStoreOrder: boolean
+  orderRef?: string
+  isEarlyCheckInRequest?: boolean
 }
 ```
 

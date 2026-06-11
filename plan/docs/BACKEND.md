@@ -261,6 +261,8 @@ Subcollection under each room.
 | `isRead` | boolean | |
 | `isQuickRequest` | boolean | `true` if sent via quick request panel |
 | `isStoreOrder` | boolean | `true` if sent by the store order system |
+| `orderRef` | string | Optional store order reference |
+| `isEarlyCheckInRequest` | boolean | Optional Spark Rewards early check-in request flag |
 
 ---
 

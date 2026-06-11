@@ -83,3 +83,18 @@ export interface Booking {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type IntercomSender = "guest" | "front-desk";
+
+export interface IntercomMessage {
+  id: string;
+  text: string;
+  sender: IntercomSender;
+  guestName: string;
+  timestamp: Date;
+  isRead: boolean;
+  isQuickRequest: boolean;
+  isStoreOrder: boolean;
+  orderRef?: string;
+  isEarlyCheckInRequest?: boolean;
+}
