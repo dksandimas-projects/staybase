@@ -52,7 +52,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Order creation: API route writes to `storeOrders` — includes `roomId`, `roomNumber`, `bookingId` (if found), `items[]`, `totalAmount`, `paymentMethod`, `status: "placed"`
 - [x] GCash screenshot: upload to Firebase Storage under `store-orders/{roomId}/payment-proof/`, store URL in order document
 - [x] Order confirmation message: `addDoc` to `intercoms/{roomId}/messages` with `isStoreOrder: true`, styled summary of items ordered
-- [ ] Cancel order: `updateDoc` status to `"cancelled"` — only allowed when `status === "placed"`
+- [x] Cancel order: API route sets status to `"cancelled"` — only allowed when `status === "placed"` and room/order ref match
 - [ ] Payment methods for store fetched from `settings/storeConfig.paymentMethods`
 
 ## Edge Cases & States
@@ -63,7 +63,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [ ] Store disabled entirely (`settings/storeConfig.isEnabled: false`) — hide Shop tab, show "Coming soon" or nothing
 - [ ] GCash screenshot upload fails — show error, do not submit order without it if GCash selected
 - [ ] Cart empty on checkout attempt — disable Place Order button
-- [ ] Order already cancelled — hide cancel button, show cancelled badge
+- [x] Order already cancelled — hide cancel button, show cancelled badge
 
 ## Manual QA
 

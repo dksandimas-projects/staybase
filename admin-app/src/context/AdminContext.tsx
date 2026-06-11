@@ -11,7 +11,7 @@ import {
 import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 type StaffRole = "front-desk" | "admin";
@@ -252,6 +252,7 @@ export interface StoreOrder {
   paymentMethod: "cod" | "add-to-bill" | "gcash";
   paymentProofUrl: string;
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
+  stockRestoredAt: string | null;
   isBilled: boolean;
   billedAt: string | null;
   cancellationReason: string;
@@ -312,7 +313,7 @@ export interface AdminContextType {
 
   // Store Orders
   storeOrders: StoreOrder[];
-  updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"]) => void | Promise<void>;
+  updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"], cancellationReason?: string) => void | Promise<void>;
   billStoreOrder: (orderId: string) => void | Promise<void>;
   storeItems: StoreItem[];
   addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => void;
@@ -1326,6 +1327,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             paymentMethod: data.paymentMethod || "cod",
             paymentProofUrl: data.paymentProofUrl || "",
             status: data.status || "placed",
+            stockRestoredAt: data.stockRestoredAt ? formatStoreDate(data.stockRestoredAt) : null,
             isBilled: !!data.isBilled,
             billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
             cancellationReason: data.cancellationReason || "",
@@ -1343,7 +1345,46 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"]) => {
+  const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
+    if (status === "cancelled") {
+      await runTransaction(db, async (transaction) => {
+        const orderRef = doc(db, "storeOrders", orderId);
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap.exists()) {
+          throw new Error("Store order not found");
+        }
+
+        const orderData = orderSnap.data();
+        const shouldRestoreStock = orderData.status === "placed" && !orderData.stockRestoredAt;
+        const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
+        const itemRefs = shouldRestoreStock
+          ? orderItems.map((item: any) => doc(db, "storeItems", item.itemId))
+          : [];
+        const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+
+        itemSnaps.forEach((itemSnap, index) => {
+          if (!itemSnap.exists()) return;
+          const itemData = itemSnap.data();
+          const stock = itemData.stock ?? null;
+          if (stock !== null) {
+            transaction.update(itemRefs[index], {
+              stock: Number(stock || 0) + Number(orderItems[index].quantity || 0),
+              updatedAt: serverTimestamp()
+            });
+          }
+        });
+
+        transaction.update(orderRef, {
+          status,
+          cancellationReason,
+          stockRestoredAt: shouldRestoreStock ? serverTimestamp() : orderData.stockRestoredAt || null,
+          updatedAt: serverTimestamp(),
+          handledBy: currentUser?.uid || currentUser?.email || ""
+        });
+      });
+      return;
+    }
+
     await updateDoc(doc(db, "storeOrders", orderId), {
       status,
       updatedAt: serverTimestamp(),

@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 11, 2026
+> Last updated: June 12, 2026
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -298,6 +298,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Spark Essentials — catalog management wireframe in Settings → Store tab
 - ✅ Spark Essentials — order management wireframe page/section (admin)
 - ✅ Spark Essentials — store order API route (stock check + order creation transaction)
+- ✅ Spark Essentials — placed order cancellation with idempotent stock restore
 - ⬜ Spark Essentials — store reports in Reports page
 
 ---

@@ -1579,7 +1579,7 @@ export function BookingsPage() {
                 <>
                   <button
                     onClick={() => {
-                      updateStoreOrderStatus(selectedOrder.id, "confirmed");
+                      void updateStoreOrderStatus(selectedOrder.id, "confirmed");
                       setSelectedOrder((prev: any) => prev ? { ...prev, status: "confirmed" } : null);
                     }}
                     className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
@@ -1591,7 +1591,7 @@ export function BookingsPage() {
                     onClick={() => {
                       const reason = prompt("Enter cancellation reason:");
                       if (reason !== null) {
-                        updateStoreOrderStatus(selectedOrder.id, "cancelled");
+                        void updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
                         setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
                       }
                     }}
@@ -1606,7 +1606,7 @@ export function BookingsPage() {
                 <>
                   <button
                     onClick={() => {
-                      updateStoreOrderStatus(selectedOrder.id, "out-for-delivery");
+                      void updateStoreOrderStatus(selectedOrder.id, "out-for-delivery");
                       setSelectedOrder((prev: any) => prev ? { ...prev, status: "out-for-delivery" } : null);
                     }}
                     className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
@@ -1618,7 +1618,7 @@ export function BookingsPage() {
                     onClick={() => {
                       const reason = prompt("Enter cancellation reason:");
                       if (reason !== null) {
-                        updateStoreOrderStatus(selectedOrder.id, "cancelled");
+                        void updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
                         setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
                       }
                     }}
@@ -1632,7 +1632,7 @@ export function BookingsPage() {
               {selectedOrder.status === "out-for-delivery" && (
                 <button
                   onClick={() => {
-                    updateStoreOrderStatus(selectedOrder.id, "delivered");
+                    void updateStoreOrderStatus(selectedOrder.id, "delivered");
                     setSelectedOrder((prev: any) => prev ? { ...prev, status: "delivered" } : null);
                   }}
                   className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-gray-900 hover:bg-black text-xs font-bold text-white shadow-sm transition active:scale-95"
@@ -1644,7 +1644,7 @@ export function BookingsPage() {
               {selectedOrder.status === "delivered" && selectedOrder.paymentMethod === "add-to-bill" && !selectedOrder.isBilled && (
                 <button
                   onClick={() => {
-                    billStoreOrder(selectedOrder.id);
+                    void billStoreOrder(selectedOrder.id);
                     setSelectedOrder((prev: any) => prev ? { ...prev, isBilled: true, billedAt: new Date().toISOString() } : null);
                     alert("Order amount added to guest's room bill successfully.");
                   }}
