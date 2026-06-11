@@ -25,7 +25,7 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 ## UI Checklist
 
 - [ ] QR grid — one card per room (all rooms), shows room number, room name, and rendered QR code
-- [ ] QR code rendered using `qrcode.react` — links to `/intercom/{roomId}` on `www.sparkinnbohol.com`
+- [x] QR code rendered using `qrcode.react` — links to `/intercom/{roomId}` on `www.sparkinnbohol.com`
 - [ ] Regenerate button per room — generates a new unique room ID / QR value, updates Firestore
 - [ ] Regenerate confirmation modal — "This will invalidate the current QR code. Guests with the old QR code will not be able to chat."
 - [ ] Print single QR button — opens print dialog for that room's QR card
@@ -35,11 +35,11 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 ## Data & Logic Checklist
 
-- [ ] QR code URL format: `https://www.sparkinnbohol.com/intercom/{roomId}`
-- [ ] `roomId` is the Firestore document ID — used as the QR parameter
+- [x] QR code URL format: `https://www.sparkinnbohol.com/intercom/{roomId}`
+- [x] `roomId` is the guest intercom route parameter; room numbers are accepted by the guest route and resolved against Firestore rooms
 - [ ] Regenerate: if using a separate QR token (not the Firestore doc ID), update the token field on the room and regenerate the QR; if using doc ID, generate a new intercom channel by creating a new sub-path
 - [ ] Print all: renders all 14 QR codes in a hidden printable div, triggers `window.print()` — CSS `@media print` controls layout
-- [ ] `qrcode.react` renders SVG or canvas — use SVG for best print quality
+- [x] `qrcode.react` renders SVG or canvas — use SVG for best print quality
 - [ ] Download as PNG: draw QR SVG to canvas, export as PNG via `canvas.toDataURL()`
 
 ## Edge Cases & States

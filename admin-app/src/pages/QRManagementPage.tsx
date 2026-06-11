@@ -1,13 +1,19 @@
 import { useState } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { QRCodeSVG } from "qrcode.react";
 import { useAdmin } from "../context/AdminContext";
-import { QrCode, Printer, RefreshCw, Eye, Sparkles, Check, Smartphone } from "lucide-react";
+import { QrCode, Printer, Eye, Check, Smartphone } from "lucide-react";
 import config from "@config";
 
 export function QRManagementPage() {
   const { rooms } = useAdmin();
-  const [domainUrl, setDomainUrl] = useState("https://sparkinn-guest.web.app");
+  const [domainUrl, setDomainUrl] = useState(`https://${config.domain}`);
   const [selectedRooms, setSelectedRooms] = useState<string[]>(rooms.map(r => r.roomNumber));
   const [previewRoomNum, setPreviewRoomNum] = useState<string>("101");
+
+  const getHostUrl = () => domainUrl.trim().replace(/\/+$/, "");
+  const getIntercomUrl = (roomNum: string) => `${getHostUrl()}/intercom/${encodeURIComponent(roomNum)}`;
+  const previewIntercomUrl = getIntercomUrl(previewRoomNum);
 
   const toggleSelectRoom = (roomNum: string) => {
     if (selectedRooms.includes(roomNum)) {
@@ -39,7 +45,17 @@ export function QRManagementPage() {
     }
 
     const cardsHtml = selectedRooms.map(roomNum => {
-      const scanLink = `${domainUrl}/intercom?room=${roomNum}`;
+      const scanLink = getIntercomUrl(roomNum);
+      const qrMarkup = renderToStaticMarkup(
+        <QRCodeSVG
+          value={scanLink}
+          size={130}
+          level="M"
+          marginSize={2}
+          fgColor="#111827"
+          bgColor="#ffffff"
+        />
+      );
       return `
         <div class="standee-card">
           <div class="header">
@@ -51,38 +67,7 @@ export function QRManagementPage() {
             <div class="room-tag">ROOM ${roomNum}</div>
             
             <div class="qr-container">
-              <!-- Inline QR SVG Mockup -->
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="qr-svg">
-                <rect width="100" height="100" fill="none"/>
-                <!-- Outer boundary markers -->
-                <path d="M5,5 h20 v20 h-20 z M5,9 h12 v12 h-12 z" fill="#111827"/>
-                <path d="M75,5 h20 v20 h-20 z M79,9 h12 v12 h-12 z" fill="#111827"/>
-                <path d="M5,75 h20 v20 h-20 z M9,79 h12 v12 h-12 z" fill="#111827"/>
-                
-                <!-- Inner random code dots for visualization -->
-                <rect x="35" y="5" width="8" height="8" fill="#111827"/>
-                <rect x="45" y="15" width="12" height="6" fill="#111827"/>
-                <rect x="60" y="5" width="6" height="12" fill="#111827"/>
-                <rect x="35" y="25" width="20" height="8" fill="#111827"/>
-                
-                <rect x="5" y="35" width="12" height="8" fill="#111827"/>
-                <rect x="20" y="45" width="8" height="15" fill="#111827"/>
-                <rect x="35" y="40" width="10" height="10" fill="#EA8A1A"/> <!-- orange accent code -->
-                <rect x="55" y="35" width="15" height="12" fill="#111827"/>
-                <rect x="75" y="35" width="20" height="8" fill="#111827"/>
-                
-                <rect x="35" y="55" width="15" height="8" fill="#111827"/>
-                <rect x="55" y="50" width="8" height="20" fill="#111827"/>
-                <rect x="70" y="55" width="12" height="12" fill="#111827"/>
-                
-                <rect x="35" y="75" width="8" height="20" fill="#111827"/>
-                <rect x="45" y="85" width="18" height="8" fill="#111827"/>
-                <rect x="70" y="75" width="25" height="8" fill="#111827"/>
-                <rect x="80" y="85" width="15" height="10" fill="#111827"/>
-                
-                <!-- Center decorative element -->
-                <rect x="44" y="44" width="12" height="12" fill="#EA8A1A" rx="2"/>
-              </svg>
+              ${qrMarkup}
             </div>
             
             <p class="scan-instructions">Scan to access the <strong>Digital Concierge</strong>. Order local delicacies, request toiletries, and chat with Reception instantly.</p>
@@ -139,7 +124,7 @@ export function QRManagementPage() {
               font-weight: 800;
               text-transform: uppercase;
               letter-spacing: 1.5px;
-              color: #EA8A1A;
+              color: ${config.colors.primary};
             }
             
             .header .subtitle {
@@ -176,7 +161,7 @@ export function QRManagementPage() {
               margin: 12px 0;
             }
             
-            .qr-svg {
+            .qr-container svg {
               width: 130px;
               height: 130px;
             }
@@ -229,8 +214,6 @@ export function QRManagementPage() {
     printWindow.document.close();
   };
 
-  const selectedRoomDetails = rooms.find(r => r.roomNumber === previewRoomNum) || rooms[0];
-
   return (
     <div className="space-y-8 font-body">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -271,7 +254,7 @@ export function QRManagementPage() {
             </label>
             <p className="text-[10px] text-gray-400 font-medium">
               This URL is used as the base path for QR scanners. Clicking a QR links to: <br/>
-              <strong className="font-mono text-gray-700 text-[9px]">{domainUrl}/intercom?room=[roomNumber]</strong>
+              <strong className="font-mono text-gray-700 text-[9px]">{getHostUrl()}/intercom/[roomNumber]</strong>
             </p>
           </div>
 
@@ -353,33 +336,15 @@ export function QRManagementPage() {
                   ROOM {previewRoomNum}
                 </div>
 
-                {/* Mock QR SVG */}
                 <div className="bg-gray-50 p-2 rounded-lg border border-gray-200">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" className="w-24 h-24">
-                    <rect width="100" height="100" fill="none"/>
-                    <path d="M5,5 h20 v20 h-20 z M5,9 h12 v12 h-12 z" fill="#111827"/>
-                    <path d="M75,5 h20 v20 h-20 z M79,9 h12 v12 h-12 z" fill="#111827"/>
-                    <path d="M5,75 h20 v20 h-20 z M9,79 h12 v12 h-12 z" fill="#111827"/>
-                    
-                    <rect x="35" y="5" width="8" height="8" fill="#111827"/>
-                    <rect x="45" y="15" width="12" height="6" fill="#111827"/>
-                    <rect x="60" y="5" width="6" height="12" fill="#111827"/>
-                    <rect x="35" y="25" width="20" height="8" fill="#111827"/>
-                    
-                    <rect x="5" y="35" width="12" height="8" fill="#111827"/>
-                    <rect x="20" y="45" width="8" height="15" fill="#111827"/>
-                    <rect x="35" y="40" width="10" height="10" fill="#EA8A1A"/>
-                    <rect x="55" y="35" width="15" height="12" fill="#111827"/>
-                    
-                    <rect x="35" y="55" width="15" height="8" fill="#111827"/>
-                    <rect x="55" y="50" width="8" height="20" fill="#111827"/>
-                    
-                    <rect x="35" y="75" width="8" height="20" fill="#111827"/>
-                    <rect x="45" y="85" width="18" height="8" fill="#111827"/>
-                    <rect x="70" y="75" width="25" height="8" fill="#111827"/>
-                    
-                    <rect x="44" y="44" width="12" height="12" fill="#EA8A1A" rx="2"/>
-                  </svg>
+                  <QRCodeSVG
+                    value={previewIntercomUrl}
+                    size={96}
+                    level="M"
+                    marginSize={2}
+                    fgColor="#111827"
+                    bgColor="#ffffff"
+                  />
                 </div>
 
                 <p className="text-[8px] text-gray-650 leading-relaxed font-semibold px-2">
@@ -389,7 +354,7 @@ export function QRManagementPage() {
 
               <footer>
                 <p className="text-[6px] font-mono text-gray-400 truncate max-w-[210px] mx-auto">
-                  {domainUrl}/intercom?room={previewRoomNum}
+                  {previewIntercomUrl}
                 </p>
                 <p className="text-[6px] font-bold uppercase tracking-wider text-gray-300 mt-1">
                   Powered by {config.brandName} Concierge
