@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useAdmin, IntercomMessage } from "../context/AdminContext";
 import { 
-  MessageSquare, Send, PhoneCall, PhoneOff, Phone, 
+  MessageSquare, Send, PhoneOff, Phone,
   Sparkles, CheckCheck, User, Radio, Volume2, Mic 
 } from "lucide-react";
 import config from "@config";
@@ -12,7 +12,6 @@ export function IntercomInboxPage() {
     sendIntercomMessage, 
     markChatAsRead, 
     incomingCall, 
-    triggerIncomingCall, 
     acceptCall, 
     declineCall,
     rooms
@@ -104,16 +103,6 @@ export function IntercomInboxPage() {
           <h1 className="font-heading text-3xl text-gray-950 lowercase">intercom & reception</h1>
           <p className="text-xs text-gray-500 mt-1">Review active room chat logs, dispatch quick-request orders, and process voice signaling calls.</p>
         </div>
-
-        {/* Demo trigger call controls */}
-        <button
-          onClick={() => triggerIncomingCall(selectedRoomNumber, "Alex Mercer")}
-          className="min-h-[44px] px-5 inline-flex items-center gap-2 rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
-          disabled={!!incomingCall}
-        >
-          <PhoneCall size={14} className="animate-pulse" />
-          Simulate Call from Room {selectedRoomNumber}
-        </button>
       </header>
 
       {/* WebRTC Signaling Call Banner Overlay */}
@@ -149,13 +138,13 @@ export function IntercomInboxPage() {
             {incomingCall.status === "ringing" ? (
               <>
                 <button
-                  onClick={declineCall}
+                  onClick={() => void declineCall()}
                   className="min-h-[44px] px-5 rounded-lg border border-red-200 text-xs font-bold text-red-600 hover:bg-red-50 transition"
                 >
                   Ignore Call
                 </button>
                 <button
-                  onClick={acceptCall}
+                  onClick={() => void acceptCall()}
                   className="min-h-[44px] px-6 rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
                 >
                   <Volume2 size={14} />
@@ -171,7 +160,7 @@ export function IntercomInboxPage() {
                 </div>
                 
                 <button
-                  onClick={declineCall}
+                  onClick={() => void declineCall()}
                   className="min-h-[44px] px-6 rounded-lg bg-red-650 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
                 >
                   <PhoneOff size={14} />
