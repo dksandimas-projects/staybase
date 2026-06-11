@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 11, 2026 (added Plan Audit Fixes — June 11, 2026, AUDIT-20–34)
+> Last updated: June 12, 2026 (added Plan Audit Fixes — June 11, 2026, AUDIT-20–34; added Phase 8 follow-up gaps)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -293,12 +293,22 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Tab title unread count
 - ✅ Sidebar unread badge
 - ✅ QR route correctness — generated QR payloads use `/intercom/{roomId}` and real SVG QR rendering
-- ⬜ QR Management page — QR grid, regenerate, print single/all
-- 🔄 Spark Essentials — guest store panel (item grid, cart, checkout, order tracking)
+- ✅ QR Management page — QR grid, regenerate, print single/all
+- ✅ Spark Essentials — guest store panel (item grid, cart, checkout, order tracking)
 - ✅ Spark Essentials — catalog management wireframe in Settings → Store tab
 - ✅ Spark Essentials — order management wireframe page/section (admin)
 - ✅ Spark Essentials — store order API route (stock check + order creation transaction)
-- ⬜ Spark Essentials — store reports in Reports page
+- ✅ Spark Essentials — placed order cancellation with idempotent stock restore
+- ✅ Spark Essentials — store reports in Reports page
+
+### Phase 8 follow-up gaps to close or explicitly defer
+
+- ⬜ Spark Essentials — live catalog CRUD in Admin Settings → Store tab; guest store already reads live `storeItems`, but admin catalog editing must persist to Firestore before launch
+- ⬜ Spark Essentials — store GCash QR/account info management in Admin Settings; guest checkout already consumes `settings/storeConfig.paymentMethods[].qrUrl/accountInfo`
+- ⬜ Intercom Inbox — render guest store order messages as rich order cards with item/total/payment summary and a link to Store Management
+- ⬜ Intercom Inbox — verify incoming call notification sound and active-call banner behavior in real browsers
+- ⬜ Guest Intercom — decide whether unread pulse and long-thread pagination are launch requirements or Phase 10 polish
+- ⬜ Phase 8 manual QA — end-to-end QR scan → guest chat → admin reply → voice call → store order → status update → cancellation/billing across desktop and mobile browsers
 
 ---
 

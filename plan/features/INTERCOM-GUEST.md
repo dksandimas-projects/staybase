@@ -24,36 +24,36 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 
 ## UI Checklist
 
-- [ ] Guest name prompt — on first open, ask guest for their name (stored in local state only, not Firestore)
-- [ ] Room identifier displayed — "Room 202 — You're connected to the front desk"
-- [ ] Chat thread — messages from guest (right-aligned) and front desk (left-aligned)
-- [ ] Quick Request panel — row of tap-able request chips above the text input
-- [ ] Quick request items pulled from `settings/hotelConfig.intercomQuickRequests` (e.g. Extra Towels, Housekeeping, Extra Pillow, Do Not Disturb)
-- [ ] Quick request chip tap — sends a styled badge message in the thread (visually distinct from typed messages)
-- [ ] Text input + Send button — guests can type freely alongside or instead of quick requests
-- [ ] Message timestamps
+- [x] Guest name prompt — on first open, ask guest for their name (stored in local state only, not Firestore)
+- [x] Room identifier displayed — "Room 202 — You're connected to the front desk"
+- [x] Chat thread — messages from guest (right-aligned) and front desk (left-aligned)
+- [x] Quick Request panel — row of tap-able request chips above the text input
+- [x] Quick request items pulled from `settings/hotelConfig.intercomQuickRequests` (e.g. Extra Towels, Housekeeping, Extra Pillow, Do Not Disturb)
+- [x] Quick request chip tap — sends a styled badge message in the thread (visually distinct from typed messages)
+- [x] Text input + Send button — guests can type freely alongside or instead of quick requests
+- [x] Message timestamps
 - [ ] Unread indicator — subtle pulse when new front desk message arrives
-- [ ] Mobile-first layout — full-screen chat on mobile (375px)
-- [ ] "spark inn" branding in chat header — warm, not clinical
-- [ ] "Shop" tab alongside chat — tab label is `config.storeName`; switches to store panel (see `plan/features/STORE-GUEST.md`)
-- [ ] Store tab hidden if `settings/storeConfig.isEnabled` is false
-- [ ] **"Call Front Desk" button** — shown in chat header; initiates a WebRTC voice call to the front desk
-  - [ ] Button label: "Call Front Desk" with a phone icon
-  - [ ] On tap: requests microphone permission via `getUserMedia` — if denied, fall back to `tel:` link using `settings/hotelConfig.frontDeskPhone`
-  - [ ] If permission granted: initiate WebRTC call flow (see §Voice Call below)
-  - [ ] Active call UI: full-screen overlay showing "Calling Front Desk…" → "Connected" with a mute button and end call button
-  - [ ] Call ended by either party: overlay dismisses, returns to chat
+- [x] Mobile-first layout — full-screen chat on mobile (375px)
+- [x] "spark inn" branding in chat header — warm, not clinical
+- [x] "Shop" tab alongside chat — tab label is `config.storeName`; switches to store panel (see `plan/features/STORE-GUEST.md`)
+- [x] Store tab hidden if `settings/storeConfig.isEnabled` is false
+- [x] **"Call Front Desk" button** — shown in chat header; initiates a WebRTC voice call to the front desk
+  - [x] Button label: "Call Front Desk" with a phone icon
+  - [x] On tap: requests microphone permission via `getUserMedia` — if denied, fall back to `tel:` link using `settings/hotelConfig.frontDeskPhone`
+  - [x] If permission granted: initiate WebRTC call flow (see §Voice Call below)
+  - [x] Active call UI: full-screen overlay showing "Calling Front Desk…" → "Connected" with a mute button and end call button
+  - [x] Call ended by either party: overlay dismisses, returns to chat
 
 ## Data & Logic Checklist
 
-- [ ] Room ID from URL param `:roomId` — validate it exists in `rooms` collection
-- [ ] Real-time messages via `onSnapshot` on `intercoms/{roomId}/messages` — always unsubscribe on cleanup
-- [ ] Guest sends message: `addDoc` to `intercoms/{roomId}/messages` with `sender: "guest"`, `isRead: false`, `isQuickRequest: false`
-- [ ] Quick request sends: same as above but `isQuickRequest: true`, `text` = quick request label
-- [ ] Spark Rewards early check-in requests keep their early check-in flag on the message for staff handling
-- [ ] Front desk messages with `isRead: false` — client marks `isRead: true` on view
-- [ ] `settings/hotelConfig` fetched once on load for quick request items
-- [ ] No auth required — `intercoms` collection is fully open (see `plan/docs/BACKEND.md §security rules`)
+- [x] Room ID from URL param `:roomId` — validate it exists in `rooms` collection
+- [x] Real-time messages via `onSnapshot` on `intercoms/{roomId}/messages` — always unsubscribe on cleanup
+- [x] Guest sends message: `addDoc` to `intercoms/{roomId}/messages` with `sender: "guest"`, `isRead: false`, `isQuickRequest: false`
+- [x] Quick request sends: same as above but `isQuickRequest: true`, `text` = quick request label
+- [x] Spark Rewards early check-in requests keep their early check-in flag on the message for staff handling
+- [x] Front desk messages with `isRead: false` — client marks `isRead: true` on view
+- [x] `settings/hotelConfig` fetched once on load for quick request items
+- [x] No auth required — `intercoms` collection is fully open (see `plan/docs/BACKEND.md §security rules`)
 
 ## Voice Call (WebRTC)
 
@@ -69,16 +69,16 @@ Zero-cost peer-to-peer audio between guest browser and front desk browser. No th
 7. On hang-up by either side: update `calls/{roomId}.status` to `"ended"` — both sides detect via `onSnapshot` and close the connection
 
 ### Checklist
-- [ ] `RTCPeerConnection` created with public STUN servers (Google's free STUN: `stun:stun.l.google.com:19302`) — no TURN server needed for same-network/LAN use; add free TURN (Metered.ca free tier) for cross-network reliability
-- [ ] Firestore signaling: `calls/{roomId}` document — offer, answer, status; `calls/{roomId}/iceCandidates/{id}` subcollection
-- [ ] Guest side: creates offer → writes to Firestore → listens for answer → listens for ICE candidates
-- [ ] Front desk side (admin-app): listens on `calls/{roomId}` for `status: "ringing"` → shows notification → on accept, creates answer → writes back
-- [ ] Both sides: add ICE candidates as they arrive via `onSnapshot`
-- [ ] Mute toggle: `audioTrack.enabled = false/true` — no renegotiation needed
-- [ ] Hang up: `peerConnection.close()` + update `calls/{roomId}.status = "ended"` + stop all tracks
-- [ ] Fallback: if `getUserMedia` throws (denied or not supported) → show "Call failed. Please call us directly: {phone}" with a `tel:` link
-- [ ] Call timeout: if `status` stays `"ringing"` for 30 seconds with no answer → auto-cancel, show "No answer. Try again or send a message."
-- [ ] Only one active call per room at a time — check `calls/{roomId}.status` before initiating
+- [x] `RTCPeerConnection` created with public STUN servers (Google's free STUN: `stun:stun.l.google.com:19302`) — no TURN server needed for same-network/LAN use; add free TURN (Metered.ca free tier) for cross-network reliability
+- [x] Firestore signaling: `calls/{roomId}` document — offer, answer, status; `calls/{roomId}/iceCandidates/{id}` subcollection
+- [x] Guest side: creates offer → writes to Firestore → listens for answer → listens for ICE candidates
+- [x] Front desk side (admin-app): listens on `calls/{roomId}` for `status: "ringing"` → shows notification → on accept, creates answer → writes back
+- [x] Both sides: add ICE candidates as they arrive via `onSnapshot`
+- [x] Mute toggle: `audioTrack.enabled = false/true` — no renegotiation needed
+- [x] Hang up: `peerConnection.close()` + update `calls/{roomId}.status = "ended"` + stop all tracks
+- [x] Fallback: if `getUserMedia` throws (denied or not supported) → show "Call failed. Please call us directly: {phone}" with a `tel:` link
+- [x] Call timeout: if `status` stays `"ringing"` for 30 seconds with no answer → auto-cancel, show "No answer. Try again or send a message."
+- [x] Only one active call per room at a time — check `calls/{roomId}.status` before initiating
 
 ### Firestore schema addition
 ```
@@ -102,10 +102,10 @@ calls/{roomId}/iceCandidates/{id}
 
 ## Edge Cases & States
 
-- [ ] Invalid room ID in URL — show "This QR code is not valid. Please contact the front desk."
-- [ ] No quick request items configured — hide quick request panel entirely, show text input only
-- [ ] Front desk offline / no response — no typing indicator, no "online" status shown — keep it calm
-- [ ] Network disconnected — show "You're offline. Reconnecting..." banner
+- [x] Invalid room ID in URL — show "This QR code is not valid. Please contact the front desk."
+- [x] No quick request items configured — hide quick request panel entirely, show text input only
+- [x] Front desk offline / no response — no typing indicator, no "online" status shown — keep it calm
+- [x] Network disconnected — show "You're offline. Reconnecting..." banner
 - [ ] Long message thread — virtualize or paginate to avoid performance issues on mobile
 - [ ] Guest refreshes page — name prompt shown again (local state only)
 
