@@ -301,6 +301,15 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Spark Essentials — placed order cancellation with idempotent stock restore
 - ✅ Spark Essentials — store reports in Reports page
 
+### Phase 8 follow-up gaps to close or explicitly defer
+
+- ⬜ Spark Essentials — live catalog CRUD in Admin Settings → Store tab; guest store already reads live `storeItems`, but admin catalog editing must persist to Firestore before launch
+- ⬜ Spark Essentials — store GCash QR/account info management in Admin Settings; guest checkout already consumes `settings/storeConfig.paymentMethods[].qrUrl/accountInfo`
+- ⬜ Intercom Inbox — render guest store order messages as rich order cards with item/total/payment summary and a link to Store Management
+- ⬜ Intercom Inbox — verify incoming call notification sound and active-call banner behavior in real browsers
+- ⬜ Guest Intercom — decide whether unread pulse and long-thread pagination are launch requirements or Phase 10 polish
+- ⬜ Phase 8 manual QA — end-to-end QR scan → guest chat → admin reply → voice call → store order → status update → cancellation/billing across desktop and mobile browsers
+
 ---
 
 ## Phase 9 — Remaining Features (P1)
