@@ -31,6 +31,7 @@ export interface Room {
   housekeepingStatus: HousekeepingStatus;
   blockReason: string;
   remarks: string;
+  qrToken?: string;
   createdAt: Date;
   updatedAt: Date;
 }

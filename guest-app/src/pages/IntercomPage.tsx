@@ -59,7 +59,18 @@ interface CartItem {
   quantity: number;
 }
 
+type StorePaymentMethod = "cod" | "add-to-bill" | "gcash";
+
+interface StorePaymentMethodConfig {
+  method: StorePaymentMethod;
+  label: string;
+  qrUrl?: string;
+  accountInfo?: string;
+  isEnabled: boolean;
+}
+
 interface ActiveOrder {
+  orderId: string;
   orderRef: string;
   items: CartItem[];
   totalAmount: number;
@@ -98,7 +109,12 @@ export function IntercomPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showCartDrawer, setShowCartDrawer] = useState<boolean>(false);
   const [checkoutStep, setCheckoutStep] = useState<"cart" | "payment">("cart");
-  const [paymentMethod, setPaymentMethod] = useState<"cod" | "bill" | "gcash">("cod");
+  const [paymentMethod, setPaymentMethod] = useState<StorePaymentMethod>("cod");
+  const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodConfig[]>([
+    { method: "cod", label: "Cash on Delivery", isEnabled: true },
+    { method: "add-to-bill", label: "Room Bill", isEnabled: true },
+    { method: "gcash", label: "GCash Wallet", isEnabled: true }
+  ]);
   
   // GCash Screenshot State
   const [gcashFile, setGcashFile] = useState<File | null>(null);
@@ -174,13 +190,25 @@ export function IntercomPage() {
         } else {
           const roomsQuery = query(collection(db, "rooms"), where("roomNumber", "==", roomId), limit(1));
           const roomsSnapshot = await getDocs(roomsQuery);
-          if (roomsSnapshot.empty) {
+          if (!roomsSnapshot.empty) {
+            resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
+          } else {
+            const tokenQuery = query(collection(db, "rooms"), where("qrToken", "==", roomId), limit(1));
+            const tokenSnapshot = await getDocs(tokenQuery);
+            if (tokenSnapshot.empty) {
+              if (!isMounted) return;
+              setIsValidRoom(false);
+              setIsRoomLoading(false);
+              return;
+            }
+            resolvedRoomNumber = tokenSnapshot.docs[0].data().roomNumber || roomId;
+          }
+          if (!resolvedRoomNumber) {
             if (!isMounted) return;
             setIsValidRoom(false);
             setIsRoomLoading(false);
             return;
           }
-          resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
         }
 
         const [hotelConfigDoc, storeConfigDoc] = await Promise.all([
@@ -196,7 +224,24 @@ export function IntercomPage() {
             ? hotelConfigDoc.data().intercomQuickRequests.filter(Boolean)
             : ["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"]
         );
-        setIsStoreEnabled(storeConfigDoc.exists() ? storeConfigDoc.data().isEnabled !== false : true);
+        const storeConfig = storeConfigDoc.exists() ? storeConfigDoc.data() : null;
+        setIsStoreEnabled(storeConfig ? storeConfig.isEnabled !== false : true);
+        if (storeConfig && Array.isArray(storeConfig.paymentMethods)) {
+          const enabledPaymentMethods = storeConfig.paymentMethods
+            .filter((method: any) => method && method.isEnabled !== false)
+            .map((method: any) => ({
+              method: method.method,
+              label: method.label || method.method,
+              qrUrl: method.qrUrl || "",
+              accountInfo: method.accountInfo || "",
+              isEnabled: true
+            }))
+            .filter((method: StorePaymentMethodConfig) => ["cod", "add-to-bill", "gcash"].includes(method.method));
+          setStorePaymentMethods(enabledPaymentMethods);
+          if (enabledPaymentMethods.length > 0) {
+            setPaymentMethod(enabledPaymentMethods[0].method);
+          }
+        }
       } catch (error) {
         console.error("Failed to load intercom room settings:", error);
         if (isMounted) {
@@ -306,6 +351,48 @@ export function IntercomPage() {
       setActiveTab("chat");
     }
   }, [activeTab, isStoreEnabled]);
+
+  useEffect(() => {
+    if (!activeOrder || !roomNumber || activeOrder.status === "delivered" || activeOrder.status === "cancelled") return;
+
+    const { orderId, orderRef } = activeOrder;
+    let isCancelled = false;
+
+    const refreshOrderStatus = async () => {
+      try {
+        const response = await fetch("/api/store/order-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId, orderRef, roomNumber })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Unable to refresh order status.");
+        }
+
+        if (isCancelled) return;
+        const nextStatus = result.data?.status as ActiveOrder["status"] | undefined;
+        if (!nextStatus || !["placed", "confirmed", "out-for-delivery", "delivered", "cancelled"].includes(nextStatus)) return;
+        setActiveOrder((currentOrder) => (
+          currentOrder?.orderId === orderId
+            ? { ...currentOrder, status: nextStatus }
+            : currentOrder
+        ));
+      } catch (error) {
+        console.error("Failed to refresh store order status:", error);
+      }
+    };
+
+    void refreshOrderStatus();
+    const refreshInterval = window.setInterval(() => {
+      void refreshOrderStatus();
+    }, 10000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(refreshInterval);
+    };
+  }, [activeOrder?.orderId, activeOrder?.orderRef, activeOrder?.status, roomNumber]);
 
   // Call timer effect
   useEffect(() => {
@@ -569,6 +656,16 @@ export function IntercomPage() {
     return cart.reduce((sum, item) => sum + (item.item.price * item.quantity), 0);
   };
 
+  const getPaymentLabel = (method: StorePaymentMethod) => {
+    const configuredMethod = storePaymentMethods.find(payment => payment.method === method);
+    if (configuredMethod?.label) return configuredMethod.label;
+    if (method === "cod") return "Cash on Delivery";
+    if (method === "add-to-bill") return "Room Bill";
+    return "GCash Transfer";
+  };
+
+  const gcashPaymentConfig = storePaymentMethods.find(method => method.method === "gcash");
+
   // GCash file input change
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -582,6 +679,11 @@ export function IntercomPage() {
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    if (!storePaymentMethods.some(method => method.method === paymentMethod)) {
+      setStoreError("That payment method is no longer available. Please choose another option.");
+      return;
+    }
 
     if (paymentMethod === "gcash" && !gcashFile) {
       alert("Please upload your GCash payment confirmation screenshot.");
@@ -607,7 +709,7 @@ export function IntercomPage() {
           roomNumber,
           guestName,
           items: cart.map(({ item, quantity }) => ({ itemId: item.id, quantity })),
-          paymentMethod: paymentMethod === "bill" ? "add-to-bill" : paymentMethod,
+          paymentMethod,
           paymentProofUrl
         })
       });
@@ -620,18 +722,14 @@ export function IntercomPage() {
       const orderRef = result.data.orderRef;
       const total = result.data.totalAmount;
       const itemsText = cart.map(i => `${i.quantity}x ${i.item.name}`).join(", ");
-      
-      const paymentLabels: Record<string, string> = {
-        cod: "Cash on Delivery",
-        bill: "Room Bill",
-        gcash: "GCash Transfer"
-      };
+      const paymentLabel = getPaymentLabel(paymentMethod);
 
       const newOrder: ActiveOrder = {
+        orderId: result.data.orderId,
         orderRef,
         items: [...cart],
         totalAmount: total,
-        paymentMethod: paymentLabels[paymentMethod],
+        paymentMethod: paymentLabel,
         status: "placed",
         estimatedDelivery: "15-20 mins"
       };
@@ -639,7 +737,7 @@ export function IntercomPage() {
       setActiveOrder(newOrder);
 
       void sendGuestMessage(
-        `Ordered items: ${itemsText}. Total: ${formatPrice(total)} via ${paymentLabels[paymentMethod]}. Ref: ${orderRef}`,
+        `Ordered items: ${itemsText}. Total: ${formatPrice(total)} via ${paymentLabel}. Ref: ${orderRef}`,
         { isStoreOrder: true, orderRef }
       );
 
@@ -657,46 +755,41 @@ export function IntercomPage() {
   };
 
   // Cancel order
-  const handleCancelOrder = () => {
+  const handleCancelOrder = async () => {
     if (!activeOrder) return;
 
-    const updatedOrder: ActiveOrder = {
-      ...activeOrder,
-      status: "cancelled"
-    };
+    setStoreError("");
 
-    setActiveOrder(updatedOrder);
-
-    void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
-      isStoreOrder: true,
-      orderRef: activeOrder.orderRef
-    });
-  };
-
-  // Debug tracker simulation
-  const handleSimulateNextStatus = () => {
-    if (!activeOrder) return;
-    
-    const statusSequence: ActiveOrder["status"][] = ["placed", "confirmed", "out-for-delivery", "delivered"];
-    const currentIndex = statusSequence.indexOf(activeOrder.status);
-    
-    if (currentIndex !== -1 && currentIndex < statusSequence.length - 1) {
-      const nextStatus = statusSequence[currentIndex + 1];
-      
-      const statusLabels: Record<string, string> = {
-        confirmed: "Confirmed & Packing",
-        "out-for-delivery": "Out for Delivery",
-        delivered: "Delivered successfully"
-      };
+    try {
+      const response = await fetch("/api/store/cancel-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: activeOrder.orderId,
+          orderRef: activeOrder.orderRef,
+          roomNumber,
+          cancellationReason: "Guest cancelled from intercom"
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to cancel store order.");
+      }
 
       const updatedOrder: ActiveOrder = {
         ...activeOrder,
-        status: nextStatus
+        status: "cancelled"
       };
-      
+
       setActiveOrder(updatedOrder);
 
-      void statusLabels[nextStatus];
+      void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
+        isStoreOrder: true,
+        orderRef: activeOrder.orderRef
+      });
+    } catch (error: any) {
+      console.error("Failed to cancel store order:", error);
+      setStoreError(error.message || "Unable to cancel order. Please contact the front desk.");
     }
   };
 
@@ -974,21 +1067,22 @@ export function IntercomPage() {
               {/* Chat footer with quick requests and free-text inputs */}
               <div className="bg-white border-t border-gray-150 p-3.5 space-y-3">
                 
-                {/* Quick requests drawer row */}
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Quick Requests</p>
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none snap-x">
-                    {quickRequests.map((req) => (
-                      <button
-                        key={req}
-                        onClick={() => handleQuickRequest(req)}
-                        className="snap-start shrink-0 min-h-[32px] px-3.5 rounded-full border border-gray-250 bg-white hover:bg-gray-50 active:scale-95 text-[11px] font-semibold text-gray-700 shadow-sm transition"
-                      >
-                        {req}
-                      </button>
-                    ))}
+                {quickRequests.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Quick Requests</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none snap-x">
+                      {quickRequests.map((req) => (
+                        <button
+                          key={req}
+                          onClick={() => handleQuickRequest(req)}
+                          className="snap-start shrink-0 min-h-[32px] px-3.5 rounded-full border border-gray-250 bg-white hover:bg-gray-50 active:scale-95 text-[11px] font-semibold text-gray-700 shadow-sm transition"
+                        >
+                          {req}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Standard Free text form */}
                 <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
@@ -1070,9 +1164,8 @@ export function IntercomPage() {
                         <span>Est. Delivery: <strong>{activeOrder.estimatedDelivery}</strong></span>
                       </div>
 
-                      {/* Controls to simulate or cancel */}
-                      <div className="flex gap-2 pt-1.5 justify-end">
-                        {activeOrder.status === "placed" && (
+                      {activeOrder.status === "placed" && (
+                        <div className="flex gap-2 pt-1.5 justify-end">
                           <button
                             type="button"
                             onClick={handleCancelOrder}
@@ -1080,18 +1173,8 @@ export function IntercomPage() {
                           >
                             Cancel Order
                           </button>
-                        )}
-                        {activeOrder.status !== "delivered" && (
-                          <button
-                            type="button"
-                            onClick={handleSimulateNextStatus}
-                            className="min-h-[36px] px-3.5 rounded-lg bg-primary text-xs font-semibold text-white hover:bg-primary-dark transition flex items-center gap-1"
-                          >
-                            Simulate Progress
-                            <ChevronRight size={12} />
-                          </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-xs text-red-700 font-medium">
@@ -1108,7 +1191,7 @@ export function IntercomPage() {
                   {config.storeName}
                 </h2>
                 <p className="text-xs text-gray-600 leading-relaxed">
-                  Browse amenities and local Bohol goods. Items will be delivered directly to Room {roomId || ""}.
+                  Browse amenities and local Bohol goods. Items will be delivered directly to Room {roomNumber || roomId || ""}.
                 </p>
               </div>
 
@@ -1387,85 +1470,52 @@ export function IntercomPage() {
                   {/* Payment selection list */}
                   <div className="space-y-3">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Select Payment Option</p>
-                    
-                    {/* COD Option */}
-                    <label 
-                      className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
-                        paymentMethod === "cod" 
-                          ? "border-primary bg-primary-light/10" 
-                          : "border-gray-250 hover:bg-gray-50"
-                      }`}
-                    >
-                      <input 
-                        type="radio" 
-                        name="payment"
-                        value="cod"
-                        checked={paymentMethod === "cod"}
-                        onChange={() => setPaymentMethod("cod")}
-                        className="sr-only"
-                      />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-gray-900">Cash on Delivery (COD)</p>
-                          <p className="text-[10px] text-gray-500 font-medium mt-0.5">Pay cash when items are delivered.</p>
-                        </div>
-                        {paymentMethod === "cod" && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
-                      </div>
-                    </label>
 
-                    {/* Add to Bill Option */}
-                    <label 
-                      className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
-                        paymentMethod === "bill" 
-                          ? "border-primary bg-primary-light/10" 
-                          : "border-gray-250 hover:bg-gray-50"
-                      }`}
-                    >
-                      <input 
-                        type="radio" 
-                        name="payment"
-                        value="bill"
-                        checked={paymentMethod === "bill"}
-                        onChange={() => setPaymentMethod("bill")}
-                        className="sr-only"
-                      />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-gray-900">Charge to Room Bill</p>
-                          <p className="text-[10px] text-gray-500 font-medium mt-0.5">Bill collected during your final hotel checkout.</p>
-                        </div>
-                        {paymentMethod === "bill" && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
+                    {storePaymentMethods.length === 0 ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-[11px] font-medium text-amber-800">
+                        Store checkout is temporarily unavailable because no payment method is enabled. Please message the front desk.
                       </div>
-                    </label>
+                    ) : (
+                      storePaymentMethods.map((method) => {
+                        const helperText =
+                          method.method === "cod"
+                            ? "Pay cash when items are delivered."
+                            : method.method === "add-to-bill"
+                              ? "This will be added to your room bill and collected at checkout."
+                              : "Instant transfer. Proof upload required.";
 
-                    {/* GCash Option */}
-                    <label 
-                      className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
-                        paymentMethod === "gcash" 
-                          ? "border-primary bg-primary-light/10" 
-                          : "border-gray-250 hover:bg-gray-50"
-                      }`}
-                    >
-                      <input 
-                        type="radio" 
-                        name="payment"
-                        value="gcash"
-                        checked={paymentMethod === "gcash"}
-                        onChange={() => setPaymentMethod("gcash")}
-                        className="sr-only"
-                      />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-gray-900">GCash Mobile Wallet</p>
-                          <p className="text-[10px] text-gray-500 font-medium mt-0.5">Instant transfer. Proof upload required.</p>
-                        </div>
-                        {paymentMethod === "gcash" && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
-                      </div>
-                    </label>
+                        return (
+                          <label
+                            key={method.method}
+                            className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
+                              paymentMethod === method.method
+                                ? "border-primary bg-primary-light/10"
+                                : "border-gray-250 hover:bg-gray-50"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="payment"
+                              value={method.method}
+                              checked={paymentMethod === method.method}
+                              onChange={() => setPaymentMethod(method.method)}
+                              className="sr-only"
+                            />
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-bold text-gray-900">{method.label}</p>
+                                <p className="text-[10px] text-gray-500 font-medium mt-0.5">{helperText}</p>
+                              </div>
+                              {paymentMethod === method.method && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
 
                   {/* Bill Warning banner */}
-                  {paymentMethod === "bill" && (
+                  {paymentMethod === "add-to-bill" && (
                     <div className="rounded-lg bg-blue-50 border border-blue-200 p-3.5 text-[11px] text-blue-800 flex gap-2">
                       <Info size={16} className="text-blue-500 shrink-0 mt-0.5" />
                       <p>
@@ -1477,13 +1527,20 @@ export function IntercomPage() {
                   {/* GCash details and file upload layout */}
                   {paymentMethod === "gcash" && (
                     <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-4">
-                      <div className="text-center space-y-1.5">
-                        <p className="text-xs font-bold text-gray-700">GCash Transfer Details</p>
-                        <p className="text-sm font-bold text-primary-dark">0917 000 0000</p>
-                        <p className="text-[10px] text-gray-500">Account: {config.legalName}</p>
+                      <div className="text-center space-y-2">
+                        <p className="text-xs font-bold text-gray-700">{gcashPaymentConfig?.label || "GCash Transfer Details"}</p>
+                        {gcashPaymentConfig?.qrUrl && (
+                          <img
+                            src={gcashPaymentConfig.qrUrl}
+                            alt="Store GCash QR"
+                            className="mx-auto h-36 w-36 rounded-lg border border-gray-200 bg-white object-contain p-2"
+                          />
+                        )}
+                        <p className="text-[10px] text-gray-500">
+                          {gcashPaymentConfig?.accountInfo || `Account: ${config.legalName}`}
+                        </p>
                       </div>
 
-                      {/* Mock File Uploader */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Upload Receipt screenshot</p>
                         
@@ -1532,7 +1589,7 @@ export function IntercomPage() {
                     </GhostButton>
                     <PrimaryButton
                       type="submit"
-                      disabled={isUploadingProof}
+                      disabled={isUploadingProof || storePaymentMethods.length === 0}
                       className="flex-[2] text-xs font-semibold min-h-[44px]"
                     >
                       {isUploadingProof ? (

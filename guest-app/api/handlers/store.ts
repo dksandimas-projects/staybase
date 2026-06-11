@@ -15,6 +15,19 @@ interface CreateStoreOrderBody {
   paymentProofUrl?: string;
 }
 
+interface CancelStoreOrderBody {
+  orderId: string;
+  roomNumber: string;
+  orderRef: string;
+  cancellationReason?: string;
+}
+
+interface StoreOrderStatusBody {
+  orderId: string;
+  roomNumber: string;
+  orderRef: string;
+}
+
 function getManilaDateInfo() {
   const d = new Date();
   const manilaStr = d.toLocaleString("en-US", { timeZone: "Asia/Manila" });
@@ -154,6 +167,7 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         paymentMethod: body.paymentMethod,
         paymentProofUrl: body.paymentProofUrl || "",
         status: "placed",
+        stockRestoredAt: null,
         isBilled: false,
         billedAt: null,
         cancellationReason: "",
@@ -187,5 +201,111 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       success: false,
       error: mapped?.message || "Unable to place store order. Please try again."
     });
+  }
+}
+
+export async function handleCancelStoreOrder(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const body = req.body as CancelStoreOrderBody;
+  if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
+    return res.status(400).json({ success: false, error: "Missing required cancellation fields." });
+  }
+
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRef = adminDb.collection("storeOrders").doc(body.orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+
+      const orderData = orderDoc.data()!;
+      if (orderData.roomNumber !== body.roomNumber) {
+        throw new Error("ORDER_ROOM_MISMATCH");
+      }
+      if (orderData.orderRef !== body.orderRef) {
+        throw new Error("ORDER_REF_MISMATCH");
+      }
+      if (orderData.status !== "placed") {
+        throw new Error("ORDER_NOT_CANCELLABLE");
+      }
+
+      const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
+      const itemRefs = orderItems.map((item: any) => adminDb.collection("storeItems").doc(item.itemId));
+      const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+
+      if (!orderData.stockRestoredAt) {
+        orderItems.forEach((item: any, index: number) => {
+          const itemDoc = itemDocs[index];
+          if (!itemDoc.exists) return;
+          const itemData = itemDoc.data()!;
+          if (itemData.stock !== null && itemData.stock !== undefined) {
+            transaction.update(itemRefs[index], {
+              stock: Number(itemData.stock || 0) + Number(item.quantity || 0),
+              updatedAt: new Date()
+            });
+          }
+        });
+      }
+
+      transaction.update(orderRef, {
+        status: "cancelled",
+        cancellationReason: body.cancellationReason || "Guest cancelled from intercom",
+        stockRestoredAt: new Date(),
+        updatedAt: new Date()
+      });
+    });
+
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    console.error("Store order cancellation failed:", error);
+    const knownErrors: Record<string, { status: number; message: string }> = {
+      ORDER_NOT_FOUND: { status: 404, message: "Store order was not found." },
+      ORDER_ROOM_MISMATCH: { status: 403, message: "This order does not belong to this room." },
+      ORDER_REF_MISMATCH: { status: 403, message: "This order reference does not match." },
+      ORDER_NOT_CANCELLABLE: { status: 409, message: "This order can no longer be cancelled from the guest page." }
+    };
+    const mapped = knownErrors[error.message];
+    return res.status(mapped?.status || 500).json({
+      success: false,
+      error: mapped?.message || "Unable to cancel store order. Please contact the front desk."
+    });
+  }
+}
+
+export async function handleGetStoreOrderStatus(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const body = req.body as StoreOrderStatusBody;
+  if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
+    return res.status(400).json({ success: false, error: "Missing required order status fields." });
+  }
+
+  try {
+    const orderDoc = await adminDb.collection("storeOrders").doc(body.orderId).get();
+    if (!orderDoc.exists) {
+      return res.status(404).json({ success: false, error: "Store order was not found." });
+    }
+
+    const orderData = orderDoc.data()!;
+    if (orderData.roomNumber !== body.roomNumber || orderData.orderRef !== body.orderRef) {
+      return res.status(403).json({ success: false, error: "This order does not belong to this room." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: orderData.status || "placed",
+        updatedAt: orderData.updatedAt?.toDate ? orderData.updatedAt.toDate().toISOString() : null
+      }
+    });
+  } catch (error) {
+    console.error("Store order status lookup failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to refresh store order status." });
   }
 }

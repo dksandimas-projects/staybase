@@ -33,6 +33,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
 | `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| `""` |
 | `remarks` | string | Internal staff notes |
+| `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 
@@ -336,6 +337,7 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `paymentMethod` | string | `"cod"` \| `"add-to-bill"` \| `"gcash"` |
 | `paymentProofUrl` | string | Firebase Storage URL (GCash screenshot, if applicable) |
 | `status` | string | `"placed"` \| `"confirmed"` \| `"out-for-delivery"` \| `"delivered"` \| `"cancelled"` |
+| `stockRestoredAt` | timestamp \| null | Set once when reserved stock is restored after a placed order cancellation |
 | `isBilled` | boolean | `true` if added to booking bill |
 | `billedAt` | timestamp \| null | When billed |
 | `cancellationReason` | string | Optional |
@@ -430,7 +432,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `breakfastSelections` | Staff/Admin only | Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
-| `storeOrders` | Open for create (guest orders) | Create = anyone; Update = Staff/Admin |
+| `storeOrders` | Open for create and guest cancellation by room/order ref | Create = anyone; Update = Staff/Admin; guest cancellation via API only |
 | `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin; no updates or deletes |
 | `settings/rewardsConfig` | Authenticated guests (needed for booking discount + My Rewards display) | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
