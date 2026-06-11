@@ -62,8 +62,8 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 ### Data & Logic Checklist
 - [x] `onSnapshot` on `storeOrders` — real-time updates
 - [x] Status update: `updateDoc` on `storeOrders/{orderId}` — update `status` + `updatedAt` + `handledBy`
-- [ ] Stock decrement: when order status moves to `confirmed`, decrement `storeItems/{itemId}.stock` for each item (skip if stock is null/unlimited) — use Firestore transaction to prevent overselling
-- [ ] Stock restored if order is cancelled before `confirmed` — add back quantities
+- [x] Stock decrement: order creation reserves finite stock in the API transaction; confirmation does not decrement again
+- [x] Stock restored if a `placed` order is cancelled before confirmation — add back quantities once using `stockRestoredAt`
 - [x] "Add to Booking Bill": `updateDoc` on order `isBilled: true`, `billedAt: timestamp`; optionally `updateDoc` on `bookings/{bookingId}` to append to a `storeCharges[]` array for checkout reference
 - [ ] Order notification: intercom badge message already sent by guest — admin sees it in intercom thread
 - [ ] New order sound notification — same Web Audio API pattern as intercom (play on new `placed` order if not on store orders page)
@@ -100,7 +100,7 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 - [ ] Add item with stock 5 — appears in guest store with correct stock
 - [ ] Place 5 orders for that item — 6th attempt blocked (out of stock)
 - [ ] Cancel order after placed — stock restored correctly
-- [ ] Confirm order — stock decremented
+- [ ] Confirm order — reserved stock stays decremented without double-counting
 - [ ] Status transitions work correctly through full flow
 - [ ] GCash screenshot viewable in order drawer
 - [ ] "Add to Booking Bill" links order to correct booking

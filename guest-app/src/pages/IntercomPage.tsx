@@ -60,6 +60,7 @@ interface CartItem {
 }
 
 interface ActiveOrder {
+  orderId: string;
   orderRef: string;
   items: CartItem[];
   totalAmount: number;
@@ -628,6 +629,7 @@ export function IntercomPage() {
       };
 
       const newOrder: ActiveOrder = {
+        orderId: result.data.orderId,
         orderRef,
         items: [...cart],
         totalAmount: total,
@@ -657,20 +659,42 @@ export function IntercomPage() {
   };
 
   // Cancel order
-  const handleCancelOrder = () => {
+  const handleCancelOrder = async () => {
     if (!activeOrder) return;
 
-    const updatedOrder: ActiveOrder = {
-      ...activeOrder,
-      status: "cancelled"
-    };
+    setStoreError("");
 
-    setActiveOrder(updatedOrder);
+    try {
+      const response = await fetch("/api/store/cancel-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: activeOrder.orderId,
+          orderRef: activeOrder.orderRef,
+          roomNumber,
+          cancellationReason: "Guest cancelled from intercom"
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to cancel store order.");
+      }
 
-    void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
-      isStoreOrder: true,
-      orderRef: activeOrder.orderRef
-    });
+      const updatedOrder: ActiveOrder = {
+        ...activeOrder,
+        status: "cancelled"
+      };
+
+      setActiveOrder(updatedOrder);
+
+      void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
+        isStoreOrder: true,
+        orderRef: activeOrder.orderRef
+      });
+    } catch (error: any) {
+      console.error("Failed to cancel store order:", error);
+      setStoreError(error.message || "Unable to cancel order. Please contact the front desk.");
+    }
   };
 
   // Debug tracker simulation

@@ -78,8 +78,10 @@ Both routes return the discount/rate details on success. Never expose full vouch
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/store/create-order` | POST | None | Create store order with server-side stock check, stock decrement, active booking lookup, and order ref generation |
+| `/api/store/cancel-order` | POST | None (room + order ref match) | Cancel a placed store order from the guest intercom and restore reserved stock once |
 
 Store order creation MUST use a Firestore transaction to prevent overselling.
+Store order cancellation MUST only allow `placed` orders and MUST use a transaction so stock restore is idempotent.
 
 ---
 
