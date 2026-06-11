@@ -419,6 +419,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ **[AUDIT-35]** Resolve contradiction with `AVAILABILITY-LOCKING.md` — that doc requires walk-in (admin) and corporate "convert to booking" creation to go through the same transaction-based path as `/api/bookings/create` ("no bypass"), but `BOOKINGS-MANAGEMENT.md` (Phase 5, marked 8/8 done) and `CORPORATE-INQUIRIES.md` both describe a plain `addDoc` to `bookings`. Verify the actual implementation and align both feature MDs — this is a double-booking risk in a phase marked complete
 - ⬜ **[AUDIT-36]** Add a `/terms` (Terms of Service) page — required by `LEGAL.md` (booking agreement, cancellation, discount eligibility/RA 9994/RA 10754, liability, governing law clauses), linked from the footer and the Step 2 consent checkbox alongside `/privacy`. Phase 1 Static Pages only lists Privacy Policy, and the `CLAUDE.md` hard rule for the consent checkbox only references `/privacy` — both need updating
+- ⬜ **[AUDIT-41]** Resolve Storage path sequencing gap — `BOOKING-FLOW.md` has the payment-proof and discount-ID photos uploaded to `bookings/{bookingId}/payment-proof/{filename}` and `bookings/{bookingId}/discount-id/{filename}` *before* booking creation, but `AVAILABILITY-LOCKING.md` generates `bookingId` only inside the `/api/bookings/create` transaction. Define how the client obtains a `bookingId` (or staging path) for these uploads ahead of booking creation
+- ⬜ **[AUDIT-42]** Resolve self-contradiction in `SECURITY.md §bookings` Firestore rules — "Update: staff/admin only" implies staff can `updateDoc` directly for status transitions (Confirm Payment, check-in/out, discount verify/reject, etc., as used throughout `BOOKINGS-MANAGEMENT.md`/`DASHBOARD-OVERVIEW.md`), but the line below it states "Direct client writes to `bookings` are NOT allowed — all writes go through the API route transaction" with no carve-out for staff status updates. Clarify which operations require an API route vs. direct `updateDoc`
+- ⬜ **[AUDIT-43]** Resolve corporate inquiry form architecture gap — `STATIC-PAGES.md` and `CORPORATE-INQUIRIES.md` spec a direct client `addDoc` to `corporateInquiries`, but `SECURITY.md`'s Bot & Spam Prevention section requires server-side Turnstile verification for this exact form. A direct Firestore write cannot have server-side token verification — add an `/api/corporate/inquiry` route (or equivalent) to `API-ROUTES.md` and update both feature MDs
 
 ### 🔴 Fix before Phase 9 — Remaining Features
 
@@ -437,12 +440,14 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ **[AUDIT-29]** Add `/members` to the Admin role's accessible pages in `AUTH-ROLES.md §Roles` table — admin-app route table includes `/members` (admin-only) but the roles table omits it
 - ⬜ **[AUDIT-37]** Define stacking/precedence order for the Phase 10B member discount relative to senior/PWD discount and vouchers — `DECISIONS-FEATURES.md` #55 only covers "senior/PWD first, then voucher"; member discount isn't factored in, so a booking could have all three with no defined order
 - ⬜ **[AUDIT-38]** Add "Account deletion / data erasure request" to the Phase 10B My Profile checklist — `DECISIONS-FEATURES.md` #49 mandates that member account deletion triggers RA 10173 erasure, but no Phase 10B item covers building this flow
+- ⬜ **[AUDIT-44]** Resolve `/rewards` enrollment mechanism contradiction — `STATIC-PAGES.md` has the "Join Spark Rewards" button do a client-side `updateDoc` on `members/{uid}` setting `isMember: true`, but `BACKEND.md` states `memberNumber` ("SR-XXXXX") is generated server-side via `/api/members/register`. Define whether enrollment goes through the API route (consistent with member number generation) or a direct `updateDoc`, and align both docs
 
 ### 🟡 Fix before Phase 10 — Security & Polish
 
 - ⬜ **[AUDIT-30]** Clarify scope split between Phase 4 (done) and Phase 10 Turnstile/honeypot items — Phase 4 covers the regular booking form only; reword Phase 10's "booking creation + corporate inquiry form" items to "corporate inquiry form" only, so it's clear the corporate form still needs both protections
 - ⬜ **[AUDIT-39]** Add "Accessibility QA — WCAG 2.1 AA checklist (`FRONTEND.md §Accessibility`) applied across guest-facing screens" to Phase 10 — `LEGAL.md` commits to this (tied directly to PWD discount guests), but Phase 10's QA section only covers cross-browser and mobile QA
 - ⬜ **[AUDIT-40]** Expand Phase 10's "Firebase Storage rules — final version" item to explicitly cover `bookings/{id}/guest-id/{filename}` (staff-only read, per `BOOKINGS-MANAGEMENT.md`) alongside payment proof — currently only payment proof is named
+- ⬜ **[AUDIT-45]** Also expand Phase 10's "Firebase Storage rules — final version" item to cover `bookings/{id}/discount-id/{filename}` (staff-only read, per `BOOKING-FLOW.md` Step 3 / `DECISIONS-FEATURES.md` #12) — same gap as AUDIT-40, separate path
 
 ### 🟢 Fix retroactively — Phase 0 / cross-cutting
 
@@ -453,6 +458,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ **[AUDIT-32]** Split the Phase 8 "QR Management page" line item into sub-items reflecting work already done (QR rendering via `qrcode.react`, URL format, route correctness — all ✅ in `QR-MANAGEMENT.md`) vs. remaining (grid view, regenerate, print single/all, download as PNG)
 - ⬜ **[AUDIT-33]** Add a note/checklist item in `CORPORATE-INQUIRIES.md` confirming "Convert to booking" goes through the same availability-locking transaction as `/api/bookings/create` (see `AVAILABILITY-LOCKING.md`) rather than a plain `addDoc`
 - ⬜ **[AUDIT-34]** Document in `QR-MANAGEMENT.md` what happens to an active intercom session on the old `roomId` when a QR code is regenerated mid-stay
+- ⬜ **[AUDIT-46]** Expand `RATE-MANAGEMENT.md`'s "Discount rules section" (currently Senior/PWD only) to cross-reference where the Phase 10B member discount (`memberDiscountPct`) is configured, so admins have one place that surfaces all stacking discount sources (relates to AUDIT-37)
 
 ---
 
@@ -484,8 +490,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 40 | 7 | 33 |
-| **Total** | **197** | **103** | **94** |
+| Audit Fixes | 46 | 7 | 39 |
+| **Total** | **203** | **103** | **100** |
 
 ---
 
