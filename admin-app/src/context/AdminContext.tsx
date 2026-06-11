@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import {
   browserSessionPersistence,
   getIdTokenResult,
@@ -15,6 +15,10 @@ import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Time
 import { db } from "../firebase/config";
 
 type StaffRole = "front-desk" | "admin";
+
+const rtcConfiguration: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
 
 interface AdminUser {
   uid: string;
@@ -202,6 +206,13 @@ export interface IntercomMessage {
   isEarlyCheckInRequest?: boolean;
 }
 
+export interface IncomingCall {
+  roomId: string;
+  guestName: string;
+  status: "ringing" | "active" | "ended";
+  offer?: RTCSessionDescriptionInit;
+}
+
 export interface StoreOrderItem {
   itemId: string;
   name: string;
@@ -284,10 +295,10 @@ export interface AdminContextType {
   intercoms: Record<string, IntercomMessage[]>;
   sendIntercomMessage: (roomId: string, text: string, sender?: "guest" | "front-desk") => void;
   markChatAsRead: (roomId: string) => void;
-  incomingCall: { roomId: string; guestName: string; status: "ringing" | "active" | "ended" } | null;
-  triggerIncomingCall: (roomId: string, guestName: string) => void;
-  acceptCall: () => void;
-  declineCall: () => void;
+  incomingCall: IncomingCall | null;
+  triggerIncomingCall: (roomId: string, guestName: string) => void | Promise<void>;
+  acceptCall: () => void | Promise<void>;
+  declineCall: () => void | Promise<void>;
 
   // Store Orders
   storeOrders: StoreOrder[];
@@ -1091,21 +1102,146 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Call Signaling state
-  const [incomingCall, setIncomingCall] = useState<AdminContextType["incomingCall"]>(null);
+  // Call Signaling state — live from Firestore calls/{roomId}
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const adminPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const adminMediaStreamRef = useRef<MediaStream | null>(null);
+  const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
 
-  const triggerIncomingCall = (roomId: string, guestName: string) => {
-    setIncomingCall({ roomId, guestName, status: "ringing" });
+  const cleanupAdminCall = () => {
+    adminIceUnsubscribeRef.current?.();
+    adminIceUnsubscribeRef.current = null;
+    adminProcessedIceIdsRef.current.clear();
+    adminPeerConnectionRef.current?.close();
+    adminPeerConnectionRef.current = null;
+    adminMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    adminMediaStreamRef.current = null;
   };
 
-  const acceptCall = () => {
-    if (incomingCall) {
-      setIncomingCall({ ...incomingCall, status: "active" });
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "calls"),
+      (snapshot) => {
+        const activeCalls = snapshot.docs
+          .map((docSnap): IncomingCall & { startedAt: number } => {
+            const data = docSnap.data();
+            return {
+              roomId: docSnap.id,
+              guestName: data.guestName || "Guest",
+              status: data.status || "ended",
+              offer: data.offer || undefined,
+              startedAt: data.startedAt?.toMillis ? data.startedAt.toMillis() : 0
+            };
+          })
+          .filter((call) =>
+            (call.status === "ringing" || call.status === "active") && !!call.roomId
+          )
+          .sort((a, b) => b.startedAt - a.startedAt);
+
+        const nextCall = activeCalls[0] || null;
+        setIncomingCall(nextCall);
+        if (!nextCall) {
+          cleanupAdminCall();
+        }
+      },
+      (error) => {
+        console.error("Error listening to WebRTC calls:", error);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+      cleanupAdminCall();
+    };
+  }, []);
+
+  const triggerIncomingCall = async (roomId: string, guestName: string) => {
+    if (!roomId) return;
+    await setDoc(doc(db, "calls", roomId), {
+      answer: null,
+      status: "ringing",
+      guestName,
+      startedAt: serverTimestamp(),
+      endedAt: null
+    }, { merge: true });
+  };
+
+  const acceptCall = async () => {
+    if (!incomingCall) return;
+
+    try {
+      const callRef = doc(db, "calls", incomingCall.roomId);
+
+      if (!incomingCall.offer) {
+        await updateDoc(callRef, {
+          status: "active",
+          endedAt: null
+        });
+        return;
+      }
+
+      cleanupAdminCall();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      adminMediaStreamRef.current = stream;
+
+      const peerConnection = new RTCPeerConnection(rtcConfiguration);
+      adminPeerConnectionRef.current = peerConnection;
+      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        void addDoc(collection(db, "calls", incomingCall.roomId, "iceCandidates"), {
+          candidate: event.candidate.toJSON(),
+          from: "staff",
+          createdAt: serverTimestamp()
+        });
+      };
+
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      adminIceUnsubscribeRef.current = onSnapshot(
+        collection(db, "calls", incomingCall.roomId, "iceCandidates"),
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type !== "added") return;
+            const data = change.doc.data();
+            if (data.from !== "guest" || adminProcessedIceIdsRef.current.has(change.doc.id)) return;
+            adminProcessedIceIdsRef.current.add(change.doc.id);
+            if (data.candidate) {
+              void peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+          });
+        }
+      );
+
+      await updateDoc(callRef, {
+        answer: {
+          type: answer.type,
+          sdp: answer.sdp
+        },
+        status: "active",
+        endedAt: null
+      });
+    } catch (error) {
+      console.error("Error accepting WebRTC call:", error);
+      cleanupAdminCall();
+      await updateDoc(doc(db, "calls", incomingCall.roomId), {
+        status: "ended",
+        endedAt: serverTimestamp()
+      });
     }
   };
 
-  const declineCall = () => {
-    setIncomingCall(null);
+  const declineCall = async () => {
+    if (!incomingCall) return;
+    cleanupAdminCall();
+    await updateDoc(doc(db, "calls", incomingCall.roomId), {
+      status: "ended",
+      endedAt: serverTimestamp()
+    });
   };
 
   // Store Orders State

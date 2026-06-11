@@ -26,6 +26,10 @@ import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 
+const rtcConfiguration: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
+
 // Interfaces
 interface Message {
   id: string;
@@ -142,6 +146,28 @@ export function IntercomPage() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [callError, setCallError] = useState<string>("");
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const guestPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const guestMediaStreamRef = useRef<MediaStream | null>(null);
+  const callUnsubscribeRef = useRef<(() => void) | null>(null);
+  const iceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processedIceIdsRef = useRef<Set<string>>(new Set());
+
+  const stopGuestCallResources = () => {
+    callUnsubscribeRef.current?.();
+    callUnsubscribeRef.current = null;
+    iceUnsubscribeRef.current?.();
+    iceUnsubscribeRef.current = null;
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+    processedIceIdsRef.current.clear();
+    guestPeerConnectionRef.current?.close();
+    guestPeerConnectionRef.current = null;
+    guestMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    guestMediaStreamRef.current = null;
+  };
 
   // Init logic
   useEffect(() => {
@@ -289,6 +315,12 @@ export function IntercomPage() {
     return () => clearInterval(interval);
   }, [callState]);
 
+  useEffect(() => {
+    return () => {
+      stopGuestCallResources();
+    };
+  }, []);
+
   const getFormattedTime = () => {
     return new Date().toLocaleTimeString(config.locale, {
       hour: "2-digit",
@@ -351,39 +383,133 @@ export function IntercomPage() {
     await sendGuestMessage(requestLabel, { isQuickRequest: true });
   };
 
-  // Voice Call Simulation Actions
+  // Voice Call Signaling Actions
   const handleStartCall = async () => {
+    if (!roomNumber || callState !== "idle") return;
+
     setCallError("");
     setCallState("requesting");
 
     try {
-      // Prompt for real microphone permission to show hardware interactivity
+      const callRef = doc(db, "calls", roomNumber);
+      const existingCall = await getDoc(callRef);
+      const existingStatus = existingCall.exists() ? existingCall.data().status : "";
+      if (existingStatus === "ringing" || existingStatus === "active") {
+        setCallError("A front desk call is already active for this room. Please wait or send a message.");
+        setCallState("idle");
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      guestMediaStreamRef.current = stream;
       setMediaStream(stream);
-      
+      setIsMuted(false);
+
+      const peerConnection = new RTCPeerConnection(rtcConfiguration);
+      guestPeerConnectionRef.current = peerConnection;
+      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        void addDoc(collection(db, "calls", roomNumber, "iceCandidates"), {
+          candidate: event.candidate.toJSON(),
+          from: "guest",
+          createdAt: serverTimestamp()
+        });
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      await setDoc(callRef, {
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp
+        },
+        answer: null,
+        status: "ringing",
+        guestName,
+        startedAt: serverTimestamp(),
+        endedAt: null
+      });
+
+      callUnsubscribeRef.current = onSnapshot(callRef, async (snapshot) => {
+        if (!snapshot.exists()) return;
+        const data = snapshot.data();
+
+        if (data.status === "active") {
+          if (callTimeoutRef.current) {
+            clearTimeout(callTimeoutRef.current);
+            callTimeoutRef.current = null;
+          }
+          if (data.answer && !peerConnection.currentRemoteDescription) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+          setCallState("connected");
+          return;
+        }
+
+        if (data.status === "ended") {
+          stopGuestCallResources();
+          setMediaStream(null);
+          setCallState("ended");
+          setTimeout(() => setCallState("idle"), 1000);
+        }
+      });
+
+      iceUnsubscribeRef.current = onSnapshot(
+        collection(db, "calls", roomNumber, "iceCandidates"),
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type !== "added") return;
+            const data = change.doc.data();
+            if (data.from !== "staff" || processedIceIdsRef.current.has(change.doc.id)) return;
+            processedIceIdsRef.current.add(change.doc.id);
+            if (data.candidate) {
+              void peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+          });
+        }
+      );
+
+      callTimeoutRef.current = setTimeout(async () => {
+        const latestCall = await getDoc(callRef);
+        if (latestCall.exists() && latestCall.data().status === "ringing") {
+          await updateDoc(callRef, {
+            status: "ended",
+            endedAt: serverTimestamp()
+          });
+          setCallError("No answer from the front desk yet. Please try again or send a message.");
+        }
+      }, 30000);
+
       setCallState("ringing");
-      // Simulate ringing period
-      setTimeout(() => {
-        setCallState("connected");
-      }, 3000);
 
     } catch (err: any) {
       console.warn("Microphone access denied or not supported:", err);
-      setCallError(`Could not access microphone. Fallback direct calling enabled.`);
+      stopGuestCallResources();
+      setMediaStream(null);
+      setCallError("Could not access microphone. Fallback direct calling enabled.");
       setCallState("ended");
-      
-      // Auto dismiss ended state after 5 seconds to show tel: link fallback
       setTimeout(() => {
         setCallState("idle");
       }, 5000);
     }
   };
 
-  const handleEndCall = () => {
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      setMediaStream(null);
+  const handleEndCall = async () => {
+    if (roomNumber) {
+      try {
+        await updateDoc(doc(db, "calls", roomNumber), {
+          status: "ended",
+          endedAt: serverTimestamp()
+        });
+      } catch (error) {
+        console.error("Failed to end intercom call:", error);
+      }
     }
+    stopGuestCallResources();
+    setMediaStream(null);
     setCallState("ended");
     setTimeout(() => {
       setCallState("idle");
@@ -391,8 +517,9 @@ export function IntercomPage() {
   };
 
   const toggleMute = () => {
-    if (mediaStream) {
-      mediaStream.getAudioTracks().forEach(track => {
+    const activeStream = mediaStream || guestMediaStreamRef.current;
+    if (activeStream) {
+      activeStream.getAudioTracks().forEach(track => {
         track.enabled = !track.enabled;
       });
       setIsMuted(prev => !prev);
