@@ -248,6 +248,19 @@ The document ID is the code itself (e.g. `ACME2026`).
 
 ---
 
+### `intercoms/{roomId}`
+
+Room-level conversation metadata for inbox filtering and resolution state.
+
+| Field | Type | Notes |
+|---|---|---|
+| `roomId` | string | Document ID / room number used by QR route |
+| `roomNumber` | string | Display room number |
+| `guestName` | string | Latest guest name from intercom prompt |
+| `resolved` | boolean | `true` when front desk archives the conversation |
+| `updatedAt` | timestamp | Latest conversation metadata update |
+| `resolvedAt` | timestamp \| null | Set when the conversation is resolved |
+
 ### `intercoms/{roomId}/messages/{messageId}`
 
 Subcollection under each room.

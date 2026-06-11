@@ -287,6 +287,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - 🔄 Guest Intercom page (`/intercom/:roomId`) — chat UI, quick requests, name prompt, Shop tab
 - 🔄 Intercom Inbox (admin) — chat list, thread view, reply, mark resolved, store order cards
+- ✅ Intercom resolved flow — Active/Resolved tabs, room-level resolved flag, reopen action
 - 🔄 WebRTC voice signaling — Firestore `calls` offer/answer status, ICE exchange, accept/decline/hang up flow
 - ✅ Notification sound — Web Audio API, every message, tab not focused
 - ✅ Tab title unread count
