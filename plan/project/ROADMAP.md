@@ -415,6 +415,11 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > Source: cross-feature flow audit of ROADMAP.md against all feature MDs — focused on connections between phases and end-to-end user flows (guest, corporate, Spark Rewards member, front desk/admin), not new features.
 > Fix these before or during the phase they block. Grouped by priority.
 
+### 🔴 Fix immediately — correctness gaps in completed phases
+
+- ⬜ **[AUDIT-35]** Resolve contradiction with `AVAILABILITY-LOCKING.md` — that doc requires walk-in (admin) and corporate "convert to booking" creation to go through the same transaction-based path as `/api/bookings/create` ("no bypass"), but `BOOKINGS-MANAGEMENT.md` (Phase 5, marked 8/8 done) and `CORPORATE-INQUIRIES.md` both describe a plain `addDoc` to `bookings`. Verify the actual implementation and align both feature MDs — this is a double-booking risk in a phase marked complete
+- ⬜ **[AUDIT-36]** Add a `/terms` (Terms of Service) page — required by `LEGAL.md` (booking agreement, cancellation, discount eligibility/RA 9994/RA 10754, liability, governing law clauses), linked from the footer and the Step 2 consent checkbox alongside `/privacy`. Phase 1 Static Pages only lists Privacy Policy, and the `CLAUDE.md` hard rule for the consent checkbox only references `/privacy` — both need updating
+
 ### 🔴 Fix before Phase 9 — Remaining Features
 
 - ⬜ **[AUDIT-20]** Add `/api/bookings/cancel` to `API-ROUTES.md` and as a Phase 9 checklist item — required by `BOOKING-LOOKUP.md` (`/my-booking` cancel action); currently undocumented anywhere
@@ -430,10 +435,14 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ **[AUDIT-27]** Add "Member discount auto-apply at booking Step 1" as an explicit Phase 10B checklist item, noting it requires reopening the Phase 4 (closed) Step 1 component
 - ⬜ **[AUDIT-28]** Add "Award points on checkout (`status → checked-out` trigger)" as a Phase 10B checklist item — server-side logic not covered by AUDIT-6's register/redeem/undo routes
 - ⬜ **[AUDIT-29]** Add `/members` to the Admin role's accessible pages in `AUTH-ROLES.md §Roles` table — admin-app route table includes `/members` (admin-only) but the roles table omits it
+- ⬜ **[AUDIT-37]** Define stacking/precedence order for the Phase 10B member discount relative to senior/PWD discount and vouchers — `DECISIONS-FEATURES.md` #55 only covers "senior/PWD first, then voucher"; member discount isn't factored in, so a booking could have all three with no defined order
+- ⬜ **[AUDIT-38]** Add "Account deletion / data erasure request" to the Phase 10B My Profile checklist — `DECISIONS-FEATURES.md` #49 mandates that member account deletion triggers RA 10173 erasure, but no Phase 10B item covers building this flow
 
 ### 🟡 Fix before Phase 10 — Security & Polish
 
 - ⬜ **[AUDIT-30]** Clarify scope split between Phase 4 (done) and Phase 10 Turnstile/honeypot items — Phase 4 covers the regular booking form only; reword Phase 10's "booking creation + corporate inquiry form" items to "corporate inquiry form" only, so it's clear the corporate form still needs both protections
+- ⬜ **[AUDIT-39]** Add "Accessibility QA — WCAG 2.1 AA checklist (`FRONTEND.md §Accessibility`) applied across guest-facing screens" to Phase 10 — `LEGAL.md` commits to this (tied directly to PWD discount guests), but Phase 10's QA section only covers cross-browser and mobile QA
+- ⬜ **[AUDIT-40]** Expand Phase 10's "Firebase Storage rules — final version" item to explicitly cover `bookings/{id}/guest-id/{filename}` (staff-only read, per `BOOKINGS-MANAGEMENT.md`) alongside payment proof — currently only payment proof is named
 
 ### 🟢 Fix retroactively — Phase 0 / cross-cutting
 
@@ -475,8 +484,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 34 | 7 | 27 |
-| **Total** | **191** | **103** | **88** |
+| Audit Fixes | 40 | 7 | 33 |
+| **Total** | **197** | **103** | **94** |
 
 ---
 
