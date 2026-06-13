@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { 
@@ -44,6 +44,7 @@ export function CorporateStaysPage() {
   
   // Honeypot state
   const [websiteUrl, setWebsiteUrl] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
   
   // Submission states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,13 +82,32 @@ export function CorporateStaysPage() {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    const scriptId = "turnstile-script";
+    if (!document.getElementById(scriptId)) {
+      const script = document.createElement("script");
+      script.id = scriptId;
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+    }
+
+    (window as any).onCorporateInquiryTurnstileSuccess = (token: string) => {
+      setTurnstileToken(token);
+    };
+
+    return () => {
+      delete (window as any).onCorporateInquiryTurnstileSuccess;
+    };
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError("");
 
     // Honeypot check
     if (websiteUrl) {
-      // Quietly ignore or simulate success to trap bot, or block. Let's simulate success to trap bots.
       setIsSubmitting(true);
       setTimeout(() => {
         setIsSubmitting(false);
@@ -103,13 +123,31 @@ export function CorporateStaysPage() {
     }
 
     setIsSubmitting(true);
-    
-    // Simulate API call to addDoc to corporateInquiries
-    setTimeout(() => {
+
+    try {
+      const response = await fetch("/api/corporate/inquiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName,
+          contactPerson,
+          email,
+          phone,
+          numRooms: Number(roomsCount),
+          preferredDates,
+          specialRequirements,
+          _hp: websiteUrl,
+          turnstileToken: turnstileToken || "mock_token"
+        })
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "We could not submit your inquiry right now. Please try again.");
+      }
+
       setIsSubmitting(false);
       setIsSubmitted(true);
-      
-      // Clear fields
       setCompanyName("");
       setContactPerson("");
       setEmail("");
@@ -117,7 +155,12 @@ export function CorporateStaysPage() {
       setRoomsCount("1");
       setPreferredDates("");
       setSpecialRequirements("");
-    }, 1200);
+      setWebsiteUrl("");
+      setTurnstileToken("");
+    } catch (error: any) {
+      setIsSubmitting(false);
+      setFormError(error?.message || "We could not submit your inquiry right now. Please try again.");
+    }
   };
 
   return (
@@ -522,7 +565,7 @@ export function CorporateStaysPage() {
                 )}
 
                 {/* Honeypot field (hidden from users) */}
-                <div className="sr-only" aria-hidden="true">
+                <div className="absolute -left-[9999px] top-auto h-px w-px opacity-0 pointer-events-none" aria-hidden="true">
                   <label htmlFor="websiteUrl">Do not fill this out if you are human</label>
                   <input
                     id="websiteUrl"
@@ -648,19 +691,11 @@ export function CorporateStaysPage() {
                   />
                 </label>
 
-                {/* Cloudflare Turnstile Simulated Widget */}
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-3">
-                    <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin shrink-0" />
-                    <div>
-                      <p className="text-xs font-semibold text-gray-800">Turnstile Protection Active</p>
-                      <p className="text-[10px] text-gray-500">Checking your connection security</p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-gray-400">
-                    Cloudflare
-                  </span>
-                </div>
+                <div
+                  className="cf-turnstile flex justify-center"
+                  data-sitekey={import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"}
+                  data-callback="onCorporateInquiryTurnstileSuccess"
+                ></div>
 
                 <div className="pt-2">
                   <PrimaryButton

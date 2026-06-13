@@ -29,7 +29,7 @@ Authorization: Bearer <firebaseIdToken>
 
 The API route verifies the token server-side using the Firebase Admin SDK before processing any request. Never trust role claims from the client.
 
-Public routes (voucher validation, corporate code validation, booking creation) do not require auth but may perform rate limiting.
+Public routes (voucher validation, corporate code validation, booking creation, corporate inquiry submission) do not require auth but may perform rate limiting.
 
 ---
 
@@ -63,6 +63,16 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 Booking creation MUST use a Firestore transaction to prevent double-booking. Public online and corporate bookings use `/api/bookings/create`; staff walk-in/manual bookings use `/api/bookings/create-walkin`. Both routes must perform room active/blocked checks, overlapping booking checks, and booking reference generation inside the transaction. Public online and corporate clients preallocate the Firestore booking document ID before Storage uploads and pass that ID to `/api/bookings/create`; the API creates the document at that exact ID while generating only the guest-facing booking reference inside the transaction. See `plan/features/AVAILABILITY-LOCKING.md`.
 
 Existing booking documents may still receive authenticated staff/admin operational updates directly from the admin app where Firestore rules allow it. Use booking API routes when the mutation creates a booking, appends audit/payment records, sends email, validates guest ownership, or changes money/member balances.
+
+---
+
+### Corporate Routes (`/api/corporate/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/corporate/inquiry` | POST | None | Submit the public corporate inquiry form; API verifies Turnstile, checks honeypot, creates `corporateInquiries/{id}` with `status: "new"`, and sends the staff notification email |
+
+Guest-facing code must not create `corporateInquiries` directly with the Firestore client SDK. This route is the only public write path so bot checks and validation stay server-side.
 
 ---
 
@@ -111,7 +121,7 @@ All public-facing routes (booking creation, voucher/code validation) apply a two
 4. If `success: false` → return `400 { success: false, error: "Bot verification failed" }` immediately
 5. Never proceed to business logic without a valid Turnstile response
 
-**Applies to:** `/api/bookings/create`, `/api/validate/voucher`, `/api/validate/corporate-code`
+**Applies to:** `/api/bookings/create`, `/api/corporate/inquiry`, `/api/validate/voucher`, `/api/validate/corporate-code`
 
 ### Honeypot Check
 
@@ -119,13 +129,14 @@ API route checks for a `_hp` field in the request body (the honeypot field name)
 - If `_hp` has any value → silently return `200 { success: true }` (do not create booking, do not tip off bot)
 - If `_hp` is empty or absent → proceed normally
 
-**Applies to:** `/api/bookings/create`, corporate inquiry submission
+**Applies to:** `/api/bookings/create`, `/api/corporate/inquiry`
 
 ### Rate Limiting
 
 | Endpoint | Limit |
 |---|---|
 | `/api/bookings/create` | 5 requests / IP / minute |
+| `/api/corporate/inquiry` | 5 requests / IP / minute |
 | `/api/validate/voucher` | 20 requests / IP / minute |
 | `/api/validate/corporate-code` | 10 requests / IP / minute |
 | `/api/email/*` | 3 requests / booking ref / hour |

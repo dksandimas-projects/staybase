@@ -51,7 +51,7 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 ### Data & Logic Checklist
 - [ ] Fetch `settings/websiteContent.corporate` for hero content and perks
 - [ ] Fetch all active rooms for the rooms overview section
-- [ ] Inquiry form submission: `addDoc` to `corporateInquiries` with `status: "new"`
+- [ ] Inquiry form submission: POST `/api/corporate/inquiry`; API creates `corporateInquiries/{id}` with `status: "new"`
 - [ ] No corporate rates displayed anywhere on this page
 - [ ] Cloudflare Turnstile widget on inquiry form — invisible, token submitted with form
 - [ ] Honeypot field on inquiry form — hidden via CSS

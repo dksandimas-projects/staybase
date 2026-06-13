@@ -384,6 +384,14 @@ function corporateInquiryEmail(inquiry: any) {
   });
 }
 
+export async function sendCorporateInquiryTrigger(inquiry: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] New corporate inquiry: ${inquiry.companyName || "Website inquiry"}`,
+    corporateInquiryEmail(inquiry)
+  );
+}
+
 async function getTomorrowConfirmedBookings() {
   const nowLocal = new Date(new Date().toLocaleString("en-US", { timeZone: config.timezone }));
   const start = new Date(nowLocal);
@@ -447,11 +455,7 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
   try {
     if (action === "corporate-inquiry") {
       const inquiry = req.body?.inquiry || req.body || {};
-      await sendEmail(
-        ADMIN_EMAIL,
-        `[${config.brandName}] New corporate inquiry: ${inquiry.companyName || "Website inquiry"}`,
-        corporateInquiryEmail(inquiry)
-      );
+      await sendCorporateInquiryTrigger(inquiry);
       return res.status(200).json({ success: true });
     }
 
