@@ -81,11 +81,13 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 - Never expose `remarks` (internal notes) to guest-facing queries — filter server-side
 
 ### `bookings`
-- Read: staff/admin OR matching `guestEmail` (for booking lookup — server-side verification only)
-- Create: anyone (booking creation via API route — not direct client write)
-- Update: staff/admin only
+- Read: staff/admin only in Firestore client rules; guest lookup is server-side by booking ref + email
+- Create: denied in Firestore client rules; all booking document creation is server-side via API route transaction
+- Update: staff/admin only for operational updates from the authenticated admin app
 - Delete: admin only
-- **Critical:** Direct client writes to `bookings` are NOT allowed — all writes go through the API route transaction
+- **Critical:** Direct client booking creation is NOT allowed. Public/corporate booking creation uses `/api/bookings/create`; staff walk-in/manual creation uses `/api/bookings/create-walkin`. Both routes use Admin SDK transactions and bypass Firestore client rules.
+- **Staff operational updates:** Authenticated staff/admin may update existing booking documents directly from the admin app for low-risk operational fields such as status progression, check-in/check-out registry fields, guest ID URL, breakfast selections, notes, `discountVerified`, and `handledBy`.
+- **Server-only booking mutations:** Use API routes for operations that require transactions, guest identity checks, audit records, or emails: booking creation, cancellation, discount rejection, onsite payment recording, points redemption/undo, and any future operation that changes totals or member balances.
 
 ### `guests`
 - Read: owner (matching UID) or staff/admin
