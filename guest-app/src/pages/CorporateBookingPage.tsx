@@ -1065,6 +1065,10 @@ export function CorporateBookingPage() {
                   <Link className="font-semibold text-primary underline" target="_blank" to="/privacy">
                     Privacy Policy
                   </Link>{" "}
+                  and{" "}
+                  <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                    Terms of Service
+                  </Link>{" "}
                   and consent to corporate accounts audit guidelines under {config.applicableLaw}.
                 </span>
               </label>
@@ -1263,7 +1267,11 @@ export function CorporateBookingPage() {
                   type="checkbox"
                 />
                 <span>
-                  I declare the travel information is correct. I agree to the hotel check-in/out policies, room guidelines, and corporate audit rules.
+                  I declare the travel information is correct. I agree to the hotel check-in/out policies, room guidelines, corporate audit rules, and{" "}
+                  <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                    Terms of Service
+                  </Link>
+                  .
                 </span>
               </label>
 

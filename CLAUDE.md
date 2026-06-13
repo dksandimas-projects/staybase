@@ -145,7 +145,7 @@ These apply to every file in every app. No exceptions.
 - **Never commit `.env` files**
 - **Never log PII** — no console.log of guest names, emails, or payment data
 - **Never expose payment proof URLs in guest-app** — admin-only
-- **Consent checkbox required at booking Step 2** — links to `/privacy`, blocks submission if unchecked
+- **Consent checkbox required at booking Step 2** — links to `/privacy` and `/terms`, blocks submission if unchecked
 - **Comply with RA 10173** — see `plan/docs/SECURITY.md` for full requirements
 - **Rate limit all public API endpoints** — booking creation, voucher/code validation, email resend
 

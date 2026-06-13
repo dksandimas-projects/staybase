@@ -86,7 +86,7 @@ Things agents must never do. Check this file before implementing any feature.
 - **Do not share PII via intercom chat** — staff must use the booking system for sensitive information. Intercom is open and unencrypted at rest.
 - **Rate limit public API endpoints** — voucher validation, corporate code validation, and booking creation are unauthenticated and must be rate-limited to prevent abuse.
 - **Firebase Storage payment proof files are not public** — Storage rules must restrict read access to authenticated staff. A leaked URL without proper rules gives anyone access.
-- **Consent checkbox is required at booking Step 2** — do not allow booking submission without it. Links to `/privacy` page.
+- **Consent checkbox is required at booking Step 2** — do not allow booking submission without it. Links to `/privacy` and `/terms` pages.
 - **Honeypot field must be hidden via CSS, not `display:none`** — bots detect and skip `display:none` fields. Use `position: absolute; opacity: 0; pointer-events: none` instead.
 - **Honeypot rejection must be silent** — return `200` with a fake success response when honeypot is filled. Never return an error that reveals the anti-bot mechanism.
 - **Turnstile token must be verified server-side** — client-side Turnstile rendering is not enough. Always POST the token to Cloudflare's verification endpoint in the API route before processing any request.

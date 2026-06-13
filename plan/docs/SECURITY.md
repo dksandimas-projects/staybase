@@ -64,8 +64,9 @@ If a breach occurs affecting guest PII:
 ### Privacy Notice
 
 - Full Privacy Policy at `/privacy` on the guest site
+- Terms of Service at `/terms` on the guest site
 - Consent checkbox required at Step 2 (Guest Details) of booking flow
-- Privacy Policy link in footer of all public pages
+- Privacy Policy and Terms of Service links in footer of all public pages
 - Privacy Policy link in all guest-facing booking confirmation emails
 
 ---
@@ -300,6 +301,12 @@ Minimum required content (legal copy — DK or client to finalize with a lawyer 
 - Date of last update
 
 See `plan/features/STATIC-PAGES.md §Privacy Policy` for UI implementation.
+
+## Terms of Service Page (`/terms`)
+
+Minimum required content is defined in `plan/docs/LEGAL.md §Guest Terms of Service`.
+
+See `plan/features/STATIC-PAGES.md §Terms of Service` for UI implementation.
 
 ---
 

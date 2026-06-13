@@ -28,6 +28,7 @@ Shared types and utils are imported from `@spark-inn/shared` (npm workspace pack
 | `/my-booking` | `BookingLookupPage.tsx` | `plan/features/BOOKING-LOOKUP.md` |
 | `/intercom/:roomId` | `IntercomPage.tsx` | `plan/features/INTERCOM-GUEST.md` |
 | `/privacy` | `PrivacyPage.tsx` | `plan/features/STATIC-PAGES.md` |
+| `/terms` | `TermsPage.tsx` | `plan/features/STATIC-PAGES.md` |
 | `/rewards` | `RewardsPage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `/signin` | `SignInPage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `/signup` | `SignUpPage.tsx` | `plan/features/SPARK-REWARDS.md` |

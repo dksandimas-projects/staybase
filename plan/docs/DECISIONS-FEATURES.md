@@ -46,8 +46,8 @@ For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 | 24 | Domain: `sparkinnbohol.com` — DK purchases as part of project |
 | 25 | Data Privacy Act of 2012 (RA 10173) compliance required — hotel processes guest PII |
 | 26 | Data retention: indefinitely — guests may request erasure via email to hotel |
-| 27 | Privacy Policy: dedicated `/privacy` page on guest site — linked from footer, booking form, and emails |
-| 28 | Consent checkbox required at booking Step 2 — links to `/privacy`, blocks submission if unchecked |
+| 27 | Privacy Policy and Terms of Service: dedicated `/privacy` and `/terms` pages on guest site — linked from footer, booking form, and emails where applicable |
+| 28 | Consent checkbox required at booking Step 2 — links to `/privacy` and `/terms`, blocks submission if unchecked |
 | 29 | Hotel owner/admin serves as Data Protection Officer (DPO) |
 | 30 | Data breach notification: NPC within 72 hours if breach affects guest PII |
 | 31 | Legal content (privacy policy body, cancellation policy, house rules) editable at runtime from Settings |
@@ -83,4 +83,3 @@ For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 | 61 | Homepage Spark Rewards section — shows Join CTA for non-members, Welcome back for logged-in members |
 | 62 | Services and Spark Rewards homepage sections editable from Settings → Website Content — sections hidden when disabled |
 | 74 | Email acknowledgment: the booking submitted email acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under manual review and a final confirmation email will follow after verification |
-
