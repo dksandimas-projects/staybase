@@ -8,6 +8,7 @@ import {
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
+import { handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleGenerateReference } from "./handlers/reference";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
@@ -241,6 +242,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleValidateCorporateCode(req, res);
+  }
+
+  if (domain === "corporate" && action === "inquiry" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`corporate-inquiry:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many inquiry requests. Please try again in a minute." });
+    }
+
+    if (req.body && typeof req.body === "object" && req.body._hp) {
+      return res.status(200).json({
+        success: true,
+        data: { inquiryId: "hp_" + Math.random().toString(36).substring(2, 9) }
+      });
+    }
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleCreateCorporateInquiry(req, res);
   }
 
   if (domain === "reference" && action === "generate" && req.method === "POST") {

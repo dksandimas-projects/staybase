@@ -206,7 +206,7 @@ Additional legal/policy fields (editable by hotel admin from Settings):
 | `email` | string | |
 | `phone` | string | |
 | `numRooms` | number | |
-| `preferredDates` | `{from, to}` | |
+| `preferredDates` | string | Free-text preferred month or date range from the public inquiry form |
 | `specialRequirements` | string | |
 | `status` | string | `"new"` \| `"contacted"` \| `"negotiating"` \| `"converted"` \| `"declined"` |
 | `handler` | string | Staff UID |
@@ -425,7 +425,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
 | `guests` | Owner or Staff/Admin | Owner or Admin |
 | `settings` | Public | Admin only |
-| `corporateInquiries` | Staff/Admin only | Staff/Admin only |
+| `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
 | `corporateCodes` | Anyone (validation) | Admin only |
 | `vouchers` | Anyone (validation) | Staff or Admin |
 | `intercoms` | Open (no auth) | Open (no auth) |

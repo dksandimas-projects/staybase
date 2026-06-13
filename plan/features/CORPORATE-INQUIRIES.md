@@ -51,7 +51,7 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
   - [ ] Store `companyName`, `ratePerRoomType`, `expiresAt`, `usageCap`, `usageCount: 0`, `linkedInquiryId`, `createdBy`, `isActive: true`
   - [ ] Update `corporateInquiries/{id}.accessCodeId` with generated code
 - [ ] Code must be unique — check if document exists before creating
-- [ ] New inquiry submitted from guest site: `status: "new"`, notification appears on this page
+- [ ] New inquiry submitted from guest site through `/api/corporate/inquiry`: `status: "new"`, notification appears on this page
 
 ## Edge Cases & States
 

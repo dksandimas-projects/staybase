@@ -56,7 +56,7 @@ service cloud.firestore {
 
     match /corporateInquiries/{inquiryId} {
       allow read, update, delete: if isStaff();
-      allow create: if true;
+      allow create: if isStaff();
     }
 
     match /corporateCodes/{code} {

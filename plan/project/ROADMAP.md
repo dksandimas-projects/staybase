@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 13, 2026 (closed AUDIT-42 booking write/update security model; added Phase 8 follow-up gaps)
+> Last updated: June 13, 2026 (closed AUDIT-43 corporate inquiry API architecture gap)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -431,7 +431,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ **[AUDIT-36]** Add a `/terms` (Terms of Service) page — required by `LEGAL.md` (booking agreement, cancellation, discount eligibility/RA 9994/RA 10754, liability, governing law clauses), linked from the footer and the Step 2 consent checkbox alongside `/privacy`. Added guest route/page, footer link, regular and corporate booking consent links, and aligned `CLAUDE.md`, `GOTCHAS.md`, `STATIC-PAGES.md`, `BOOKING-FLOW.md`, `SECURITY.md`, `DECISIONS-FEATURES.md`, and guest route docs.
 - ✅ **[AUDIT-41]** Resolve Storage path sequencing gap — defined the preallocated Firestore booking document ID contract for guest/corporate booking flows. Step 3 uploads use the preallocated `bookingId`; `/api/bookings/create` creates that exact document inside the availability-locking transaction; only the guest-facing `bookingRef` is generated inside the transaction. Aligned `AVAILABILITY-LOCKING.md`, `BOOKING-FLOW.md`, `API-ROUTES.md`, `BACKEND.md`, `SECURITY.md`, and `GOTCHAS.md`; corporate booking now uses the same Firestore preallocation pattern instead of a timestamp ID.
 - ✅ **[AUDIT-42]** Resolve self-contradiction in `SECURITY.md §bookings` Firestore rules — clarified that booking creation is API/Admin SDK only, while authenticated staff/admin may directly update existing booking operational fields where Firestore rules permit it. Tightened `firebase/firestore.rules` to deny client-side booking creates, documented server-only booking mutations, added `/api/bookings/add-payment` to `API-ROUTES.md`, and aligned `BACKEND.md`, `BOOKINGS-MANAGEMENT.md`, `GOTCHAS.md`, and `SECURITY.md`.
-- ⬜ **[AUDIT-43]** Resolve corporate inquiry form architecture gap — `STATIC-PAGES.md` and `CORPORATE-INQUIRIES.md` spec a direct client `addDoc` to `corporateInquiries`, but `SECURITY.md`'s Bot & Spam Prevention section requires server-side Turnstile verification for this exact form. A direct Firestore write cannot have server-side token verification — add an `/api/corporate/inquiry` route (or equivalent) to `API-ROUTES.md` and update both feature MDs
+- ✅ **[AUDIT-43]** Resolve corporate inquiry form architecture gap — added `/api/corporate/inquiry` as the public submission path, moved corporate inquiry creation behind server-side validation, Turnstile, honeypot, rate limiting, and staff notification, blocked guest client-side creates in Firestore rules, wired the guest Corporate page to the API, and aligned `STATIC-PAGES.md`, `CORPORATE-INQUIRIES.md`, `API-ROUTES.md`, `BACKEND.md`, `SECURITY.md`, and `GOTCHAS.md`.
 
 ### 🔴 Fix before Phase 9 — Remaining Features
 

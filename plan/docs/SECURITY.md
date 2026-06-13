@@ -101,6 +101,7 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `corporateInquiries`
 - Read/Write: staff/admin only
 - Contains contact PII — never expose to guest-facing app
+- Public guest submissions go through `/api/corporate/inquiry`; Firestore client-side creates are not allowed
 
 ### `corporateCodes`
 - Read: anyone — needed for validation on `/corporate/book`
@@ -166,6 +167,7 @@ Full rules in `firebase/storage.rules`. Intent:
 ### Rate Limiting
 - Implement rate limiting on public endpoints to prevent abuse:
   - `/api/bookings/create` — max 5 requests per IP per minute
+  - `/api/corporate/inquiry` — max 5 requests per IP per minute
   - `/api/validate/voucher` — max 20 requests per IP per minute
   - `/api/validate/corporate-code` — max 10 requests per IP per minute
   - `/api/email/*` — max 3 requests per booking ref per hour
@@ -221,9 +223,9 @@ Cloudflare's invisible CAPTCHA replacement. Free with no usage limits. Real user
 
 **Where to apply:**
 - `/api/bookings/create` — booking creation (highest risk)
+- `/api/corporate/inquiry` — corporate inquiry submission
 - `/api/validate/voucher` — voucher validation
 - `/api/validate/corporate-code` — corporate code validation
-- Corporate inquiry form submission (direct Firestore write — add server-side verification step)
 
 **Environment variables needed:**
 - `TURNSTILE_SITE_KEY` — public, used in guest-app
