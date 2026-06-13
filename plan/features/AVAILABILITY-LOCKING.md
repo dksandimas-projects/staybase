@@ -6,7 +6,7 @@
 
 ## Overview
 
-Prevents double-booking by using Firestore transactions for all booking creation. This is a critical safety feature — the client's prior Excel-based system had documented overbooking incidents. Every booking creation (online, walk-in, corporate) must go through the transaction-based API route. Never write bookings directly to Firestore from the client.
+Prevents double-booking by using Firestore transactions for all booking creation. This is a critical safety feature — the client's prior Excel-based system had documented overbooking incidents. Every booking creation (online, walk-in, corporate) must go through a transaction-based API route. Never write bookings directly to Firestore from the client.
 
 ---
 
@@ -22,6 +22,8 @@ Prevents double-booking by using Firestore transactions for all booking creation
 
 Transactions guarantee no two bookings can be created for the same room/dates simultaneously — even with concurrent requests.
 
+Staff-created walk-in bookings use the authenticated `/api/bookings/create-walkin` route, but the safety rule is the same: it must run the same conflict checks and reference counter write inside a Firestore transaction before creating the booking. This route exists only for front-desk/admin workflows that need staff auth, immediate check-in, onsite payment handling, and optional staff price override.
+
 ---
 
 ## UI Checklist
@@ -33,7 +35,8 @@ Transactions guarantee no two bookings can be created for the same room/dates si
 
 ## Data & Logic Checklist
 
-- [ ] Booking creation ALWAYS via `/api/bookings/create` — never direct Firestore write from client
+- [ ] Public online and corporate booking creation ALWAYS via `/api/bookings/create` — never direct Firestore write from client
+- [ ] Staff walk-in/manual booking creation ALWAYS via authenticated `/api/bookings/create-walkin` — never direct Firestore write from admin client
 - [ ] Transaction reads `bookings` where:
   - `roomId == selectedRoomId`
   - `status` NOT IN `["cancelled"]`
@@ -41,8 +44,8 @@ Transactions guarantee no two bookings can be created for the same room/dates si
 - [ ] If any conflicting booking found → abort transaction, return `{ success: false, error: "Room no longer available" }`
 - [ ] If no conflict → create booking document with all fields, return `{ success: true, data: { bookingId, bookingRef } }`
 - [ ] Booking reference (`{config.bookingRefPrefix}-YYYYMMDD-NNN`) generated within the transaction to ensure uniqueness
-- [ ] Walk-in bookings follow the same transaction path via admin API call (with staff auth token)
-- [ ] Corporate bookings follow the same path — no bypass
+- [ ] Walk-in bookings follow the same transaction checks via admin API call (with staff auth token)
+- [ ] Corporate bookings follow `/api/bookings/create` with `isCorporate: true` — no bypass
 
 ## Edge Cases & States
 
@@ -56,7 +59,7 @@ Transactions guarantee no two bookings can be created for the same room/dates si
 
 - [ ] Open two browser sessions, both on Step 3 for the same room/dates — submit simultaneously — only one booking created, other receives conflict error
 - [ ] Room manually blocked in admin while guest is in booking flow — guest receives unavailability error on submit
-- [ ] Walk-in booking in admin for dates that conflict with an online booking — conflict error shown
+- [ ] Walk-in booking in admin for dates that conflict with an online booking — authenticated API route returns conflict error and the modal shows it
 - [ ] All created bookings have unique `bookingRef` values — no duplicates in Firestore
 
 ## References

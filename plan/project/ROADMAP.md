@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 12, 2026 (added Plan Audit Fixes — June 11, 2026, AUDIT-20–34; added Phase 8 follow-up gaps)
+> Last updated: June 13, 2026 (closed AUDIT-35 booking transaction documentation alignment; added Phase 8 follow-up gaps)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -427,7 +427,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### 🔴 Fix immediately — correctness gaps in completed phases
 
-- ⬜ **[AUDIT-35]** Resolve contradiction with `AVAILABILITY-LOCKING.md` — that doc requires walk-in (admin) and corporate "convert to booking" creation to go through the same transaction-based path as `/api/bookings/create` ("no bypass"), but `BOOKINGS-MANAGEMENT.md` (Phase 5, marked 8/8 done) and `CORPORATE-INQUIRIES.md` both describe a plain `addDoc` to `bookings`. Verify the actual implementation and align both feature MDs — this is a double-booking risk in a phase marked complete
+- ✅ **[AUDIT-35]** Resolve contradiction with `AVAILABILITY-LOCKING.md` — verified admin walk-ins already post to authenticated `/api/bookings/create-walkin`, which uses a Firestore transaction; corporate guest bookings use `/api/bookings/create`. Aligned `AVAILABILITY-LOCKING.md`, `BOOKINGS-MANAGEMENT.md`, `CORPORATE-INQUIRIES.md`, `API-ROUTES.md`, and `GOTCHAS.md` so no flow documents direct `addDoc` booking creation.
 - ⬜ **[AUDIT-36]** Add a `/terms` (Terms of Service) page — required by `LEGAL.md` (booking agreement, cancellation, discount eligibility/RA 9994/RA 10754, liability, governing law clauses), linked from the footer and the Step 2 consent checkbox alongside `/privacy`. Phase 1 Static Pages only lists Privacy Policy, and the `CLAUDE.md` hard rule for the consent checkbox only references `/privacy` — both need updating
 - ⬜ **[AUDIT-41]** Resolve Storage path sequencing gap — `BOOKING-FLOW.md` has the payment-proof and discount-ID photos uploaded to `bookings/{bookingId}/payment-proof/{filename}` and `bookings/{bookingId}/discount-id/{filename}` *before* booking creation, but `AVAILABILITY-LOCKING.md` generates `bookingId` only inside the `/api/bookings/create` transaction. Define how the client obtains a `bookingId` (or staging path) for these uploads ahead of booking creation
 - ⬜ **[AUDIT-42]** Resolve self-contradiction in `SECURITY.md §bookings` Firestore rules — "Update: staff/admin only" implies staff can `updateDoc` directly for status transitions (Confirm Payment, check-in/out, discount verify/reject, etc., as used throughout `BOOKINGS-MANAGEMENT.md`/`DASHBOARD-OVERVIEW.md`), but the line below it states "Direct client writes to `bookings` are NOT allowed — all writes go through the API route transaction" with no carve-out for staff status updates. Clarify which operations require an API route vs. direct `updateDoc`

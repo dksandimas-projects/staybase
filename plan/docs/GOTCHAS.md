@@ -80,7 +80,7 @@ Things agents must never do. Check this file before implementing any feature.
 - **Never log PII** — no `console.log(guestEmail)`, `console.log(guestName)`, or similar in any environment. Logs may be stored by Vercel and are accessible to anyone with project access.
 - **Never expose payment proof URLs in guest-app** — `paymentProofUrl` is admin-only. Never include it in guest-facing API responses or Firestore queries from guest-app.
 - **Never expose `remarks` field to guest-app** — room remarks are internal staff notes only. Filter before returning room data to guests.
-- **Never write booking documents directly from the client** — all booking creation goes through `/api/bookings/create`. Direct client writes bypass the availability transaction and security checks.
+- **Never write booking documents directly from the client** — public online/corporate bookings go through `/api/bookings/create`, and staff walk-ins go through authenticated `/api/bookings/create-walkin`. Direct client writes bypass the availability transaction and security checks.
 - **Never trust client-supplied role, `isCorporate`, or `corporateCode`** — always derive from server-side token verification or Firestore lookup.
 - **Booking lookup requires BOTH ref AND email** — never return booking data on ref alone. Prevents enumeration attacks.
 - **Do not share PII via intercom chat** — staff must use the booking system for sensitive information. Intercom is open and unencrypted at rest.

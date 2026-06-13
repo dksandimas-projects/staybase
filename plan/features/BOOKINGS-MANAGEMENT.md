@@ -107,8 +107,8 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Status update: `updateDoc` on `bookings/{bookingId}`, update `status` + `updatedAt` + `handledBy`
 - [ ] `confirmed` and `payment-confirmed` status changes trigger corresponding emails
 - [ ] Cancellation: update status to `"cancelled"`, store `cancellationReason`, trigger cancellation email
-- [ ] Walk-in booking creation: `addDoc` to `bookings` with `source` set appropriately, `status: "confirmed"` (no payment flow), `handledBy` = current staff UID
-- [ ] Walk-in booking ref generated via `/api/reference/generate`
+- [ ] Walk-in booking creation: POST to authenticated `/api/bookings/create-walkin`; API runs the availability-locking transaction, writes `source: "walk-in"`, default `status: "confirmed"` unless immediate check-in is selected, and stores `handledBy` from the verified staff token
+- [ ] Walk-in booking ref generated inside the same transaction as booking creation; do not call `/api/reference/generate` separately for walk-ins
 - [ ] Points redemption: POST to `/api/members/redeem-points` — validates member balance, computes `₱ value = pointsRedeemed × (redemptionRate / 100)`, updates booking `totalPrice`, `pointsRedeemed`, `pointsRedeemedValue`; deducts from `members/{uid}.rewardsPoints`; logs to `members/{uid}/pointsHistory` with `type: "redeem"`, `bookingId`, `by: staffUID`
 - [ ] Redemption rate fetched from `settings/rewardsConfig.pointsRedemptionRate` — never hardcoded
 - [ ] Undo redemption: POST to `/api/members/undo-redemption` — restores `totalPrice`, zeroes `pointsRedeemed`/`pointsRedeemedValue`, returns points to member balance, logs `type: "manual"` reversal to pointsHistory; only allowed on `confirmed` status, admin role only
@@ -124,7 +124,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 
 - [ ] Empty state (no bookings matching filters) — "No bookings found" with reset filters option
 - [ ] Booking updated by another session while drawer is open — refresh data, notify staff
-- [ ] Walk-in booking: date conflict with existing booking — show conflict error
+- [ ] Walk-in booking: date conflict with existing booking — show conflict error returned by `/api/bookings/create-walkin`
 - [ ] Receipt generation fails — show error, allow retry
 - [ ] Notes field: auto-save or explicit save button (choose one, be consistent)
 - [ ] Additional payment recorded as ₱0 — prevent with validation
