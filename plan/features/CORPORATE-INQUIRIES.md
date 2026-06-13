@@ -45,7 +45,7 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
 - [ ] `onSnapshot` on `corporateInquiries` collection — real-time pipeline updates
 - [ ] Stage move: `updateDoc` status field + `updatedAt`
 - [ ] Add note: `updateDoc` to append to `notes[]` array with `{text, by: staffUID, at: timestamp}`
-- [ ] Convert to booking: `addDoc` to `bookings` with pre-filled data, `source: "corporate"`, `status: "confirmed"`, link inquiry via `linkedInquiryId` if needed; update inquiry `status: "converted"`
+- [ ] Convert to booking: POST the pre-filled booking data to the transaction-based booking API, with `isCorporate: true`, `source: "corporate"`, and any `linkedInquiryId` metadata; never `addDoc` directly to `bookings`. On API success, update inquiry `status: "converted"`
 - [ ] Generate Access Code:
   - [ ] `setDoc` on `corporateCodes/{code}` — document ID is the code string
   - [ ] Store `companyName`, `ratePerRoomType`, `expiresAt`, `usageCap`, `usageCount: 0`, `linkedInquiryId`, `createdBy`, `isActive: true`
@@ -59,7 +59,7 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
 - [ ] Empty pipeline column — show empty state per column
 - [ ] Duplicate code conflict — show error, suggest a different code
 - [ ] Inquiry already has an access code — show existing code, allow deactivating and generating a new one
-- [ ] Convert to booking: date conflict — show availability error
+- [ ] Convert to booking: date conflict — show availability error returned by the transaction-based booking API
 - [ ] Declined inquiry — moved to Declined column, no further actions except view
 
 ## Manual QA
