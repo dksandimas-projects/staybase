@@ -10,6 +10,7 @@ import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleGenerateReference } from "./handlers/reference";
+import { handleRegisterMember } from "./handlers/members";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { adminAuth } from "./lib/firebase-admin";
@@ -49,6 +50,37 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
       success: true,
       uid: decodedToken.uid,
       email: decodedToken.email
+    };
+  } catch (err) {
+    console.error("Token verification failed:", err);
+    return { success: false, error: "Unauthorized: Invalid or expired token." };
+  }
+}
+
+async function authenticateUser(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; name?: string; picture?: string; error?: string }> {
+  if (process.env.NODE_ENV === "test") {
+    return {
+      success: true,
+      uid: "mock_member_uid",
+      email: "member@sparkinn.com",
+      name: "Mock Member"
+    };
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return { success: false, error: "Unauthorized: Missing or invalid authorization token." };
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  try {
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    return {
+      success: true,
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      name: decodedToken.name,
+      picture: decodedToken.picture
     };
   } catch (err) {
     console.error("Token verification failed:", err);
@@ -271,6 +303,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleGenerateReference(req, res);
+  }
+
+  if (domain === "members" && action === "register" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-register:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many rewards registration requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+    return await handleRegisterMember(req, res);
   }
 
   if (domain === "store" && action === "create-order" && req.method === "POST") {

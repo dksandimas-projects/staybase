@@ -31,6 +31,8 @@ The API route verifies the token server-side using the Firebase Admin SDK before
 
 Public routes (voucher validation, corporate code validation, booking creation, corporate inquiry submission) do not require auth but may perform rate limiting.
 
+Guest member routes require a valid Firebase ID token for the signed-in guest. They are authenticated but not staff-only.
+
 ---
 
 ## Route Surface
@@ -106,6 +108,16 @@ Store order status MUST return only guest-safe metadata (`status`, `updatedAt`) 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/reference/generate` | POST | Staff | Generate next booking reference number (SI-YYYYMMDD-NNN) |
+
+---
+
+### Member Routes (`/api/members/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/members/register` | POST | Signed-in guest | Enroll the authenticated guest in Spark Rewards, generate the sequential `memberNumber`, create or update `members/{uid}`, and link past bookings by email |
+
+Member registration must be server-side because `memberNumber` is sequential and cannot be trusted to client code. Guest apps may update editable profile fields after enrollment where Firestore rules allow it, but they must not create member documents or assign `memberNumber` directly.
 
 ---
 
