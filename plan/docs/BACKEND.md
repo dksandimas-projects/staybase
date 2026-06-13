@@ -422,7 +422,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | Collection | Read | Write |
 |---|---|---|
 | `rooms` | Public | Staff or Admin |
-| `bookings` | Owner or Staff/Admin | Create = anyone; Update = Staff/Admin; Delete = Admin |
+| `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
 | `guests` | Owner or Staff/Admin | Owner or Admin |
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only |
@@ -435,7 +435,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
 | `storeOrders` | Open for create and guest cancellation by room/order ref | Create = anyone; Update = Staff/Admin; guest cancellation via API only |
-| `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin; no updates or deletes |
+| `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment`; no updates or deletes |
 | `settings/rewardsConfig` | Authenticated guests (needed for booking discount + My Rewards display) | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |

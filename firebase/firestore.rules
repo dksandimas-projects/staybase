@@ -21,7 +21,7 @@ service cloud.firestore {
 
     match /bookings/{bookingId} {
       allow read: if isStaff();
-      allow create: if true;
+      allow create: if false;
       allow update: if isStaff();
       allow delete: if isAdmin();
 

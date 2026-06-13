@@ -57,9 +57,12 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock) |
 | `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
+| `/api/bookings/add-payment` | POST | Staff | Append onsite payment audit record to `bookings/{bookingId}/payments` |
 | `/api/bookings/reject-discount` | POST | Staff | Reject Senior/PWD discount ID — restores `totalPrice`, sets rejection fields, triggers discount-rejected email |
 
 Booking creation MUST use a Firestore transaction to prevent double-booking. Public online and corporate bookings use `/api/bookings/create`; staff walk-in/manual bookings use `/api/bookings/create-walkin`. Both routes must perform room active/blocked checks, overlapping booking checks, and booking reference generation inside the transaction. Public online and corporate clients preallocate the Firestore booking document ID before Storage uploads and pass that ID to `/api/bookings/create`; the API creates the document at that exact ID while generating only the guest-facing booking reference inside the transaction. See `plan/features/AVAILABILITY-LOCKING.md`.
+
+Existing booking documents may still receive authenticated staff/admin operational updates directly from the admin app where Firestore rules allow it. Use booking API routes when the mutation creates a booking, appends audit/payment records, sends email, validates guest ownership, or changes money/member balances.
 
 ---
 
