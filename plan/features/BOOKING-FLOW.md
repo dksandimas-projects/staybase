@@ -58,7 +58,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Number of guests (required, max = room capacity)
 - [ ] Special requests (optional, textarea)
 - [ ] Corporate fields (shown only on `/corporate/book` flow): company name (required), designation, company address, number of rooms, purpose of stay, preferred billing arrangement
-- [ ] Privacy consent checkbox — "I agree to the [Privacy Policy] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` in a new tab
+- [ ] Privacy and terms consent checkbox — "I agree to the [Privacy Policy] and [Terms of Service] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` and `/terms` in new tabs
 - [ ] Back button to Step 1, Next button to Step 3
 - [ ] Inline Zod validation — errors shown per field on blur
 - [ ] Next button disabled until consent checkbox is checked

@@ -269,6 +269,10 @@ export function SignUpPage() {
                 <Link className="font-semibold text-primary underline" target="_blank" to="/privacy">
                   Privacy Policy
                 </Link>{" "}
+                and{" "}
+                <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                  Terms of Service
+                </Link>{" "}
                 and consent to data processing under {config.applicableLaw}.
               </span>
             </label>

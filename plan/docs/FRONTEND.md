@@ -561,6 +561,7 @@ All meta tags injected via a shared `<SEO>` component that accepts per-page over
 | Booking Confirmation `/book/confirm` | `Booking Confirmed` | (noindex — do not expose to search engines) |
 | My Booking `/my-booking` | `My Booking` | (noindex) |
 | Privacy Policy `/privacy` | `Privacy Policy` | (noindex) |
+| Terms of Service `/terms` | `Terms of Service` | (noindex) |
 | Spark Rewards `/rewards` | `Spark Rewards` | `Join Spark Rewards — {config.brandName}'s loyalty program. Earn points on every stay, get member discounts, and enjoy exclusive perks.` |
 | 404 `*` | `Page Not Found` | (noindex) |
 

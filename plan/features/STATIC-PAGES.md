@@ -6,7 +6,7 @@
 
 ## Overview
 
-Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and 404. About and Corporate hero/content are editable from admin Settings → Website Content. Contact details are shared with `settings/hotelConfig`.
+Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Privacy Policy, Terms of Service, and 404. About and Corporate hero/content are editable from admin Settings → Website Content. Contact details are shared with `settings/hotelConfig`.
 
 ---
 
@@ -129,6 +129,29 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 
 ---
 
+## Terms of Service (`/terms`)
+
+### UI Checklist
+- [ ] Standalone page — no hero, clean readable layout (white background, Inter body text)
+- [ ] Sections: Booking Agreement, Accuracy of Information, Payment and Verification, Cancellation Policy, Senior/PWD Discount Eligibility, Guest Conduct, Personal Property and Liability, Privacy, Governing Law, Contact
+- [ ] Support email — clickable mailto link
+- [ ] Link back to homepage
+- [ ] Footer with version
+
+### Data & Logic Checklist
+- [ ] Static content — no Firestore fetch needed in Phase 1
+- [ ] Hotel legal name, brand name, support email, and applicable law sourced from `hotel.config.ts`
+- [ ] Booking Step 2 consent checkbox links to `/terms` alongside `/privacy`
+- [ ] Footer links to `/terms`
+- [ ] "Last Updated" date updated manually when terms change
+
+### Notes
+- Legal copy must be reviewed and finalized by hotel owner
+- Minimum clauses defined in `plan/docs/LEGAL.md §Guest Terms of Service`
+- Plain language — avoid legalese where possible
+
+---
+
 ## Edge Cases & States (All Static Pages)
 
 - [ ] Loading state — skeleton for hero photo
@@ -141,6 +164,7 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 - [ ] Corporate page: dark hero, perks grid, rooms overview (no prices), inquiry form all render
 - [ ] Corporate inquiry form submits and appears in admin Corporate Inquiries pipeline
 - [ ] Contact page: all details match `settings/hotelConfig`
+- [ ] Terms page: booking, cancellation, discount eligibility, liability, and governing law sections render correctly
 - [ ] CTA to `/corporate/book` present and working on corporate page
 - [ ] 404 page appears for any unmatched route
 - [ ] All pages load in under 3s on 4G mobile

@@ -680,6 +680,10 @@ export function BookingPage() {
                   <Link className="font-semibold text-primary underline" target="_blank" to="/privacy">
                     Privacy Policy
                   </Link>{" "}
+                  and{" "}
+                  <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                    Terms of Service
+                  </Link>{" "}
                   and consent to the collection of my personal data for booking purposes.
                 </span>
               </label>
@@ -1090,7 +1094,11 @@ export function BookingPage() {
                   <Link to="/privacy" target="_blank" className="font-semibold text-primary underline">
                     Privacy Policy
                   </Link>{" "}
-                  and Terms of Service. I understand that my booking is subject to the cancellation policy selected.
+                  and{" "}
+                  <Link to="/terms" target="_blank" className="font-semibold text-primary underline">
+                    Terms of Service
+                  </Link>
+                  . I understand that my booking is subject to the cancellation policy selected.
                 </span>
               </label>
             </div>
