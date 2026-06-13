@@ -56,6 +56,7 @@ Things agents must never do. Check this file before implementing any feature.
 ## Payments & Uploads
 
 - **Payment proof uploads go to Firebase Storage** — store the download URL in the booking document's `paymentProofUrl` field.
+- **Booking upload paths use a preallocated Firestore booking ID** — the client may reserve a `bookings/{bookingId}` document ID before Step 3 uploads, but `/api/bookings/create` must create that exact document inside the transaction. The guest-facing `bookingRef` is still generated server-side inside the transaction.
 - **Never store raw file blobs in Firestore** — Firestore has a 1MB document size limit. Always use Firebase Storage for files.
 - **Compress images before upload** — use the shared `compressImageFile()` utility for room photos, IDs, payment proofs, QR images, store item photos, and website content photos so uploads stay readable but efficient.
 

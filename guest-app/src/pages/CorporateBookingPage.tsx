@@ -37,7 +37,7 @@ import {
   VERSION,
   type Room
 } from "@spark-inn/shared";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -71,6 +71,7 @@ export function CorporateBookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const currentStepKey = searchParams.get("step") ?? "gate";
+  const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
 
   // Corporate validation state (persisted in sessionStorage)
   const [accessCode, setAccessCode] = useState("");
@@ -385,7 +386,7 @@ export function CorporateBookingPage() {
 
     try {
       const body = {
-        bookingId: `corp-${Date.now()}`,
+        bookingId,
         roomId: selectedRoom?.id ?? "",
         checkIn,
         checkOut,
