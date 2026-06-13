@@ -130,7 +130,7 @@ Staff accounts only (Front Desk + Admin). Document ID = Firebase Auth UID.
 
 ### `members/{uid}`
 
-Guest loyalty members. Document ID = Firebase Auth UID. Separate from `guests/` (staff).
+Guest loyalty members. Document ID = Firebase Auth UID. Separate from `guests/` (staff). Public member enrollment goes through `/api/members/register` so `memberNumber` is generated server-side; guest clients must not create this document directly.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -429,7 +429,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `corporateCodes` | Anyone (validation) | Admin only |
 | `vouchers` | Anyone (validation) | Staff or Admin |
 | `intercoms` | Open (no auth) | Open (no auth) |
-| `members` | Owner (self) or Staff/Admin | Create = authenticated guest; Update = owner or Staff/Admin |
+| `members` | Owner (self) or Staff/Admin | Create = API/Admin SDK only via `/api/members/register`; Update = owner or Staff/Admin |
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
 | `breakfastSelections` | Staff/Admin only | Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |

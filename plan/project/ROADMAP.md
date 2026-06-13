@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 13, 2026 (closed AUDIT-43 corporate inquiry API architecture gap)
+> Last updated: June 13, 2026 (closed AUDIT-44 Spark Rewards enrollment API contradiction)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -397,7 +397,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### 🔴 Fix before Phase 10B — Spark Rewards
 
-- ⬜ **[AUDIT-6]** Add `api/handlers/members.ts` and define `/api/members/register`, `/api/members/redeem-points`, `/api/members/undo-redemption` in API-ROUTES.md
+- ⬜ **[AUDIT-6]** Extend `api/handlers/members.ts` with `/api/members/redeem-points` and `/api/members/undo-redemption`, and define those remaining member points routes in API-ROUTES.md (`/api/members/register` is covered by AUDIT-44)
 - ⬜ **[AUDIT-6b]** Add `api/handlers/store.ts` and define `/api/store/create-order` in API-ROUTES.md
 - ⬜ **[AUDIT-6c]** Add `api/handlers/admin.ts` and define `/api/admin/create-staff`, `/api/admin/disable-staff` in API-ROUTES.md
 - ✅ **[AUDIT-7]** Add `isEarlyCheckInRequest?: boolean` to `IntercomMessage` type in `TYPES.md` and `BACKEND.md §intercoms`
@@ -450,7 +450,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ **[AUDIT-29]** Add `/members` to the Admin role's accessible pages in `AUTH-ROLES.md §Roles` table — admin-app route table includes `/members` (admin-only) but the roles table omits it
 - ⬜ **[AUDIT-37]** Define stacking/precedence order for the Phase 10B member discount relative to senior/PWD discount and vouchers — `DECISIONS-FEATURES.md` #55 only covers "senior/PWD first, then voucher"; member discount isn't factored in, so a booking could have all three with no defined order
 - ⬜ **[AUDIT-38]** Add "Account deletion / data erasure request" to the Phase 10B My Profile checklist — `DECISIONS-FEATURES.md` #49 mandates that member account deletion triggers RA 10173 erasure, but no Phase 10B item covers building this flow
-- ⬜ **[AUDIT-44]** Resolve `/rewards` enrollment mechanism contradiction — `STATIC-PAGES.md` has the "Join Spark Rewards" button do a client-side `updateDoc` on `members/{uid}` setting `isMember: true`, but `BACKEND.md` states `memberNumber` ("SR-XXXXX") is generated server-side via `/api/members/register`. Define whether enrollment goes through the API route (consistent with member number generation) or a direct `updateDoc`, and align both docs
+- ✅ **[AUDIT-44]** Resolve `/rewards` enrollment mechanism contradiction — defined Spark Rewards enrollment as API-only through authenticated `/api/members/register`, added the registration handler with server-side sequential `memberNumber` generation and booking linkage, blocked client-side member creates in Firestore rules, and aligned `STATIC-PAGES.md`, `SPARK-REWARDS.md`, `API-ROUTES.md`, `BACKEND.md`, and `GOTCHAS.md`.
 
 ### 🟡 Fix before Phase 10 — Security & Polish
 

@@ -104,7 +104,7 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 
 ### Data & Logic Checklist
 - [ ] If already logged in and already a member — redirect to `/account/rewards`
-- [ ] If logged in but not a member — show enroll button, `updateDoc` on `members/{uid}` sets `isMember: true`
+- [ ] If logged in but not a member — show enroll button, POST `/api/members/register`; API sets `isMember: true` and generates `memberNumber`
 
 ---
 

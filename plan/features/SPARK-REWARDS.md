@@ -40,8 +40,8 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### Data & Logic Checklist
 - [ ] Firebase Auth: `signInWithGoogle()` (Google OAuth provider) + `signInWithEmailAndPassword()` + `createUserWithEmailAndPassword()`
-- [ ] On first Google Sign-In: check if `members/{uid}` exists — if not, create member document with profile data from Google account
-- [ ] On email/password signup: create Firebase Auth user + create `members/{uid}` document
+- [ ] On first Google Sign-In: after Firebase Auth succeeds, POST `/api/members/register` with the guest Firebase ID token if `members/{uid}` does not exist or is not enrolled
+- [ ] On email/password signup: create Firebase Auth user, then POST `/api/members/register` with the guest Firebase ID token to create/enroll `members/{uid}`
 - [ ] `onAuthStateChanged` listener in guest auth context — unsubscribe on cleanup
 - [ ] Guest auth context separate from admin auth context — different Firebase Auth flows, same Firebase project
 - [ ] Password reset: `sendPasswordResetEmail()` via Firebase Auth
@@ -52,13 +52,13 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### UI Checklist
 - [ ] Post-booking prompt (Step 4 — Confirmation page) — "Join Spark Rewards and earn points on this stay!" CTA — shown only to non-members / logged-out guests
-- [ ] One-click join if already signed in — just opt-in, no extra form
+- [ ] One-click join if already signed in — POST `/api/members/register`, no extra form
 - [ ] If not signed in — show Google Sign-In + quick email signup inline on confirmation page
 - [ ] Standalone signup at `/rewards` — marketing page with program overview + sign-up form
 - [ ] Homepage CTA — "Join Spark Rewards" link in navbar and/or footer
 
 ### Data & Logic Checklist
-- [ ] On registration: create `members/{uid}` with `isMember: true`, `memberSince: now`, `rewardsPoints: 0`, `tier: "standard"` (placeholder), `memberNumber: "{config.memberNumberPrefix}-XXXXX"` (generated server-side via `/api/members/register` — sequential, zero-padded 5 digits)
+- [ ] On registration: POST `/api/members/register`; API creates or enrolls `members/{uid}` with `isMember: true`, `memberSince: now`, `rewardsPoints: 0`, `tier: "standard"` (placeholder), `memberNumber: "{config.memberNumberPrefix}-XXXXX"` (sequential, zero-padded 5 digits)
 - [ ] Link past bookings by email: on registration, query `bookings` where `guestEmail == member.email` — update those bookings with `memberId` field
 - [ ] If guest registered post-booking: link the just-completed booking to their new member account
 
