@@ -13,14 +13,16 @@ Prevents double-booking by using Firestore transactions for all booking creation
 ## How It Works
 
 1. Guest completes booking flow and hits Confirm
-2. `guest-app` calls `/api/bookings/create` with booking data
+2. `guest-app` calls `/api/bookings/create` with booking data and a preallocated Firestore booking document ID
 3. API route runs a Firestore transaction:
    - **Read:** query `bookings` for the selected room and date range — check for conflicts
-   - **Write:** if no conflict, create the booking document atomically
+   - **Write:** if no conflict, create the booking document atomically at the preallocated ID
    - **Fail:** if conflict found, transaction aborts — return conflict error to client
 4. Client receives success or conflict error and responds accordingly
 
 Transactions guarantee no two bookings can be created for the same room/dates simultaneously — even with concurrent requests.
+
+The booking document ID and the public booking reference are different values. The client preallocates the Firestore document ID before Step 3 uploads so payment proof and discount ID files can be stored under `bookings/{bookingId}/...` before the booking document exists. The API still generates the guest-facing `bookingRef` inside the transaction to preserve uniqueness and ordering.
 
 Staff-created walk-in bookings use the authenticated `/api/bookings/create-walkin` route, but the safety rule is the same: it must run the same conflict checks and reference counter write inside a Firestore transaction before creating the booking. This route exists only for front-desk/admin workflows that need staff auth, immediate check-in, onsite payment handling, and optional staff price override.
 
@@ -37,12 +39,14 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 
 - [ ] Public online and corporate booking creation ALWAYS via `/api/bookings/create` — never direct Firestore write from client
 - [ ] Staff walk-in/manual booking creation ALWAYS via authenticated `/api/bookings/create-walkin` — never direct Firestore write from admin client
+- [ ] Online and corporate booking flows preallocate a Firestore booking document ID before uploads, then pass that exact ID to `/api/bookings/create`
 - [ ] Transaction reads `bookings` where:
   - `roomId == selectedRoomId`
   - `status` NOT IN `["cancelled"]`
   - `checkIn < requestedCheckOut` AND `checkOut > requestedCheckIn`
 - [ ] If any conflicting booking found → abort transaction, return `{ success: false, error: "Room no longer available" }`
 - [ ] If no conflict → create booking document with all fields, return `{ success: true, data: { bookingId, bookingRef } }`
+- [ ] Booking document created at the preallocated `bookingId` supplied by the client; never generate a different document ID inside the transaction
 - [ ] Booking reference (`{config.bookingRefPrefix}-YYYYMMDD-NNN`) generated within the transaction to ensure uniqueness
 - [ ] Walk-in bookings follow the same transaction checks via admin API call (with staff auth token)
 - [ ] Corporate bookings follow `/api/bookings/create` with `isCorporate: true` — no bypass
@@ -53,6 +57,7 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 - [ ] Room blocked between guest viewing availability and submitting — transaction catches this
 - [ ] Network timeout during transaction — client receives error, booking NOT created (idempotent)
 - [ ] Retry on network error — safe, transaction will either succeed or fail cleanly (no duplicates)
+- [ ] Upload succeeds but booking transaction fails — no booking document is created; uploaded proof/ID objects are orphaned and staff-invisible until a future cleanup job removes unused preallocated paths
 - [ ] Room status changes to "blocked" after Step 1 — transaction checks bookings, not room status directly; blocked rooms should also have an active blocking booking entry or status check added to transaction
 
 ## Manual QA

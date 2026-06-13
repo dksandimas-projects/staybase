@@ -129,6 +129,12 @@ Full rules in `firebase/storage.rules`. Intent:
 - Read: authenticated staff/admin only — **never public**
 - Write: anyone (guests upload during booking flow — use a time-limited upload token approach or validate booking context)
 - URLs stored in Firestore `bookings` documents — access controlled via Firestore rules
+- `bookingId` is preallocated by the booking flow before upload, then passed to `/api/bookings/create`; the API creates the booking document at that exact ID inside the transaction
+
+### Discount ID photos (`bookings/{bookingId}/discount-id/{filename}`)
+- Read: authenticated staff/admin only — **never public**
+- Write: anyone (guests upload during booking flow before booking creation)
+- `bookingId` follows the same preallocated-ID contract as payment proof uploads
 
 ### Website content photos (`settings/website-content/**`)
 - Read: public

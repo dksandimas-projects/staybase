@@ -41,6 +41,8 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 ### `bookings/{bookingId}`
 
+`bookingId` is the Firestore document ID. Guest and corporate booking flows preallocate this ID before payment-proof or discount-ID uploads so Firebase Storage paths can be created before the booking document exists. `/api/bookings/create` must create the booking document at this supplied ID inside the availability-locking transaction. The guest-facing `bookingRef` is generated separately inside the transaction.
+
 | Field | Type | Notes |
 |---|---|---|
 | `bookingRef` | string | e.g. "SI-20260601-001" |
