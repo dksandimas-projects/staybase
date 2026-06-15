@@ -405,6 +405,7 @@ export async function handleCreateWalkin(req: any, res: any) {
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
+    let newBooking: Record<string, any> | null = null;
 
     await adminDb.runTransaction(async (transaction) => {
       // 1. Fetch Room Details
@@ -491,7 +492,7 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 7. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       
-      const newBooking = {
+      newBooking = {
         bookingRef,
         roomId,
         roomNumber: roomData.roomNumber,
@@ -549,6 +550,15 @@ export async function handleCreateWalkin(req: any, res: any) {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
       transaction.set(bookingDocRef, newBooking);
     });
+
+    const resolvedStatus = status || "confirmed";
+    if (resolvedStatus === "confirmed" && newBooking) {
+      try {
+        await sendBookingTrigger("booking-confirmed", { ...newBooking, status: "confirmed" });
+      } catch (emailErr) {
+        console.error("Failed to send walk-in booking confirmation email:", emailErr);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -704,8 +714,11 @@ export async function handleAddPayment(req: any, res: any) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
 
+    const bookingData = bookingDoc.data()!;
+    const numericAmount = Number(amount);
+
     const paymentRecord = {
-      amount: Number(amount),
+      amount: numericAmount,
       method,
       note: note || "",
       recordedBy: req.staff.email || "staff",
@@ -714,9 +727,70 @@ export async function handleAddPayment(req: any, res: any) {
 
     await bookingRef.collection("payments").add(paymentRecord);
 
+    try {
+      const paymentsSnapshot = await bookingRef.collection("payments").get();
+      const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => {
+        const data = doc.data() as { amount?: number };
+        return sum + Number(data.amount || 0);
+      }, 0);
+
+      const totalPrice = Number(bookingData.totalPrice || 0);
+      const fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+      const isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
+
+      if (fullyPaid && isConfirmableStatus) {
+        await sendBookingTrigger("payment-confirmed", bookingData);
+      }
+    } catch (emailErr) {
+      console.error("Failed to send payment confirmation email:", emailErr);
+    }
+
     return res.status(200).json({ success: true, data: paymentRecord });
   } catch (error: any) {
     console.error("Add payment handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+export async function handleConfirmBooking(req: any, res: any) {
+  const { bookingId } = req.body;
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef.get();
+    if (!bookingDoc.exists) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+
+    const bookingData = bookingDoc.data()!;
+    const allowedStatuses = ["pending", "payment-uploaded"];
+    if (!allowedStatuses.includes(bookingData.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be confirmed because its status is already ${bookingData.status}.`
+      });
+    }
+
+    const confirmedBy = req.staff?.email || "staff";
+    await bookingRef.update({
+      status: "confirmed",
+      confirmedAt: new Date(),
+      confirmedBy,
+      updatedAt: new Date()
+    });
+
+    try {
+      await sendBookingTrigger("booking-confirmed", { ...bookingData, status: "confirmed" });
+    } catch (emailErr) {
+      console.error("Failed to send booking confirmation email:", emailErr);
+    }
+
+    return res.status(200).json({ success: true, data: { status: "confirmed" } });
+  } catch (error: any) {
+    console.error("Confirm booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
