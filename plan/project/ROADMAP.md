@@ -512,20 +512,22 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | Phase | Items | Done | Remaining |
 |---|---|---|---|
 | 0 — Foundation | 41 | 41 | 0 |
-| 1 — Guest Shell & Static | 12 | 6 | 6 |
+| 0.5 — Wireframe Pass | 60 | 60 | 0 |
+| 1 — Guest Shell & Static | 12 | 12 | 0 |
 | 2 — Admin Shell & Auth | 6 | 6 | 0 |
 | 3 — Room System | 5 | 5 | 0 |
 | 4 — Booking Flow | 11 | 11 | 0 |
 | 5 — Admin Bookings | 8 | 8 | 0 |
 | 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
-| 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
+| 8 — Intercom | 29 | 19 | 10 (manual E2E QA — see checklist) |
 | 9 — Remaining Features | 6 | 6 | 0 |
-| 10 — Security & Polish | 11 | 7 | 4 (operational/QA) |
-| 10B — Spark Rewards | 14 | 14 | 0 |
-| 11 — Staging & Launch | 14 | 2 | 12 (operational) |
-| Audit Fixes | 46 | 46 | 0 |
-| **Total** | **216** | **186** | **30** |
+| 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
+| 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
+| 11 — Staging & Launch | 16 | 2 | 14 (operational) |
+| Audit Fixes (June 10) | 21 | 21 | 0 |
+| Audit Fixes (June 11) | 16 | 16 | 0 |
+| **Total** | **279** | **249** | **30** |
 
 ---
 
