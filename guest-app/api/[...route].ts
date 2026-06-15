@@ -4,7 +4,8 @@ import {
   handleCreateWalkin, 
   handleAddPayment, 
   handleRejectDiscount, 
-  handleCancelBooking 
+  handleCancelBooking,
+  handleConfirmBooking
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
@@ -235,6 +236,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleRejectDiscount(req, res);
+  }
+
+  if (domain === "bookings" && action === "confirm" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many confirm requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleConfirmBooking(req, res);
   }
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
