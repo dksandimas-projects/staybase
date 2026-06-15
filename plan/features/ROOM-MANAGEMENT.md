@@ -43,6 +43,7 @@ The `/rooms` dashboard page for editing all rooms. Staff can update room details
 - [ ] Photo delete: remove URL from `imageUrls[]` via `updateDoc`, optionally delete from Storage
 - [ ] Active toggle: `updateDoc` sets `isActive: true/false`
 - [ ] Status change to Blocked: require `blockReason` — do not allow save without it
+- [ ] **Block a room for a date range**: write `blockedFrom: Timestamp`, `blockedTo: Timestamp`, `blockReason: string` to the room doc *(Per `DECISIONS-FEATURES.md #78`)*. The booking creation transaction iterates the room's active block ranges and rejects any booking whose dates overlap. The previous lossy approach (string-encoding the date range into `blockReason`) is replaced.
 - [ ] Never delete a room document — only deactivate
 
 ## Edge Cases & States
