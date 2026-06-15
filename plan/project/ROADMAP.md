@@ -307,7 +307,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Spark Essentials — store GCash QR/account info management in Admin Settings; guest checkout already consumes `settings/storeConfig.paymentMethods[].qrUrl/accountInfo`
 - ✅ Intercom Inbox — render guest store order messages as rich order cards with item/total/payment summary and a link to Store Management
 - ⬜ Intercom Inbox — verify incoming call notification sound and active-call banner behavior in real browsers
-- ⬜ Guest Intercom — decide whether unread pulse and long-thread pagination are launch requirements or Phase 10 polish
+- ✅ Guest Intercom — unread pulse and long-thread pagination are deferred to Phase 10 polish; Phase 8 launch keeps real-time chat, auto-scroll, and immediate read marking
 - ⬜ Phase 8 manual QA — end-to-end QR scan → guest chat → admin reply → voice call → store order → status update → cancellation/billing across desktop and mobile browsers
 
 ---
@@ -334,6 +334,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ `FIREBASE_PRIVATE_KEY` newline handling verified in Admin SDK init
 - ⬜ Firebase API key domain restriction set in Firebase Console
 - ⬜ Performance audit — guest site < 3s on 4G mobile, dashboard < 2s
+- ⬜ Guest Intercom polish — unread pulse for front-desk replies when the guest is away from Chat, plus long-thread pagination/virtualization if live usage shows large room threads
 - ⬜ Cross-browser QA — Chrome, Safari, Firefox
 - ⬜ Mobile QA — iOS Safari, Android Chrome (375px)
 

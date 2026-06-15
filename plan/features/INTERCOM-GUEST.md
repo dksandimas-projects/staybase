@@ -32,7 +32,7 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 - [x] Quick request chip tap — sends a styled badge message in the thread (visually distinct from typed messages)
 - [x] Text input + Send button — guests can type freely alongside or instead of quick requests
 - [x] Message timestamps
-- [ ] Unread indicator — subtle pulse when new front desk message arrives
+- [ ] Unread indicator — subtle pulse when new front desk message arrives while the guest is not viewing the Chat tab (Phase 10 polish; not launch-blocking for Phase 8 because visible replies auto-scroll and mark read immediately)
 - [x] Mobile-first layout — full-screen chat on mobile (375px)
 - [x] "spark inn" branding in chat header — warm, not clinical
 - [x] "Shop" tab alongside chat — tab label is `config.storeName`; switches to store panel (see `plan/features/STORE-GUEST.md`)
@@ -106,7 +106,7 @@ calls/{roomId}/iceCandidates/{id}
 - [x] No quick request items configured — hide quick request panel entirely, show text input only
 - [x] Front desk offline / no response — no typing indicator, no "online" status shown — keep it calm
 - [x] Network disconnected — show "You're offline. Reconnecting..." banner
-- [ ] Long message thread — virtualize or paginate to avoid performance issues on mobile
+- [ ] Long message thread — virtualize or paginate after launch if real usage produces large room threads (Phase 10 polish; current launch scope keeps the full active stay thread in one real-time list)
 - [ ] Guest refreshes page — name prompt shown again (local state only)
 
 ## Manual QA
