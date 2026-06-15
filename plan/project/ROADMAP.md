@@ -406,6 +406,47 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ---
 
+## Phase 11.5 — Audit Fixes & Launch-Readiness *(P0 — inserted 2026-06-15)*
+> Goal: Close the launch-blocking SEV-1s from the end-to-end audit before staging is reviewed by the client. Code is structurally complete; this phase fills the day-one production gaps the audit exposed.
+> Source: `plan/project/AUDIT-E2E-2026-06-15.md` (238 findings — 23 SEV-1, 67 SEV-2, 94 SEV-3, 54 SEV-4)
+> Decision source: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (15 of 51 Wave 1 decisions resolved)
+
+### Wave 1 — Decision Triage (2026-06-15) — 15/15 ✅
+- ✅ **#75** Breakfast pricing model: add-on only (drop `includedInRoomRate`)
+- ✅ **#76** Contact form on `/contact` in scope for Phase 1 (wire to `/api/contact`) — see `plan/features/CONTACT-INQUIRIES.md`
+- ✅ **#77** `payment-confirmed` is a real state — set on full payment, admin Confirm flips to `confirmed`
+- ✅ **#78** Room block uses structured `blockedFrom`/`blockedTo` Timestamp fields
+- ✅ **#79** `isCorporate` is server-authoritative — client sends only `corporateCode`, server increments `usageCount`
+- ✅ **#80** Store stock decremented on `confirmed`, not `placed` (reverses contradicting STORE-MANAGEMENT.md text)
+- ✅ **#81** Vouchers live in Rates page, not Settings
+- ✅ **#82** Booking Confirmation Receipt PDF is in scope for Phase 1
+- ✅ **#83** Cron idempotency marker `reminderSentAt` is required
+- ✅ **#84** `booking.checkIn`/`checkOut` always stored as Firestore `Timestamp`
+- ✅ **#85** `AdminContext.members` uses real `onSnapshot`, not `useState` mock
+- ✅ **#86** Developer's personal name removed from default payment-method `accountName` (hard rule)
+- ✅ **#87** Honeypot inputs always inside the `<form>`, hidden via CSS
+- ✅ **#88** Housekeeping cycle: `clean → dirty → in-progress → clean` (per spec; code was wrong)
+
+### Launch-Readiness Sprint — 5 SEV-1 fixes (highest blast-radius, lowest effort)
+Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
+
+- [ ] **SEV-1 #1** Add `store-orders/{roomNumber}/payment-proof/` Storage rule — closes the 403 every GCash in-room store order hits. File: `firebase/storage.rules`. Branch: `fix/audit-storage-store-orders`. Effort: XS.
+- [ ] **SEV-1 #2** Fix CORS: replace `Access-Control-Allow-Origin: *` + `Allow-Credentials: true` with explicit allowlist from `config.domain` + `config.adminDomain`. File: `guest-app/api/[...route].ts:163-170`. Branch: `fix/audit-cors-allowlist`. Effort: XS.
+- [ ] **SEV-1 #3** Member discount applied server-side in `handleCreateBooking` — verify ID token, look up `memberId`, read `rewardsConfig.memberDiscountPct`, apply as 3rd stacking step. Closes the silent overcharge for Spark Rewards members. Files: `guest-app/api/handlers/bookings.ts`, `guest-app/src/pages/BookingPage.tsx:97` (drop TODO + hardcoded 10%). Branch: `fix/audit-member-discount-server`. Effort: M.
+- [ ] **SEV-1 #4** Lowercase `guestEmail` on write + read paths — fixes "No stays yet" for mixed-case emails, unbreaks self-cancel + lookup. Files: `guest-app/api/handlers/bookings.ts` (3 handlers), `guest-app/src/pages/StaysPage.tsx:47`. Branch: `fix/audit-email-case-lowercase`. Effort: S.
+- [ ] **SEV-1 #5** Replace `useState<Member[]>` mock in `AdminContext` with real `onSnapshot(collection(db, "members"))` listener. File: `admin-app/src/context/AdminContext.tsx:949-996`. Branch: `fix/audit-admin-members-listener`. Effort: M.
+
+### Deferred to Phase 11.6 (post-launch polish)
+36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4). Tackle in `docs:` commits alongside the SEV-1/2/3 fixes from the audit.
+
+### References
+- Audit report: `plan/project/AUDIT-E2E-2026-06-15.md`
+- Open questions: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md`
+- Decisions: `plan/docs/DECISIONS-FEATURES.md` (#75-#88)
+- Specs updated: `EMAIL-PDF-STORAGE.md`, `ROOM-MANAGEMENT.md`, `STORE-MANAGEMENT.md`, `TYPES.md`, `CONTACT-INQUIRIES.md` (new), `STATIC-PAGES.md`, `API-ROUTES.md`
+
+---
+
 ## Plan Audit Fixes — June 10, 2026
 > Source: mid-build plan audit (see `Spark Inn/mid-audit.md`)
 > Fix these before or during the phase they block. Grouped by priority.
@@ -525,6 +566,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
+| 11.5 — Audit Fixes & Launch-Readiness | 20 | 15 | 5 (5 SEV-1 launch-readiness fixes — see phase section) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **279** | **249** | **30** |
