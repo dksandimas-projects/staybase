@@ -48,7 +48,7 @@ Guest member routes require a valid Firebase ID token for the signed-in guest. T
 | `/api/email/booking-cancelled` | Booking cancelled | Guest |
 | `/api/email/discount-rejected` | Staff rejects Senior/PWD discount ID | Guest |
 | `/api/email/corporate-inquiry` | New corporate inquiry submitted | Staff (admin email) |
-| `/api/email/early-checkin-request` | *(Phase 10B — planned)* Guest requests early check-in via Intercom | Staff (admin email) |
+| `/api/email/early-checkin-request` | Spark Rewards member requests early check-in for an upcoming booking (from My Rewards page or Intercom) | Staff (admin email) |
 
 All email routes use Resend. Templates are defined server-side. See `plan/features/EMAIL-PDF-STORAGE.md` for full email flow details.
 
@@ -66,6 +66,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | `/api/bookings/lookup` | POST | None (owner by ref+email) | Look up a single booking by `bookingRef` + `guestEmail` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}` |
 | `/api/bookings/add-payment` | POST | Staff | Append onsite payment audit record to `bookings/{bookingId}/payments`; fires `payment-confirmed` email when running total reaches `totalPrice` |
 | `/api/bookings/confirm` | POST | Staff | Flip `pending`/`payment-uploaded` → `confirmed`; fires `booking-confirmed` email |
+| `/api/bookings/checkout` | POST | Staff | Flip `checked-in` → `checked-out`; atomically frees the room (`status: "available"`, `housekeepingStatus: "dirty"`) and, if the booking is linked to a Spark Rewards member (or the guest email matches an existing member), awards points per `settings/rewardsConfig.earningMode` (`per-spend` or `per-booking`) and writes a `members/{uid}/pointsHistory` entry. Falls back gracefully (no points) if points are disabled. |
 | `/api/bookings/reject-discount` | POST | Staff | Reject Senior/PWD discount ID — restores `totalPrice`, sets rejection fields, triggers discount-rejected email |
 
 Booking creation MUST use a Firestore transaction to prevent double-booking. Public online and corporate bookings use `/api/bookings/create`; staff walk-in/manual bookings use `/api/bookings/create-walkin`. Both routes must perform room active/blocked checks, overlapping booking checks, and booking reference generation inside the transaction. Public online and corporate clients preallocate the Firestore booking document ID before Storage uploads and pass that ID to `/api/bookings/create`; the API creates the document at that exact ID while generating only the guest-facing booking reference inside the transaction. See `plan/features/AVAILABILITY-LOCKING.md`.
