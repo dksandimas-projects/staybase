@@ -93,7 +93,12 @@ export function IntercomPage() {
   const [activeTab, setActiveTab] = useState<"chat" | "shop">("chat");
 
   // Chat States
+  const INITIAL_MESSAGE_LIMIT = 50;
+  const LOAD_MORE_STEP = 30;
+
   const [messages, setMessages] = useState<Message[]>([]);
+  const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
+  const [messageLimit, setMessageLimit] = useState(INITIAL_MESSAGE_LIMIT);
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [typedMessage, setTypedMessage] = useState<string>("");
   const [isRoomLoading, setIsRoomLoading] = useState<boolean>(true);
@@ -104,6 +109,7 @@ export function IntercomPage() {
   const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
   const [messageError, setMessageError] = useState<string>("");
   const [storeError, setStoreError] = useState<string>("");
+  const [unreadFromFrontDesk, setUnreadFromFrontDesk] = useState(0);
 
   // Cart & Shop States
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -271,7 +277,8 @@ export function IntercomPage() {
 
     const messagesQuery = query(
       collection(db, "intercoms", roomNumber, "messages"),
-      orderBy("timestamp", "asc")
+      orderBy("timestamp", "asc"),
+      limit(messageLimit)
     );
 
     const unsubscribe = onSnapshot(
@@ -294,12 +301,26 @@ export function IntercomPage() {
             isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
           } satisfies Message;
         });
+
+        setAllMessagesLoaded(snapshot.docs.length < messageLimit);
         setMessages(liveMessages);
 
-        const unreadFrontDeskMessages = liveMessages.filter((message) => message.sender === "front-desk" && !message.isRead);
-        unreadFrontDeskMessages.forEach((message) => {
-          void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
-        });
+        // Only mark as read when guest is on the Chat tab
+        if (activeTab === "chat") {
+          const unreadFrontDeskMessages = liveMessages.filter(
+            (message) => message.sender === "front-desk" && !message.isRead
+          );
+          unreadFrontDeskMessages.forEach((message) => {
+            void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+          });
+          setUnreadFromFrontDesk(0);
+        } else {
+          // On Shop tab — count unread for the pulse indicator
+          const count = liveMessages.filter(
+            (message) => message.sender === "front-desk" && !message.isRead
+          ).length;
+          setUnreadFromFrontDesk(count);
+        }
       },
       (error) => {
         console.error("Failed to listen to intercom messages:", error);
@@ -308,7 +329,22 @@ export function IntercomPage() {
     );
 
     return unsubscribe;
-  }, [isValidRoom, roomNumber]);
+  }, [isValidRoom, roomNumber, messageLimit, activeTab]);
+
+  // Mark unread FD messages as read when guest switches to Chat tab
+  useEffect(() => {
+    if (activeTab !== "chat" || !roomNumber || !isValidRoom) return;
+    const unreadOnChat = messages.filter((m) => m.sender === "front-desk" && !m.isRead);
+    if (unreadOnChat.length === 0) return;
+    unreadOnChat.forEach((message) => {
+      void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+    });
+    setUnreadFromFrontDesk(0);
+  }, [activeTab, messages, roomNumber, isValidRoom]);
+
+  const handleLoadMore = () => {
+    setMessageLimit((prev) => prev + LOAD_MORE_STEP);
+  };
 
   useEffect(() => {
     if (!isStoreEnabled) {
@@ -998,7 +1034,7 @@ export function IntercomPage() {
           <div className="flex border-t border-white/10 pt-2.5 mt-1">
             <button
               onClick={() => setActiveTab("chat")}
-              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 relative ${
                 activeTab === "chat" 
                   ? "border-primary text-primary" 
                   : "border-transparent text-gray-400 hover:text-gray-200"
@@ -1006,6 +1042,11 @@ export function IntercomPage() {
             >
               <MessageSquare size={14} />
               Chat Support
+              {unreadFromFrontDesk > 0 && activeTab !== "chat" && (
+                <span className="absolute -top-1 right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-pulse">
+                  {unreadFromFrontDesk > 9 ? "9+" : unreadFromFrontDesk}
+                </span>
+              )}
             </button>
             {isStoreEnabled && (
               <button
@@ -1042,6 +1083,16 @@ export function IntercomPage() {
                   <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
                     {messageError}
                   </div>
+                )}
+
+                {!allMessagesLoaded && messages.length >= messageLimit && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    className="mx-auto block min-h-[32px] px-4 rounded-lg border border-gray-200 bg-white text-[10px] font-bold text-gray-500 hover:bg-gray-50 hover:text-primary transition"
+                  >
+                    Load earlier messages
+                  </button>
                 )}
 
                 {displayMessages.map((msg) => (
