@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 13, 2026 (closed AUDIT-44 Spark Rewards enrollment API contradiction)
+> Last updated: June 15, 2026 (closed AUDIT-6 member points API routes)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -397,7 +397,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### 🔴 Fix before Phase 10B — Spark Rewards
 
-- ⬜ **[AUDIT-6]** Extend `api/handlers/members.ts` with `/api/members/redeem-points` and `/api/members/undo-redemption`, and define those remaining member points routes in API-ROUTES.md (`/api/members/register` is covered by AUDIT-44)
+- ✅ **[AUDIT-6]** Extend `api/handlers/members.ts` with `/api/members/redeem-points` and `/api/members/undo-redemption`, and define those remaining member points routes in API-ROUTES.md (`/api/members/register` is covered by AUDIT-44). Added transactional redemption and admin-only undo handlers, route dispatch, and API tests covering insufficient balance, booking/member/history updates, and undo restrictions.
 - ⬜ **[AUDIT-6b]** Add `api/handlers/store.ts` and define `/api/store/create-order` in API-ROUTES.md
 - ⬜ **[AUDIT-6c]** Add `api/handlers/admin.ts` and define `/api/admin/create-staff`, `/api/admin/disable-staff` in API-ROUTES.md
 - ✅ **[AUDIT-7]** Add `isEarlyCheckInRequest?: boolean` to `IntercomMessage` type in `TYPES.md` and `BACKEND.md §intercoms`

@@ -10,7 +10,7 @@ import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleRegisterMember } from "./handlers/members";
+import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { adminAuth } from "./lib/firebase-admin";
@@ -26,12 +26,13 @@ const publicEmailActions = new Set([
   "discount-rejected"
 ]);
 
-async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
+async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; role?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
     return {
       success: true,
       uid: "mock_staff_uid",
-      email: "mock_staff@sparkinn.com"
+      email: "mock_staff@sparkinn.com",
+      role: "admin"
     };
   }
 
@@ -49,7 +50,8 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
     return {
       success: true,
       uid: decodedToken.uid,
-      email: decodedToken.email
+      email: decodedToken.email,
+      role: decodedToken.role
     };
   } catch (err) {
     console.error("Token verification failed:", err);
@@ -316,6 +318,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).user = authResult;
     return await handleRegisterMember(req, res);
+  }
+
+  if (domain === "members" && action === "redeem-points" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleRedeemMemberPoints(req, res);
+  }
+
+  if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can undo points redemption." });
+    }
+    (req as any).staff = authResult;
+    return await handleUndoMemberPointsRedemption(req, res);
   }
 
   if (domain === "store" && action === "create-order" && req.method === "POST") {
