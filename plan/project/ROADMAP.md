@@ -450,11 +450,31 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 - ~18 remaining SEV-1s from the audit (not in the launch-readiness top 5)
 - ~67 SEV-2s — high-impact cross-feature bugs
 
+### Wave 2 — Decision Triage (2026-06-15) — 15/15 Decided, 0/15 Implemented
+
+15 more spec questions resolved. Documented in `DECISIONS-FEATURES.md` #89-#103. Build deferred to Phase 1.5 or 11.6.
+
+- **Decided** — **#89** Overlapping bookings by same email are **allowed** (per-room conflict check only)
+- **Decided** — **#90** Member discount via `Authorization: Bearer <idToken>` header — server verifies and applies as 3rd stacking step; client cannot supply a `memberDiscountPct`
+- **Decided** — **#91** Past-booking linkage beyond email — **deferred to Phase 2** (no "claim past stays" UI in Phase 1)
+- **Decided** — **#92** Early check-in with multiple upcoming bookings: pick first confirmed/checked-in by `checkIn` ascending; show picker if > 1; error if 0
+- **Decided** — **#93** No member-registration welcome email in Phase 1; remove the "Welcome Gift" copy from `RewardsLandingPage`
+- **Decided** — **#94** Multiple concurrent calls in admin inbox: **second wins** (old call gets `status: "ended"`)
+- **Decided** — **#95** Auto-archive intercom thread on checkout: set `intercoms/{roomNumber}.resolved = true` in the checkout transaction
+- **Decided** — **#96** Cancellation messages render as a distinct greyed "Cancelled" visual state in both guest and admin views
+- **Decided** — **#97** Notification sound mute: `localStorage` per-staff, `Bell`/`BellOff` icon in inbox header
+- **Decided** — **#98** `calls/{roomId}` retention: delete after 30s grace once both sides have observed `status: "ended"`
+- **Decided** — **#99** LOU for corporate chargeback: **not collected in Phase 1** — replace fake upload with a note; staff tracks via `louReceived: boolean` on the booking drawer
+- **Decided** — **#100** Corporate bookings never accept promo vouchers (`voucherDiscount: 0` is correct)
+- **Decided** — **#101** Negotiated corporate rate model: **flat rate per room type** via `ratePerRoomType: Record<roomType, rate>`; UI label "Negotiated rate applied"
+- **Decided** — **#102** Converted-inquiry bookings get `linkedInquiryId?: string` on the booking doc (added to `Booking` type)
+- **Decided** — **#103** Booking source for a converted inquiry is `"corporate"`
+
 ### References
 - Audit report: `plan/project/AUDIT-E2E-2026-06-15.md`
 - Open questions: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md`
-- Decisions: `plan/docs/DECISIONS-FEATURES.md` (#75-#88)
-- Specs updated: `EMAIL-PDF-STORAGE.md`, `ROOM-MANAGEMENT.md`, `STORE-MANAGEMENT.md`, `TYPES.md`, `CONTACT-INQUIRIES.md` (new), `STATIC-PAGES.md`, `API-ROUTES.md`
+- Decisions: `plan/docs/DECISIONS-FEATURES.md` (#75-#103)
+- Specs updated: `EMAIL-PDF-STORAGE.md`, `ROOM-MANAGEMENT.md`, `STORE-MANAGEMENT.md`, `TYPES.md`, `CONTACT-INQUIRIES.md` (new), `STATIC-PAGES.md`, `API-ROUTES.md`, `CORPORATE-BOOKING.md`, `INTERCOM-INBOX.md`
 
 ---
 
@@ -582,7 +602,7 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **279** | **249** | **30** |
 
-*Phase 11.5 is shown as 0/20 in the table above because none of the SEV-1 fixes are implemented yet; the 15 Wave 1 decisions are tracked separately in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` as "decided but not implemented". They contribute to "Spec closure" rather than the implementation count.*
+*Phase 11.5 is shown as 0/20 in the table above because none of the SEV-1 fixes are implemented yet; the 30 Wave 1+2 decisions are tracked separately in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` as "decided but not implemented". They contribute to "Spec closure" rather than the implementation count.*
 
 ---
 

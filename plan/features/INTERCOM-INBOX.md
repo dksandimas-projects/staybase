@@ -83,6 +83,9 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Tab title shows unread count when messages are unread
 - [ ] Mark as Resolved moves conversation to Resolved tab
 - [x] Sidebar nav badge shows correct unread count
+- [ ] **Sound mute toggle** *(Per `DECISIONS-FEATURES.md #97`)* — `Bell` / `BellOff` icon in inbox header. Persists in `localStorage` under `notif_sound_muted`. `playNotificationSound` early-returns when muted.
+- [ ] **Second concurrent call wins** *(Per `DECISIONS-FEATURES.md #94`)* — accepting a new call writes `status: "ended", endedAt: serverTimestamp()` to the old call doc, then accepts the new one. The previous guest's UI sees the call end via snapshot listener.
+- [ ] **Cancellation messages render as greyed-out "Cancelled" cards** *(Per `DECISIONS-FEATURES.md #96`)* — distinct from placed-order cards in both guest chat and admin inbox.
 
 ## References
 

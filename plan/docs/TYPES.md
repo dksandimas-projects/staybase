@@ -99,6 +99,8 @@ Booking {
   paymentMethod: PaymentMethod
   paymentProofUrl: string
   source: BookingSource
+  linkedInquiryId: string | null     // set when created from a converted corporate inquiry (per `DECISIONS-FEATURES.md #102`)
+  louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99`)
   notes: string
   memberId: string | null
   pointsRedeemed: number              // points redeemed by staff (0 if none)
