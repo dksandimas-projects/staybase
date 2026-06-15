@@ -329,8 +329,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Reports page (`/reports`) — restructured into **Performance** + **Sales** tabs; Performance shows occupancy by room type, acquisition channels, and revenue trend; Sales shows 4 revenue KPI cards (Total/Room/Breakfast/Store), stacked bar by stream, revenue trend line, combined payment method pie with `Add to Bill = Uncollected` label, and sub-tabbed detail tables (Bookings / Breakfast / Store Orders) with search. CSV + Sales XLSX export (4 sheets via SheetJS). All aggregation live against `bookings` + `storeOrders` + `breakfastConfig` from context. PDF export and Full Data Backup (admin-only 8-sheet XLSX) deferred.
 - ✅ Settings page (`/settings`) — 9 settings surfaces wired: Hotel Info, Room Types, Website Content, Loyalty Rewards, Breakfast & Dining, In-Room Store (all 6 existing tabs); Email Config (read-only env var display + 7 active email triggers list), Intercom (quick requests CRUD + notification sound URL + preview), Legal Content (Privacy Policy body / Cancellation Policy / House Rules textareas sourced to `websiteContent.*` — also closes AUDIT-25 / PrivacyPage body wiring). Payment Methods + Staff Accounts + Discounts + Vouchers accessible via RatesPage and MembersPage respectively.
 - ✅ Guest registration data capture wireframe — booking drawer at check-in
-- ⬜ Guest Registration PDF (jsPDF) — pre-filled from booking, printable at check-in
-- ⬜ Wire `/privacy` page body to source from `settings/websiteContent.privacyPolicyBody` (AUDIT-25) — current body is hardcoded in `PrivacyPage.tsx` and reads only `config.legalName` / `config.applicableLaw` / `config.privacyPolicyLastUpdated`. Until Settings → Legal Content tab ships, page violates the white-label rule for hotels that need a custom privacy policy beyond config tokens.
+- ✅ Guest Registration PDF (jsPDF) — enhanced `printRegistrationPDF()` in admin BookingsPage.tsx: pre-filled booking + registration details; guest ID photo fetched via `fetch` and embedded as base64 image (RA 11862 compliance) with "Attach ID here" placeholder box when absent; house rules section from `websiteContent.houseRules` with agreement checkbox; physical signature + date lines; breakfast grid now shows per-cell checkbox options for each active silog item when no selection is yet recorded (pre-filled ✓ when selected); header, info, footer preserved. Triggered via "Preview Registration PDF" button in booking detail drawer.
+- ✅ Wire `/privacy` page body to source from `settings/websiteContent.privacyPolicyBody` (AUDIT-25) — `PrivacyPage.tsx` now fetches `settings/websiteContent` on mount via `getDoc`; renders admin-authored `privacyPolicyBody` when set; falls back to deployment-configured content when blank. `privacyPolicyLastUpdated` auto-set from admin Settings → Legal Content tab.
 
 ---
 
@@ -508,12 +508,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
-| 9 — Remaining Features | 6 | 4 | 2 |
+| 9 — Remaining Features | 6 | 6 | 0 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
 | Audit Fixes | 46 | 16 | 30 |
-| **Total** | **215** | **133** | **82** |
+| **Total** | **215** | **134** | **81** |
 
 ---
 
