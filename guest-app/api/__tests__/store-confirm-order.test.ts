@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mockState = vi.hoisted(() => ({
-  storeOrders: {} as Record<string, any>
+  storeOrders: {} as Record<string, any>,
+  storeItems: {} as Record<string, any>,
+  bookings: [] as any[],
+  settings: {} as Record<string, any>,
+  counters: {} as Record<string, any>,
+  writes: [] as { type: string; path: string; data: any }[],
+  newDocCounter: 0
 }));
 
 vi.mock("../lib/firebase-admin", () => {
@@ -9,11 +15,34 @@ vi.mock("../lib/firebase-admin", () => {
     const [coll, docId] = path.split("/");
     return {
       path,
+      id: docId,
       get: async () => {
         if (coll === "storeOrders" && mockState.storeOrders[docId]) {
           return {
             exists: true,
+            id: docId,
             data: () => mockState.storeOrders[docId]
+          };
+        }
+        if (coll === "storeItems" && mockState.storeItems[docId]) {
+          return {
+            exists: true,
+            id: docId,
+            data: () => mockState.storeItems[docId]
+          };
+        }
+        if (coll === "settings" && mockState.settings[docId]) {
+          return {
+            exists: true,
+            id: docId,
+            data: () => mockState.settings[docId]
+          };
+        }
+        if (coll === "counters" && mockState.counters[docId]) {
+          return {
+            exists: true,
+            id: docId,
+            data: () => mockState.counters[docId]
           };
         }
         return { exists: false };
@@ -21,16 +50,44 @@ vi.mock("../lib/firebase-admin", () => {
     };
   };
 
+  const collection = vi.fn().mockImplementation((collName: string) => ({
+    doc: (docId?: string) => createDocRef(`${collName}/${docId || `generated_${++mockState.newDocCounter}`}`),
+    where: function (field: string, op: string, value: any) {
+      return { ...this, field, op, value };
+    },
+    limit: function (count: number) {
+      return { ...this, limitCount: count };
+    }
+  }));
+
   return {
     adminDb: {
-      collection: vi.fn().mockImplementation((collName: string) => ({
-        doc: (docId: string) => createDocRef(`${collName}/${docId}`)
-      }))
+      collection,
+      runTransaction: vi.fn().mockImplementation(async (callback) => {
+        await callback({
+          get: vi.fn().mockImplementation(async (ref: any) => {
+            if (ref.path) return ref.get();
+            if (ref.limitCount === 1) {
+              return {
+                empty: mockState.bookings.length === 0,
+                docs: mockState.bookings
+              };
+            }
+            return { empty: true, docs: [] };
+          }),
+          set: vi.fn().mockImplementation((ref: any, data: any) => {
+            mockState.writes.push({ type: "set", path: ref.path, data });
+          }),
+          update: vi.fn().mockImplementation((ref: any, data: any) => {
+            mockState.writes.push({ type: "update", path: ref.path, data });
+          })
+        });
+      })
     }
   };
 });
 
-import { handleGetStoreOrderStatus } from "../handlers/store";
+import { handleCreateStoreOrder, handleGetStoreOrderStatus } from "../handlers/store";
 
 const mockResponse = () => {
   const res: any = {};
@@ -51,7 +108,116 @@ describe("/api/store/order-status", () => {
         updatedAt: { toDate: () => new Date("2026-06-12T10:30:00.000Z") }
       }
     };
+    mockState.storeItems = {
+      "coffee": {
+        name: "Cold Brew",
+        price: 120,
+        stock: 5,
+        isActive: true
+      },
+      "tea": {
+        name: "Hot Tea",
+        price: 90,
+        stock: null,
+        isActive: true
+      }
+    };
+    mockState.bookings = [{ id: "booking_123" }];
+    mockState.settings = {
+      storeConfig: {
+        isEnabled: true,
+        paymentMethods: [
+          { method: "cod", isEnabled: true },
+          { method: "gcash", isEnabled: true },
+          { method: "add-to-bill", isEnabled: true }
+        ]
+      }
+    };
+    mockState.counters = {
+      "store-orders-2026-06-15": { count: 4 }
+    };
+    mockState.writes = [];
+    mockState.newDocCounter = 0;
     vi.clearAllMocks();
+  });
+
+  test("creates an order with server-side stock decrement and active booking lookup", async () => {
+    const req = {
+      method: "POST",
+      body: {
+        roomId: "room_202",
+        roomNumber: "202",
+        guestName: "Maria Santos",
+        items: [
+          { itemId: "coffee", quantity: 2 },
+          { itemId: "tea", quantity: 1 }
+        ],
+        paymentMethod: "cod"
+      }
+    };
+    const res = mockResponse();
+
+    await handleCreateStoreOrder(req, res);
+
+    expect(mockState.writes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "update",
+        path: "storeItems/coffee",
+        data: expect.objectContaining({ stock: 3 })
+      }),
+      expect.objectContaining({
+        type: "update",
+        path: "counters/store-orders-2026-06-15",
+        data: { count: 5 }
+      }),
+      expect.objectContaining({
+        type: "set",
+        path: "storeOrders/generated_1",
+        data: expect.objectContaining({
+          orderRef: expect.stringMatching(/^SO-\d{8}-005$/),
+          roomNumber: "202",
+          bookingId: "booking_123",
+          guestName: "Maria Santos",
+          totalAmount: 330,
+          paymentMethod: "cod",
+          status: "placed"
+        })
+      })
+    ]));
+    expect(mockState.writes.some((write) => write.path === "storeItems/tea")).toBe(false);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        orderId: "generated_1",
+        orderRef: expect.stringMatching(/^SO-\d{8}-005$/),
+        totalAmount: 330,
+        bookingId: "booking_123"
+      })
+    });
+  });
+
+  test("rejects create-order when stock is insufficient", async () => {
+    mockState.storeItems.coffee.stock = 1;
+    const req = {
+      method: "POST",
+      body: {
+        roomId: "room_202",
+        roomNumber: "202",
+        guestName: "Maria Santos",
+        items: [{ itemId: "coffee", quantity: 2 }],
+        paymentMethod: "cod"
+      }
+    };
+    const res = mockResponse();
+
+    await handleCreateStoreOrder(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "One of the selected items no longer has enough stock."
+    });
   });
 
   test("returns only guest-safe status metadata for a matching order", async () => {
@@ -109,8 +275,4 @@ describe("/api/store/order-status", () => {
       error: "Missing required order status fields."
     });
   });
-
-  test.todo("decrements stock when an order is confirmed");
-  test.todo("restores stock when an order is cancelled before confirmation");
-  test.todo("allows unlimited stock items without decrementing");
 });
