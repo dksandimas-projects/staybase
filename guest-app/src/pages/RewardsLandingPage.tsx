@@ -278,13 +278,13 @@ export function RewardsLandingPage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary mb-6">
                   <Gift size={24} />
                 </div>
-                <h4 className="font-heading text-xl md:text-2xl text-gray-950">Welcome Gift</h4>
+                <h4 className="font-heading text-xl md:text-2xl text-gray-950">Welcome to the Program</h4>
                 <p className="mt-3 text-sm leading-relaxed text-gray-600 max-w-md">
-                  Feel at home immediately. A little welcome item, from local Bohol snacks to hand-packaged amenities, is placed in your room on arrival.
+                  Earn points on every stay, redeem for complimentary nights and curated local experiences. We're glad to have you.
                 </p>
               </div>
               <div className="mt-6 text-xs italic text-gray-500">
-                Curated by our Bohol organic farm partners
+                No welcome email for Phase 1 — per `DECISIONS-FEATURES.md #93`
               </div>
               <div className="absolute -bottom-6 -right-6 text-gray-100 opacity-20 pointer-events-none group-hover:scale-110 transition duration-300">
                 <Gift size={120} />
