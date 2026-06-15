@@ -354,20 +354,20 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 10B — Spark Rewards (P1)
 > Goal: Guest auth + member portal working. Loyalty rules deferred to Phase 2.
 
-- ⬜ Firebase Auth — Google Sign-In provider enabled in Firebase Console
-- ⬜ Guest auth context — `onAuthStateChanged`, separate from admin auth
-- ⬜ Sign-in page (`/signin`) — Google + email/password
-- ⬜ Sign-up page (`/signup`) — Google + email/password + profile fields
-- ⬜ Forgot password flow
-- ⬜ Navbar — member state (logged in/out), dropdown menu
-- ⬜ Spark Rewards landing page (`/rewards`) — program overview + enroll CTA
-- ⬜ Member registration — post-booking Step 4 prompt + standalone
-- ⬜ Past booking linkage by email on registration
-- ⬜ Member portal — My Profile (`/account/profile`)
-- ⬜ Member portal — My Stays (`/account/stays`)
-- ⬜ Member portal — My Rewards (`/account/rewards`) — points balance + history + early check-in request
-- ⬜ Admin — Members management page (list, detail drawer, manual points adjustment)
-- ⬜ Firestore rules for `members/` collection
+- ⬜ Firebase Auth — Google Sign-In provider enabled in Firebase Console (operational task — code side done; requires Firebase Console > Authentication > Sign-in method > Google > Enable)
+- ✅ Guest auth context — `GuestAuthContext.tsx` with `onAuthStateChanged`, `signInWithEmail`, `signUpWithEmail`, `signInWithGoogle`, `signOut`, `sendPasswordReset`; separate from admin auth context (`AdminContext.tsx`)
+- ✅ Sign-in page (`/signin`) — Google Sign-In + email/password form + forgot password flow; wired to real Firebase Auth; redirects to `/account/profile`
+- ✅ Sign-up page (`/signup`) — email/password + Google + first/last/phone/consent; auto-calls `/api/members/register` after auth; redirects to `/account/profile`
+- ✅ Forgot password flow — inline on SignInPage via `sendPasswordResetEmail()`; shows success/error messages
+- ✅ Navbar — member state (logged in/out), dropdown with My Profile/My Stays/My Rewards + points badge + sign out; mobile menu support
+- ✅ Spark Rewards landing page (`/rewards`) — program overview + enroll CTA (was already wired from Phase 0.5 wireframe pass)
+- ✅ Member registration — post-booking Step 4 prompt (BookingConfirmPage.tsx:177-200 "Join Spark Rewards" CTA with signup + learn more links); standalone signup at `/rewards`; `/api/members/register` API handler with sequential `memberNumber` generation
+- ✅ Past booking linkage by email on registration — handled server-side by `/api/members/register` handler (queries `bookings` by `guestEmail`, updates `memberId`)
+- ✅ Member portal — My Profile (`/account/profile`) — live member data from `useGuestAuth()`; editable name/phone; Spark Rewards card with points balance + member number; change password (email/password accounts); delete account with RA 10173 erasure confirmation modal
+- ✅ Member portal — My Stays (`/account/stays`) — live Firestore query on `bookings` by `guestEmail`; upcoming/past/cancelled sections; status badges; room + dates + total
+- ✅ Member portal — My Rewards (`/account/rewards`) — live points balance from `members/{uid}.rewardsPoints`; points history from `members/{uid}/pointsHistory` subcollection; early check-in request info; earning info
+- ✅ Admin — Members management page (`MembersPage.tsx`) — list, detail drawer, manual points adjustment (already wired from earlier phase)
+- ✅ Firestore rules for `members/` collection — `members/{uid}` staff+owner read, create=false (API only), staff+owner update, admin+owner delete; `pointsHistory/{entryId}` staff+owner read, staff create, no update/delete
 
 ---
 
@@ -510,10 +510,10 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
 | 9 — Remaining Features | 6 | 6 | 0 |
 | 10 — Security & Polish | 11 | 7 | 4 (operational/QA) |
-| 10B — Spark Rewards | 14 | 0 | 14 |
+| 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Console config) |
 | 11 — Staging & Launch | 14 | 0 | 14 |
 | Audit Fixes | 46 | 16 | 30 |
-| **Total** | **216** | **141** | **75** |
+| **Total** | **216** | **154** | **62** |
 
 ---
 
