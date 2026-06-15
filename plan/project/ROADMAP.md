@@ -410,25 +410,34 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > Goal: Close the launch-blocking SEV-1s from the end-to-end audit before staging is reviewed by the client. Code is structurally complete; this phase fills the day-one production gaps the audit exposed.
 > Source: `plan/project/AUDIT-E2E-2026-06-15.md` (238 findings — 23 SEV-1, 67 SEV-2, 94 SEV-3, 54 SEV-4)
 > Decision source: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (15 of 51 Wave 1 decisions resolved)
+>
+> **Status legend**:
+> - **Decided** — the spec/approach has been agreed in `DECISIONS-FEATURES.md`; no code change yet
+> - **Implemented** — the code change has shipped on `origin/dev` and tests pass
+> - A decision can be Decided without being Implemented (most are — see Launch-Readiness Sprint below)
 
-### Wave 1 — Decision Triage (2026-06-15) — 15/15 ✅
-- ✅ **#75** Breakfast pricing model: add-on only (drop `includedInRoomRate`)
-- ✅ **#76** Contact form on `/contact` in scope for Phase 1 (wire to `/api/contact`) — see `plan/features/CONTACT-INQUIRIES.md`
-- ✅ **#77** `payment-confirmed` is a real state — set on full payment, admin Confirm flips to `confirmed`
-- ✅ **#78** Room block uses structured `blockedFrom`/`blockedTo` Timestamp fields
-- ✅ **#79** `isCorporate` is server-authoritative — client sends only `corporateCode`, server increments `usageCount`
-- ✅ **#80** Store stock decremented on `confirmed`, not `placed` (reverses contradicting STORE-MANAGEMENT.md text)
-- ✅ **#81** Vouchers live in Rates page, not Settings
-- ✅ **#82** Booking Confirmation Receipt PDF is in scope for Phase 1
-- ✅ **#83** Cron idempotency marker `reminderSentAt` is required
-- ✅ **#84** `booking.checkIn`/`checkOut` always stored as Firestore `Timestamp`
-- ✅ **#85** `AdminContext.members` uses real `onSnapshot`, not `useState` mock
-- ✅ **#86** Developer's personal name removed from default payment-method `accountName` (hard rule)
-- ✅ **#87** Honeypot inputs always inside the `<form>`, hidden via CSS
-- ✅ **#88** Housekeeping cycle: `clean → dirty → in-progress → clean` (per spec; code was wrong)
+### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 0/15 Implemented
+
+These 15 questions from the audit are **decided** (documented in `DECISIONS-FEATURES.md`), but **none of them are implemented yet**. Each becomes an implementation ticket below or in Phase 11.6.
+
+- **Decided** — **#75** Breakfast pricing model: add-on only (drop `includedInRoomRate`)
+- **Decided** — **#76** Contact form on `/contact` in scope for Phase 1 (wire to `/api/contact`) — see `plan/features/CONTACT-INQUIRIES.md`
+- **Decided** — **#77** `payment-confirmed` is a real state — set on full payment, admin Confirm flips to `confirmed`
+- **Decided** — **#78** Room block uses structured `blockedFrom`/`blockedTo` Timestamp fields
+- **Decided** — **#79** `isCorporate` is server-authoritative — client sends only `corporateCode`, server increments `usageCount`
+- **Decided** — **#80** Store stock decremented on `confirmed`, not `placed` (reverses contradicting STORE-MANAGEMENT.md text)
+- **Decided** — **#81** Vouchers live in Rates page, not Settings
+- **Decided** — **#82** Booking Confirmation Receipt PDF is in scope for Phase 1
+- **Decided** — **#83** Cron idempotency marker `reminderSentAt` is required
+- **Decided** — **#84** `booking.checkIn`/`checkOut` always stored as Firestore `Timestamp`
+- **Decided** — **#85** `AdminContext.members` uses real `onSnapshot`, not `useState` mock
+- **Decided** — **#86** Developer's personal name removed from default payment-method `accountName` (hard rule)
+- **Decided** — **#87** Honeypot inputs always inside the `<form>`, hidden via CSS
+- **Decided** — **#88** Housekeeping cycle: `clean → dirty → in-progress → clean` (per spec; code was wrong)
 
 ### Launch-Readiness Sprint — 5 SEV-1 fixes (highest blast-radius, lowest effort)
 Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
+**0/5 implemented.** These are the next concrete work items.
 
 - [ ] **SEV-1 #1** Add `store-orders/{roomNumber}/payment-proof/` Storage rule — closes the 403 every GCash in-room store order hits. File: `firebase/storage.rules`. Branch: `fix/audit-storage-store-orders`. Effort: XS.
 - [ ] **SEV-1 #2** Fix CORS: replace `Access-Control-Allow-Origin: *` + `Allow-Credentials: true` with explicit allowlist from `config.domain` + `config.adminDomain`. File: `guest-app/api/[...route].ts:163-170`. Branch: `fix/audit-cors-allowlist`. Effort: XS.
@@ -437,7 +446,9 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 - [ ] **SEV-1 #5** Replace `useState<Member[]>` mock in `AdminContext` with real `onSnapshot(collection(db, "members"))` listener. File: `admin-app/src/context/AdminContext.tsx:949-996`. Branch: `fix/audit-admin-members-listener`. Effort: M.
 
 ### Deferred to Phase 11.6 (post-launch polish)
-36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4). Tackle in `docs:` commits alongside the SEV-1/2/3 fixes from the audit.
+- 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
+- ~18 remaining SEV-1s from the audit (not in the launch-readiness top 5)
+- ~67 SEV-2s — high-impact cross-feature bugs
 
 ### References
 - Audit report: `plan/project/AUDIT-E2E-2026-06-15.md`
@@ -566,10 +577,12 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 20 | 15 | 5 (5 SEV-1 launch-readiness fixes — see phase section) |
+| 11.5 — Audit Fixes & Launch-Readiness | 20 | 0 | 15 (decisions documented, unimplemented) + 5 (SEV-1 fixes, unimplemented) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **279** | **249** | **30** |
+
+*Phase 11.5 is shown as 0/20 in the table above because none of the SEV-1 fixes are implemented yet; the 15 Wave 1 decisions are tracked separately in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` as "decided but not implemented". They contribute to "Spec closure" rather than the implementation count.*
 
 ---
 
