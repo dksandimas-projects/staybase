@@ -35,7 +35,7 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 - [ ] GCash QR upload and account info for store payments
 
 ### Data & Logic Checklist
-- [ ] `addDoc` / `updateDoc` / `deleteDoc` on `storeItems` collection
+- [x] `addDoc` / `updateDoc` / soft-delete on `storeItems` collection
 - [ ] Stock: `null` = unlimited, `0` = out of stock, `n` = n remaining
 - [ ] Deleting an item: soft-delete (`isActive: false`) if it has existing orders — never hard delete referenced items
 - [ ] Store config saved to `settings/storeConfig` — `isEnabled`, `paymentMethods[]`
