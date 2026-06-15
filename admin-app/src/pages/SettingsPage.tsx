@@ -5,13 +5,13 @@ import {
   Settings, Globe, Gift, Coffee, ShoppingBag, 
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
-  Mail, Users, Scale, MessageSquare, Volume2, GripVertical
+  Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock
 } from "lucide-react";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 
-type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal";
+type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
 type StoreCategory = StoreItem["category"];
 type StorePaymentMethodSetting = {
   method: string;
@@ -43,7 +43,11 @@ export function SettingsPage() {
     storeItems,
     addStoreItem,
     updateStoreItem,
-    deleteStoreItem
+    deleteStoreItem,
+    currentUser,
+    staff,
+    createStaff,
+    disableStaff
   } = useAdmin();
 
   // Active Settings Section Tab
@@ -99,6 +103,18 @@ export function SettingsPage() {
   const [privacyPolicyLastUpdated, setPrivacyPolicyLastUpdated] = useState(
     websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || ""
   );
+
+  // 8. Staff Accounts states
+  const [newStaffName, setNewStaffName] = useState("");
+  const [newStaffEmail, setNewStaffEmail] = useState("");
+  const [newStaffPassword, setNewStaffPassword] = useState("");
+  const [newStaffPhone, setNewStaffPhone] = useState("");
+  const [newStaffRole, setNewStaffRole] = useState<"front-desk" | "admin">("front-desk");
+  const [isCreatingStaff, setIsCreatingStaff] = useState(false);
+  const [staffFormMessage, setStaffFormMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [disablingStaff, setDisablingStaff] = useState<{ uid: string; name: string } | null>(null);
+  const [isDisablingStaff, setIsDisablingStaff] = useState(false);
+  const [disableStaffError, setDisableStaffError] = useState("");
 
   useEffect(() => {
     setStoreEnabled(storeConfig.isEnabled !== false);
@@ -178,6 +194,63 @@ export function SettingsPage() {
     });
     setPrivacyPolicyLastUpdated(new Date().toISOString().slice(0, 10));
   };
+
+  const handleCreateStaffSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!newStaffName.trim() || !newStaffEmail.trim() || newStaffPassword.length < 8) {
+      setStaffFormMessage({ type: "error", text: "Please fill in name, email, and an 8+ character password." });
+      return;
+    }
+    setIsCreatingStaff(true);
+    setStaffFormMessage(null);
+    const result = await createStaff({
+      fullName: newStaffName.trim(),
+      email: newStaffEmail.trim(),
+      password: newStaffPassword,
+      phone: newStaffPhone.trim(),
+      role: newStaffRole
+    });
+    setIsCreatingStaff(false);
+    if (!result.success) {
+      setStaffFormMessage({ type: "error", text: result.error || "Failed to create staff account." });
+      return;
+    }
+    setStaffFormMessage({
+      type: "success",
+      text: `Staff account created for ${newStaffEmail.trim()}. They can sign in now.`
+    });
+    setNewStaffName("");
+    setNewStaffEmail("");
+    setNewStaffPassword("");
+    setNewStaffPhone("");
+    setNewStaffRole("front-desk");
+  };
+
+  const openDisableStaffConfirm = (member: { uid: string; fullName: string }) => {
+    setDisablingStaff({ uid: member.uid, name: member.fullName });
+    setDisableStaffError("");
+  };
+
+  const closeDisableStaffConfirm = () => {
+    if (isDisablingStaff) return;
+    setDisablingStaff(null);
+    setDisableStaffError("");
+  };
+
+  const handleConfirmDisableStaff = async () => {
+    if (!disablingStaff) return;
+    setIsDisablingStaff(true);
+    setDisableStaffError("");
+    const result = await disableStaff(disablingStaff.uid);
+    setIsDisablingStaff(false);
+    if (!result.success) {
+      setDisableStaffError(result.error || "Failed to disable staff account.");
+      return;
+    }
+    setDisablingStaff(null);
+  };
+
+  const isAdmin = currentUser?.role === "admin";
 
   // Toggle item status in local states
   const toggleSilogItem = (id: string) => {
@@ -283,7 +356,8 @@ export function SettingsPage() {
     { id: "store" as const, label: "In-Room Store", icon: ShoppingBag },
     { id: "email" as const, label: "Email Config", icon: Mail },
     { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
-    { id: "legal" as const, label: "Legal Content", icon: Scale }
+    { id: "legal" as const, label: "Legal Content", icon: Scale },
+    { id: "staff" as const, label: "Staff Accounts", icon: UserCog }
   ];
 
   return (
@@ -1436,8 +1510,285 @@ export function SettingsPage() {
               </form>
             </div>
           )}
+
+          {/* TAB 10: STAFF ACCOUNTS (admin-only) */}
+          {activeTab === "staff" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Staff Accounts</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Provision front-desk and admin accounts. All account actions are logged to <code>guests/{`{uid}`}</code> with the operator's UID.</p>
+              </div>
+
+              {!isAdmin ? (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-5 text-xs text-amber-800 flex gap-2.5 items-start">
+                  <Lock size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Admin only</p>
+                    <p className="mt-1 leading-relaxed">Only admin accounts can create or disable staff. Sign in with an admin account to manage the team.</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-xs text-blue-800 flex gap-2.5 items-start">
+                    <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">How staff accounts work</p>
+                      <p className="mt-1 leading-relaxed">New accounts are created via the server-side <code>/api/admin/create-staff</code> route. The Firebase Auth user gets a <code>role</code> custom claim (<code>admin</code> or <code>front-desk</code>). The profile is mirrored to <code>guests/{`{uid}`}</code>. Disabling a staff member revokes their Auth sign-in and marks the profile inactive. You cannot disable your own account, and you cannot disable the last active admin.</p>
+                    </div>
+                  </div>
+
+                  {/* Staff list */}
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Current Staff ({staff.length})</h4>
+                      <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-[10px] font-bold text-gray-600">
+                        <Users size={12} />
+                        {staff.filter(s => s.role === "admin").length} admins, {staff.filter(s => s.role === "front-desk").length} front desk
+                      </span>
+                    </div>
+
+                    {staff.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-gray-250 bg-gray-50 p-8 text-center">
+                        <UserCog size={24} className="mx-auto text-gray-400" />
+                        <h5 className="mt-3 text-sm font-bold text-gray-900">No staff accounts yet</h5>
+                        <p className="mx-auto mt-1 max-w-md text-[10px] leading-relaxed text-gray-500">
+                          Use the form below to create the first admin or front-desk account.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                        <table className="min-w-full divide-y divide-gray-150 text-xs">
+                          <thead>
+                            <tr className="bg-gray-50 text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                              <th className="px-4 py-2.5">Name</th>
+                              <th className="px-4 py-2.5">Email</th>
+                              <th className="px-4 py-2.5">Role</th>
+                              <th className="px-4 py-2.5">Status</th>
+                              <th className="px-4 py-2.5 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 font-medium">
+                            {staff.map((member) => {
+                              const isCurrentUser = member.uid === currentUser?.uid;
+                              return (
+                                <tr key={member.uid} className="text-gray-800 hover:bg-gray-50/50">
+                                  <td className="px-4 py-3 font-semibold text-gray-900">
+                                    {member.fullName || "(no name)"}
+                                    {isCurrentUser ? <span className="ml-2 inline-flex items-center rounded-full bg-primary-light px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-dark">You</span> : null}
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-700 font-mono text-[11px]">{member.email}</td>
+                                  <td className="px-4 py-3">
+                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                      member.role === "admin"
+                                        ? "border-primary/30 bg-primary-light text-primary-dark"
+                                        : "border-gray-200 bg-gray-100 text-gray-600"
+                                    }`}>
+                                      {member.role === "admin" ? "Admin" : "Front Desk"}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                      member.isActive
+                                        ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                                        : "border-gray-200 bg-gray-100 text-gray-500"
+                                    }`}>
+                                      {member.isActive ? "Active" : "Disabled"}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-right">
+                                    {member.isActive ? (
+                                      <button
+                                        type="button"
+                                        disabled={isCurrentUser}
+                                        onClick={() => openDisableStaffConfirm(member)}
+                                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        title={isCurrentUser ? "You cannot disable your own account" : "Disable this staff account"}
+                                      >
+                                        <Lock size={13} />
+                                        Disable
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-gray-400 italic">No actions</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Create staff form */}
+                  <div className="space-y-4 border-t border-gray-150 pt-5">
+                    <h4 className="text-xs font-bold text-gray-750 flex items-center gap-1">
+                      <Plus size={14} className="text-primary" />
+                      Create Staff Account
+                    </h4>
+
+                    <form
+                      onSubmit={handleCreateStaffSubmit}
+                      className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
+                    >
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                          Full Name
+                          <input
+                            type="text"
+                            required
+                            value={newStaffName}
+                            onChange={(e) => setNewStaffName(e.target.value)}
+                            placeholder="Jane Doe"
+                            className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                          Email
+                          <input
+                            type="email"
+                            required
+                            value={newStaffEmail}
+                            onChange={(e) => setNewStaffEmail(e.target.value)}
+                            placeholder="janedoe@sparkinn.com"
+                            className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                          />
+                        </label>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                          Temporary Password
+                          <input
+                            type="text"
+                            required
+                            minLength={8}
+                            value={newStaffPassword}
+                            onChange={(e) => setNewStaffPassword(e.target.value)}
+                            placeholder="At least 8 characters"
+                            autoComplete="new-password"
+                            className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white font-mono"
+                          />
+                          <span className="text-[10px] font-medium text-gray-500">Share securely with the new staff member. They can change it after first sign-in.</span>
+                        </label>
+                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                          Phone (optional)
+                          <input
+                            type="tel"
+                            value={newStaffPhone}
+                            onChange={(e) => setNewStaffPhone(e.target.value)}
+                            placeholder="+63 917 000 0000"
+                            className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                          />
+                        </label>
+                      </div>
+                      <fieldset className="space-y-2">
+                        <legend className="text-xs font-semibold text-gray-700">Role</legend>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label className={`flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border px-3 text-xs font-bold transition ${
+                            newStaffRole === "front-desk"
+                              ? "border-primary/30 bg-primary/5 text-primary-dark"
+                              : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                          }`}>
+                            <input
+                              type="radio"
+                              name="newStaffRole"
+                              value="front-desk"
+                              checked={newStaffRole === "front-desk"}
+                              onChange={() => setNewStaffRole("front-desk")}
+                              className="h-4 w-4 accent-primary"
+                            />
+                            <div>
+                              <div>Front Desk</div>
+                              <div className="text-[10px] font-medium text-gray-500">Bookings, check-in, intercom, dashboard.</div>
+                            </div>
+                          </label>
+                          <label className={`flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border px-3 text-xs font-bold transition ${
+                            newStaffRole === "admin"
+                              ? "border-primary/30 bg-primary/5 text-primary-dark"
+                              : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                          }`}>
+                            <input
+                              type="radio"
+                              name="newStaffRole"
+                              value="admin"
+                              checked={newStaffRole === "admin"}
+                              onChange={() => setNewStaffRole("admin")}
+                              className="h-4 w-4 accent-primary"
+                            />
+                            <div>
+                              <div>Admin</div>
+                              <div className="text-[10px] font-medium text-gray-500">All front-desk access + Settings, Rates, Members.</div>
+                            </div>
+                          </label>
+                        </div>
+                      </fieldset>
+
+                      {staffFormMessage ? (
+                        <div className={`rounded-lg border px-3 py-2 text-[10px] font-semibold ${
+                          staffFormMessage.type === "success"
+                            ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                            : "border-red-100 bg-red-50 text-red-700"
+                        }`}>
+                          {staffFormMessage.text}
+                        </div>
+                      ) : null}
+
+                      <div className="flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={isCreatingStaff}
+                          className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Plus size={14} />
+                          {isCreatingStaff ? "Creating..." : "Create Staff Account"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      <Modal
+        title="Disable staff account?"
+        open={Boolean(disablingStaff)}
+        onClose={closeDisableStaffConfirm}
+      >
+        {disablingStaff ? (
+          <div className="space-y-4 text-xs">
+            <p className="text-xs text-gray-700 leading-relaxed">
+              Disable <span className="font-bold">{disablingStaff.name}</span>? They will be signed out and unable to sign in again. You can re-enable by contacting the development team.
+            </p>
+            {disableStaffError ? (
+              <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-[10px] font-semibold text-red-700">
+                {disableStaffError}
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-2 border-t border-gray-100 pt-4 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDisableStaffConfirm}
+                disabled={isDisablingStaff}
+                className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDisableStaff}
+                disabled={isDisablingStaff}
+                className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-red-650 px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Lock size={14} />
+                {isDisablingStaff ? "Disabling..." : "Disable Account"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
