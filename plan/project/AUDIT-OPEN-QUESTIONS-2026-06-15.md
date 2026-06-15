@@ -89,7 +89,7 @@ These mostly affect cosmetic/polish work, but some are launch-visible (404 versi
 | W4.1 | 1.4 | `roomTypes` configuration for non-standard types — how do they pick up corporate rates? | **Fail-soft** — if `ratePerRoomType[type]` is undefined, fall back to `room.corporateRate`. Log a warning to the admin console. Spec is implicit on this. | 1.4 (open Q) | ☐ |
 | W4.2 | 1.6 | `index.html` static OG meta — how to template for white-label? | **Vite build-time transform** — use a small `transformIndexHtml` plugin that substitutes `config.brandName`, `config.domain`, `config.ogImage` into the static meta tags. | 1.6 SEV-3 (OG) | ☐ |
 | W4.3 | 1.6 | WHITE-LABEL.md schema — missing fields from actual `hotel.config.ts`? | **Update WHITE-LABEL.md** to include the actual fields used in `hotel.config.ts`. Spec drift in the other direction. | 1.6 (open Q) | ☐ |
-| W4.4 | 1.7 | Voucher-issued / store-order-* / staff-* emails — in scope? | **Not in Phase 1** — only the 7 currently implemented. Defer voucher-issued to Phase 2, store-order-* to Phase 2 (using Intercom message as the existing UI). | 1.7 (open Q) | ☐ |
+| W4.4 | 1.7 | Voucher-issued / store-order-* / staff-* emails — in scope? | **Option C: add all 7** — `voucher-issued`, `store-order-placed`, `store-order-confirmed`, `store-order-out-for-delivery`, `store-order-delivered`, `store-order-cancelled`, `staff-new-booking`, `staff-new-payment`. Closes the gap where guests who close the intercom tab miss order status updates and where staff can miss new bookings when logged out. Full spec in `plan/features/EMAIL-AUDIT-EXTENSIONS.md`. **Documentation only — build deferred to Phase 1.5.** | 1.7 (open Q) | ✅ (decision 2026-06-15) |
 | W4.5 | 1.7 | `store-orders/{roomNumber}/payment-proof/` rule — client path or rule needs change? | **Rule uses `roomNumber`** — matches the current client code. Add the storage rule. | 1.3 SEV-1 #1, 1.7 SEV-3 #4 | ☐ |
 | W4.6 | 1.7 | CORS `Allow-Credentials: true` — anything actually relies on cookies? | **No — remove `Allow-Credentials: true` and `*` in favor of explicit allowlist** from `config.domain` + `config.adminDomain` + localhost. Firebase ID tokens ride in `Authorization` header, not cookies. | 1.7 SEV-1 #2, Phase 2 SEV-1 | ☐ |
 | W4.7 | Phase 2 | `prompt("Enter cancellation reason:")` — replace with modal or keep? | **Replace with modal** — `prompt()` is brittle and inconsistent with the inquiry "Add Note" pattern. Add a small "Reason" input in the existing drawer. | 2.2 (alert/confirm/prompt) | ☐ |
@@ -108,6 +108,6 @@ After approval, the decisions get copied to `plan/docs/DECISIONS-FEATURES.md` as
 
 ---
 
-*Status: 30 of 51 approved (W1.1–W2.15 — Waves 1+2 complete, 2026-06-15).*
+*Status: 31 of 51 approved (W1.1–W2.15 + W4.4 — 2026-06-15).*
 
 *Total: 51 questions in 4 waves. Wave 1 (15) is launch-blocking. Wave 2 (15) blocks SEV-2 polish. Wave 3 (12) is UI/UX. Wave 4 (9) is infrastructure.*
