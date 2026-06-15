@@ -22,6 +22,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        navigateFallback: "/offline.html",
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith("/api/"),
