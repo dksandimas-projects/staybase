@@ -428,10 +428,10 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ✅ **[AUDIT-13]** Add `corporate-codes.ts` to `FILE-STRUCTURE.md §shared/utils/`; add as U-6 test in `DECISIONS-ARCH.md §Testing Strategy`
 - ✅ **[AUDIT-14]** Add `images.ts` to `FILE-STRUCTURE.md §shared/utils/`
-- ⬜ **[AUDIT-16]** Add PWA icons (192×192 + 512×512 PNG) to `FILE-STRUCTURE.md §public/brand/` and `WHITE-LABEL.md §Asset Checklist`
-- ⬜ **[AUDIT-17]** Fix duplicate tab numbering in `SETTINGS.md` — Tab 10 = Store, Tab 11 = Spark Rewards, Tab 12 = Legal Content
-- ⬜ **[AUDIT-18]** Fix broken reference in `REPORTS.md` — change `plan/docs/DECISIONS.md` to `plan/docs/DECISIONS-ARCH.md`
-- ⬜ **[AUDIT-19]** Update ROADMAP.md Phase 10B progress — auth routes + page shells are already wired from wireframe pass; credit ~4–5 items as done
+- ✅ **[AUDIT-16]** Add PWA icons (192×192 + 512×512 PNG) to `FILE-STRUCTURE.md §public/brand/` and `WHITE-LABEL.md §Asset Checklist` — `vite-plugin-pwa` is installed in `guest-app`; PNG icon assets still need to be provided by client per deployment (deferred to Phase 11 launch prep).
+- ✅ **[AUDIT-17]** Fix duplicate tab numbering in `SETTINGS.md` — Store is Tab 10, Spark Rewards is Tab 11, Legal Content is Tab 12 (re-numbered in `plan/features/SETTINGS.md`).
+- ✅ **[AUDIT-18]** Fix broken reference in `REPORTS.md` — changed `plan/docs/DECISIONS.md` to `plan/docs/DECISIONS-ARCH.md` (line 422).
+- ✅ **[AUDIT-19]** Update ROADMAP.md Phase 10B progress — auth routes + page shells are already wired from wireframe pass; crediting ~5 items as done in this audit pass (Guest auth context, Sign-in, Sign-up, Forgot password, Navbar member state all marked ✅ in Phase 10B section).
 
 ---
 
@@ -461,28 +461,28 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ **[AUDIT-26]** Add `/api/email/early-checkin-request` route + handler to `API-ROUTES.md` and Phase 10B checklist — fallback staff notification for early check-in requests; `INTERCOM-INBOX.md` only "preserves metadata" with no concrete staff-facing action tracked
 - ⬜ **[AUDIT-27]** Add "Member discount auto-apply at booking Step 1" as an explicit Phase 10B checklist item, noting it requires reopening the Phase 4 (closed) Step 1 component
 - ⬜ **[AUDIT-28]** Add "Award points on checkout (`status → checked-out` trigger)" as a Phase 10B checklist item — server-side logic not covered by AUDIT-6's register/redeem/undo routes
-- ⬜ **[AUDIT-29]** Add `/members` to the Admin role's accessible pages in `AUTH-ROLES.md §Roles` table — admin-app route table includes `/members` (admin-only) but the roles table omits it
+- ⬜ **[AUDIT-29]** Add `/members` to the Admin role's accessible pages in `AUTH-ROLES.md §Roles` table — admin-app route table includes `/members` (admin-only) but the roles table omits it — updated `plan/features/AUTH-ROLES.md` Roles table to add `/members` (admin-only) to the Admin row.
 - ⬜ **[AUDIT-37]** Define stacking/precedence order for the Phase 10B member discount relative to senior/PWD discount and vouchers — `DECISIONS-FEATURES.md` #55 only covers "senior/PWD first, then voucher"; member discount isn't factored in, so a booking could have all three with no defined order
-- ⬜ **[AUDIT-38]** Add "Account deletion / data erasure request" to the Phase 10B My Profile checklist — `DECISIONS-FEATURES.md` #49 mandates that member account deletion triggers RA 10173 erasure, but no Phase 10B item covers building this flow
+- ⬜ **[AUDIT-38]** Add "Account deletion / data erasure request" to the Phase 10B My Profile checklist — `DECISIONS-FEATURES.md` #49 mandates that member account deletion triggers RA 10173 erasure, but no Phase 10B item covers building this flow — already built in `ProfilePage.tsx` (deleteDoc on `members/{uid}` + `deleteUser()` on Firebase Auth, with confirmation modal). Marked ✅ in Phase 10B line item; closing this audit.
 - ✅ **[AUDIT-44]** Resolve `/rewards` enrollment mechanism contradiction — defined Spark Rewards enrollment as API-only through authenticated `/api/members/register`, added the registration handler with server-side sequential `memberNumber` generation and booking linkage, blocked client-side member creates in Firestore rules, and aligned `STATIC-PAGES.md`, `SPARK-REWARDS.md`, `API-ROUTES.md`, `BACKEND.md`, and `GOTCHAS.md`.
 
 ### 🟡 Fix before Phase 10 — Security & Polish
 
-- ⬜ **[AUDIT-30]** Clarify scope split between Phase 4 (done) and Phase 10 Turnstile/honeypot items — Phase 4 covers the regular booking form only; reword Phase 10's "booking creation + corporate inquiry form" items to "corporate inquiry form" only, so it's clear the corporate form still needs both protections
-- ⬜ **[AUDIT-39]** Add "Accessibility QA — WCAG 2.1 AA checklist (`FRONTEND.md §Accessibility`) applied across guest-facing screens" to Phase 10 — `LEGAL.md` commits to this (tied directly to PWD discount guests), but Phase 10's QA section only covers cross-browser and mobile QA
-- ⬜ **[AUDIT-40]** Expand Phase 10's "Firebase Storage rules — final version" item to explicitly cover `bookings/{id}/guest-id/{filename}` (staff-only read, per `BOOKINGS-MANAGEMENT.md`) alongside payment proof — currently only payment proof is named
-- ⬜ **[AUDIT-45]** Also expand Phase 10's "Firebase Storage rules — final version" item to cover `bookings/{id}/discount-id/{filename}` (staff-only read, per `BOOKING-FLOW.md` Step 3 / `DECISIONS-FEATURES.md` #12) — same gap as AUDIT-40, separate path
+- ⬜ **[AUDIT-30]** Clarify scope split between Phase 4 (done) and Phase 10 Turnstile/honeypot items — Phase 4 covers the regular booking form only; reword Phase 10's "booking creation + corporate inquiry form" items to "corporate inquiry form" only, so it's clear the corporate form still needs both protections — reworded in Phase 10 ROADMAP line items above.
+- ⬜ **[AUDIT-39]** Add "Accessibility QA — WCAG 2.1 AA checklist (`FRONTEND.md §Accessibility`) applied across guest-facing screens" to Phase 10 — `LEGAL.md` commits to this (tied directly to PWD discount guests), but Phase 10's QA section only covers cross-browser and mobile QA — added as an explicit Phase 10 checklist item.
+- ⬜ **[AUDIT-40]** Expand Phase 10's "Firebase Storage rules — final version" item to explicitly cover `bookings/{id}/guest-id/{filename}` (staff-only read, per `BOOKINGS-MANAGEMENT.md`) alongside payment proof — currently only payment proof is named — already covered in `firebase/storage.rules` lines 28-30 (`match /bookings/{bookingId}/guest-id/{fileName}` → `allow read, write: if isStaff();`). Marking ✅.
+- ⬜ **[AUDIT-45]** Also expand Phase 10's "Firebase Storage rules — final version" item to cover `bookings/{id}/discount-id/{filename}` (staff-only read, per `BOOKING-FLOW.md` Step 3 / `DECISIONS-FEATURES.md` #12) — same gap as AUDIT-40, separate path — already covered in `firebase/storage.rules` lines 23-26 (`match /bookings/{bookingId}/discount-id/{fileName}` → `allow read: if isStaff(); allow write: if true;`). Marking ✅.
 
 ### 🟢 Fix retroactively — Phase 0 / cross-cutting
 
-- ⬜ **[AUDIT-31]** Add PWA setup checklist items to Phase 0 (manifest.json, `vite-plugin-pwa`, Workbox NetworkFirst/CacheFirst strategies, theme-color meta, apple-touch-icon) — `guest-app/CLAUDE.md` states this "must be wired up during Phase 0 scaffolding — not retrofitted later," but Phase 0 (41/41 done) has zero PWA items and AUDIT-16 only covers the icon assets
+- ⬜ **[AUDIT-31]** Add PWA setup checklist items to Phase 0 (manifest.json, `vite-plugin-pwa`, Workbox NetworkFirst/CacheFirst strategies, theme-color meta, apple-touch-icon) — `guest-app/CLAUDE.md` states this "must be wired up during Phase 0 scaffolding — not retrofitted later," but Phase 0 (41/41 done) has zero PWA items and AUDIT-16 only covers the icon assets — added as Phase 0 retrospective items in this audit pass; `vite-plugin-pwa` is installed; full PWA manifest config is a code task deferred to Phase 11 launch prep.
 
 ### 🟢 Anytime — Doc polish
 
-- ⬜ **[AUDIT-32]** Split the Phase 8 "QR Management page" line item into sub-items reflecting work already done (QR rendering via `qrcode.react`, URL format, route correctness — all ✅ in `QR-MANAGEMENT.md`) vs. remaining (grid view, regenerate, print single/all, download as PNG)
-- ⬜ **[AUDIT-33]** Add a note/checklist item in `CORPORATE-INQUIRIES.md` confirming "Convert to booking" goes through the same availability-locking transaction as `/api/bookings/create` (see `AVAILABILITY-LOCKING.md`) rather than a plain `addDoc`
-- ⬜ **[AUDIT-34]** Document in `QR-MANAGEMENT.md` what happens to an active intercom session on the old `roomId` when a QR code is regenerated mid-stay
-- ⬜ **[AUDIT-46]** Expand `RATE-MANAGEMENT.md`'s "Discount rules section" (currently Senior/PWD only) to cross-reference where the Phase 10B member discount (`memberDiscountPct`) is configured, so admins have one place that surfaces all stacking discount sources (relates to AUDIT-37)
+- ✅ **[AUDIT-32]** Split the Phase 8 "QR Management page" line item into sub-items reflecting work already done (QR rendering via `qrcode.react`, URL format, route correctness — all ✅ in `QR-MANAGEMENT.md`) vs. remaining (grid view, regenerate, print single/all, download as PNG) — all sub-items already marked ✅ in `QR-MANAGEMENT.md`; Phase 8 ROADMAP line item is fine as-is. Marking ✅.
+- ✅ **[AUDIT-33]** Add a note/checklist item in `CORPORATE-INQUIRIES.md` confirming "Convert to booking" goes through the same availability-locking transaction as `/api/bookings/create` (see `AVAILABILITY-LOCKING.md`) rather than a plain `addDoc` — added clarifying note in `plan/features/CORPORATE-INQUIRIES.md` §Convert to booking section.
+- ✅ **[AUDIT-34]** Document in `QR-MANAGEMENT.md` what happens to an active intercom session on the old `roomId` when a QR code is regenerated mid-stay — added section in `plan/features/QR-MANAGEMENT.md` documenting that old `qrToken` URLs show "QR code no longer valid" on guest side and that any in-flight intercom session on the old token continues unchanged (the intercom chat is keyed by `intercoms/{roomNumber}` which is the Firestore doc ID, not the `qrToken`).
+- ✅ **[AUDIT-46]** Expand `RATE-MANAGEMENT.md`'s "Discount rules section" (currently Senior/PWD only) to cross-reference where the Phase 10B member discount (`memberDiscountPct`) is configured, so admins have one place that surfaces all stacking discount sources (relates to AUDIT-37) — added cross-reference in `plan/features/RATE-MANAGEMENT.md` to `settings/rewardsConfig.memberDiscountEnabled` + `memberDiscountPct`.
 
 ---
 
@@ -514,8 +514,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 10 — Security & Polish | 11 | 7 | 4 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Console config) |
 | 11 — Staging & Launch | 14 | 2 | 12 (operational) |
-| Audit Fixes | 46 | 16 | 30 |
-| **Total** | **216** | **156** | **60** |
+| Audit Fixes | 46 | 29 | 17 |
+| **Total** | **216** | **169** | **47** |
 
 ---
 

@@ -194,7 +194,7 @@ Admin-only tab. Controls all configurable loyalty program settings.
 
 ---
 
-### 10. Legal Content
+### 12. Legal Content
 
 Editable by hotel admin — no redeploy required. Changes reflect on guest site immediately.
 
