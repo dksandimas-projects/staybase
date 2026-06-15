@@ -89,6 +89,7 @@ Manual QA for all UI, flows, and integration scenarios. Automated tests for the 
 | U-3 | `shared/utils/points.ts` | Per-booking earning (flat `pointsPerBooking`); per-spend earning (`floor(totalPrice / 100) × pointsPerHundred`); redemption value (`points × rate / 100`); insufficient balance returns error |
 | U-4 | `shared/utils/references.ts` | Booking ref format (`{prefix}-YYYYMMDD-NNN`); zero-padding to 3 digits; member number format (`{prefix}-NNNNN`, 5 digits); store order ref (`SO-YYYYMMDD-NNN`); same-day counter increments correctly |
 | U-5 | `shared/utils/vouchers.ts` | `isActive: false` → rejected; expired (`expiresAt < now`) → rejected; usage cap at exact limit → rejected; `usageCap: null` (unlimited) → accepted; room type mismatch → rejected; empty `applicableRoomTypes` → accepted for all types; flat discount > total → ₱0 floor; percent calculation correct |
+| U-6 | `shared/utils/corporate-codes.ts` | `isActive: false` → rejected; expired (`expiresAt < now`) → rejected; usage cap at exact limit → rejected; `usageCap: null` (unlimited) → accepted; valid code returns corporate rate and metadata |
 
 ---
 

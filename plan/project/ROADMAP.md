@@ -412,7 +412,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### 🟢 Anytime — Doc polish
 
-- ⬜ **[AUDIT-13]** Add `corporate-codes.ts` to `FILE-STRUCTURE.md §shared/utils/`; add as U-6 test in `DECISIONS-ARCH.md §Testing Strategy`
+- ✅ **[AUDIT-13]** Add `corporate-codes.ts` to `FILE-STRUCTURE.md §shared/utils/`; add as U-6 test in `DECISIONS-ARCH.md §Testing Strategy`
 - ⬜ **[AUDIT-14]** Add `images.ts` to `FILE-STRUCTURE.md §shared/utils/`
 - ⬜ **[AUDIT-16]** Add PWA icons (192×192 + 512×512 PNG) to `FILE-STRUCTURE.md §public/brand/` and `WHITE-LABEL.md §Asset Checklist`
 - ⬜ **[AUDIT-17]** Fix duplicate tab numbering in `SETTINGS.md` — Tab 10 = Store, Tab 11 = Spark Rewards, Tab 12 = Legal Content

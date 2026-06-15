@@ -147,7 +147,8 @@ shared/
 │   ├── dates.ts                        ← numNights, weekend detection, date overlap check
 │   ├── points.ts                       ← Points earning + redemption calculations
 │   ├── references.ts                   ← Booking ref, member number, store order ref generation
-│   └── vouchers.ts                     ← Voucher validation logic (expiry, cap, room type, discount calc)
+│   ├── vouchers.ts                     ← Voucher validation logic (expiry, cap, room type, discount calc)
+│   └── corporate-codes.ts              ← Corporate access code validation logic (expiry, cap, active status)
 ├── constants/
 │   └── index.ts                        ← Booking statuses, sources, etc.
 ├── animations.ts                       ← Shared Framer Motion variants (fadeUp, staggerContainer, slideInRight, etc.) — see plan/docs/FRONTEND.md §Animations
@@ -156,7 +157,8 @@ shared/
 │   ├── dates.test.ts                   ← U-2: numNights, weekend nights, date overlap
 │   ├── points.test.ts                  ← U-3: earning modes, redemption value, insufficient balance
 │   ├── references.test.ts              ← U-4: ref formats, zero-padding, sequential counter
-│   └── vouchers.test.ts               ← U-5: all validation edge cases, discount calculations
+│   ├── vouchers.test.ts                ← U-5: all validation edge cases, discount calculations
+│   └── corporate-codes.test.ts         ← U-6: access code expiry, cap, active status, corporate rate
 └── VERSION.ts                          ← Single source of version string e.g. "0.1.0"
 ```
 
