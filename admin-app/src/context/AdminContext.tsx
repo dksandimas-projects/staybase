@@ -1163,6 +1163,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const adminRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
+  const adminPreviousCallRoomIdRef = useRef<string | null>(null);
 
   const cleanupAdminCall = () => {
     adminIceUnsubscribeRef.current?.();
@@ -1200,9 +1201,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           .sort((a, b) => b.startedAt - a.startedAt);
 
         const nextCall = activeCalls[0] || null;
+        // Per W2.6 / decision #94: "second wins" — if a new active
+        // call arrives while a previous one was being shown, write
+        // status: "ended" to the old call doc so the previous guest's
+        // UI sees the call end via its snapshot listener. The new
+        // call is the only one shown in the inbox.
+        const previousRoomId = adminPreviousCallRoomIdRef.current;
+        if (nextCall && previousRoomId && nextCall.roomId !== previousRoomId) {
+          void updateDoc(doc(db, "calls", previousRoomId), {
+            status: "ended",
+            endedAt: serverTimestamp(),
+            endedReason: "superseded-by-other-call"
+          }).catch((err) => {
+            console.error("Error ending superseded call:", err);
+          });
+          cleanupAdminCall();
+        }
+        adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         setIncomingCall(nextCall);
         if (!nextCall) {
           cleanupAdminCall();
+          adminPreviousCallRoomIdRef.current = null;
         }
       },
       (error) => {
