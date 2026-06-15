@@ -330,6 +330,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ⬜ Settings page — all 9 tabs (Hotel Info, Payment Methods, Email, Staff Accounts, Discounts, Vouchers, Intercom, Website Content, Legal Content)
 - ✅ Guest registration data capture wireframe — booking drawer at check-in
 - ⬜ Guest Registration PDF (jsPDF) — pre-filled from booking, printable at check-in
+- ⬜ Wire `/privacy` page body to source from `settings/websiteContent.privacyPolicyBody` (AUDIT-25) — current body is hardcoded in `PrivacyPage.tsx` and reads only `config.legalName` / `config.applicableLaw` / `config.privacyPolicyLastUpdated`. Until Settings → Legal Content tab ships, page violates the white-label rule for hotels that need a custom privacy policy beyond config tokens.
 
 ---
 
@@ -446,12 +447,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 ### 🔴 Fix before Phase 9 — Remaining Features
 
-- ⬜ **[AUDIT-20]** Add `/api/bookings/cancel` to `API-ROUTES.md` and as a Phase 9 checklist item — required by `BOOKING-LOOKUP.md` (`/my-booking` cancel action); currently undocumented anywhere
-- ⬜ **[AUDIT-21]** Add `/api/bookings/reject-discount` to `API-ROUTES.md` — required by `BOOKINGS-MANAGEMENT.md` discount rejection flow (Phase 5 marked done, but route was never added to the API surface)
+- ✅ **[AUDIT-20]** Add `/api/bookings/cancel` to `API-ROUTES.md` and as a Phase 9 checklist item — route now documented at `plan/docs/API-ROUTES.md:65`; the cancel action is already part of the Phase 9 Booking Lookup line item
+- ✅ **[AUDIT-21]** Add `/api/bookings/reject-discount` to `API-ROUTES.md` — route now documented at `plan/docs/API-ROUTES.md:68`
 - ✅ **[AUDIT-22]** Add "Email: discount rejected" as its own checklist item under Phase 6 — added as an explicit Phase 6 line item; handler wired from `handleRejectDiscount`
 - ✅ **[AUDIT-23]** Add `discount-rejected` and `early-checkin-request` rows to the email routes table in `API-ROUTES.md` — both rows added; `early-checkin-request` marked as Phase 10B planned and tracked under AUDIT-26
-- ⬜ **[AUDIT-24]** Define `storeCharges[]` on `bookings/{bookingId}` in `BACKEND.md §bookings` — `STORE-MANAGEMENT.md` references "Add to Booking Bill" writing to this field, but it doesn't exist in the schema; blocks the Phase 8 store billing → Phase 5 checkout folio link
-- ⬜ **[AUDIT-25]** Flag dependency in Phase 4 (closed) — Step 3 cancellation policy display and `/privacy` page should source from `settings/websiteContent.cancellationPolicy` / `.privacyPolicyBody`, both edited via Settings → Legal Content (Phase 9, not started). Until Phase 9 ships, these are either hardcoded (violates white-label rule) or only editable via Firebase console
+- ✅ **[AUDIT-24]** Define `storeCharges[]` on `bookings/{bookingId}` in `BACKEND.md §bookings` — closed by documenting the **derived** approach in `plan/docs/BACKEND.md §bookings` (no denormalized field; checkout folio filters `storeOrders` on `bookingId` + `paymentMethod === "add-to-bill"` + `status === "delivered"` + `isBilled`). Aligned `STORE-MANAGEMENT.md` to match.
+- ⬜ **[AUDIT-25]** Flag dependency in Phase 4 (closed) — BookingPage Step 3 cancellation policy is already wired to `settings/websiteContent.cancellationPolicy` (with a hardcoded fallback) — done. PrivacyPage body is still hardcoded (reads only `config.legalName` / `config.applicableLaw` / `config.privacyPolicyLastUpdated`). Tracked under new Phase 9 item: "Wire `/privacy` page body to source from `settings/websiteContent.privacyPolicyBody` (with config-driven fallback until Settings → Legal Content tab ships)".
 
 ### 🔴 Fix before Phase 10B — Spark Rewards
 
@@ -507,12 +508,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
-| 9 — Remaining Features | 5 | 1 | 4 |
+| 9 — Remaining Features | 6 | 1 | 5 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 46 | 11 | 35 |
-| **Total** | **214** | **129** | **85** |
+| Audit Fixes | 46 | 15 | 31 |
+| **Total** | **215** | **130** | **85** |
 
 ---
 

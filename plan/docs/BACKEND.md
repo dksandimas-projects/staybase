@@ -93,6 +93,9 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 
+> **Store charges are not denormalized onto the booking document.** The checkout folio in `admin-app/src/pages/BookingsPage.tsx` (`getBookingStoreCharges`) derives the billed store orders for a booking at read time by filtering the `storeOrders` collection on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. This avoids denormalization drift between the booking and store order lifecycles. `storeOrders.isBilled` and `storeOrders.billedAt` are the source of truth (set by the front desk "Add to Booking Bill" action in the admin Bookings drawer).
+
+
 ---
 
 ### `bookings/{bookingId}/payments/{paymentId}`
