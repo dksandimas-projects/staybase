@@ -375,22 +375,24 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > Goal: Client review on staging, then production launch.
 
 ### Staging (25% payment milestone)
-- ⬜ `dev` branch merged to `main` at `v0.9.0`
-- ⬜ Staging URLs live and shared with client
-- ⬜ Client review session — bookings, dashboard, intercom
-- ⬜ Feedback collected and addressed
-- ⬜ Firestore rules tested with real client data
+- ⬜ `dev` branch merged to `main` at `v0.9.0` — operational step, scheduled after client approval
+- ⬜ Staging URLs live and shared with client — operational
+- ⬜ Client review session — bookings, dashboard, intercom — operational
+- ⬜ Feedback collected and addressed — operational
+- ⬜ Firestore rules tested with real client data — operational
+- ✅ Production launch procedure documented — `plan/project/DEPLOY.md` covers the full staging → production cutover flow (DNS, Vercel, Firebase, env vars, domain restrictions, rollback, monitoring)
+- ✅ Pre-launch verification script — `npm run preflight` runs tests, typecheck, builds, env checks, Firebase rules, Vercel headers, version sanity; exits non-zero on any failure
 
 ### Production Launch
-- ⬜ Domain `sparkinnbohol.com` purchased and configured
-- ⬜ Vercel custom domains set (`www.sparkinnbohol.com`, `admin.sparkinnbohol.com`)
-- ⬜ VERSION bumped to `v1.0.0` via `release:` commit
-- ⬜ Final `dev` → `main` merge
-- ⬜ All 14 rooms seeded with real data + photos
-- ⬜ Hotel config + website content finalized by client
-- ⬜ First admin account created for hotel owner
-- ⬜ Client training session (booking management, settings, intercom)
-- ⬜ Deployment confirmed live on both domains
+- ⬜ Domain `sparkinnbohol.com` purchased and configured — operational
+- ⬜ Vercel custom domains set (`www.sparkinnbohol.com`, `admin.sparkinnbohol.com`) — operational
+- ⬜ VERSION bumped to `v1.0.0` via `release:` commit — operational (Husky auto-bumps)
+- ⬜ Final `dev` → `main` merge — operational
+- ⬜ All 14 rooms seeded with real data + photos — operational (skeleton data exists; client to upload real photos via admin UI)
+- ⬜ Hotel config + website content finalized by client — operational (via admin Settings)
+- ⬜ First admin account created for hotel owner — operational (via `/api/admin/create-staff`)
+- ⬜ Client training session (booking management, settings, intercom) — operational
+- ⬜ Deployment confirmed live on both domains — operational
 
 ---
 
@@ -511,9 +513,9 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 9 — Remaining Features | 6 | 6 | 0 |
 | 10 — Security & Polish | 11 | 7 | 4 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Console config) |
-| 11 — Staging & Launch | 14 | 0 | 14 |
+| 11 — Staging & Launch | 14 | 2 | 12 (operational) |
 | Audit Fixes | 46 | 16 | 30 |
-| **Total** | **216** | **154** | **62** |
+| **Total** | **216** | **156** | **60** |
 
 ---
 
