@@ -416,7 +416,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **16 of 51 decisions Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2). 35 remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 sections below for the 16 closed.
+> **Current state** (as of 2026-06-16): **17 of 51 decisions + 1 launch-gate SEV-1 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3). 34 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 sections below for the 17 closed.
 
 ### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
@@ -466,6 +466,11 @@ Branch: `feature/phase-11.6-batch-2`. Shipped in PR `ed701ab`.
 - [x] **W2.14** (commit `551760c`) Add `linkedInquiryId` to the `Booking` type and to the `handleCreateBooking` / `handleCreateWalkin` handlers — the schema + handler change is done; the "Convert to Booking" UI (per audit 1.4 SEV-1 #2) is a separate scope. **Closes decision #102.**
 - [x] **W2.13** (commit `c8282ed`) Negotiated corporate rate UI label changed from `(X% additional discount applied)` to `— Negotiated rate applied` per `DECISIONS-FEATURES.md #101`. **Closes decision #101.**
 - [x] **W2.4** (commit `2d41ed7`) Early check-in on `RewardsPage` now actually submits — loads the next upcoming confirmed/checked-in booking for the member, POSTs to `/api/email/early-checkin-request`, shows success/error states. Replaces the previous "open the intercom or call the desk" hint. **Closes decision #92.**
+
+### Phase 11.6 Batch 3 — Launch-blocker: Staff Accounts tab (1 fix, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-3`. Ships the launch-gate UI for staff provisioning.
+
+- [x] **S5.2** (commit `<pending>`) **Add Staff Accounts tab to `SettingsPage`.** Closes the launch gate from `AUDIT-E2E-2026-06-15.md` Top 5 launch-blockers: hotel owner could not provision front-desk accounts. Files: `admin-app/src/context/AdminContext.tsx` (new `StaffMember` type + `staff: StaffMember[]` listener on `guests` filtered by `role in ["front-desk", "admin"]` + `createStaff` + `disableStaff` API wrappers), `admin-app/src/pages/SettingsPage.tsx` (new "staff" tab on the settings list, admin-only role guard, live staff table, create form with role radios, disable confirmation modal, "You" badge for the current admin, self-disable guard). API routes (`/api/admin/create-staff`, `/api/admin/disable-staff`) were already shipped per AUDIT-6c — this PR wires the UI to the existing routes. 13 regression tests in `admin-app/src/__tests__/staff-accounts-tab.test.ts` cover the listener, the Bearer-token API wrappers, the role guard, the form, the table, and the confirmation modal. **Closes the S5.2 launch-gate SEV-1.**
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -649,12 +654,12 @@ Branch: `feature/phase-11.6-batch-2`. Shipped in PR `ed701ab`.
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 37 | 16 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4). 16/37 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2. |
+| 11.5 — Audit Fixes & Launch-Readiness | 38 | 17 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 1 launch-gate (S5.2 Staff Accounts tab). 17/38 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **316** | **265** | **51** |
+| **Total** | **317** | **266** | **51** |
 
-*Phase 11.5 is now 16/37 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 are shipped. 21 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (316) = previous total (279) + Phase 11.5 additions (37).*
+*Phase 11.5 is now 17/38 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (317) = previous total (316) + Phase 11.5 Batch 3 addition (1).*
 
 ---
 
