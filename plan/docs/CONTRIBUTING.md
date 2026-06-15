@@ -57,10 +57,16 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 ## Branching & Commit Rules
 
 **Branch naming:**
-- `feature/booking-flow` — new feature
-- `feature/admin-dashboard` — new feature
-- `fix/availability-locking` — bug fix
-- `plan/docs/update-backend-schema` — documentation only
+- `feature/<phase-n>-<short-slug>` — new feature (e.g. `feature/phase-9-booking-lookup`, `feature/phase-4-booking-flow`)
+- `fix/<phase-n>-<short-slug>` — bug fix (e.g. `fix/phase-5-availability-locking`)
+- `docs/<phase-n>-<short-slug>` — documentation-only (e.g. `docs/phase-9-update-roadmap`)
+- Audit fix branches use the audit ID: `fix/audit-24-store-charges-schema`
+
+**Why include the phase number:**
+- A glance at any open or recent branch tells you which phase of the roadmap it belongs to, even after the work is merged and the commit history is months old.
+- Branch names stay stable if work spans multiple phase boundaries (don't rename mid-flight just because scope drifted).
+- The phase number is the project's primary planning unit (see `plan/project/ROADMAP.md`). Putting it on the branch keeps branches and roadmap in lockstep.
+- The `phase-` prefix is required; bare `feature/<name>` is reserved for cross-cutting work that doesn't fit a single phase (rare — prefer scoping it to a phase).
 
 **Conventional Commits:**
 
