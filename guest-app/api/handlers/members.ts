@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { generateMemberNumber } from "@spark-inn/shared";
+import { generateMemberNumber, validatePointsRedemption } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 
@@ -11,8 +11,22 @@ const registerMemberSchema = z.object({
   bookingId: z.string().trim().max(120).optional().default("")
 }).strict();
 
+const redeemPointsSchema = z.object({
+  bookingId: z.string().trim().min(1).max(120),
+  memberId: z.string().trim().max(120).optional().default(""),
+  pointsToRedeem: z.coerce.number().int().min(1)
+}).strict();
+
+const undoRedemptionSchema = z.object({
+  bookingId: z.string().trim().min(1).max(120)
+}).strict();
+
 function getAuthUser(req: any) {
   return (req as any).user || {};
+}
+
+function getStaff(req: any) {
+  return (req as any).staff || {};
 }
 
 async function linkBookingsByEmail(email: string, uid: string, explicitBookingId?: string) {
@@ -131,6 +145,218 @@ export async function handleRegisterMember(req: any, res: any) {
     return res.status(500).json({
       success: false,
       error: "We could not join Spark Rewards right now. Please try again."
+    });
+  }
+}
+
+export async function handleRedeemMemberPoints(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+
+  const parsed = redeemPointsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the points redemption details and try again."
+    });
+  }
+
+  try {
+    const now = new Date();
+    const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed.data;
+    let responseData: any = {};
+
+    await adminDb.runTransaction(async (transaction: any) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+
+      const booking = bookingDoc.data();
+      if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
+        throw new Error("Points can only be redeemed before check-in.");
+      }
+      if ((booking.pointsRedeemed || 0) > 0) {
+        throw new Error("This booking already has a points redemption.");
+      }
+
+      const memberId = requestedMemberId || booking.memberId;
+      if (!memberId || (booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId)) {
+        throw new Error("Booking is not linked to this member.");
+      }
+
+      const memberRef = adminDb.collection("members").doc(memberId);
+      const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
+      const memberDoc = await transaction.get(memberRef);
+      const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
+
+      if (!memberDoc.exists) {
+        throw new Error("Member not found.");
+      }
+
+      const member = memberDoc.data();
+      if (member.isActive === false || member.isMember === false) {
+        throw new Error("Member account is not active.");
+      }
+
+      const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
+      if (pointsRedemptionRate <= 0) {
+        throw new Error("Points redemption is not configured.");
+      }
+
+      const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+
+      const redemptionValue = Math.round(validation.value);
+      if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
+        throw new Error("Points redemption value exceeds the booking total.");
+      }
+
+      const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+
+      transaction.update(bookingRef, {
+        memberId,
+        totalPrice: nextTotalPrice,
+        pointsRedeemed: pointsToRedeem,
+        pointsRedeemedValue: redemptionValue,
+        pointsRedeemedBy: staff.uid,
+        pointsRedeemedAt: now,
+        updatedAt: now
+      });
+      transaction.update(memberRef, {
+        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
+        updatedAt: now
+      });
+      transaction.set(historyRef, {
+        type: "redeem",
+        points: -pointsToRedeem,
+        description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
+        reason: "Points redeemed by staff",
+        bookingId,
+        by: staff.uid,
+        at: now
+      });
+
+      responseData = {
+        bookingId,
+        memberId,
+        pointsRedeemed: pointsToRedeem,
+        pointsRedeemedValue: redemptionValue,
+        totalPrice: nextTotalPrice,
+        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
+      };
+    });
+
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "We could not redeem points for this booking."
+    });
+  }
+}
+
+export async function handleUndoMemberPointsRedemption(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can undo points redemption." });
+  }
+
+  const parsed = undoRedemptionSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the redemption undo details and try again."
+    });
+  }
+
+  try {
+    const now = new Date();
+    const { bookingId } = parsed.data;
+    let responseData: any = {};
+
+    await adminDb.runTransaction(async (transaction: any) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+
+      const booking = bookingDoc.data();
+      if (booking.status !== "confirmed") {
+        throw new Error("Points redemption can only be undone while the booking is confirmed.");
+      }
+      if (!booking.memberId || (booking.pointsRedeemed || 0) <= 0 || (booking.pointsRedeemedValue || 0) <= 0) {
+        throw new Error("This booking has no points redemption to undo.");
+      }
+
+      const memberRef = adminDb.collection("members").doc(booking.memberId);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member not found.");
+      }
+
+      const member = memberDoc.data();
+      const restoredPoints = Number(booking.pointsRedeemed || 0);
+      const restoredValue = Number(booking.pointsRedeemedValue || 0);
+      const nextTotalPrice = Number(booking.totalPrice || 0) + restoredValue;
+      const nextRewardsPoints = Number(member.rewardsPoints || 0) + restoredPoints;
+      const historyRef = adminDb.collection(`members/${booking.memberId}/pointsHistory`).doc();
+
+      transaction.update(bookingRef, {
+        totalPrice: nextTotalPrice,
+        pointsRedeemed: 0,
+        pointsRedeemedValue: 0,
+        pointsRedeemedBy: null,
+        pointsRedeemedAt: null,
+        updatedAt: now
+      });
+      transaction.update(memberRef, {
+        rewardsPoints: nextRewardsPoints,
+        updatedAt: now
+      });
+      transaction.set(historyRef, {
+        type: "manual",
+        points: restoredPoints,
+        description: `Reversed points redemption for booking ${booking.bookingRef || bookingId}`,
+        reason: "Points redemption undone by admin",
+        bookingId,
+        by: staff.uid,
+        at: now
+      });
+
+      responseData = {
+        bookingId,
+        memberId: booking.memberId,
+        pointsRestored: restoredPoints,
+        pointsRedeemedValue: restoredValue,
+        totalPrice: nextTotalPrice,
+        rewardsPoints: nextRewardsPoints
+      };
+    });
+
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "We could not undo this points redemption."
     });
   }
 }

@@ -95,7 +95,7 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 - [ ] **Points earning info** — if `settings/rewardsConfig.pointsEnabled` is true, show how points are earned (e.g. "Earn {X} points per booking" or "Earn {X} points per ₱100 spent") — pulled from `settings/rewardsConfig`; if disabled, hide points balance section entirely
 - [ ] **Member discount badge** — if `settings/rewardsConfig.memberDiscountEnabled` is true, show "You get {X}% off every booking as a member" — if disabled, hide
 - [ ] **Early check-in perk** — always shown (not configurable off); "Request Early Check-In" button → sends a tagged message to front desk via `intercoms` (or email if no active room intercom); subject to availability
-- [ ] Points redemption — admin-only from booking detail drawer (staff applies on guest's behalf); My Rewards page shows current balance only — no guest-facing redeem button in Phase 1
+- [ ] Points redemption — staff-only from booking detail drawer via `/api/members/redeem-points`; My Rewards page shows current balance only — no guest-facing redeem button in Phase 1
 
 ### Data & Logic Checklist
 - [ ] Profile: `getDoc` / `updateDoc` on `members/{uid}`
@@ -105,6 +105,8 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 - [ ] Early check-in request: `addDoc` to `intercoms/{roomId}/messages` tagged `isEarlyCheckInRequest: true` OR POST to `/api/email/early-checkin-request` if no active room — always shown to members regardless of rewards config
 - [ ] Member discount: if `settings/rewardsConfig.memberDiscountEnabled`, show discount badge in booking Step 1 for logged-in members (auto-applied) — if disabled, no discount shown
 - [ ] Points awarded on booking checkout: if `settings/rewardsConfig.pointsEnabled`, compute points earned from booking `totalPrice` or flat per-booking value per `rewardsConfig` — `updateDoc` on `members/{uid}.rewardsPoints` + `addDoc` to pointsHistory when booking status changes to `checked-out`; triggered server-side via API route
+- [ ] Points redemption: POST `/api/members/redeem-points`; API transaction validates member balance and redemption rate, updates booking totals, deducts points, and writes points history
+- [ ] Undo points redemption: POST `/api/members/undo-redemption`; admin-only and only while booking status is `confirmed`
 - [ ] Auth guard: all `/account/*` routes redirect to `/signin` if not authenticated
 
 ---
