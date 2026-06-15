@@ -7,6 +7,7 @@ White-label hotel booking and management system. Spark Inn (Bohol, Philippines) 
 - **Agents / AI tools:** read `CLAUDE.md` first — it has the full project context, read bundles, and hard rules.
 - **Setup:** follow `plan/project/SETUP-GUIDE.md` to get the project running locally and deployed.
 - **Build order:** see `plan/project/ROADMAP.md` for the prioritized development checklist.
+- **Production launch:** see `plan/project/DEPLOY.md` for the staging → production cutover procedure.
 
 ## Structure
 
