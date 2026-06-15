@@ -416,11 +416,11 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **11 of 51 decisions Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1). 40 remain unimplemented. See Launch-Readiness Sprint + Phase 11.6 Batch 1 sections below for the 11 closed.
+> **Current state** (as of 2026-06-16): **16 of 51 decisions Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2). 35 remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 sections below for the 16 closed.
 
-### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented
+### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
-15 questions from the audit are **decided** (documented in `DECISIONS-FEATURES.md`); 11 of them are also **implemented** (the Launch-Readiness Sprint + Batch 1). The 4 not-yet-implemented (#75, #77, #80, #81, #83) are scheduled for Phase 11.6 Batch 2.
+15 questions from the audit are **decided** (documented in `DECISIONS-FEATURES.md`); 11 are **implemented** (the Launch-Readiness Sprint + Batch 1). The 4 not-yet-implemented from Wave 1 (#75, #77, #80, #81, #83) are scheduled for Batch 3.
 
 - **Decided** — **#75** Breakfast pricing model: add-on only (drop `includedInRoomRate`)
 - **Decided** — **#76** Contact form on `/contact` in scope for Phase 1 (wire to `/api/contact`) — see `plan/features/CONTACT-INQUIRIES.md`
@@ -457,6 +457,15 @@ Branch: `feature/phase-11.6-batch-1`. Shipped in PR `821eb4e`.
 - [x] **W2.7** (commit `e787594`) Auto-archive intercom thread on checkout — set `intercoms/{roomNumber}.resolved = true` in the same transaction. **Closes decision #95.**
 - [x] **W2.8** (commit `bc8e01f`) Cancellation message sets `isCancelledOrder: true` so admin Inbox renders it as a distinct greyed-out "Cancelled" card. **Closes decision #96.**
 - [x] **W2.10** (commit `67beb4c`) `calls/{roomId}` retention: delete after 30s grace via `setTimeout(..., 30000) + deleteDoc`. **Closes decision #98.**
+
+### Phase 11.6 Batch 2 — Spec compliance (5 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-2`. Shipped in PR `ed701ab`.
+
+- [x] **W2.5** (commit `6796fc6`) Remove "Welcome Gift" marketing copy on `RewardsLandingPage` and replace with "Welcome to the Program" — Phase 1 has no transactional welcome email. **Closes decision #93.**
+- [x] **W2.11** (commit `f3054b1`) Remove the fake LOU upload from corporate chargeback. Replaced the file picker with a note that the accounts team will email the guest for the LOU within 24 hours. Staff tracks receipt via the `louReceived: boolean` toggle on the booking drawer. **Closes decision #99.**
+- [x] **W2.14** (commit `551760c`) Add `linkedInquiryId` to the `Booking` type and to the `handleCreateBooking` / `handleCreateWalkin` handlers — the schema + handler change is done; the "Convert to Booking" UI (per audit 1.4 SEV-1 #2) is a separate scope. **Closes decision #102.**
+- [x] **W2.13** (commit `c8282ed`) Negotiated corporate rate UI label changed from `(X% additional discount applied)` to `— Negotiated rate applied` per `DECISIONS-FEATURES.md #101`. **Closes decision #101.**
+- [x] **W2.4** (commit `2d41ed7`) Early check-in on `RewardsPage` now actually submits — loads the next upcoming confirmed/checked-in booking for the member, POSTs to `/api/email/early-checkin-request`, shows success/error states. Replaces the previous "open the intercom or call the desk" hint. **Closes decision #92.**
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -640,12 +649,12 @@ Branch: `feature/phase-11.6-batch-1`. Shipped in PR `821eb4e`.
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 37 | 11 | 26 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4). 11/37 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1. |
+| 11.5 — Audit Fixes & Launch-Readiness | 37 | 16 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4). 16/37 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **316** | **260** | **56** |
+| **Total** | **316** | **265** | **51** |
 
-*Phase 11.5 is now 11/37 implemented. 5 SEV-1 fixes from the Launch-Readiness Sprint and 6 fixes from Phase 11.6 Batch 1 are shipped. 26 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (316) = previous total (279) + Phase 11.5 additions (37).*
+*Phase 11.5 is now 16/37 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 are shipped. 21 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (316) = previous total (279) + Phase 11.5 additions (37).*
 
 ---
 
