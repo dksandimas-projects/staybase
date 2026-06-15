@@ -474,7 +474,7 @@ export function IntercomPage() {
   };
 
   // Text message sending
-  const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean }) => {
+  const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean; isCancelledOrder?: boolean }) => {
     if (!roomNumber || !guestName.trim()) return;
     setMessageError("");
 
