@@ -63,6 +63,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock) |
 | `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
+| `/api/bookings/lookup` | POST | None (owner by ref+email) | Look up a single booking by `bookingRef` + `guestEmail` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}` |
 | `/api/bookings/add-payment` | POST | Staff | Append onsite payment audit record to `bookings/{bookingId}/payments`; fires `payment-confirmed` email when running total reaches `totalPrice` |
 | `/api/bookings/confirm` | POST | Staff | Flip `pending`/`payment-uploaded` → `confirmed`; fires `booking-confirmed` email |
 | `/api/bookings/reject-discount` | POST | Staff | Reject Senior/PWD discount ID — restores `totalPrice`, sets rejection fields, triggers discount-rejected email |
@@ -170,6 +171,7 @@ API route checks for a `_hp` field in the request body (the honeypot field name)
 | `/api/corporate/inquiry` | 5 requests / IP / minute |
 | `/api/validate/voucher` | 20 requests / IP / minute |
 | `/api/validate/corporate-code` | 10 requests / IP / minute |
+| `/api/bookings/lookup` | 10 requests / IP / minute |
 | `/api/email/*` | 3 requests / booking ref / hour |
 
 Use Vercel Edge middleware for IP-based rate limiting. Simple in-memory map is sufficient for Phase 1 at this traffic scale.
