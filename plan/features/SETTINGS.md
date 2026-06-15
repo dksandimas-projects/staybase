@@ -151,7 +151,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 - [ ] Enable/disable store globally — toggle
 - [ ] Product catalog management — see `plan/features/STORE-MANAGEMENT.md §Catalog Management` for full checklist
-- [ ] Store payment methods — CoD, Add to Bill, GCash (with QR upload + account info) — independent of booking payment methods
+- [x] Store payment methods — CoD, Add to Bill, GCash (with QR URL + account info) — independent of booking payment methods
 - [ ] Low stock threshold — number input (default 5)
 - [ ] Both Admin and Front Desk can access this tab
 - [ ] Source: `settings/storeConfig`

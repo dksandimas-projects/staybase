@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAdmin, type StoreItem } from "../context/AdminContext";
 import { compressImageFile } from "@spark-inn/shared";
 import { 
@@ -12,6 +12,13 @@ import { Modal } from "../components/Modal";
 
 type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store";
 type StoreCategory = StoreItem["category"];
+type StorePaymentMethodSetting = {
+  method: string;
+  label: string;
+  isEnabled: boolean;
+  qrUrl?: string;
+  accountInfo?: string;
+};
 
 const storeCategories: { value: StoreCategory; label: string }[] = [
   { value: "drinks", label: "Drinks" },
@@ -71,12 +78,18 @@ export function SettingsPage() {
   // 5. Store Config states
   const [storeEnabled, setStoreEnabled] = useState(storeConfig.isEnabled);
   const [lowStockThreshold, setLowStockThreshold] = useState(String(storeConfig.lowStockThreshold));
-  const [storePaymentMethods, setStorePaymentMethods] = useState<{ method: string; label: string; isEnabled: boolean }[]>(storeConfig.paymentMethods);
+  const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodSetting[]>(storeConfig.paymentMethods);
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   const [isStoreItemModalOpen, setIsStoreItemModalOpen] = useState(false);
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
   const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
   const [storeItemPhotoStatus, setStoreItemPhotoStatus] = useState("");
+
+  useEffect(() => {
+    setStoreEnabled(storeConfig.isEnabled !== false);
+    setLowStockThreshold(String(storeConfig.lowStockThreshold ?? 3));
+    setStorePaymentMethods(Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []);
+  }, [storeConfig]);
 
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
@@ -134,6 +147,10 @@ export function SettingsPage() {
 
   const togglePaymentMethod = (method: string) => {
     setStorePaymentMethods(prev => prev.map(m => m.method === method ? { ...m, isEnabled: !m.isEnabled } : m));
+  };
+
+  const updateStorePaymentMethod = (method: string, updates: Partial<StorePaymentMethodSetting>) => {
+    setStorePaymentMethods(prev => prev.map(m => m.method === method ? { ...m, ...updates } : m));
   };
 
   const editingStoreItem = storeItems.find(item => item.id === editingStoreItemId) ?? null;
@@ -654,6 +671,69 @@ export function SettingsPage() {
                     </button>
                   ))}
                 </div>
+
+                {storePaymentMethods.some(pm => pm.method === "gcash") ? (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h5 className="text-xs font-bold text-gray-900">GCash transfer details</h5>
+                        <p className="mt-1 text-[10px] leading-relaxed text-gray-500">
+                          These details appear in the guest store checkout when GCash is enabled.
+                        </p>
+                      </div>
+                      <span className={`w-fit rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                        storePaymentMethods.find(pm => pm.method === "gcash")?.isEnabled
+                          ? "bg-primary-light text-primary-dark"
+                          : "bg-gray-100 text-gray-500"
+                      }`}>
+                        {storePaymentMethods.find(pm => pm.method === "gcash")?.isEnabled ? "Visible to guests" : "Hidden"}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 lg:grid-cols-[160px_1fr]">
+                      <div className="flex min-h-40 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        {storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl ? (
+                          <img
+                            src={storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl}
+                            alt="Store GCash QR preview"
+                            className="h-32 w-32 rounded-lg border border-gray-200 bg-white object-contain p-2"
+                          />
+                        ) : (
+                          <div className="text-center">
+                            <ImageIcon size={24} className="mx-auto text-gray-400" />
+                            <p className="mt-2 text-[10px] font-semibold text-gray-500">No QR URL set</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid gap-3">
+                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                          GCash QR image URL
+                          <input
+                            type="url"
+                            value={storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl ?? ""}
+                            onChange={(event) => updateStorePaymentMethod("gcash", { qrUrl: event.target.value })}
+                            disabled={!storeEnabled}
+                            placeholder="https://firebasestorage.googleapis.com/..."
+                            className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                          GCash account info
+                          <textarea
+                            value={storePaymentMethods.find(pm => pm.method === "gcash")?.accountInfo ?? ""}
+                            onChange={(event) => updateStorePaymentMethod("gcash", { accountInfo: event.target.value })}
+                            disabled={!storeEnabled}
+                            rows={3}
+                            placeholder="GCash: 0917 000 0000 - spark inn"
+                            className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-3 border-t border-gray-150 pt-5">
