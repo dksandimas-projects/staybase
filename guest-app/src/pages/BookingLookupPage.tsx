@@ -1,6 +1,6 @@
-import { ArrowLeft, Calendar, FileText, Landmark, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
+import { ArrowLeft, Calendar, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { scaleIn } from "@spark-inn/shared";
 import config from "@config";
@@ -14,10 +14,12 @@ import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
 
 interface BookingData {
+  id: string;
   bookingRef: string;
   guestName: string;
   guestEmail: string;
   guestPhone: string;
+  roomId: string;
   roomName: string;
   roomNumber: string;
   roomType: string;
@@ -33,84 +35,22 @@ interface BookingData {
   specialRequests: string;
 }
 
-const mockBookingsList: BookingData[] = [
-  {
-    bookingRef: "SI-20260612-042",
-    guestName: "Maria Santos",
-    guestEmail: "maria@example.com",
-    guestPhone: "+63 917 000 0000",
-    roomName: "Executive Queen",
-    roomNumber: "201",
-    roomType: "executive",
-    checkIn: "2026-06-12",
-    checkOut: "2026-06-14",
-    numNights: 2,
-    numGuests: 2,
-    ratePerNight: 3200,
-    totalPrice: 6400,
-    paymentMethod: "gcash",
-    status: "pending",
-    hasBreakfast: false,
-    specialRequests: "Late check-in around 8 PM, please."
-  },
-  {
-    bookingRef: "SI-09214",
-    guestName: "Alex Mercer",
-    guestEmail: "member@sparkinn.com",
-    guestPhone: "+63 912 345 6789",
-    roomName: "The Riverview Suite",
-    roomNumber: "305",
-    roomType: "executive",
-    checkIn: "2026-10-12",
-    checkOut: "2026-10-15",
-    numNights: 3,
-    numGuests: 2,
-    ratePerNight: 4500,
-    totalPrice: 13500,
-    paymentMethod: "bank",
-    status: "confirmed",
-    hasBreakfast: true,
-    specialRequests: "High floor, quiet room please."
-  },
-  {
-    bookingRef: "SI-08103",
-    guestName: "Alex Mercer",
-    guestEmail: "member@sparkinn.com",
-    guestPhone: "+63 912 345 6789",
-    roomName: "Garden Sanctuary Villa",
-    roomNumber: "102",
-    roomType: "family",
-    checkIn: "2025-08-05",
-    checkOut: "2025-08-09",
-    numNights: 4,
-    numGuests: 4,
-    ratePerNight: 7500,
-    totalPrice: 30000,
-    paymentMethod: "gcash",
-    status: "checked-out",
-    hasBreakfast: true,
-    specialRequests: "Vegetarian breakfast options."
-  },
-  {
-    bookingRef: "SI-07524",
-    guestName: "Alex Mercer",
-    guestEmail: "member@sparkinn.com",
-    guestPhone: "+63 912 345 6789",
-    roomName: "Sky Loft",
-    roomNumber: "401",
-    roomType: "single",
-    checkIn: "2025-07-10",
-    checkOut: "2025-07-12",
-    numNights: 2,
-    numGuests: 2,
-    ratePerNight: 5500,
-    totalPrice: 11000,
-    paymentMethod: "pay-at-hotel",
-    status: "cancelled",
-    hasBreakfast: false,
-    specialRequests: ""
+function toDateInput(value: unknown): string {
+  if (!value) return "";
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
   }
-];
+  if (typeof value === "object" && value && typeof (value as any).toDate === "function") {
+    const d = (value as any).toDate();
+    if (d instanceof Date && !Number.isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  if (typeof value === "string") {
+    return value.slice(0, 10);
+  }
+  return "";
+}
 
 function formatStayDate(value: string) {
   if (!value) return "";
@@ -121,6 +61,8 @@ function formatStayDate(value: string) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+const RESEND_COOLDOWN_MS = 60_000;
+
 export function BookingLookupPage() {
   const shouldReduceMotion = useReducedMotion();
   const [searchParams] = useSearchParams();
@@ -130,58 +72,103 @@ export function BookingLookupPage() {
   const [emailInput, setEmailInput] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [searchError, setSearchError] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
   const [activeBooking, setActiveBooking] = useState<BookingData | null>(null);
 
-  // Modal and Action state
+  // Action state
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
-  const [resendStatus, setResendStatus] = useState("");
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState("");
 
-  // Check URL parameters for direct lookup
+  const [isResending, setIsResending] = useState(false);
+  const [resendStatus, setResendStatus] = useState<"idle" | "sent" | "rate-limited" | "error">("idle");
+  const [resendError, setResendError] = useState("");
+  const [resendCooldownUntil, setResendCooldownUntil] = useState<number>(0);
+  const [resendCooldownTick, setResendCooldownTick] = useState(0);
+  const lastAutoLookupSignatureRef = useRef("");
+
+  useEffect(() => {
+    if (resendCooldownUntil === 0) return;
+    const interval = setInterval(() => {
+      setResendCooldownTick((tick) => tick + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [resendCooldownUntil]);
+
+  const performLookup = async (bookingRef: string, guestEmail: string) => {
+    setIsSearching(true);
+    setSearchError("");
+    setActiveBooking(null);
+
+    try {
+      const response = await fetch("/api/bookings/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingRef, guestEmail })
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        setSearchError(
+          result?.error ||
+            "We couldn't find a booking with those details. Please check your reference number and email."
+        );
+        return;
+      }
+
+      const data: any = result.data;
+      const normalized: BookingData = {
+        id: data.id,
+        bookingRef: data.bookingRef,
+        guestName: data.guestName,
+        guestEmail: data.guestEmail,
+        guestPhone: data.guestPhone || "",
+        roomId: data.roomId || "",
+        roomName: data.roomName || data.roomType || "",
+        roomNumber: data.roomNumber || "",
+        roomType: data.roomType || "",
+        checkIn: toDateInput(data.checkIn),
+        checkOut: toDateInput(data.checkOut),
+        numNights: Number(data.numNights || 0),
+        numGuests: Number(data.numGuests || 0),
+        ratePerNight: Number(data.ratePerNight || 0),
+        totalPrice: Number(data.totalPrice || 0),
+        paymentMethod: data.paymentMethod || "",
+        status: data.status,
+        hasBreakfast: Boolean(data.hasBreakfast),
+        specialRequests: data.specialRequests || ""
+      };
+      setActiveBooking(normalized);
+    } catch (err) {
+      console.error("Booking lookup failed:", err);
+      setSearchError(
+        "We couldn't reach the booking service. Please check your connection and try again."
+      );
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   useEffect(() => {
     const ref = searchParams.get("ref");
     const email = searchParams.get("email");
-    if (ref && email) {
-      setRefInput(ref);
-      setEmailInput(email);
-      setHasSearched(true);
-      
-      const found = mockBookingsList.find(
-        (b) =>
-          b.bookingRef === ref.trim().toUpperCase() &&
-          b.guestEmail.toLowerCase() === email.trim().toLowerCase()
-      );
-
-      if (found) {
-        setActiveBooking({ ...found });
-      } else {
-        setActiveBooking(null);
-        setSearchError(
-          "We couldn't find a booking with those details. Please check your reference number and email."
-        );
-      }
-    }
+    if (!ref || !email) return;
+    const signature = `${ref}::${email}`;
+    if (lastAutoLookupSignatureRef.current === signature) return;
+    lastAutoLookupSignatureRef.current = signature;
+    setRefInput(ref);
+    setEmailInput(email);
+    setHasSearched(true);
+    void performLookup(ref, email);
   }, [searchParams]);
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError("");
     setHasSearched(true);
-
-    const found = mockBookingsList.find(
-      (b) =>
-        b.bookingRef === refInput.trim().toUpperCase() &&
-        b.guestEmail.toLowerCase() === emailInput.trim().toLowerCase()
-    );
-
-    if (found) {
-      setActiveBooking({ ...found });
-    } else {
-      setActiveBooking(null);
-      setSearchError(
-        "We couldn't find a booking with those details. Please check your reference number and email."
-      );
-    }
+    await performLookup(refInput, emailInput);
   };
 
   const handleResetSearch = () => {
@@ -190,37 +177,109 @@ export function BookingLookupPage() {
     setHasSearched(false);
     setSearchError("");
     setActiveBooking(null);
-    setResendStatus("");
+    setResendStatus("idle");
+    setResendError("");
+    setCancelError("");
+    setShowCancelModal(false);
+    setCancelReason("");
+    lastAutoLookupSignatureRef.current = "";
   };
 
-  const handleResendEmail = () => {
-    setResendStatus("sending");
-    setTimeout(() => {
-      setResendStatus("sent");
-      alert(`Confirmation email has been resent to ${activeBooking?.guestEmail}!`);
-    }, 800);
-  };
+  const handleResendEmail = async () => {
+    if (!activeBooking) return;
+    if (resendCooldownUntil > Date.now()) {
+      setResendStatus("rate-limited");
+      setResendError("Email already resent recently, please wait.");
+      return;
+    }
 
-  const handleCancelBookingSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (activeBooking) {
-      setActiveBooking({
-        ...activeBooking,
-        status: "cancelled"
+    setIsResending(true);
+    setResendStatus("idle");
+    setResendError("");
+
+    try {
+      const triggerAction =
+        activeBooking.status === "pending" || activeBooking.status === "payment-uploaded"
+          ? "booking-submitted"
+          : "booking-confirmed";
+
+      const response = await fetch(`/api/email/${triggerAction}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingRef: activeBooking.bookingRef,
+          guestEmail: activeBooking.guestEmail
+        })
       });
+
+      const result = await response.json().catch(() => null);
+
+      if (response.status === 429) {
+        setResendStatus("rate-limited");
+        setResendError("Email already resent recently, please wait.");
+        setResendCooldownUntil(Date.now() + RESEND_COOLDOWN_MS);
+        return;
+      }
+
+      if (!response.ok || !result?.success) {
+        setResendStatus("error");
+        setResendError(result?.error || "We couldn't resend the email. Please try again later.");
+        return;
+      }
+
+      setResendStatus("sent");
+      setResendCooldownUntil(Date.now() + RESEND_COOLDOWN_MS);
+    } catch (err) {
+      console.error("Resend email failed:", err);
+      setResendStatus("error");
+      setResendError("We couldn't reach the email service. Please try again later.");
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const handleCancelBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeBooking) return;
+    setIsCancelling(true);
+    setCancelError("");
+
+    try {
+      const response = await fetch("/api/bookings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookingRef: activeBooking.bookingRef,
+          guestEmail: activeBooking.guestEmail,
+          reason: cancelReason
+        })
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        setCancelError(result?.error || "We couldn't cancel your booking. Please try again.");
+        return;
+      }
+
+      setActiveBooking({ ...activeBooking, status: "cancelled" });
       setShowCancelModal(false);
       setCancelReason("");
-      alert("Your booking has been cancelled successfully.");
+    } catch (err) {
+      console.error("Cancel booking failed:", err);
+      setCancelError("We couldn't reach the booking service. Please try again.");
+    } finally {
+      setIsCancelling(false);
     }
   };
 
   const paymentLabels: Record<string, string> = {
     gcash: "Digital Wallet (GCash/Maya)",
-    bank: "Bank Transfer",
-    "pay-at-hotel": "Pay at Hotel"
+    "pay-at-hotel": "Pay at Hotel",
+    paypal: "PayPal",
+    bank: "Bank Transfer"
   };
 
-  // Timeline step calculations
   const timelineSteps = [
     { label: "Submitted", statusKey: "pending", description: "Booking received" },
     { label: "Confirmed", statusKey: "payment-confirmed", description: "Payment verified" },
@@ -233,11 +292,18 @@ export function BookingLookupPage() {
     if (status === "payment-confirmed" || status === "confirmed") return 1;
     if (status === "checked-in") return 2;
     if (status === "checked-out") return 3;
-    return -1; // e.g. cancelled
+    return -1;
   };
 
   const currentStepIndex = activeBooking ? getActiveStepIndex(activeBooking.status) : -1;
   const isCancelled = activeBooking?.status === "cancelled";
+  const canCancel =
+    activeBooking?.status === "pending" || activeBooking?.status === "payment-uploaded";
+  const canResend = Boolean(activeBooking) && !isCancelled;
+
+  const cooldownRemainingMs = Math.max(0, resendCooldownUntil - Date.now());
+  const isOnCooldown = cooldownRemainingMs > 0;
+  const cooldownSeconds = Math.ceil(cooldownRemainingMs / 1000);
 
   return (
     <main className="min-h-screen bg-gray-50 pb-20 font-body text-gray-900">
@@ -245,7 +311,6 @@ export function BookingLookupPage() {
 
       <section className="mx-auto max-w-4xl px-4 pt-10">
         {!activeBooking ? (
-          // Look up Form
           <motion.div
             variants={scaleIn}
             initial={shouldReduceMotion ? false : "hidden"}
@@ -269,7 +334,8 @@ export function BookingLookupPage() {
                   value={refInput}
                   onChange={(e) => setRefInput(e.target.value)}
                   required
-                  className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
+                  disabled={isSearching}
+                  className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
 
@@ -281,7 +347,8 @@ export function BookingLookupPage() {
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
                   required
-                  className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
+                  disabled={isSearching}
+                  className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
 
@@ -291,23 +358,12 @@ export function BookingLookupPage() {
                 </p>
               )}
 
-              <PrimaryButton type="submit" className="w-full">
-                Find My Booking
+              <PrimaryButton type="submit" className="w-full" disabled={isSearching}>
+                {isSearching ? "Looking up..." : "Find My Booking"}
               </PrimaryButton>
             </form>
-
-            <div className="mt-6 border-t border-gray-100 pt-6 text-center text-xs text-gray-500">
-              <p>Demo lookup details:</p>
-              <p className="mt-1 font-mono text-gray-700">
-                Ref: <span className="font-semibold text-primary">SI-20260612-042</span>
-              </p>
-              <p className="font-mono text-gray-700">
-                Email: <span className="font-semibold text-primary">maria@example.com</span>
-              </p>
-            </div>
           </motion.div>
         ) : (
-          // Found Booking View
           <div className="space-y-6">
             <button
               onClick={handleResetSearch}
@@ -317,7 +373,6 @@ export function BookingLookupPage() {
               Back to search
             </button>
 
-            {/* Main Header Row */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Booking Status</span>
@@ -329,13 +384,33 @@ export function BookingLookupPage() {
                 </div>
               </div>
 
-              {/* Quick Actions */}
-              <div className="flex flex-wrap gap-2">
-                <GhostButton onClick={handleResendEmail} disabled={resendStatus === "sending"}>
-                  <Mail size={16} />
-                  {resendStatus === "sending" ? "Resending..." : "Resend Email"}
-                </GhostButton>
-                {(activeBooking.status === "pending" || activeBooking.status === "payment-uploaded") && (
+              <div className="flex flex-wrap items-center gap-2">
+                {canResend && (
+                  <div className="flex flex-col items-end gap-1">
+                    <GhostButton
+                      onClick={handleResendEmail}
+                      disabled={isResending || isOnCooldown}
+                    >
+                      <Mail size={16} />
+                      {isResending
+                        ? "Resending..."
+                        : isOnCooldown
+                          ? `Wait ${cooldownSeconds}s`
+                          : "Resend Email"}
+                    </GhostButton>
+                    {resendStatus === "sent" && (
+                      <span className="text-[10px] font-semibold text-green-600">
+                        Email sent to {activeBooking.guestEmail}.
+                      </span>
+                    )}
+                    {(resendStatus === "rate-limited" || resendStatus === "error") && resendError && (
+                      <span className="text-[10px] font-semibold text-red-600">
+                        {resendError}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {canCancel && (
                   <GhostButton
                     onClick={() => setShowCancelModal(true)}
                     className="border-red-200 text-red-600 hover:bg-red-50"
@@ -348,12 +423,10 @@ export function BookingLookupPage() {
             </div>
 
             <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-              {/* Left Column: Details */}
               <div className="space-y-6">
-                {/* Stay Summary Card */}
                 <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                   <h2 className="text-lg font-bold text-gray-950 mb-4">Stay Summary</h2>
-                  
+
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="flex gap-3">
                       <Calendar className="mt-0.5 h-5 w-5 text-primary shrink-0" />
@@ -402,10 +475,9 @@ export function BookingLookupPage() {
                   )}
                 </div>
 
-                {/* Visual Status Timeline */}
                 <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                   <h2 className="text-lg font-bold text-gray-950 mb-5">Timeline</h2>
-                  
+
                   {isCancelled ? (
                     <div className="flex items-center gap-3 rounded-lg bg-red-50 p-4 text-sm text-red-700">
                       <ShieldAlert size={20} className="shrink-0" />
@@ -413,9 +485,8 @@ export function BookingLookupPage() {
                     </div>
                   ) : (
                     <div className="relative flex flex-col gap-6 md:flex-row md:justify-between md:gap-0">
-                      {/* Desktop timeline horizontal connector bar */}
                       <div className="absolute top-4 left-0 hidden h-1 w-full bg-gray-200 md:block" />
-                      
+
                       {timelineSteps.map((step, index) => {
                         const isCompleted = index <= currentStepIndex;
                         const isActive = index === currentStepIndex;
@@ -425,12 +496,10 @@ export function BookingLookupPage() {
                             key={step.label}
                             className="relative flex items-start gap-4 md:flex-col md:items-center md:gap-0 md:text-center md:flex-1"
                           >
-                            {/* Connector bar (mobile) */}
                             {index > 0 && (
                               <div className="absolute -top-6 left-4 h-6 w-0.5 bg-gray-200 md:hidden" />
                             )}
 
-                            {/* Node Dot */}
                             <span
                               className={cn(
                                 "flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-semibold z-10 transition-all",
@@ -442,7 +511,6 @@ export function BookingLookupPage() {
                               {index + 1}
                             </span>
 
-                            {/* Node labels */}
                             <div className="mt-1 md:mt-3">
                               <p className={cn("text-sm font-semibold", isActive ? "text-primary" : "text-gray-950")}>
                                 {step.label}
@@ -457,15 +525,14 @@ export function BookingLookupPage() {
                 </div>
               </div>
 
-              {/* Right Column: Pricing & Booking details */}
               <div className="space-y-6">
                 <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
                   <h2 className="text-lg font-bold text-gray-950 mb-4">Pricing & Details</h2>
-                  
+
                   <div className="space-y-4">
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Room Type</span>
-                      <span className="font-semibold text-gray-900">{activeBooking.roomName} (Room {activeBooking.roomNumber})</span>
+                      <span className="font-semibold text-gray-900">{activeBooking.roomName || activeBooking.roomType} (Room {activeBooking.roomNumber})</span>
                     </div>
 
                     <div className="flex justify-between text-sm text-gray-600">
@@ -492,7 +559,6 @@ export function BookingLookupPage() {
                   </div>
                 </div>
 
-                {/* Help Banner */}
                 <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
                   <Sparkles className="text-primary shrink-0 mt-0.5 animate-pulse" size={18} />
                   <div>
@@ -508,9 +574,8 @@ export function BookingLookupPage() {
         )}
       </section>
 
-      {/* Cancellation Confirmation Modal */}
       {showCancelModal && activeBooking && (
-        <Modal open={showCancelModal} onClose={() => setShowCancelModal(false)} title="Cancel reservation?">
+        <Modal open={showCancelModal} onClose={() => !isCancelling && setShowCancelModal(false)} title="Cancel reservation?">
           <form onSubmit={handleCancelBookingSubmit} className="space-y-4">
             <p className="text-sm text-gray-600 leading-relaxed">
               Are you sure you want to cancel your booking <span className="font-mono font-semibold text-gray-900">{activeBooking.bookingRef}</span>? This action is permanent.
@@ -522,23 +587,32 @@ export function BookingLookupPage() {
                 placeholder="Please tell us why you are cancelling..."
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                className="min-h-24 w-full rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                disabled={isCancelling}
+                className="min-h-24 w-full rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60"
               />
             </label>
+
+            {cancelError && (
+              <p className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-600">
+                {cancelError}
+              </p>
+            )}
 
             <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setShowCancelModal(false)}
-                className="min-h-11 rounded-lg border border-gray-200 px-5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100"
+                disabled={isCancelling}
+                className="min-h-11 rounded-lg border border-gray-200 px-5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 No, keep booking
               </button>
               <button
                 type="submit"
-                className="min-h-11 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition hover:bg-red-700 shadow-sm shadow-red-600/20"
+                disabled={isCancelling}
+                className="min-h-11 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white transition hover:bg-red-700 shadow-sm shadow-red-600/20 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Yes, cancel reservation
+                {isCancelling ? "Cancelling..." : "Yes, cancel reservation"}
               </button>
             </div>
           </form>

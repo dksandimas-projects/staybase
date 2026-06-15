@@ -794,3 +794,86 @@ export async function handleConfirmBooking(req: any, res: any) {
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
+
+export async function handleLookupBooking(req: any, res: any) {
+  const { bookingRef, guestEmail } = req.body || {};
+  if (!bookingRef || !guestEmail) {
+    return res.status(400).json({ success: false, error: "Booking reference and guest email are required." });
+  }
+
+  const trimmedRef = String(bookingRef).trim();
+  const normalizedEmail = String(guestEmail).trim().toLowerCase();
+
+  try {
+    const snapshot = await adminDb.collection("bookings")
+      .where("bookingRef", "==", trimmedRef)
+      .where("guestEmail", "==", normalizedEmail)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      const fallbackSnapshot = await adminDb.collection("bookings")
+        .where("bookingRef", "==", trimmedRef)
+        .limit(5)
+        .get();
+
+      const matched = fallbackSnapshot.docs.find((doc: any) => {
+        const data = doc.data();
+        return String(data.guestEmail || "").trim().toLowerCase() === normalizedEmail;
+      });
+
+      if (!matched) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+
+      const bookingData: any = { id: matched.id, ...matched.data() };
+      return await enrichAndRespond(res, bookingData);
+    }
+
+    const bookingDoc = snapshot.docs[0];
+    const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
+    return await enrichAndRespond(res, bookingData);
+  } catch (error: any) {
+    console.error("Booking lookup failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
+  }
+}
+
+async function enrichAndRespond(res: any, bookingData: any) {
+  let roomData: any = null;
+  if (bookingData.roomId) {
+    try {
+      const roomDoc = await adminDb.collection("rooms").doc(String(bookingData.roomId)).get();
+      if (roomDoc.exists) {
+        roomData = roomDoc.data();
+      }
+    } catch (roomErr) {
+      console.error("Failed to enrich booking with room data:", roomErr);
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      id: bookingData.id,
+      bookingRef: bookingData.bookingRef,
+      guestName: bookingData.guestName,
+      guestEmail: bookingData.guestEmail,
+      guestPhone: bookingData.guestPhone,
+      roomId: bookingData.roomId,
+      roomNumber: bookingData.roomNumber,
+      roomName: roomData?.name || bookingData.roomType || "",
+      roomType: bookingData.roomType,
+      checkIn: bookingData.checkIn,
+      checkOut: bookingData.checkOut,
+      numNights: bookingData.numNights,
+      numGuests: bookingData.numGuests,
+      ratePerNight: bookingData.ratePerNight,
+      totalPrice: bookingData.totalPrice,
+      paymentMethod: bookingData.paymentMethod,
+      status: bookingData.status,
+      hasBreakfast: bookingData.hasBreakfast,
+      specialRequests: bookingData.specialRequests || ""
+    }
+  });
+}
