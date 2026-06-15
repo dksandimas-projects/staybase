@@ -337,17 +337,17 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 10 — Security & Polish
 > Goal: Security rules finalized, performance verified, ready for staging.
 
-- ⬜ Firestore security rules — final version, tested in emulator
-- ⬜ Firebase Storage rules — final version, payment proof restricted to staff
-- ⬜ API rate limiting — all public endpoints
-- ⬜ Cloudflare Turnstile — wired into booking creation + corporate inquiry form
-- ⬜ Honeypot fields — booking form + corporate inquiry form
-- ⬜ `FIREBASE_PRIVATE_KEY` newline handling verified in Admin SDK init
-- ⬜ Firebase API key domain restriction set in Firebase Console
-- ⬜ Performance audit — guest site < 3s on 4G mobile, dashboard < 2s
-- ⬜ Guest Intercom polish — unread pulse for front-desk replies when the guest is away from Chat, plus long-thread pagination/virtualization if live usage shows large room threads
-- ⬜ Cross-browser QA — Chrome, Safari, Firefox
-- ⬜ Mobile QA — iOS Safari, Android Chrome (375px)
+- ✅ Firestore security rules — final version (`firebase/firestore.rules`): bookings create=false (API/Admin SDK only), staff/admin role checks, member owner checks, intercom/calls open for WebRTC, storeOrders create=true for guest ordering
+- ✅ Firebase Storage rules — final version (`firebase/storage.rules`): payment-proof + discount-id staff-only read, guest-id staff-only read+write, website-content admin write, notification-sound staff-only, store-items staff write, branding public read
+- ✅ API rate limiting — all public endpoints covered in `[...route].ts`: bookings 5/min, voucher 20/min, corporate-code 10/min, corporate-inquiry 5/min, bookings-lookup 10/min, email 3/ref/hour, store 10/min, store-cancel 10/min, store-status 30/min
+- ✅ Cloudflare Turnstile — wired into booking creation, voucher validation, corporate code validation, corporate inquiry form (`[...route].ts` lines 206-208, 259-263, 296-299, 316-319)
+- ✅ Honeypot fields — booking creation (`_hp` check at line 193-200) + corporate inquiry (`_hp` check at line 309-313) — both return silent success
+- ✅ `FIREBASE_PRIVATE_KEY` newline handling — `firebase-admin.ts:19` already has `.replace(/\\n/g, "\n")`
+- ⬜ Firebase API key domain restriction — operational task, requires Firebase Console configuration (not a code change)
+- ⬜ Performance audit — guest site < 3s on 4G mobile, dashboard < 2s (requires Lighthouse/WebPageTest; manual QA)
+- ✅ Guest Intercom polish — unread pulse on Chat tab: red dot with count shown when front desk messages arrive while guest is on Shop tab; messages marked read only when guest switches to Chat tab. Long-thread pagination: initial load limited to 50 messages, "Load earlier messages" button fetches 30 more per tap.
+- ⬜ Cross-browser QA — Chrome, Safari, Firefox (manual QA)
+- ⬜ Mobile QA — iOS Safari, Android Chrome (375px) (manual QA)
 
 ---
 
@@ -509,11 +509,11 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
 | 9 — Remaining Features | 6 | 6 | 0 |
-| 10 — Security & Polish | 10 | 0 | 10 |
+| 10 — Security & Polish | 11 | 7 | 4 (operational/QA) |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
 | Audit Fixes | 46 | 16 | 30 |
-| **Total** | **215** | **134** | **81** |
+| **Total** | **216** | **141** | **75** |
 
 ---
 
