@@ -448,12 +448,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const toggleHousekeepingStatus = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
-    
+
+    // Per W1.15 / decision #88 / DASHBOARD-OVERVIEW.md: cycle order is
+    // clean -> dirty -> in-progress -> clean (a room is cleaned, gets
+    // used and goes dirty, is then taken for cleaning which is in-progress,
+    // and returns to clean when done).
     let nextHK: Room["housekeepingStatus"] = "clean";
     if (room.housekeepingStatus === "clean") {
-      nextHK = "in-progress";
-    } else if (room.housekeepingStatus === "in-progress") {
       nextHK = "dirty";
+    } else if (room.housekeepingStatus === "dirty") {
+      nextHK = "in-progress";
     } else {
       nextHK = "clean";
     }
@@ -1159,6 +1163,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const adminRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
+  const adminPreviousCallRoomIdRef = useRef<string | null>(null);
 
   const cleanupAdminCall = () => {
     adminIceUnsubscribeRef.current?.();
@@ -1196,9 +1201,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           .sort((a, b) => b.startedAt - a.startedAt);
 
         const nextCall = activeCalls[0] || null;
+        // Per W2.6 / decision #94: "second wins" — if a new active
+        // call arrives while a previous one was being shown, write
+        // status: "ended" to the old call doc so the previous guest's
+        // UI sees the call end via its snapshot listener. The new
+        // call is the only one shown in the inbox.
+        const previousRoomId = adminPreviousCallRoomIdRef.current;
+        if (nextCall && previousRoomId && nextCall.roomId !== previousRoomId) {
+          void updateDoc(doc(db, "calls", previousRoomId), {
+            status: "ended",
+            endedAt: serverTimestamp(),
+            endedReason: "superseded-by-other-call"
+          }).catch((err) => {
+            console.error("Error ending superseded call:", err);
+          });
+          cleanupAdminCall();
+        }
+        adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         setIncomingCall(nextCall);
         if (!nextCall) {
           cleanupAdminCall();
+          adminPreviousCallRoomIdRef.current = null;
         }
       },
       (error) => {
@@ -1509,8 +1532,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
     bookingPaymentMethods: [
-      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "BDO: 001234567890 (Spark Inn)" },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "GCash: 09170000000 (Daniel Sandimas)" },
+      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "" },
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "" },
       { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
     ]
   });
