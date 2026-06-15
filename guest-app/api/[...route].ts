@@ -5,7 +5,8 @@ import {
   handleAddPayment, 
   handleRejectDiscount, 
   handleCancelBooking,
-  handleConfirmBooking
+  handleConfirmBooking,
+  handleLookupBooking
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
@@ -261,6 +262,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult.success ? authResult : null;
     return await handleCancelBooking(req, res);
+  }
+
+  if (domain === "bookings" && action === "lookup" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many lookup attempts. Please try again in a minute." });
+    }
+    return await handleLookupBooking(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
