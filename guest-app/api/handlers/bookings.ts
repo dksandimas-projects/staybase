@@ -104,6 +104,33 @@ export async function handleCreateBooking(req: any, res: any) {
     let finalTotalPrice = 0;
     let computedData: any = {};
 
+    // Detect Spark Rewards member via the request's ID token.
+    // Per W2.2 / decision #90: server is authoritative for member discount.
+    // The client cannot supply a memberDiscount or memberDiscountPct field;
+    // we look up the member by authUser.uid and apply the 3rd stacking
+    // step (DECISIONS-FEATURES.md #13b). The Authorization header is
+    // optional — anonymous bookings get no member discount.
+    let detectedMemberId: string | null = null;
+    let detectedMemberDoc: any = null;
+    const authHeader = req.headers?.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const idToken = authHeader.split("Bearer ")[1];
+      try {
+        const decoded = await adminAuth.verifyIdToken(idToken);
+        const memberRef = adminDb.collection("members").doc(decoded.uid);
+        const memberSnap = await memberRef.get();
+        if (memberSnap.exists) {
+          const m = memberSnap.data()!;
+          if (m.isMember !== false && m.isActive !== false) {
+            detectedMemberId = memberSnap.id;
+            detectedMemberDoc = m;
+          }
+        }
+      } catch (err) {
+        // Invalid/expired token — fall through to anonymous booking
+      }
+    }
+
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
       // 1. Fetch Room Details
@@ -241,9 +268,31 @@ export async function handleCreateBooking(req: any, res: any) {
         }
       }
 
-      const governmentDiscount = Math.round((subtotal - voucherDiscount) * (discountPct / 100));
-      const totalDiscount = voucherDiscount + governmentDiscount;
-      const totalPrice = Math.max(subtotal - totalDiscount, 0);
+      // 8b. Spark Rewards member discount (3rd stacking step per
+      // DECISIONS-FEATURES.md #13b). Read settings/rewardsConfig inside
+      // the transaction. Applied to the post-voucher subtotal.
+      let memberDiscountPct = 0;
+      if (detectedMemberId) {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsDoc = await transaction.get(rewardsRef);
+        if (rewardsDoc.exists) {
+          const rc = rewardsDoc.data()!;
+          if (rc.memberDiscountEnabled !== false) {
+            const pct = Number(rc.memberDiscountPct) || 0;
+            if (pct > 0) memberDiscountPct = pct;
+          }
+        }
+      }
+
+      // Stacking order (per DECISIONS-FEATURES.md #13b):
+      //   1. Senior/PWD on subtotal
+      //   2. Voucher (flat or percent) on post–Senior/PWD subtotal
+      //   3. Member discount (percent) on post-voucher subtotal
+      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const afterVoucher = afterSeniorPwd - voucherDiscount;
+      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
       // Pre-discount total to restore if discount is rejected
       const originalTotalPrice = discountPct > 0 ? (subtotal - voucherDiscount) : null;
@@ -304,7 +353,10 @@ export async function handleCreateBooking(req: any, res: any) {
         source: isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
-        memberId: null,
+        // Server-detected Spark Rewards member (per W2.2 / decision #90).
+        // Set from the Authorization Bearer token detected above.
+        memberId: detectedMemberId,
+        memberDiscountPct: memberDiscountPct,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
