@@ -275,7 +275,7 @@ export async function handleCreateBooking(req: any, res: any) {
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
         guestName,
-        guestEmail: guestDetails.email.trim(),
+        guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
         checkIn: adminDb.doc(`rooms/${roomId}`).firestore.valueType ? checkInDate : checkInDate, // Firestore Timestamps
@@ -324,7 +324,7 @@ export async function handleCreateBooking(req: any, res: any) {
 
       computedData = {
         guestName,
-        email: guestDetails.email.trim(),
+        email: guestDetails.email.trim().toLowerCase(),
         roomName: roomData.name,
         roomNumber: roomData.roomNumber,
         checkIn,
@@ -498,7 +498,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
         guestName,
-        guestEmail: guestDetails.email.trim(),
+        guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
         checkIn: checkInDate,
@@ -663,7 +663,7 @@ export async function handleCancelBooking(req: any, res: any) {
 
       const query = adminDb.collection("bookings")
         .where("bookingRef", "==", bookingRef.trim())
-        .where("guestEmail", "==", guestEmail.trim())
+        .where("guestEmail", "==", guestEmail.trim().toLowerCase())
         .limit(1);
       
       const snapshot = await query.get();
