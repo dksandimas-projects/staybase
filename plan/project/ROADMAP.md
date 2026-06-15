@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 15, 2026 (closed AUDIT-6c admin staff account API routes)
+> Last updated: June 15, 2026 (closed AUDIT-8 Spark Rewards promo perks schema)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -401,7 +401,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ **[AUDIT-6b]** Add `api/handlers/store.ts` and define `/api/store/create-order` in API-ROUTES.md — verified the store handler and route docs already cover `/api/store/create-order`, `/api/store/cancel-order`, and `/api/store/order-status`; added create-order API tests for transaction stock decrement, active booking lookup, unlimited-stock items, and insufficient-stock rejection.
 - ✅ **[AUDIT-6c]** Add `api/handlers/admin.ts` and define `/api/admin/create-staff`, `/api/admin/disable-staff` in API-ROUTES.md. Added admin-only staff account creation/disable handlers, Firebase Auth custom-claim wiring, Firestore `guests/{uid}` profile mirroring, self-disable and last-active-admin guards, route dispatch, and API tests.
 - ✅ **[AUDIT-7]** Add `isEarlyCheckInRequest?: boolean` to `IntercomMessage` type in `TYPES.md` and `BACKEND.md §intercoms`
-- ⬜ **[AUDIT-8]** Decide on `SparkRewardsPromo.perks` field — add to type in `TYPES.md` and schema in `BACKEND.md §settings/websiteContent`
+- ✅ **[AUDIT-8]** Decide on `SparkRewardsPromo.perks` field — added `perks: (WebsiteContentItem & { isEnabled: boolean })[]` to `TYPES.md`, documented the backend schema in `BACKEND.md §settings/websiteContent`, and aligned the homepage feature spec with disabled-perk handling.
 
 ### 🟡 Fix before Phase 10 — Security & Polish
 

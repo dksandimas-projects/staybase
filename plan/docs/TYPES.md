@@ -319,6 +319,7 @@ WebsiteContentItem {
 SparkRewardsPromo {
   heading: string
   description: string
+  perks: (WebsiteContentItem & { isEnabled: boolean })[]
   isEnabled: boolean
 }
 

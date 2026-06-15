@@ -36,7 +36,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
   - [ ] No pricing displayed — inquiry-only
 - [ ] Spark Rewards promo section — marketing block promoting the loyalty program
   - [ ] Heading and short description editable from Settings → Website Content
-  - [ ] Perks list — icon + perk name + short description per item (e.g. "Earn Points", "Member Discounts", "Early Check-In"); editable from Settings
+  - [ ] Perks list — icon + perk name + short description per item from `settings/websiteContent.homepage.sparkRewards.perks` (e.g. "Earn Points", "Member Discounts", "Early Check-In"); editable from Settings, with disabled perks hidden
   - [ ] CTA: "Join Spark Rewards" → links to `/rewards`
   - [ ] If guest is already a logged-in member — show "Welcome back, [name]" with link to `/account/rewards` instead; hide perks list
   - [ ] Section hidden entirely if `isEnabled: false`
