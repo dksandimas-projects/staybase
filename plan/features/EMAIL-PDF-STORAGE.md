@@ -78,7 +78,7 @@ Use Vercel Cron for check-in reminders. The cron job runs once daily against `/a
 - Schedule: daily at `0 0 * * *` UTC, which runs at 08:00 in Asia/Manila
 - Auth: Vercel sends `Authorization: Bearer {CRON_SECRET}`; `CRON_SECRET` must be configured in Vercel and must not use a `VITE_` prefix
 - Method: Vercel invokes cron paths with `GET`; the route also keeps staff-triggered `POST` support for manual resend/testing
-- Idempotency: before production launch, the cron sender should record a reminder-sent marker on each booking so retries do not send duplicate reminder emails
+- Idempotency: **required** *(Per `DECISIONS-FEATURES.md #83`)*. The cron sender writes `reminderSentAt: Timestamp` to the booking in the same transaction that sends the email, and the cron query filters `where("reminderSentAt", "==", null)`. Retries do not double-send.
 
 ---
 

@@ -62,8 +62,8 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 ### Data & Logic Checklist
 - [x] `onSnapshot` on `storeOrders` — real-time updates
 - [x] Status update: `updateDoc` on `storeOrders/{orderId}` — update `status` + `updatedAt` + `handledBy`
-- [x] Stock decrement: order creation reserves finite stock in the API transaction; confirmation does not decrement again
-- [x] Stock restored if a `placed` order is cancelled before confirmation — add back quantities once using `stockRestoredAt`
+- [x] **Stock decrement happens on order confirmation, not on order creation** *(Per `DECISIONS-FEATURES.md #80`)*. The current text "order creation reserves finite stock in the API transaction; confirmation does not decrement again" is reversed — stock is **not** decremented at create; a new `handleConfirmStoreOrder` API decrements inside a transaction. `handleCancelStoreOrder` only restores stock that was decremented at confirmation.
+- [x] Stock restored if a `placed` order is cancelled before confirmation — but the `placed` order did not decrement stock, so no restoration is needed for that path. Cancellation after confirmation: add back quantities once using `stockRestoredAt`.
 - [x] "Add to Booking Bill": `updateDoc` on order `isBilled: true`, `billedAt: timestamp`. The booking document itself is **not** mutated — the checkout folio derives billed store charges at read time by filtering `storeOrders` on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. See `plan/docs/BACKEND.md §bookings` for rationale.
 - [ ] Order notification: intercom badge message already sent by guest — admin sees it in intercom thread
 - [ ] New order sound notification — same Web Audio API pattern as intercom (play on new `placed` order if not on store orders page)

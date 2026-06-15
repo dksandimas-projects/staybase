@@ -73,10 +73,10 @@ Booking {
   roomType: RoomType
   guestName: string
   guestEmail: string
-  guestPhone: string
-  numGuests: number
-  checkIn: Date
-  checkOut: Date
+   guestPhone: string
+   numGuests: number
+   checkIn: Timestamp        // Firestore Timestamp — see `DECISIONS-FEATURES.md #84`
+   checkOut: Timestamp       // (always stored as `Timestamp.fromDate(jsDate)`, never raw Date or ISO string)
   numNights: number
   ratePerNight: number
   totalPrice: number
