@@ -8,6 +8,7 @@
 ```
 spark-inn/
 ├── package.json                 ← npm workspaces root — defines workspace members
+├── vercel.json                  ← Vercel headers + scheduled cron config
 ├── CLAUDE.md                    ← Master agent context (read first)
 ├── GEMINI.md                    ← One-liner redirect to CLAUDE.md
 ├── AGENTS.md                    ← One-liner redirect to CLAUDE.md
@@ -127,6 +128,8 @@ One Vercel project for the entire monorepo. Two deployments configured:
 | Admin | `admin-app/` | `admin.sparkinnbohol.com` |
 
 Vercel automatically picks up `guest-app/api/` as serverless functions when root is set to `guest-app/`. No separate project needed. Both deployments share the same env vars set in the single Vercel project dashboard.
+
+Root `vercel.json` owns deployment-wide security headers and the scheduled check-in reminder cron entry. Headers include CSP, clickjacking protection, MIME sniffing protection, referrer policy, and permissions policy. The cron entry calls `/api/email/checkin-reminder` daily using the `CRON_SECRET` bearer-token flow documented in `plan/features/EMAIL-PDF-STORAGE.md`.
 
 ---
 
