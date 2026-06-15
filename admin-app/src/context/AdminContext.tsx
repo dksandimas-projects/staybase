@@ -448,12 +448,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const toggleHousekeepingStatus = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
-    
+
+    // Per W1.15 / decision #88 / DASHBOARD-OVERVIEW.md: cycle order is
+    // clean -> dirty -> in-progress -> clean (a room is cleaned, gets
+    // used and goes dirty, is then taken for cleaning which is in-progress,
+    // and returns to clean when done).
     let nextHK: Room["housekeepingStatus"] = "clean";
     if (room.housekeepingStatus === "clean") {
-      nextHK = "in-progress";
-    } else if (room.housekeepingStatus === "in-progress") {
       nextHK = "dirty";
+    } else if (room.housekeepingStatus === "dirty") {
+      nextHK = "in-progress";
     } else {
       nextHK = "clean";
     }
