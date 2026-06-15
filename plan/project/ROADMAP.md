@@ -286,10 +286,10 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 8 — Intercom (P1)
 > Goal: QR chat working between guests and front desk, including Spark Essentials store.
 
-- 🔄 Guest Intercom page (`/intercom/:roomId`) — chat UI, quick requests, name prompt, Shop tab
-- 🔄 Intercom Inbox (admin) — chat list, thread view, reply, mark resolved, store order cards
+- ✅ Guest Intercom page (`/intercom/:roomId`) — chat UI, quick requests, name prompt, Shop tab — `guest-app/src/pages/IntercomPage.tsx`
+- ✅ Intercom Inbox (admin) — chat list, thread view, reply, mark resolved, store order cards — `admin-app/src/pages/IntercomInboxPage.tsx`
 - ✅ Intercom resolved flow — Active/Resolved tabs, room-level resolved flag, reopen action
-- 🔄 WebRTC voice signaling — Firestore `calls` offer/answer status, ICE exchange, accept/decline/hang up flow
+- ✅ WebRTC voice signaling — Firestore `calls` offer/answer status, ICE exchange, accept/decline/hang up flow — `admin-app/src/context/AdminContext.tsx` (acceptCall/declineCall) + `guest-app/src/pages/IntercomPage.tsx` (caller flow)
 - ✅ Notification sound — Web Audio API, every message, tab not focused
 - ✅ Tab title unread count
 - ✅ Sidebar unread badge
@@ -307,9 +307,18 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Spark Essentials — live catalog CRUD in Admin Settings → Store tab; guest store already reads live `storeItems`, but admin catalog editing must persist to Firestore before launch
 - ✅ Spark Essentials — store GCash QR/account info management in Admin Settings; guest checkout already consumes `settings/storeConfig.paymentMethods[].qrUrl/accountInfo`
 - ✅ Intercom Inbox — render guest store order messages as rich order cards with item/total/payment summary and a link to Store Management
-- ⬜ Intercom Inbox — verify incoming call notification sound and active-call banner behavior in real browsers
 - ✅ Guest Intercom — unread pulse and long-thread pagination are deferred to Phase 10 polish; Phase 8 launch keeps real-time chat, auto-scroll, and immediate read marking
-- ⬜ Phase 8 manual QA — end-to-end QR scan → guest chat → admin reply → voice call → store order → status update → cancellation/billing across desktop and mobile browsers
+- 📋 **Phase 8 manual QA checklist** *(run on staging before launch — sign off in client training session)*
+  - [ ] Desktop Chrome — scan QR from `/intercom/{roomId}` → enter guest name → quick request lands in admin Inbox → admin reply reaches guest within 2s
+  - [ ] Desktop Chrome — guest voice call → admin ringing banner + ring sound → accept → bidirectional audio → hang up from both sides
+  - [ ] Desktop Chrome — guest places store order (COD/Add-to-bill/GCash with screenshot) → order card appears in admin Inbox → status update reflects in guest shop panel
+  - [ ] Desktop Chrome — store order cancellation from guest side restores stock (verify `storeItems.stock` increments and `stockRestoredAt` is set)
+  - [ ] iOS Safari (375px) — full chat → reply → voice call → store order loop
+  - [ ] Android Chrome (375px) — same loop
+  - [ ] Mark resolved / reopen from admin Inbox updates the room-level flag and hides thread from Active tab
+  - [ ] Notification sound fires only when tab is not focused; tab title unread count updates correctly
+  - [ ] WebRTC active-call banner shows live duration timer; "Disconnect" button properly tears down the peer connection and media stream on both sides
+  - [ ] QR regen in admin Settings → QR Management → old QR continues to work for in-flight session, new QR encodes the same `/intercom/{roomId}` URL (per `QR-MANAGEMENT.md`)
 
 ---
 
@@ -497,13 +506,13 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 5 — Admin Bookings | 8 | 8 | 0 |
 | 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
-| 8 — Intercom | 10 | 2 | 8 |
+| 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
 | 9 — Remaining Features | 5 | 1 | 4 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
 | Audit Fixes | 46 | 11 | 35 |
-| **Total** | **204** | **111** | **93** |
+| **Total** | **214** | **129** | **85** |
 
 ---
 
