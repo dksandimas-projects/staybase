@@ -16,7 +16,7 @@
     "preview:guest": "npm run preview -w guest-app",
     "preview:admin": "npm run preview -w admin-app",
     "typecheck": "npm run typecheck -w guest-app && npm run typecheck -w admin-app",
-    "test": "npm run test -w shared && npm run test:api -w guest-app",
+    "test": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app",
     "test:shared": "npm run test -w shared",
     "test:guest:api": "npm run test:api -w guest-app",
     "preflight": "node scripts/preflight.mjs"
