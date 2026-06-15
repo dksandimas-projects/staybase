@@ -11,7 +11,7 @@ import {
 import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 type StaffRole = "front-desk" | "admin";
@@ -24,6 +24,20 @@ interface AdminUser {
   uid: string;
   email: string;
   role: StaffRole;
+}
+
+export interface StaffMember {
+  uid: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  nationality: string;
+  role: StaffRole;
+  isActive: boolean;
+  createdAt: string;
+  disabledAt: string | null;
+  createdBy: string;
+  disabledBy: string;
 }
 
 // Interfaces aligning with plan/docs/TYPES.md
@@ -328,6 +342,11 @@ export interface AdminContextType {
   breakfastConfig: any;
   storeConfig: any;
   updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<void>;
+
+  // Staff Accounts
+  staff: StaffMember[];
+  createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string }>;
+  disableStaff: (uid: string) => Promise<{ success: boolean; error?: string }>;
 
   // Room Types Config
   roomTypes: { value: string; label: string; shortLabel: string }[];
@@ -1662,6 +1681,129 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     saveRoomTypes(updated);
   };
 
+  // Staff Accounts — live from `guests/{uid}` where role is staff (front-desk | admin).
+  // Per SETTINGS.md §4 + audit S5.2: this is the source of truth for the Staff
+  // Accounts tab. The /api/admin/create-staff and /api/admin/disable-staff
+  // handlers write here transactionally; Firestore listeners refresh the UI.
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+
+  useEffect(() => {
+    const staffRef = query(
+      collection(db, "guests"),
+      where("role", "in", ["front-desk", "admin"])
+    );
+    const unsubscribe = onSnapshot(
+      staffRef,
+      (snapshot) => {
+        const staffData: StaffMember[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const createdAt = data.createdAt
+            ? (typeof data.createdAt.toDate === "function"
+                ? data.createdAt.toDate().toISOString()
+                : String(data.createdAt))
+            : "";
+          const disabledAt = data.disabledAt
+            ? (typeof data.disabledAt.toDate === "function"
+                ? data.disabledAt.toDate().toISOString()
+                : String(data.disabledAt))
+            : null;
+          staffData.push({
+            uid: docSnap.id,
+            fullName: data.fullName || "",
+            email: data.email || "",
+            phone: data.phone || "",
+            nationality: data.nationality || "",
+            role: data.role === "admin" ? "admin" : "front-desk",
+            isActive: data.isActive !== false,
+            createdAt,
+            disabledAt,
+            createdBy: data.createdBy || "",
+            disabledBy: data.disabledBy || ""
+          });
+        });
+
+        staffData.sort((a, b) => {
+          if (a.role !== b.role) return a.role === "admin" ? -1 : 1;
+          return a.email.localeCompare(b.email);
+        });
+        setStaff(staffData);
+      },
+      (error) => {
+        console.error("Error listening to staff collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const getApiBaseUrl = () => {
+    if (typeof window === "undefined") return "";
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:3000";
+    }
+    return import.meta.env.VITE_GUEST_APP_URL || "";
+  };
+
+  const createStaff = async (input: {
+    fullName: string;
+    email: string;
+    password: string;
+    phone?: string;
+    nationality?: string;
+    role: StaffRole;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/create-staff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          fullName: input.fullName,
+          email: input.email,
+          password: input.password,
+          phone: input.phone || "",
+          nationality: input.nationality || "",
+          role: input.role
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to create staff account." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error creating staff account:", err);
+      return { success: false, error: err?.message || "Failed to create staff account." };
+    }
+  };
+
+  const disableStaff = async (uid: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/disable-staff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ uid })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to disable staff account." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error disabling staff account:", err);
+      return { success: false, error: err?.message || "Failed to disable staff account." };
+    }
+  };
+
   return (
     <AdminContext.Provider
       value={{
@@ -1716,7 +1858,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         roomTypes,
         addRoomType,
         updateRoomType,
-        deleteRoomType
+        deleteRoomType,
+        staff,
+        createStaff,
+        disableStaff
       }}
     >
       {children}
