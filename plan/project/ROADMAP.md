@@ -470,11 +470,41 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 - **Decided** — **#102** Converted-inquiry bookings get `linkedInquiryId?: string` on the booking doc (added to `Booking` type)
 - **Decided** — **#103** Booking source for a converted inquiry is `"corporate"`
 
+### Wave 3 — UI/UX Decision Triage (2026-06-15) — 12/12 Decided, 0/12 Implemented
+
+12 minor spec gaps resolved so the polish work in Phase 11.6 has a clear target. Documented in `DECISIONS-FEATURES.md #105`. Build deferred to Phase 11.6.
+
+- **Decided** — **#105a** Booking payment methods live in Rates (not Settings) — `SETTINGS.md` is updated to cross-reference Rates
+- **Decided** — **#105b** Spark Rewards Settings tab is admin-only with explicit role guard
+- **Decided** — **#105c** Room Types migrates from localStorage to `settings/hotelConfig.roomTypes` (Firestore)
+- **Decided** — **#105d** Reports "Download Full Backup" role guard is page-level (not layout)
+- **Decided** — **#105e** Reports Performance tab swaps "Avg Length of Stay" for "Avg Occupancy" + "Busiest Room Type" per `REPORTS.md` spec
+- **Decided** — **#105f** AboutPage "Brand Promise" banner is kept; `STATIC-PAGES.md §About` is updated
+- **Decided** — **#105g** CorporateStaysPage "Integration Process" + "Retreat CTA" sections are kept; `STATIC-PAGES.md §Corporate` is updated
+- **Decided** — **#105h** PrivacyPage + TermsPage include global `<Navbar />` for consistency (drop the custom thin header)
+- **Decided** — **#105i** PrivacyPage §3 heading renamed to "How Long We Keep It" per `STATIC-PAGES.md` spec wording
+- **Decided** — **#105j** New `config.rewardsName: "Spark Rewards"` for white-label deployments
+- **Decided** — **#105k** New `config.termsLastUpdated` field separate from `privacyPolicyLastUpdated`
+- **Decided** — **#105l** 404 page renders a tiny `<p>v{VERSION}</p>` to resolve the spec contradiction
+
+### Wave 4 — Infrastructure Decision Triage (2026-06-15) — 8/8 Decided, 0/8 Implemented (plus W4.4 documented separately)
+
+8 spec/build questions resolved for the cross-cutting work. Documented in `DECISIONS-FEATURES.md #106`. W4.4 (7 new email templates) is in `DECISIONS-FEATURES.md #104` and `plan/features/EMAIL-AUDIT-EXTENSIONS.md`. Build deferred to Phase 11.6.
+
+- **Decided** — **#106a** Corporate rate lookup fails soft to `room.corporateRate` with a console warning if `ratePerRoomType[roomType]` is undefined
+- **Decided** — **#106b** `index.html` static OG meta is templated at Vite build time via a small `transformIndexHtml` plugin reading `hotel.config.ts`
+- **Decided** — **#106c** `WHITE-LABEL.md` schema is updated to match the actual `HotelConfig` fields used in `hotel.config.ts`
+- **Decided** — **#106e** Storage rule for `store-orders/{roomNumber}/payment-proof/` uses `roomNumber` (matching the existing client upload path)
+- **Decided** — **#106f** CORS `Allow-Credentials: true` is removed; explicit allowlist from `config.domain` + `config.adminDomain` + localhost dev origins
+- **Decided** — **#106g** `prompt("Enter cancellation reason:")` is replaced with a small input field in the existing cancellation drawer
+- **Decided** — **#106h** Privacy + Terms pages keep the `Republic of the Philippines` hardcoded copy in legally-relevant sections but expose `config.applicableLaw` for the rest
+- **Decided** — **#106i** `Spark Inn Hotel Corp` hardcoded `accountName` fallback becomes `config.legalName`
+
 ### References
 - Audit report: `plan/project/AUDIT-E2E-2026-06-15.md`
 - Open questions: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md`
-- Decisions: `plan/docs/DECISIONS-FEATURES.md` (#75-#103)
-- Specs updated: `EMAIL-PDF-STORAGE.md`, `ROOM-MANAGEMENT.md`, `STORE-MANAGEMENT.md`, `TYPES.md`, `CONTACT-INQUIRIES.md` (new), `STATIC-PAGES.md`, `API-ROUTES.md`, `CORPORATE-BOOKING.md`, `INTERCOM-INBOX.md`
+- Decisions: `plan/docs/DECISIONS-FEATURES.md` (#75-#106)
+- Specs updated: `EMAIL-PDF-STORAGE.md`, `ROOM-MANAGEMENT.md`, `STORE-MANAGEMENT.md`, `TYPES.md`, `CONTACT-INQUIRIES.md` (new), `STATIC-PAGES.md`, `API-ROUTES.md`, `CORPORATE-BOOKING.md`, `INTERCOM-INBOX.md`, `EMAIL-AUDIT-EXTENSIONS.md` (new)
 
 ---
 
@@ -597,12 +627,12 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 20 | 0 | 15 (decisions documented, unimplemented) + 5 (SEV-1 fixes, unimplemented) |
+| 11.5 — Audit Fixes & Launch-Readiness | 37 | 0 | 32 (decisions documented, unimplemented) + 5 (SEV-1 fixes, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **279** | **249** | **30** |
+| **Total** | **316** | **249** | **67** |
 
-*Phase 11.5 is shown as 0/20 in the table above because none of the SEV-1 fixes are implemented yet; the 30 Wave 1+2 decisions are tracked separately in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` as "decided but not implemented". They contribute to "Spec closure" rather than the implementation count.*
+*Phase 11.5 is shown as 0/20 in the table above because none of the SEV-1 fixes are implemented yet; 32 Wave 1+2+3+4 decisions are tracked separately in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` as "decided but not implemented". They contribute to "Spec closure" rather than the implementation count.*
 
 ---
 
