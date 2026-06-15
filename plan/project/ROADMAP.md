@@ -416,7 +416,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **17 of 51 decisions + 1 launch-gate SEV-1 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3). 34 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 sections below for the 17 closed.
+> **Current state** (as of 2026-06-16): **18 of 51 decisions + 1 launch-gate SEV-1 + 1 launch-gate SEV-1 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4). 33 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 sections below for the 18 closed.
 
 ### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
@@ -471,6 +471,11 @@ Branch: `feature/phase-11.6-batch-2`. Shipped in PR `ed701ab`.
 Branch: `feature/phase-11.6-batch-3`. Ships the launch-gate UI for staff provisioning.
 
 - [x] **S5.2** (commit `<pending>`) **Add Staff Accounts tab to `SettingsPage`.** Closes the launch gate from `AUDIT-E2E-2026-06-15.md` Top 5 launch-blockers: hotel owner could not provision front-desk accounts. Files: `admin-app/src/context/AdminContext.tsx` (new `StaffMember` type + `staff: StaffMember[]` listener on `guests` filtered by `role in ["front-desk", "admin"]` + `createStaff` + `disableStaff` API wrappers), `admin-app/src/pages/SettingsPage.tsx` (new "staff" tab on the settings list, admin-only role guard, live staff table, create form with role radios, disable confirmation modal, "You" badge for the current admin, self-disable guard). API routes (`/api/admin/create-staff`, `/api/admin/disable-staff`) were already shipped per AUDIT-6c — this PR wires the UI to the existing routes. 13 regression tests in `admin-app/src/__tests__/staff-accounts-tab.test.ts` cover the listener, the Bearer-token API wrappers, the role guard, the form, the table, and the confirmation modal. **Closes the S5.2 launch-gate SEV-1.**
+
+### Phase 11.6 Batch 4 — Launch-blocker: Booking Receipt PDF (1 fix, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-4`. Ships the staff-side booking receipt PDF for the front desk.
+
+- [x] **S7.1** (commit `<pending>`) **Add `printBookingReceiptPDF()` to `BookingsPage.tsx` + drawer button.** Closes the launch gate from `AUDIT-E2E-2026-06-15.md` Top 5 launch-blockers: front desk had no way to print/email a booking summary. Implements the spec in `plan/features/EMAIL-PDF-STORAGE.md §Booking Confirmation Receipt` end-to-end: header (brand + title + booking ref + generated-on), guest info, stay info, pricing breakdown (subtotal, Senior/PWD discount, voucher, Spark Rewards points redemption, total), special requests, payments-collected section (date + method + amount per payment, total collected, outstanding balance — green if settled, red if outstanding), or "Payment Method + Amount Due" fallback when no payments are recorded, and a BIR-receipt disclaimer footer. Client-side jsPDF, A4, no server round-trip; opens in a new tab. 13 regression tests in `admin-app/src/__tests__/booking-receipt-pdf.test.ts` cover the builder, every required section, and the drawer button. **Closes decision #82 + audit S7.1 launch-gate SEV-1.**
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -654,12 +659,12 @@ Branch: `feature/phase-11.6-batch-3`. Ships the launch-gate UI for staff provisi
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 38 | 17 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 1 launch-gate (S5.2 Staff Accounts tab). 17/38 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3. |
+| 11.5 — Audit Fixes & Launch-Readiness | 39 | 18 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF). 18/39 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **317** | **266** | **51** |
+| **Total** | **318** | **267** | **51** |
 
-*Phase 11.5 is now 17/38 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (317) = previous total (316) + Phase 11.5 Batch 3 addition (1).*
+*Phase 11.5 is now 18/39 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (318) = previous total (317) + Phase 11.5 Batch 4 addition (1).*
 
 ---
 
