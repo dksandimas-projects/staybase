@@ -76,6 +76,12 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 
 Husky's `commit-msg` hook auto-bumps `shared/VERSION.ts` based on the prefix.
 
+**Branch retention (do not delete merged branches):**
+- Once a feature/fix/docs branch is merged into `dev`, **leave the branch in place** — locally and on origin. Merged branches are cheap, and the commit history is the source of truth for "what was in this feature/fix before it landed." Deleting a merged branch throws away its human-readable label (e.g. `feature/email-system`) and makes it harder to grep, bisect, or re-cherry-pick later.
+- If a branch was force-pushed, rebased, or otherwise lost, recreate it at the original tip commit: `git branch <name> <sha>`. The SHA is recoverable from `dev`'s log.
+- Do **not** run `git branch -d` / `git branch -D` / `git push origin --delete` on merged branches without explicit user instruction.
+- The only acceptable reasons to delete a branch are: (a) the user explicitly asks, or (b) the branch was created by mistake and never merged anywhere (e.g. typo'd name, abandoned spike).
+
 ---
 
 ## Deploy Checklist (merge `dev → main`)
