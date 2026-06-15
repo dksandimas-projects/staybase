@@ -48,5 +48,14 @@ service firebase.storage {
       allow read: if true;
       allow write: if isStaff();
     }
+
+    // In-room store: GCash payment proof uploads from guests.
+    // Per W4.5 decision and STORE-GUEST.md §Checkout, the path uses
+    // roomNumber (matching the existing client upload path in
+    // guest-app/src/pages/IntercomPage.tsx).
+    match /store-orders/{roomNumber}/payment-proof/{fileName} {
+      allow read: if isStaff();
+      allow write: if true;
+    }
   }
 }
