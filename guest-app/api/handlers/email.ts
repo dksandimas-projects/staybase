@@ -10,7 +10,8 @@ type EmailAction =
   | "checkin-reminder"
   | "booking-cancelled"
   | "corporate-inquiry"
-  | "discount-rejected";
+  | "discount-rejected"
+  | "early-checkin-request";
 
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || config.supportEmail;
 const ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || config.supportEmail;
@@ -392,6 +393,39 @@ export async function sendCorporateInquiryTrigger(inquiry: any) {
   );
 }
 
+function earlyCheckinRequestEmail(booking: any, request: any) {
+  const requestedTime = request.requestedCheckInTime || "Not specified";
+  const notes = request.notes || "No additional notes";
+  return emailLayout({
+    preheader: `Early check-in request for ${booking.bookingRef} from ${booking.guestName}.`,
+    eyebrow: "Early check-in request",
+    title: "A member has requested early check-in",
+    intro: `${escapeHtml(booking.guestName)} (${escapeHtml(booking.guestEmail)}) has submitted an early check-in request for their upcoming stay. This is a Spark Rewards perk — subject to availability.`,
+    body: `
+      ${card("Booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest", booking.guestName)}
+        ${row("Email", booking.guestEmail)}
+        ${row("Phone", booking.guestPhone || "—")}
+        ${row("Room", booking.roomNumber || "—")}
+        ${row("Scheduled check-in", `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`)}
+        ${row("Requested check-in time", requestedTime)}
+      </table>`)}
+      ${callout("warm", "Notes from guest", escapeHtml(notes))}
+    `,
+    ctaLabel: "Review booking",
+    ctaUrl: adminUrl(`/bookings?ref=${booking.bookingRef}`)
+  });
+}
+
+export async function sendEarlyCheckinRequestTrigger(booking: any, request: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] Early check-in request: ${booking.bookingRef}`,
+    earlyCheckinRequestEmail(booking, request)
+  );
+}
+
 async function getTomorrowConfirmedBookings() {
   const nowLocal = new Date(new Date().toLocaleString("en-US", { timeZone: config.timezone }));
   const start = new Date(nowLocal);
@@ -458,6 +492,20 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
     if (action === "corporate-inquiry") {
       const inquiry = req.body?.inquiry || req.body || {};
       await sendCorporateInquiryTrigger(inquiry);
+      return res.status(200).json({ success: true });
+    }
+
+    if (action === "early-checkin-request") {
+      const hasStaff = Boolean((req as any).staff?.success);
+      const booking = await findBooking(req, { requireGuestMatch: !hasStaff });
+      if (!booking) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const request = req.body?.request || {
+        requestedCheckInTime: req.body?.requestedCheckInTime,
+        notes: req.body?.notes
+      };
+      await sendEarlyCheckinRequestTrigger(booking, request);
       return res.status(200).json({ success: true });
     }
 
