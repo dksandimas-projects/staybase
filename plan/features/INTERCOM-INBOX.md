@@ -37,12 +37,12 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [x] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
 - [x] Unread indicator badge on sidebar nav item
 - [ ] Timestamps on all messages
-- [ ] **Incoming call notification** — when `calls/{roomId}.status == "ringing"`, show a persistent banner at the top of the inbox: "📞 Room {X} — {guestName} is calling" with Accept and Decline buttons
-  - [ ] Accept: creates WebRTC answer, writes to `calls/{roomId}.answer`, begins audio connection
-  - [ ] Decline: updates `calls/{roomId}.status = "ended"`
-  - [ ] Active call UI: banner changes to "🔴 On call — Room {X}" with a Hang Up button
-  - [ ] Hang up: closes RTCPeerConnection, updates `calls/{roomId}.status = "ended"`
-  - [ ] Notification sound plays on incoming call (same Web Audio API pattern as messages)
+- [x] **Incoming call notification** — when `calls/{roomId}.status == "ringing"`, show a persistent banner at the top of the inbox with room, guest, Accept, and Decline actions
+  - [x] Accept: creates WebRTC answer, writes to `calls/{roomId}.answer`, begins audio connection
+  - [x] Decline: updates `calls/{roomId}.status = "ended"`
+  - [x] Active call UI: banner changes to connected state with call duration and Hang Up action
+  - [x] Hang up: closes RTCPeerConnection, updates `calls/{roomId}.status = "ended"`
+  - [x] Notification sound plays on incoming call using the same Web Audio API pattern as messages when the inbox is not focused and audio is unlocked
 
 ## Data & Logic Checklist
 
@@ -78,7 +78,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [x] Store order message renders as a rich order card with items, total, payment method, and Store Management link
 - [ ] Notification sound plays when new message arrives on a different browser tab
 - [ ] Notification sound does NOT play when inbox tab is active and focused
-- [ ] Incoming call banner appears and notification sound plays regardless of which tab is focused
+- [ ] Incoming call banner appears when ringing; notification sound plays when inbox is not focused after audio unlock
 - [ ] Accept call → audio connects within 3 seconds on same network
 - [ ] Tab title shows unread count when messages are unread
 - [ ] Mark as Resolved moves conversation to Resolved tab

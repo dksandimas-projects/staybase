@@ -1162,6 +1162,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const adminPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const adminMediaStreamRef = useRef<MediaStream | null>(null);
+  const adminRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
 
@@ -1173,6 +1174,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     adminPeerConnectionRef.current = null;
     adminMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     adminMediaStreamRef.current = null;
+    if (adminRemoteAudioRef.current) {
+      adminRemoteAudioRef.current.pause();
+      adminRemoteAudioRef.current.srcObject = null;
+      adminRemoteAudioRef.current = null;
+    }
   };
 
   useEffect(() => {
@@ -1251,6 +1257,17 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           candidate: event.candidate.toJSON(),
           from: "staff",
           createdAt: serverTimestamp()
+        });
+      };
+      peerConnection.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        if (!remoteStream) return;
+        const remoteAudio = adminRemoteAudioRef.current ?? new Audio();
+        remoteAudio.autoplay = true;
+        remoteAudio.srcObject = remoteStream;
+        adminRemoteAudioRef.current = remoteAudio;
+        void remoteAudio.play().catch(() => {
+          // Browser autoplay policy can still require staff interaction.
         });
       };
 

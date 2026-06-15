@@ -100,6 +100,7 @@ export function IntercomInboxPage() {
   const notificationBufferRef = useRef<AudioBuffer | null>(null);
   const notificationInitializedRef = useRef(false);
   const previousUnreadGuestIdsRef = useRef<Set<string>>(new Set());
+  const previousRingingCallKeyRef = useRef("");
 
   // Call timer simulation state
   const [callDuration, setCallDuration] = useState(0);
@@ -210,6 +211,17 @@ export function IntercomInboxPage() {
     return `${m}:${s}`;
   };
 
+  const playNotificationSound = () => {
+    const audioContext = audioContextRef.current;
+    const notificationBuffer = notificationBufferRef.current;
+    if (!audioContext || !notificationBuffer || audioContext.state !== "running") return;
+
+    const source = audioContext.createBufferSource();
+    source.buffer = notificationBuffer;
+    source.connect(audioContext.destination);
+    source.start();
+  };
+
   // Get rooms with active occupancy or intercom history, then filter by resolved state
   const allThreadRooms = useMemo(
     () => rooms.filter((room) => room.status === "occupied" || intercoms[room.roomNumber]),
@@ -267,19 +279,23 @@ export function IntercomInboxPage() {
     const hasNewUnreadGuestMessage = unreadGuestMessages.some((message) => !previousUnreadGuestIdsRef.current.has(message.id));
 
     if (notificationInitializedRef.current && hasNewUnreadGuestMessage && !isInboxFocused) {
-      const audioContext = audioContextRef.current;
-      const notificationBuffer = notificationBufferRef.current;
-      if (audioContext && notificationBuffer && audioContext.state === "running") {
-        const source = audioContext.createBufferSource();
-        source.buffer = notificationBuffer;
-        source.connect(audioContext.destination);
-        source.start();
-      }
+      playNotificationSound();
     }
 
     notificationInitializedRef.current = true;
     previousUnreadGuestIdsRef.current = currentUnreadGuestIds;
   }, [isInboxFocused, unreadGuestMessages]);
+
+  useEffect(() => {
+    const ringingCallKey = incomingCall?.status === "ringing" ? incomingCall.roomId : "";
+    const hasNewRingingCall = ringingCallKey && ringingCallKey !== previousRingingCallKeyRef.current;
+
+    if (hasNewRingingCall && !isInboxFocused) {
+      playNotificationSound();
+    }
+
+    previousRingingCallKeyRef.current = ringingCallKey;
+  }, [incomingCall?.roomId, incomingCall?.status, isInboxFocused]);
 
   const handleToggleResolved = async () => {
     if (!selectedRoomNumber) return;
