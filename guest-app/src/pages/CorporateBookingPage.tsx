@@ -468,11 +468,11 @@ export function CorporateBookingPage() {
           <span className="min-h-11 min-w-11" />
         </div>
         
-        {/* Persistent corporate rate badge */}
+        {/* Persistent corporate rate badge — per W2.13 / decision #101 */}
         {(companyName || isFlatRate) && currentStepKey !== "confirm" && (
           <div className="bg-primary/10 border-t border-primary/20 text-center py-1.5 text-xs text-primary font-medium">
             Active Negotiated Pricing: <span className="font-bold underline">{companyName || "Flat Corporate Rate"}</span>
-            {activeCode && ` (${discountPercent}% additional discount applied)`}
+            {activeCode && " — Negotiated rate applied"}
           </div>
         )}
       </header>
@@ -1117,8 +1117,13 @@ export function CorporateBookingPage() {
   // ==================== STEP 3: REVIEW & PAY ====================
   if (currentStepKey === "review") {
     const isPersonalPay = guestDetails.billingArrangement === "personal";
-    const isFileUploaded = Boolean(billingFile);
-    const canConfirm = termsConsent && isFileUploaded && Boolean(selectedRoom);
+    // Per W2.11 / decision #99: LOU is no longer collected in Phase 1.
+    // The previous isFileUploaded requirement blocked chargeback
+    // bookings, but the file was never actually uploaded (only the
+    // filename was stored in state). The file picker has been replaced
+    // with a note; staff tracks receipt via the louReceived boolean on
+    // the booking drawer.
+    const canConfirm = termsConsent && Boolean(selectedRoom);
 
     return bookingShell(
       <>
@@ -1229,29 +1234,17 @@ export function CorporateBookingPage() {
                   </div>
                 </div>
               ) : (
-                /* Company Charge Back LOU Upload */
+                /* Company Charge Back (no LOU upload per W2.11 / decision #99) */
                 <div>
                   <h3 className="text-lg font-semibold text-gray-950">Company Charge Back Direct Billing</h3>
                   <p className="mt-1 text-sm text-gray-600">
-                    Your company account has been set to direct bill. Please upload your Letter of Undertaking (LOU), Travel Voucher, or approved Purchase Order to authorize this reservation.
+                    Your company account has been set to direct bill. The negotiated corporate rate has been applied to your stay.
                   </p>
 
-                  <div className="mt-6">
-                    <p className="text-sm font-medium text-gray-700 mb-2">Upload Authorization / LOU Document <span className="text-red-500">*</span></p>
-                    <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition hover:bg-gray-50">
-                      <UploadCloud size={32} className="text-primary mb-2" />
-                      <span className="text-sm font-semibold text-gray-900">
-                        {billingFile ? `Document Loaded: ${billingFile}` : "Upload LOU / Authorization PDF"}
-                      </span>
-                      <span className="mt-1 text-xs text-gray-500">PDF, DOCX, or Image up to 5MB</span>
-                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={handleFileChange} />
-                    </label>
-                  </div>
-
-                  <div className="mt-5 rounded-lg bg-primary-light/50 border border-primary/20 p-4 text-xs text-gray-700 flex gap-2">
+                  <div className="mt-6 rounded-lg bg-primary-light/50 border border-primary/20 p-4 text-xs text-gray-700 flex gap-2">
                     <Info size={16} className="text-primary shrink-0 mt-0.5" />
                     <p>
-                      Your company travel administrator will review and sign off the direct billing arrangements. The reservation remains in <span className="font-semibold">Pending Verification</span> state until authorization document is audited.
+                      Our accounts team will email you within 24 hours to request your company's Letter of Undertaking (LOU), Travel Voucher, or approved Purchase Order. You don't need to upload anything here. The reservation will be marked <span className="font-semibold">Pending Verification</span> until authorization is received.
                     </p>
                   </div>
                 </div>
@@ -1313,9 +1306,13 @@ export function CorporateBookingPage() {
         <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
           <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs text-gray-600">Verification file upload check</p>
+              <p className="text-xs text-gray-600">
+                {isPersonalPay ? "Payment receipt uploaded" : "Authorization via email after booking"}
+              </p>
               <p className="text-sm font-semibold text-gray-950">
-                {isFileUploaded ? "Verification file uploaded" : "File upload required"}
+                {isPersonalPay
+                  ? (billingFile ? "Payment receipt uploaded" : "Payment receipt upload required")
+                  : "No LOU upload needed — accounts team will email you"}
               </p>
             </div>
             {canConfirm ? (

@@ -1,12 +1,20 @@
 import { useState, useEffect } from "react";
 import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles } from "lucide-react";
-import { collection, query, getDocs, orderBy } from "firebase/firestore";
+import { collection, query, getDocs, orderBy, where } from "firebase/firestore";
 import config from "@config";
 import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
 import { GhostButton } from "../components/GhostButton";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { formatPrice } from "../utils/format";
+
+interface UpcomingBooking {
+  id: string;
+  bookingRef: string;
+  roomName?: string;
+  checkIn: any;
+  checkOut: any;
+}
 
 interface PointsTransaction {
   id: string;
@@ -30,6 +38,11 @@ export function RewardsPage() {
   const [transactions, setTransactions] = useState<PointsTransaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showEarlyCheckIn, setShowEarlyCheckIn] = useState(false);
+  const [upcomingBookings, setUpcomingBookings] = useState<UpcomingBooking[]>([]);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+  const [earlyCheckInError, setEarlyCheckInError] = useState<string | null>(null);
+  const [earlyCheckInSent, setEarlyCheckInSent] = useState<string | null>(null);
+  const [submittingEarlyCheckIn, setSubmittingEarlyCheckIn] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) { setIsLoading(false); return; }
@@ -64,6 +77,75 @@ export function RewardsPage() {
     fetchHistory();
     return () => { cancelled = true; };
   }, [user]);
+
+  // Per W2.4 / decision #92: load the member's upcoming bookings when
+  // the early check-in modal is opened. We pick the first confirmed or
+  // checked-in booking whose checkIn is >= today (in the hotel
+  // timezone), sorted ascending. If 0, the modal shows an error. If
+  // 1, we submit directly. If >1, the modal shows a small picker.
+  useEffect(() => {
+    if (!showEarlyCheckIn || !user?.uid) return;
+    let cancelled = false;
+    setLoadingBookings(true);
+    setEarlyCheckInError(null);
+    setEarlyCheckInSent(null);
+    (async () => {
+      try {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const bkSnap = await getDocs(
+          query(
+            collection(db, "bookings"),
+            where("memberId", "==", user!.uid),
+            where("status", "in", ["confirmed", "checked-in"])
+          )
+        );
+        if (cancelled) return;
+        const today = new Date(`${todayStr}T00:00:00Z`).getTime();
+        const upcoming: UpcomingBooking[] = bkSnap.docs
+          .map((d) => {
+            const data = d.data();
+            const ci = data.checkIn?.toDate ? data.checkIn.toDate() : new Date(data.checkIn);
+            return { id: d.id, bookingRef: data.bookingRef, roomName: data.roomName, checkIn: ci, checkOut: data.checkOut };
+          })
+          .filter((b) => b.checkIn.getTime() >= today)
+          .sort((a, b) => a.checkIn.getTime() - b.checkIn.getTime());
+        setUpcomingBookings(upcoming);
+        if (upcoming.length === 0) {
+          setEarlyCheckInError("No upcoming booking found. Book a stay first to request early check-in.");
+        }
+      } catch (err) {
+        console.error("Failed to load upcoming bookings:", err);
+        setEarlyCheckInError("Unable to load your bookings. Please try again.");
+      } finally {
+        if (!cancelled) setLoadingBookings(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showEarlyCheckIn, user]);
+
+  // Per W2.4 / decision #92: submit the early check-in request for
+  // the chosen booking (auto-pick the first one when count is 1).
+  const handleSubmitEarlyCheckIn = async (bookingId: string) => {
+    setSubmittingEarlyCheckIn(true);
+    setEarlyCheckInError(null);
+    try {
+      const response = await fetch("/api/email/early-checkin-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingId })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to submit the request.");
+      }
+      setEarlyCheckInSent(bookingId);
+    } catch (err: any) {
+      console.error("Early check-in request failed:", err);
+      setEarlyCheckInError(err.message || "Unable to submit the request.");
+    } finally {
+      setSubmittingEarlyCheckIn(false);
+    }
+  };
 
   const pointsBalance = memberProfile?.rewardsPoints || 0;
 
@@ -106,20 +188,91 @@ export function RewardsPage() {
           </div>
         </div>
 
-        {/* Early Check-In Modal */}
+        {/* Early Check-In Modal — per W2.4 / decision #92 */}
         {showEarlyCheckIn && (
-          <div className="rounded-lg bg-primary-light border border-primary/20 p-4 text-xs text-primary-dark">
-            <p className="font-bold mb-1">Early Check-In Request</p>
-            <p className="leading-relaxed">
-              To request early check-in, open the Intercom chat for your room (scan the QR code in your room) and send a quick request. The front desk will check availability and confirm. You can also call the front desk directly at {config.frontDeskPhone}.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowEarlyCheckIn(false)}
-              className="mt-3 text-xs font-semibold text-primary hover:underline"
-            >
-              Got it
-            </button>
+          <div className="rounded-lg bg-primary-light border border-primary/20 p-4 text-xs text-primary-dark space-y-2">
+            <p className="font-bold">Early Check-In Request</p>
+            {loadingBookings ? (
+              <p className="flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin" />
+                Loading your bookings...
+              </p>
+            ) : earlyCheckInError ? (
+              <>
+                <p className="leading-relaxed text-red-600">{earlyCheckInError}</p>
+                <button
+                  type="button"
+                  onClick={() => setShowEarlyCheckIn(false)}
+                  className="mt-2 text-xs font-semibold text-primary hover:underline"
+                >
+                  Close
+                </button>
+              </>
+            ) : earlyCheckInSent ? (
+              <>
+                <p className="leading-relaxed text-green-700">
+                  Request sent. Our front desk team will email you within 24 hours to confirm availability.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEarlyCheckIn(false);
+                    setEarlyCheckInSent(null);
+                  }}
+                  className="mt-2 text-xs font-semibold text-primary hover:underline"
+                >
+                  Close
+                </button>
+              </>
+            ) : upcomingBookings.length === 1 ? (
+              <>
+                <p className="leading-relaxed">
+                  Send an early check-in request for your upcoming stay (Booking {upcomingBookings[0].bookingRef}, check-in {toDateStr(upcomingBookings[0].checkIn)})?
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleSubmitEarlyCheckIn(upcomingBookings[0].id)}
+                  disabled={submittingEarlyCheckIn}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
+                >
+                  {submittingEarlyCheckIn ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                  Send Request
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEarlyCheckIn(false)}
+                  className="ml-2 text-xs font-semibold text-primary hover:underline"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="leading-relaxed">You have {upcomingBookings.length} upcoming bookings. Pick the one you want to request early check-in for:</p>
+                <ul className="space-y-1">
+                  {upcomingBookings.map((b) => (
+                    <li key={b.id} className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5">
+                      <span>Booking {b.bookingRef} — check-in {toDateStr(b.checkIn)}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleSubmitEarlyCheckIn(b.id)}
+                        disabled={submittingEarlyCheckIn}
+                        className="rounded-md bg-primary px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
+                      >
+                        Request
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => setShowEarlyCheckIn(false)}
+                  className="mt-2 text-xs font-semibold text-primary hover:underline"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
           </div>
         )}
 
