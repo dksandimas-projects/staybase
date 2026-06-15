@@ -92,19 +92,31 @@ export function BookingPage() {
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
 
-  // Spark Rewards member discount: applied automatically at Step 1 when signed in
-  // Stacking order (per DECISIONS-FEATURES.md): senior/PWD -> voucher -> member discount
-  const memberDiscountPct = memberProfile ? 10 : 0; // TODO: pull from rewardsConfig (requires fetching settings/rewardsConfig)
+  // Spark Rewards member discount: the value is read from settings/rewardsConfig
+  // and applied server-side in handleCreateBooking (per W2.2 / decision #90).
+  // We mirror it client-side for the price summary display only; the server
+  // is authoritative on the actual charge.
+  // (Definition moved below the useState declarations; see memberDiscountPct
+  // derived after rewardsConfig is loaded.)
 
   // Persistent unique booking ID pre-generated client-side
   const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
 
   // Dynamic config states loaded from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+  const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
   const [websiteContent, setWebsiteContent] = useState<any>(null);
   const [allBookings, setAllBookings] = useState<any[]>([]);
   const [settingsLoading, setSettingsLoading] = useState(true);
+
+  // Spark Rewards member discount (client-side display mirror).
+  // The actual charge is computed server-side in handleCreateBooking
+  // (per W2.2 / decision #90) using the same value from rewardsConfig.
+  const memberDiscountPct = rewardsConfig?.memberDiscountEnabled !== false
+    && memberProfile
+    ? Number(rewardsConfig?.memberDiscountPct) || 0
+    : 0;
 
   const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getTodayIso());
   const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getTomorrowIso());
@@ -270,6 +282,10 @@ export function BookingPage() {
         const bSnap = await getDoc(doc(db, "settings", "breakfastConfig"));
         if (bSnap.exists()) {
           setBreakfastConfig(bSnap.data() as any);
+        }
+        const rSnap = await getDoc(doc(db, "settings", "rewardsConfig"));
+        if (rSnap.exists()) {
+          setRewardsConfig(rSnap.data());
         }
         const hSnap = await getDoc(doc(db, "settings", "hotelConfig"));
         if (hSnap.exists()) {
