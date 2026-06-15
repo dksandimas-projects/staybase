@@ -448,7 +448,9 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
 }
 
 export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse, action: EmailAction) {
-  if (req.method !== "POST") {
+  const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
+
+  if (req.method !== "POST" && !isCronReminderRequest) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 

@@ -162,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization"
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, X-Cron-Secret"
   );
 
   if (req.method === "OPTIONS") {
@@ -390,18 +390,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleGetStoreOrderStatus(req, res);
   }
 
-  if (domain === "email" && publicEmailActions.has(action) && req.method === "POST") {
+  const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
+
+  if (domain === "email" && publicEmailActions.has(action) && (req.method === "POST" || isCronEmailMethod)) {
     const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
     if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 3600000)) {
       return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
     }
 
     const cronSecret = req.headers["x-cron-secret"];
+    const authHeader = req.headers.authorization;
+    const bearerSecret =
+      typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.split("Bearer ")[1]
+        : "";
     const isCronRequest =
       action === "checkin-reminder" &&
       process.env.CRON_SECRET &&
-      typeof cronSecret === "string" &&
-      cronSecret === process.env.CRON_SECRET;
+      ((typeof cronSecret === "string" && cronSecret === process.env.CRON_SECRET) ||
+        bearerSecret === process.env.CRON_SECRET);
 
     if (staffOnlyEmailActions.has(action) || (action === "checkin-reminder" && !isCronRequest)) {
       const authResult = await authenticateStaff(req);

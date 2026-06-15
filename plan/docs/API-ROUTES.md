@@ -50,6 +50,8 @@ Guest member routes require a valid Firebase ID token for the signed-in guest. T
 
 All email routes use Resend. Templates are defined server-side. See `plan/features/EMAIL-PDF-STORAGE.md` for full email flow details.
 
+`/api/email/checkin-reminder` accepts staff-authenticated `POST` requests for manual sends and Vercel Cron `GET` requests for daily scheduled sends. Cron requests must use `Authorization: Bearer {CRON_SECRET}` and an empty body so the route sends reminders for all confirmed bookings checking in tomorrow.
+
 ---
 
 ### Booking Routes (`/api/bookings/*`)
