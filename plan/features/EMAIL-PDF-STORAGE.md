@@ -23,6 +23,15 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
 | New corporate inquiry | `/api/email/corporate-inquiry` | Staff (admin email) | When inquiry form submitted on guest site |
 | Discount rejected | `/api/email/discount-rejected` | Guest | When staff rejects Senior/PWD discount ID |
+| Early check-in request | `/api/email/early-checkin-request` | Staff (admin email) | When Spark Rewards member requests early check-in for an upcoming booking |
+| Voucher issued *(Phase 1.5 — per `DECISIONS-FEATURES.md #104`)* | `/api/email/voucher-issued` | Guest | When admin creates a voucher with a non-empty `guestEmail` |
+| Store order placed *(Phase 1.5)* | `/api/email/store-order-placed` | Guest | When guest places a store order via Intercom Shop |
+| Store order confirmed *(Phase 1.5)* | `/api/email/store-order-confirmed` | Guest | When staff confirms the order (status: placed → confirmed) |
+| Store order out for delivery *(Phase 1.5)* | `/api/email/store-order-out-for-delivery` | Guest | When staff marks the order as out for delivery |
+| Store order delivered *(Phase 1.5)* | `/api/email/store-order-delivered` | Guest | When staff marks the order as delivered |
+| Store order cancelled *(Phase 1.5)* | `/api/email/store-order-cancelled` | Guest | When order is cancelled (by guest or staff) |
+| New online booking *(Phase 1.5)* | `/api/email/staff-new-booking` | Staff (`settings/hotelConfig.staffEmail`) | When a new online booking is created |
+| New payment proof *(Phase 1.5)* | `/api/email/staff-new-payment` | Staff (`settings/hotelConfig.staffEmail`) | When guest uploads GCash/bank payment proof |
 
 ### Email Content Checklist
 
