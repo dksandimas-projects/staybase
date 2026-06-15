@@ -32,7 +32,7 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 - [x] Delete item — confirmation prompt ("Orders referencing this item will not be affected")
 - [x] Enable/disable store globally — toggle at top of Store settings tab
 - [x] Store payment methods — enable/disable CoD, Add to Bill, GCash — separate from booking payment methods
-- [ ] GCash QR upload and account info for store payments
+- [x] GCash QR URL and account info for store payments
 
 ### Data & Logic Checklist
 - [x] `addDoc` / `updateDoc` / soft-delete on `storeItems` collection

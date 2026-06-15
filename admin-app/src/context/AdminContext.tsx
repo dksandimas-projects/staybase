@@ -1548,7 +1548,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     paymentMethods: [
       { method: "cod", label: "Cash on Delivery", isEnabled: true },
       { method: "add-to-bill", label: "Room Bill", isEnabled: true },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true }
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "", accountInfo: "" }
     ]
   });
 
