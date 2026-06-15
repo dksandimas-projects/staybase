@@ -191,9 +191,9 @@ Default items: Tour Packages, Car Rentals. CTA always links to `/contact`. Hide 
 
 **`homepage.sparkRewards`** — Spark Rewards promo block:
 ```
-{ heading, description, isEnabled }
+{ heading, description, perks, isEnabled }
 ```
-Hide section entirely if `isEnabled: false`.
+`perks` uses the same editable card shape as services: `{ title, description, icon, isEnabled }[]`. Hide section entirely if `isEnabled: false`; hide disabled perks within the section.
 
 Additional legal/policy fields (editable by hotel admin from Settings):
 - `privacyPolicyBody` — full privacy policy text (plain text or light markdown)
