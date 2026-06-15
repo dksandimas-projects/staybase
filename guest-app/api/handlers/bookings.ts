@@ -32,6 +32,10 @@ interface CreateBookingBody {
   paymentProofUrl?: string | null;
   isCorporate: boolean;
   corporateCode?: string;
+  // Per W2.14 / decision #102: set when this booking is created from a
+  // converted corporate inquiry. The convert-to-booking UI (per audit
+  // 1.4 SEV-1 #2) populates this field; normal bookings send null.
+  linkedInquiryId?: string | null;
 }
 
 function getManilaDateInfo() {
@@ -72,7 +76,8 @@ export async function handleCreateBooking(req: any, res: any) {
     paymentMethod,
     paymentProofUrl,
     isCorporate,
-    corporateCode
+    corporateCode,
+    linkedInquiryId
   } = body;
 
   // Basic Input Validation
@@ -367,6 +372,11 @@ export async function handleCreateBooking(req: any, res: any) {
         guestRegistration: null,
         breakfastSelections: {},
         cancellationReason: "",
+        // Per W2.14 / decision #102: linkedInquiryId is set when a booking
+        // is created from a converted corporate inquiry. The body field
+        // is null for normal bookings; the convert-to-booking UI (per
+        // audit 1.4 SEV-1 #2) will populate it.
+        linkedInquiryId: linkedInquiryId || null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -433,7 +443,8 @@ export async function handleCreateWalkin(req: any, res: any) {
     guestDetails,
     paymentMethod,
     status,
-    totalPriceOverride
+    totalPriceOverride,
+    linkedInquiryId
   } = body;
 
   if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
@@ -590,6 +601,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         guestRegistration: null,
         breakfastSelections: {},
         cancellationReason: "",
+        linkedInquiryId: linkedInquiryId || null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
