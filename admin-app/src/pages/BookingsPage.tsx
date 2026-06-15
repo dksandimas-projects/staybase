@@ -657,6 +657,305 @@ export function BookingsPage() {
     window.open(url, "_blank");
   };
 
+  const printBookingReceiptPDF = () => {
+    if (!selectedBooking) return;
+    const b = selectedBooking;
+
+    const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    const pageW = 210;
+    const marginL = 15;
+    const marginR = pageW - 15;
+    const labelColX = 20;
+    const valueColX = 70;
+    let y = 15;
+
+    const checkNewPage = (needed: number) => {
+      if (y + needed > 280) {
+        pdf.addPage();
+        y = 15;
+      }
+    };
+
+    const formatAmount = (value: number) =>
+      formatPrice(value).replace(/\u00A0/g, " ");
+
+    // ── Header ──
+    pdf.setFontSize(20);
+    pdf.setTextColor(241, 101, 34);
+    pdf.text(config.brandName, pageW / 2, y, { align: "center" });
+    y += 7;
+
+    pdf.setFontSize(16);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Booking Confirmation Receipt", pageW / 2, y, { align: "center" });
+    y += 6;
+
+    pdf.setDrawColor(241, 101, 34);
+    pdf.setLineWidth(0.5);
+    pdf.line(marginL, y, marginR, y);
+    y += 6;
+
+    // Booking ref + generated-on
+    pdf.setFontSize(9);
+    pdf.setTextColor(100, 100, 100);
+    pdf.text(`Booking Reference: ${b.bookingRef}`, marginL, y);
+    const generatedAt = new Date().toLocaleString("en-PH", {
+      timeZone: config.timezone || "Asia/Manila",
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
+    pdf.text(`Generated: ${generatedAt}`, marginR, y, { align: "right" });
+    y += 8;
+
+    // ── Guest Information ──
+    pdf.setFontSize(12);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Guest Information", marginL, y);
+    y += 6;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(50, 50, 50);
+    pdf.text(`Name: ${b.guestName}`, labelColX, y); y += 5.5;
+    pdf.text(`Email: ${b.guestEmail}`, labelColX, y); y += 5.5;
+    pdf.text(`Phone: ${b.guestPhone}`, labelColX, y); y += 8;
+
+    // ── Stay Information ──
+    pdf.setFontSize(12);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Stay Information", marginL, y);
+    y += 6;
+
+    pdf.setFontSize(10);
+    pdf.setTextColor(50, 50, 50);
+    pdf.text(`Room: ${b.roomNumber} (${b.roomType})`, labelColX, y); y += 5.5;
+    pdf.text(`Check-in: ${b.checkIn}`, labelColX, y); y += 5.5;
+    pdf.text(`Check-out: ${b.checkOut}`, labelColX, y); y += 5.5;
+    pdf.text(`Nights: ${b.numNights}    Guests: ${b.numGuests}`, labelColX, y); y += 5.5;
+    pdf.text(`Rate per night: ${formatAmount(b.ratePerNight)}`, labelColX, y); y += 5.5;
+
+    if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
+      pdf.text(
+        `Includes breakfast: ${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night`,
+        labelColX,
+        y
+      );
+      y += 5.5;
+    }
+    y += 2;
+
+    // ── Pricing Breakdown ──
+    checkNewPage(60);
+    pdf.setDrawColor(200, 200, 200);
+    pdf.setLineWidth(0.2);
+    pdf.line(marginL, y, marginR, y);
+    y += 6;
+
+    pdf.setFontSize(12);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Pricing Breakdown", marginL, y);
+    y += 6;
+
+    const subtotal = b.ratePerNight * b.numNights;
+    pdf.setFontSize(10);
+    pdf.setTextColor(50, 50, 50);
+    pdf.text(`Subtotal (${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)})`, labelColX, y);
+    pdf.text(formatAmount(subtotal), marginR, y, { align: "right" });
+    y += 5.5;
+
+    // Senior / PWD discount
+    if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
+      const discountLabel = b.discountType === "senior"
+        ? "Senior Citizen Discount"
+        : b.discountType === "pwd"
+          ? "PWD Discount"
+          : "Discount";
+      const discountAmount = Math.round(subtotal * (b.discountPct / 100));
+      pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
+      pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
+      y += 5.5;
+    }
+
+    // Voucher
+    if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
+      pdf.text(`Voucher (${b.voucherCode})`, labelColX, y);
+      pdf.text(`-${formatAmount(b.voucherDiscount)}`, marginR, y, { align: "right" });
+      y += 5.5;
+    }
+
+    // Points redemption
+    if (b.pointsRedeemed && b.pointsRedeemed > 0) {
+      pdf.text(
+        `Spark Rewards: ${b.pointsRedeemed} pts redeemed`,
+        labelColX,
+        y
+      );
+      pdf.text(
+        `-${formatAmount(b.pointsRedeemedValue || 0)}`,
+        marginR,
+        y,
+        { align: "right" }
+      );
+      y += 5.5;
+    }
+
+    // Total
+    y += 2;
+    pdf.setDrawColor(150, 150, 150);
+    pdf.setLineWidth(0.3);
+    pdf.line(marginL, y, marginR, y);
+    y += 6;
+
+    pdf.setFontSize(12);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Total", labelColX, y);
+    pdf.text(formatAmount(b.totalPrice), marginR, y, { align: "right" });
+    y += 8;
+
+    // ── Special Requests / Notes ──
+    if (b.specialRequests && b.specialRequests.trim().length > 0) {
+      checkNewPage(20);
+      pdf.setFontSize(12);
+      pdf.setTextColor(30, 30, 30);
+      pdf.text("Special Requests", marginL, y);
+      y += 6;
+
+      pdf.setFontSize(10);
+      pdf.setTextColor(60, 60, 60);
+      const reqLines = pdf.splitTextToSize(b.specialRequests, pageW - 40);
+      for (const line of reqLines) {
+        checkNewPage(5);
+        pdf.text(line, labelColX, y);
+        y += 4.5;
+      }
+      y += 4;
+    }
+
+    // ── Payment Breakdown ──
+    checkNewPage(40);
+    pdf.setDrawColor(241, 101, 34);
+    pdf.setLineWidth(0.5);
+    pdf.line(marginL, y, marginR, y);
+    y += 6;
+
+    pdf.setFontSize(12);
+    pdf.setTextColor(30, 30, 30);
+    pdf.text("Payments Collected", marginL, y);
+    y += 6;
+
+    const payments = selectedBookingPayments;
+    if (payments.length > 0) {
+      pdf.setFontSize(9);
+      pdf.setTextColor(80, 80, 80);
+      pdf.text("Date", labelColX, y);
+      pdf.text("Method", labelColX + 40, y);
+      pdf.text("Amount", marginR, y, { align: "right" });
+      y += 2;
+      pdf.setDrawColor(220, 220, 220);
+      pdf.setLineWidth(0.15);
+      pdf.line(marginL, y, marginR, y);
+      y += 4;
+
+      let paymentsTotal = 0;
+      payments.forEach((pay) => {
+        checkNewPage(6);
+        pdf.setFontSize(9);
+        pdf.setTextColor(50, 50, 50);
+        const recordedDate = pay.recordedAt
+          ? new Date(pay.recordedAt).toLocaleDateString("en-PH", {
+              timeZone: config.timezone || "Asia/Manila",
+              year: "numeric",
+              month: "short",
+              day: "numeric"
+            })
+          : "—";
+        pdf.text(recordedDate, labelColX, y);
+        pdf.text(pay.method || "—", labelColX + 40, y);
+        pdf.text(formatAmount(pay.amount), marginR, y, { align: "right" });
+        paymentsTotal += pay.amount;
+        y += 5;
+      });
+
+      y += 1;
+      pdf.setDrawColor(200, 200, 200);
+      pdf.setLineWidth(0.2);
+      pdf.line(marginL, y, marginR, y);
+      y += 5;
+
+      pdf.setFontSize(10);
+      pdf.setTextColor(50, 50, 50);
+      pdf.text("Total Collected", labelColX, y);
+      pdf.text(formatAmount(paymentsTotal), marginR, y, { align: "right" });
+      y += 5;
+
+      const balance = b.totalPrice - paymentsTotal;
+      pdf.setFontSize(11);
+      if (balance <= 0) {
+        pdf.setTextColor(34, 139, 34);
+        pdf.text("Outstanding Balance", labelColX, y);
+        pdf.text(formatAmount(0), marginR, y, { align: "right" });
+        y += 6;
+        pdf.setFontSize(9);
+        pdf.setTextColor(80, 80, 80);
+        pdf.text("Fully settled. Thank you.", labelColX, y);
+      } else {
+        pdf.setTextColor(200, 60, 60);
+        pdf.text("Outstanding Balance", labelColX, y);
+        pdf.text(formatAmount(balance), marginR, y, { align: "right" });
+      }
+      y += 8;
+    } else {
+      // No payments yet — show payment method + amount due
+      pdf.setFontSize(10);
+      pdf.setTextColor(50, 50, 50);
+      const methodLabel = b.paymentMethod
+        ? b.paymentMethod.charAt(0).toUpperCase() + b.paymentMethod.slice(1)
+        : "—";
+      pdf.text(`Payment Method: ${methodLabel}`, labelColX, y);
+      y += 5.5;
+      pdf.setFontSize(11);
+      pdf.setTextColor(200, 60, 60);
+      pdf.text("Amount Due", labelColX, y);
+      pdf.text(formatAmount(b.totalPrice), marginR, y, { align: "right" });
+      y += 8;
+    }
+
+    // ── Footer ──
+    const footerY = 280;
+    if (y > footerY - 20) {
+      pdf.addPage();
+      y = 15;
+    }
+    pdf.setDrawColor(200, 200, 200);
+    pdf.setLineWidth(0.2);
+    pdf.line(marginL, footerY, marginR, footerY);
+    pdf.setFontSize(8);
+    pdf.setTextColor(120, 120, 120);
+    pdf.text(
+      "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property.",
+      pageW / 2,
+      footerY + 5,
+      { align: "center" }
+    );
+    pdf.setFontSize(7);
+    pdf.setTextColor(160, 160, 160);
+    pdf.text(
+      `${config.brandName} — ${config.address?.street ?? ""}${config.address?.street ? ", " : ""}${config.address?.city ?? ""} | ${config.frontDeskPhone ?? ""} | ${config.supportEmail ?? ""}`,
+      pageW / 2,
+      footerY + 10,
+      { align: "center" }
+    );
+    pdf.text(
+      `Generated by ${config.brandName} booking system — ${new Date().toISOString().split("T")[0]}`,
+      pageW / 2,
+      footerY + 14,
+      { align: "center" }
+    );
+
+    const blob = pdf.output("blob");
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  };
+
   const getBookingPaymentsTotal = (booking: Booking) => {
     if (selectedBooking && selectedBooking.id === booking.id) {
       return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -1540,6 +1839,14 @@ export function BookingsPage() {
                           <span>{folio.balance > 0 ? "Balance due at checkout" : folio.balance < 0 ? "Overpaid amount" : "Fully settled"}</span>
                           <span>{formatPrice(Math.abs(folio.balance))}</span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={printBookingReceiptPDF}
+                          className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-255 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                        >
+                          <FileText size={13} />
+                          Print Booking Receipt (PDF)
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
