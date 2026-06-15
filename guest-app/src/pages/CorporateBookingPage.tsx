@@ -468,11 +468,11 @@ export function CorporateBookingPage() {
           <span className="min-h-11 min-w-11" />
         </div>
         
-        {/* Persistent corporate rate badge */}
+        {/* Persistent corporate rate badge — per W2.13 / decision #101 */}
         {(companyName || isFlatRate) && currentStepKey !== "confirm" && (
           <div className="bg-primary/10 border-t border-primary/20 text-center py-1.5 text-xs text-primary font-medium">
             Active Negotiated Pricing: <span className="font-bold underline">{companyName || "Flat Corporate Rate"}</span>
-            {activeCode && ` (${discountPercent}% additional discount applied)`}
+            {activeCode && " — Negotiated rate applied"}
           </div>
         )}
       </header>
