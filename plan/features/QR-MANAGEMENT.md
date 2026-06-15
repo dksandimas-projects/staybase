@@ -50,6 +50,15 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 - [x] Regenerated QR — old `/intercom/{oldQrToken}` URL shows "QR code no longer valid" on guest side
 - [x] Print dialog blocked by browser — show instruction to allow popups
 
+## Behavior notes
+
+- **QR regen mid-stay** — when staff regenerates a room's QR code while the guest is already checked in, two things happen:
+  1. Any **new** scans of the old printed QR / old qrToken URL show the guest "QR code no longer valid" message (guest route resolves the qrToken, finds no match, falls through to the room-number check, then surfaces a "no longer valid" notice).
+  2. Any **in-flight intercom session** on the old qrToken continues unchanged. The intercom chat collection is keyed by `intercoms/{roomNumber}` (Firestore doc ID = the room's human-readable number), not by the qrToken. Once a guest has opened the intercom in their browser, the URL parameter is irrelevant for subsequent messages — only the room number matters. So existing chats stay open; only future QR scans of the old code fail.
+  3. Practical guidance for staff: regenerate QR only when a card is physically damaged or compromised, not on guest turnover. The room number QR is sufficient for a new guest's first scan after check-in.
+
+---
+
 ## Manual QA
 
 - [ ] All room QR codes render in grid

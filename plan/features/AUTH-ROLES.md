@@ -54,7 +54,7 @@ Firebase Email/Password authentication for all staff. No public registration —
 | Role | Value in claims | Pages accessible |
 |---|---|---|
 | Front Desk | `"front-desk"` | Dashboard, Bookings, Rooms, Reports, Corporate Inquiries, Intercom, QR Management |
-| Admin | `"admin"` | All of the above + Rates, Settings |
+| Admin | `"admin"` | All of the above + Rates, Settings, Members |
 
 ## Edge Cases & States
 

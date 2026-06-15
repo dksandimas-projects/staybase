@@ -45,7 +45,7 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
 - [ ] `onSnapshot` on `corporateInquiries` collection — real-time pipeline updates
 - [ ] Stage move: `updateDoc` status field + `updatedAt`
 - [ ] Add note: `updateDoc` to append to `notes[]` array with `{text, by: staffUID, at: timestamp}`
-- [ ] Convert to booking: POST the pre-filled booking data to the transaction-based booking API, with `isCorporate: true`, `source: "corporate"`, and any `linkedInquiryId` metadata; never `addDoc` directly to `bookings`. On API success, update inquiry `status: "converted"`
+- [ ] Convert to booking: POST the pre-filled booking data to the transaction-based booking API (`/api/bookings/create` or `/api/bookings/create-walkin` for staff-initiated conversions), with `isCorporate: true`, `source: "corporate"`, and any `linkedInquiryId` metadata. The API uses a Firestore transaction (per `plan/features/AVAILABILITY-LOCKING.md`) to atomically check room availability, lock dates, and create the booking document. Never `addDoc` directly to `bookings` from this UI — always go through the API so the availability check is enforced. On API success, update inquiry `status: "converted"`.
 - [ ] Generate Access Code:
   - [ ] `setDoc` on `corporateCodes/{code}` — document ID is the code string
   - [ ] Store `companyName`, `ratePerRoomType`, `expiresAt`, `usageCap`, `usageCount: 0`, `linkedInquiryId`, `createdBy`, `isActive: true`

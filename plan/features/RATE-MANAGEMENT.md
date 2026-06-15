@@ -29,7 +29,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] Flat corporate rate section — one row per room type; note: "This is the public rate at `/corporate/book`. Custom rates are set per inquiry via access codes."
 - [ ] All price inputs display `config.currencySymbol` prefix
 - [ ] Breakfast rate section — single rate per person per night input; note: "Rate applies to all room types. Guests × nights × rate = breakfast total."
-- [ ] Discount rules section — Senior Citizen (20%) and PWD (20%) displayed as read-only (OSCA-mandated, not editable) with explanatory note
+- [ ] Discount rules section — Senior Citizen (20%) and PWD (20%) displayed as read-only (OSCA-mandated, not editable) with explanatory note. Also cross-reference: **Spark Rewards member discount** is configured separately in `settings/rewardsConfig.memberDiscountEnabled` + `memberDiscountPct` (see `plan/features/SETTINGS.md §11. Spark Rewards`); admins should treat the Rate Management page as the single source of truth for *all* stacking discount sources in use at the property.
 - [ ] Payment methods section — list of payment methods with enable/disable toggle, QR code upload, account info text field per method
 - [ ] Pay at Hotel toggle — global enable/disable
 - [ ] Add payment method — allow adding custom method name + QR + account info

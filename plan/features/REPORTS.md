@@ -419,5 +419,5 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 
 - Booking schema (source, status, totalPrice): `plan/docs/BACKEND.md §bookings`
 - jsPDF usage: `plan/features/EMAIL-PDF-STORAGE.md`
-- Recharts: already in stack — `plan/docs/DECISIONS.md`
+- Recharts: already in stack — `plan/docs/DECISIONS-ARCH.md`
 - Status values for revenue queries: `plan/docs/TYPES.md §BookingStatus`
