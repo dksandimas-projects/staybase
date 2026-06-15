@@ -8,6 +8,7 @@ import {
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -649,8 +650,18 @@ export function IntercomPage() {
           status: "ended",
           endedAt: serverTimestamp()
         });
+        // Per W2.10 / decision #98: delete the call doc after a 30s
+        // grace period (both sides have observed status: "ended").
+        // Prevents the calls collection from growing unboundedly.
+        setTimeout(() => {
+          if (roomNumber) {
+            deleteDoc(doc(db, "calls", roomNumber)).catch((err) => {
+              console.error("Error deleting call doc:", err);
+            });
+          }
+        }, 30000);
       } catch (error) {
-        console.error("Failed to end intercom call:", error);
+        console.error("Error ending call:", error);
       }
     }
     stopGuestCallResources();
@@ -838,6 +849,7 @@ export function IntercomPage() {
 
       void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
         isStoreOrder: true,
+        isCancelledOrder: true,
         orderRef: activeOrder.orderRef
       });
     } catch (error: any) {
