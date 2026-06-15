@@ -633,6 +633,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
+      } else if (status === "checked-out") {
+        const token = await auth.currentUser?.getIdToken();
+        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://localhost:3000"
+          : import.meta.env.VITE_GUEST_APP_URL || "";
+
+        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/checkout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to checkout booking via server API.");
+        }
       } else {
         const updatePayload: Record<string, any> = {
           status,
@@ -646,14 +664,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
             if (matchedRoom) {
               void updateRoomConfig(matchedRoom.id, { status: "occupied" });
-            }
-          }
-        } else if (status === "checked-out") {
-          const booking = bookings.find(b => b.id === bookingId);
-          if (booking) {
-            const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
-            if (matchedRoom) {
-              void updateRoomConfig(matchedRoom.id, { status: "available", housekeepingStatus: "dirty" });
             }
           }
         }
