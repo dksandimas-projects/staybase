@@ -85,6 +85,14 @@ Guest-facing code must not create `corporateInquiries` directly with the Firesto
 
 ---
 
+### Contact Routes (`/api/contact/*`) *(Phase 1 — see `plan/features/CONTACT-INQUIRIES.md`)*
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/contact` | POST | None | Submit the public contact form (Name, Email, Subject, Message); API verifies Turnstile, checks honeypot, rate-limits (5/min/IP), creates `contactInquiries/{id}` with `status: "new"`, and sends the staff notification email to `settings/hotelConfig.supportEmail` |
+
+---
+
 ### Validation Routes (`/api/validate/*`)
 
 | Route | Method | Auth | Purpose |
