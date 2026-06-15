@@ -31,7 +31,7 @@ Spark Inn is the reference deployment of a white-label hotel booking and managem
 | Data fetching (API) | TanStack Query |
 | Data fetching (Firestore) | Custom hooks with onSnapshot |
 | Validation | Zod |
-| PDF | jsPDF |
+| PDF / screen capture | jsPDF + html2canvas |
 | QR Codes | qrcode.react |
 | Charts | Recharts |
 | Git hooks | Husky + Conventional Commits |

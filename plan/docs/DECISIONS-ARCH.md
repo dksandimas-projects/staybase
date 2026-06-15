@@ -67,6 +67,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 56 | Analytics: 8 key GA4 events for product decisions — full event list in `FRONTEND.md §Analytics Events`; GA4 only loads when `config.analyticsId` is non-empty |
 | 57 | Post-launch support: DK offers a monthly maintenance retainer — critical bugs fixed within 24 hours, minor bugs within 5 business days; full terms in `plan/docs/LEGAL.md` |
 | 58 | UX Philosophy: "It Just Works" — Apple-inspired approach applied to every screen. 10 tenets: zero friction, progressive disclosure, smart defaults, optimistic UI, skeleton loaders, inline validation, no dead ends, purposeful delight, consistency, and forgiving interactions. Full spec + per-app checklists in `FRONTEND.md §UX Philosophy` |
+| 59 | PDF and screen capture: jsPDF generates downloadable receipts and forms; html2canvas captures DOM-rendered layouts when a visual snapshot is needed |
 
 ---
 
