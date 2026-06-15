@@ -27,6 +27,9 @@ VITE_FIREBASE_APP_ID=
 # Cloudflare Turnstile (public key — safe to expose to browser)
 VITE_TURNSTILE_SITE_KEY=
 
+# Sentry browser error reporting (public DSN — safe to expose to browser)
+VITE_SENTRY_DSN=
+
 # Firebase Admin SDK (server-side only — never prefix with VITE_)
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
@@ -55,6 +58,9 @@ VITE_FIREBASE_PROJECT_ID=
 VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
+
+# Sentry browser error reporting (public DSN — safe to expose to browser)
+VITE_SENTRY_DSN=
 
 # Guest app URL (for linking to booking pages from admin)
 VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
