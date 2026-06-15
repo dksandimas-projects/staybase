@@ -67,18 +67,18 @@ These mostly affect cosmetic/polish work, but some are launch-visible (404 versi
 
 | # | Source | Question | Default (proposed) | Blocks | Your call |
 |---|---|---|---|---|---|
-| W3.1 | 1.5 | Booking payment methods — in Settings or Rates? | **Rates** — current implementation is correct. Update `SETTINGS.md` to reference "Booking payment methods are managed in Rates". | 1.5 (open Q) | ☐ |
-| W3.2 | 1.5 | Spark Rewards tab visibility — admin-only? | **Admin-only** — the Settings page itself is admin-only, so the tab inherits the restriction. Add an explicit role guard inside the tab. | 1.5 (open Q) | ☐ |
-| W3.3 | 1.5 | Room Types tab — spec or out-of-spec side feature? | **Keep as a Settings tab** — but migrate from localStorage to `settings/hotelConfig.roomTypes` (Firestore). Aligns with the rest of settings. | 1.5 SEV-3 (room types) | ☐ |
-| W3.4 | 1.5 | Reports owner vs role access — guard in page or layout? | **Page-level** — the "Download Full Backup" button has its own `isAdmin` check, while the rest of the page is staff-accessible. Easier to maintain than layout-level. | 1.5 (open Q) | ☐ |
-| W3.5 | 1.5 | Reports "Average stay length" — intentional or replace with avg occupancy? | **Replace with avg occupancy** — matches `REPORTS.md` spec exactly. Add `busiestRoomType` card too. | 1.5 SEV-3 (performance cards) | ☐ |
-| W3.6 | 1.6 | AboutPage Brand Promise banner — keep + update spec or remove? | **Keep, update spec** — it's a small, on-brand section. Add a row to `STATIC-PAGES.md §About`. | 1.6 (open Q) | ☐ |
-| W3.7 | 1.6 | CorporateStaysPage extra sections — keep + update spec or remove? | **Keep, update spec** — Integration Process and Retreat CTA are on-brand and not harmful. Update `STATIC-PAGES.md §Corporate`. | 1.6 (open Q) | ☐ |
-| W3.8 | 1.6 | PrivacyPage / TermsPage chrome — include Navbar? | **Include Navbar** — currently mixes global Footer with custom thin header. Add `<Navbar />` for consistency. Drop the custom thin header. | 1.6 SEV-3 (chrome) | ☐ |
-| W3.9 | 1.6 | Section title wording — "How Long We Keep It" or "Data Retention Policy"? | **"How Long We Keep It"** — matches `STATIC-PAGES.md` spec wording exactly. Spec is the source of truth. | 1.6 SEV-3 (wording) | ☐ |
-| W3.10 | 1.6 | Rewards program brand name — add `config.rewardsName`? | **Yes** — add `config.rewardsName: "Spark Rewards"` to `hotel.config.ts`. Sweep all "Spark Rewards" literals into `{config.rewardsName}`. | 1.6 SEV-3 (white-label) | ☐ |
-| W3.11 | 1.6 | Terms "Last Updated" — separate config field or reuse? | **Add `config.termsLastUpdated`** — separate from privacy. | 1.6 SEV-3 (terms) | ☐ |
-| W3.12 | 1.6 | 404 version display — all pages or none? | **Add a tiny `<p>v{VERSION}</p>` to the 404 card** so the version still shows. Resolve the spec contradiction by amending FRONTEND.md to allow this carve-out. | 1.6 SEV-3 (404) | ☐ |
+| W3.1 | 1.5 | Booking payment methods — in Settings or Rates? | **Rates** — current implementation is correct. Update `SETTINGS.md` to reference "Booking payment methods are managed in Rates". | 1.5 (open Q) | ✅ (decision 2026-06-15) |
+| W3.2 | 1.5 | Spark Rewards tab visibility — admin-only? | **Admin-only** — the Settings page itself is admin-only, so the tab inherits the restriction. Add an explicit role guard inside the tab. | 1.5 (open Q) | ✅ (decision 2026-06-15) |
+| W3.3 | 1.5 | Room Types tab — spec or out-of-spec side feature? | **Keep as a Settings tab** — but migrate from localStorage to `settings/hotelConfig.roomTypes` (Firestore). Aligns with the rest of settings. | 1.5 SEV-3 (room types) | ✅ (decision 2026-06-15) |
+| W3.4 | 1.5 | Reports owner vs role access — guard in page or layout? | **Page-level** — the "Download Full Backup" button has its own `isAdmin` check, while the rest of the page is staff-accessible. Easier to maintain than layout-level. | 1.5 (open Q) | ✅ (decision 2026-06-15) |
+| W3.5 | 1.5 | Reports "Average stay length" — intentional or replace with avg occupancy? | **Replace with avg occupancy** — matches `REPORTS.md` spec exactly. Add `busiestRoomType` card too. | 1.5 SEV-3 (performance cards) | ✅ (decision 2026-06-15) |
+| W3.6 | 1.6 | AboutPage Brand Promise banner — keep + update spec or remove? | **Keep, update spec** — it's a small, on-brand section. Add a row to `STATIC-PAGES.md §About`. | 1.6 (open Q) | ✅ (decision 2026-06-15) |
+| W3.7 | 1.6 | CorporateStaysPage extra sections — keep + update spec or remove? | **Keep, update spec** — Integration Process and Retreat CTA are on-brand and not harmful. Update `STATIC-PAGES.md §Corporate`. | 1.6 (open Q) | ✅ (decision 2026-06-15) |
+| W3.8 | 1.6 | PrivacyPage / TermsPage chrome — include Navbar? | **Include Navbar** — currently mixes global Footer with custom thin header. Add `<Navbar />` for consistency. Drop the custom thin header. | 1.6 SEV-3 (chrome) | ✅ (decision 2026-06-15) |
+| W3.9 | 1.6 | Section title wording — "How Long We Keep It" or "Data Retention Policy"? | **"How Long We Keep It"** — matches `STATIC-PAGES.md` spec wording exactly. Spec is the source of truth. | 1.6 SEV-3 (wording) | ✅ (decision 2026-06-15) |
+| W3.10 | 1.6 | Rewards program brand name — add `config.rewardsName`? | **Yes** — add `config.rewardsName: "Spark Rewards"` to `hotel.config.ts`. Sweep all "Spark Rewards" literals into `{config.rewardsName}`. | 1.6 SEV-3 (white-label) | ✅ (decision 2026-06-15) |
+| W3.11 | 1.6 | Terms "Last Updated" — separate config field or reuse? | **Add `config.termsLastUpdated`** — separate from privacy. | 1.6 SEV-3 (terms) | ✅ (decision 2026-06-15) |
+| W3.12 | 1.6 | 404 version display — all pages or none? | **Add a tiny `<p>v{VERSION}</p>` to the 404 card** so the version still shows. Resolve the spec contradiction by amending FRONTEND.md to allow this carve-out. | 1.6 SEV-3 (404) | ✅ (decision 2026-06-15) |
 
 ---
 
@@ -86,15 +86,15 @@ These mostly affect cosmetic/polish work, but some are launch-visible (404 versi
 
 | # | Source | Question | Default (proposed) | Blocks | Your call |
 |---|---|---|---|---|---|
-| W4.1 | 1.4 | `roomTypes` configuration for non-standard types — how do they pick up corporate rates? | **Fail-soft** — if `ratePerRoomType[type]` is undefined, fall back to `room.corporateRate`. Log a warning to the admin console. Spec is implicit on this. | 1.4 (open Q) | ☐ |
-| W4.2 | 1.6 | `index.html` static OG meta — how to template for white-label? | **Vite build-time transform** — use a small `transformIndexHtml` plugin that substitutes `config.brandName`, `config.domain`, `config.ogImage` into the static meta tags. | 1.6 SEV-3 (OG) | ☐ |
-| W4.3 | 1.6 | WHITE-LABEL.md schema — missing fields from actual `hotel.config.ts`? | **Update WHITE-LABEL.md** to include the actual fields used in `hotel.config.ts`. Spec drift in the other direction. | 1.6 (open Q) | ☐ |
+| W4.1 | 1.4 | `roomTypes` configuration for non-standard types — how do they pick up corporate rates? | **Fail-soft** — if `ratePerRoomType[type]` is undefined, fall back to `room.corporateRate`. Log a warning to the admin console. Spec is implicit on this. | 1.4 (open Q) | ✅ (decision 2026-06-15) |
+| W4.2 | 1.6 | `index.html` static OG meta — how to template for white-label? | **Vite build-time transform** — use a small `transformIndexHtml` plugin that substitutes `config.brandName`, `config.domain`, `config.ogImage` into the static meta tags. | 1.6 SEV-3 (OG) | ✅ (decision 2026-06-15) |
+| W4.3 | 1.6 | WHITE-LABEL.md schema — missing fields from actual `hotel.config.ts`? | **Update WHITE-LABEL.md** to include the actual fields used in `hotel.config.ts`. Spec drift in the other direction. | 1.6 (open Q) | ✅ (decision 2026-06-15) |
 | W4.4 | 1.7 | Voucher-issued / store-order-* / staff-* emails — in scope? | **Option C: add all 7** — `voucher-issued`, `store-order-placed`, `store-order-confirmed`, `store-order-out-for-delivery`, `store-order-delivered`, `store-order-cancelled`, `staff-new-booking`, `staff-new-payment`. Closes the gap where guests who close the intercom tab miss order status updates and where staff can miss new bookings when logged out. Full spec in `plan/features/EMAIL-AUDIT-EXTENSIONS.md`. **Documentation only — build deferred to Phase 1.5.** | 1.7 (open Q) | ✅ (decision 2026-06-15) |
-| W4.5 | 1.7 | `store-orders/{roomNumber}/payment-proof/` rule — client path or rule needs change? | **Rule uses `roomNumber`** — matches the current client code. Add the storage rule. | 1.3 SEV-1 #1, 1.7 SEV-3 #4 | ☐ |
-| W4.6 | 1.7 | CORS `Allow-Credentials: true` — anything actually relies on cookies? | **No — remove `Allow-Credentials: true` and `*` in favor of explicit allowlist** from `config.domain` + `config.adminDomain` + localhost. Firebase ID tokens ride in `Authorization` header, not cookies. | 1.7 SEV-1 #2, Phase 2 SEV-1 | ☐ |
-| W4.7 | Phase 2 | `prompt("Enter cancellation reason:")` — replace with modal or keep? | **Replace with modal** — `prompt()` is brittle and inconsistent with the inquiry "Add Note" pattern. Add a small "Reason" input in the existing drawer. | 2.2 (alert/confirm/prompt) | ☐ |
-| W4.8 | Phase 2 | `Philippines` / `Tagbilaran City` in Privacy/Terms — keep or config-drive? | **Keep as hardcoded copy** in the legally-relevant sections (governing law, venue) but expose `config.applicableLaw` for the rest. The "Republic of the Philippines" in the venue clause is correct and not white-label-able. | 2.4 (hardcoded) | ☐ |
-| W4.9 | Phase 2 | `Spark Inn Hotel Corp` hardcoded as `accountName` fallback — use `config.legalName`? | **Yes — use `config.legalName`** as the fallback. | 2.4 (hardcoded) | ☐ |
+| W4.5 | 1.7 | `store-orders/{roomNumber}/payment-proof/` rule — client path or rule needs change? | **Rule uses `roomNumber`** — matches the current client code. Add the storage rule. | 1.3 SEV-1 #1, 1.7 SEV-3 #4 | ✅ (decision 2026-06-15) |
+| W4.6 | 1.7 | CORS `Allow-Credentials: true` — anything actually relies on cookies? | **No — remove `Allow-Credentials: true` and `*` in favor of explicit allowlist** from `config.domain` + `config.adminDomain` + localhost. Firebase ID tokens ride in `Authorization` header, not cookies. | 1.7 SEV-1 #2, Phase 2 SEV-1 | ✅ (decision 2026-06-15) |
+| W4.7 | Phase 2 | `prompt("Enter cancellation reason:")` — replace with modal or keep? | **Replace with modal** — `prompt()` is brittle and inconsistent with the inquiry "Add Note" pattern. Add a small "Reason" input in the existing drawer. | 2.2 (alert/confirm/prompt) | ✅ (decision 2026-06-15) |
+| W4.8 | Phase 2 | `Philippines` / `Tagbilaran City` in Privacy/Terms — keep or config-drive? | **Keep as hardcoded copy** in the legally-relevant sections (governing law, venue) but expose `config.applicableLaw` for the rest. The "Republic of the Philippines" in the venue clause is correct and not white-label-able. | 2.4 (hardcoded) | ✅ (decision 2026-06-15) |
+| W4.9 | Phase 2 | `Spark Inn Hotel Corp` hardcoded as `accountName` fallback — use `config.legalName`? | **Yes — use `config.legalName`** as the fallback. | 2.4 (hardcoded) | ✅ (decision 2026-06-15) |
 
 ---
 
@@ -108,6 +108,6 @@ After approval, the decisions get copied to `plan/docs/DECISIONS-FEATURES.md` as
 
 ---
 
-*Status: 31 of 51 approved (W1.1–W2.15 + W4.4 — 2026-06-15).*
+*Status: 51 of 51 approved (W1.1–W4.9 — all waves complete, 2026-06-15).*
 
 *Total: 51 questions in 4 waves. Wave 1 (15) is launch-blocking. Wave 2 (15) blocks SEV-2 polish. Wave 3 (12) is UI/UX. Wave 4 (9) is infrastructure.*
