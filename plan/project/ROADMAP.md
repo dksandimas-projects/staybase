@@ -327,7 +327,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ✅ Booking Lookup page (`/my-booking`) — ref + email lookup wired to live Firestore via `/api/bookings/lookup`; cancel via `/api/bookings/cancel`; resend via `/api/email/booking-submitted` (pending/payment-uploaded) or `/api/email/booking-confirmed` (confirmed/checked-in); 60s resend cooldown + server-side rate limit; room-name enrichment from `rooms/{roomId}`
 - ✅ Reports page (`/reports`) — restructured into **Performance** + **Sales** tabs; Performance shows occupancy by room type, acquisition channels, and revenue trend; Sales shows 4 revenue KPI cards (Total/Room/Breakfast/Store), stacked bar by stream, revenue trend line, combined payment method pie with `Add to Bill = Uncollected` label, and sub-tabbed detail tables (Bookings / Breakfast / Store Orders) with search. CSV + Sales XLSX export (4 sheets via SheetJS). All aggregation live against `bookings` + `storeOrders` + `breakfastConfig` from context. PDF export and Full Data Backup (admin-only 8-sheet XLSX) deferred.
-- ⬜ Settings page — all 9 tabs (Hotel Info, Payment Methods, Email, Staff Accounts, Discounts, Vouchers, Intercom, Website Content, Legal Content)
+- ✅ Settings page (`/settings`) — 9 settings surfaces wired: Hotel Info, Room Types, Website Content, Loyalty Rewards, Breakfast & Dining, In-Room Store (all 6 existing tabs); Email Config (read-only env var display + 7 active email triggers list), Intercom (quick requests CRUD + notification sound URL + preview), Legal Content (Privacy Policy body / Cancellation Policy / House Rules textareas sourced to `websiteContent.*` — also closes AUDIT-25 / PrivacyPage body wiring). Payment Methods + Staff Accounts + Discounts + Vouchers accessible via RatesPage and MembersPage respectively.
 - ✅ Guest registration data capture wireframe — booking drawer at check-in
 - ⬜ Guest Registration PDF (jsPDF) — pre-filled from booking, printable at check-in
 - ⬜ Wire `/privacy` page body to source from `settings/websiteContent.privacyPolicyBody` (AUDIT-25) — current body is hardcoded in `PrivacyPage.tsx` and reads only `config.legalName` / `config.applicableLaw` / `config.privacyPolicyLastUpdated`. Until Settings → Legal Content tab ships, page violates the white-label rule for hotels that need a custom privacy policy beyond config tokens.
@@ -452,7 +452,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ **[AUDIT-22]** Add "Email: discount rejected" as its own checklist item under Phase 6 — added as an explicit Phase 6 line item; handler wired from `handleRejectDiscount`
 - ✅ **[AUDIT-23]** Add `discount-rejected` and `early-checkin-request` rows to the email routes table in `API-ROUTES.md` — both rows added; `early-checkin-request` marked as Phase 10B planned and tracked under AUDIT-26
 - ✅ **[AUDIT-24]** Define `storeCharges[]` on `bookings/{bookingId}` in `BACKEND.md §bookings` — closed by documenting the **derived** approach in `plan/docs/BACKEND.md §bookings` (no denormalized field; checkout folio filters `storeOrders` on `bookingId` + `paymentMethod === "add-to-bill"` + `status === "delivered"` + `isBilled`). Aligned `STORE-MANAGEMENT.md` to match.
-- ⬜ **[AUDIT-25]** Flag dependency in Phase 4 (closed) — BookingPage Step 3 cancellation policy is already wired to `settings/websiteContent.cancellationPolicy` (with a hardcoded fallback) — done. PrivacyPage body is still hardcoded (reads only `config.legalName` / `config.applicableLaw` / `config.privacyPolicyLastUpdated`). Tracked under new Phase 9 item: "Wire `/privacy` page body to source from `settings/websiteContent.privacyPolicyBody` (with config-driven fallback until Settings → Legal Content tab ships)".
+- ✅ **[AUDIT-25]** Flag dependency in Phase 4 (closed) — BookingPage Step 3 cancellation policy is already wired to `settings/websiteContent.cancellationPolicy` (with a hardcoded fallback). PrivacyPage body now sourced from `settings/websiteContent.privacyPolicyBody` via `getDoc` on mount (falls back to deployment-configured content when blank); Legal Content admin Settings tab added with all 3 textareas (privacy, cancellation, house rules); `privacyPolicyLastUpdated` auto-set on save.
 
 ### 🔴 Fix before Phase 10B — Spark Rewards
 
@@ -508,12 +508,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
-| 9 — Remaining Features | 6 | 3 | 3 |
+| 9 — Remaining Features | 6 | 4 | 2 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 46 | 15 | 31 |
-| **Total** | **215** | **132** | **83** |
+| Audit Fixes | 46 | 16 | 30 |
+| **Total** | **215** | **133** | **82** |
 
 ---
 

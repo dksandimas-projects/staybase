@@ -4,13 +4,14 @@ import { compressImageFile } from "@spark-inn/shared";
 import { 
   Settings, Globe, Gift, Coffee, ShoppingBag, 
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
-  BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil
+  BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
+  Mail, Users, Scale, MessageSquare, Volume2, GripVertical
 } from "lucide-react";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 
-type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store";
+type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal";
 type StoreCategory = StoreItem["category"];
 type StorePaymentMethodSetting = {
   method: string;
@@ -85,11 +86,31 @@ export function SettingsPage() {
   const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
   const [storeItemPhotoStatus, setStoreItemPhotoStatus] = useState("");
 
+  // 6. Intercom Config states
+  const [intercomQuickRequests, setIntercomQuickRequests] = useState<string[]>(
+    Array.isArray(hotelConfig.intercomQuickRequests) ? hotelConfig.intercomQuickRequests : []
+  );
+  const [notificationSoundUrl, setNotificationSoundUrl] = useState(hotelConfig.notificationSoundUrl || "");
+
+  // 7. Legal Content states
+  const [privacyPolicyBody, setPrivacyPolicyBody] = useState(websiteContent.privacyPolicyBody || "");
+  const [cancellationPolicy, setCancellationPolicy] = useState(websiteContent.cancellationPolicy || "");
+  const [houseRules, setHouseRules] = useState(websiteContent.houseRules || "");
+  const [privacyPolicyLastUpdated, setPrivacyPolicyLastUpdated] = useState(
+    websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || ""
+  );
+
   useEffect(() => {
     setStoreEnabled(storeConfig.isEnabled !== false);
     setLowStockThreshold(String(storeConfig.lowStockThreshold ?? 3));
     setStorePaymentMethods(Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []);
-  }, [storeConfig]);
+    setIntercomQuickRequests(Array.isArray(hotelConfig.intercomQuickRequests) ? hotelConfig.intercomQuickRequests : []);
+    setNotificationSoundUrl(hotelConfig.notificationSoundUrl || "");
+    setPrivacyPolicyBody(websiteContent.privacyPolicyBody || "");
+    setCancellationPolicy(websiteContent.cancellationPolicy || "");
+    setHouseRules(websiteContent.houseRules || "");
+    setPrivacyPolicyLastUpdated(websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || "");
+  }, [storeConfig, hotelConfig, websiteContent]);
 
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
@@ -138,6 +159,24 @@ export function SettingsPage() {
       lowStockThreshold: parseInt(lowStockThreshold) || 3,
       paymentMethods: storePaymentMethods
     });
+  };
+
+  const handleSaveIntercom = () => {
+    updateSettings("hotelConfig", {
+      intercomQuickRequests,
+      notificationSoundUrl
+    });
+  };
+
+  const handleSaveLegal = () => {
+    updateSettings("websiteContent", {
+      ...websiteContent,
+      privacyPolicyBody,
+      cancellationPolicy,
+      houseRules,
+      privacyPolicyLastUpdated: new Date().toISOString().slice(0, 10)
+    });
+    setPrivacyPolicyLastUpdated(new Date().toISOString().slice(0, 10));
   };
 
   // Toggle item status in local states
@@ -241,7 +280,10 @@ export function SettingsPage() {
     { id: "website" as const, label: "Website Content", icon: Globe },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
-    { id: "store" as const, label: "In-Room Store", icon: ShoppingBag }
+    { id: "store" as const, label: "In-Room Store", icon: ShoppingBag },
+    { id: "email" as const, label: "Email Config", icon: Mail },
+    { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
+    { id: "legal" as const, label: "Legal Content", icon: Scale }
   ];
 
   return (
@@ -1161,6 +1203,237 @@ export function SettingsPage() {
                   </div>
                 </form>
               </div>
+            </div>
+          )}
+
+          {/* TAB 7: EMAIL CONFIG */}
+          {activeTab === "email" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Email Configuration</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Resend email delivery settings — managed via environment variables, read-only here.</p>
+              </div>
+
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-xs text-amber-800">
+                <div className="flex items-start gap-2">
+                  <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Code deploy required</p>
+                    <p className="mt-1 leading-relaxed">Changing the Resend sender address or admin notification email requires updating environment variables and redeploying. Contact the development team to make these changes.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-5 space-y-2">
+                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Resend Sender Address</span>
+                  <p className="text-sm font-semibold text-gray-900 font-mono">{config.supportEmail}</p>
+                  <p className="text-[10px] text-gray-500">Used as the `from` address for all transactional emails.</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-5 space-y-2">
+                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Admin Notification Email</span>
+                  <p className="text-sm font-semibold text-gray-900 font-mono">{config.supportEmail}</p>
+                  <p className="text-[10px] text-gray-500">Receives new corporate inquiry notifications and staff alerts.</p>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-gray-150">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-3">Active Email Triggers</h4>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    { label: "Booking Submitted", description: "Guest receives acknowledgment when a booking request is submitted", status: "active" },
+                    { label: "Payment Confirmed", description: "Guest notified when their payment is verified and fully paid", status: "active" },
+                    { label: "Booking Confirmed", description: "Guest notified when booking is confirmed by front desk", status: "active" },
+                    { label: "Check-in Reminder", description: "Scheduled daily cron — guests with tomorrow's check-in get a reminder", status: "active" },
+                    { label: "Booking Cancelled", description: "Guest receives cancellation confirmation", status: "active" },
+                    { label: "Discount Rejected", description: "Guest notified when their Senior/PWD ID cannot be verified", status: "active" },
+                    { label: "Corporate Inquiry", description: "Staff notification when a new corporate inquiry is submitted", status: "active" },
+                    { label: "Early Check-in Request", description: "Staff notification when a member requests early check-in via Intercom", status: "planned" }
+                  ].map(trigger => (
+                    <div key={trigger.label} className="rounded-lg border border-gray-150 bg-white p-3 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${trigger.status === "active" ? "bg-green-500" : "bg-gray-300"}`} />
+                        <span className="text-xs font-bold text-gray-800">{trigger.label}</span>
+                        {trigger.status === "planned" && (
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-500">Planned</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-500 leading-relaxed">{trigger.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 8: INTERCOM CONFIG */}
+          {activeTab === "intercom" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Intercom Settings</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Quick request shortcuts and notification sound for the guest-to-staff intercom.</p>
+              </div>
+
+              <form onSubmit={(e) => { e.preventDefault(); handleSaveIntercom(); }} className="space-y-6">
+                <div className="space-y-4">
+                  <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Quick Request Items</h4>
+                  <p className="text-[10px] text-gray-500">These appear as tap-to-send shortcuts in the guest Intercom page. Guests can select one without typing.</p>
+                  <div className="space-y-2">
+                    {intercomQuickRequests.map((req, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={req}
+                          onChange={(e) => {
+                            const updated = [...intercomQuickRequests];
+                            updated[index] = e.target.value;
+                            setIntercomQuickRequests(updated);
+                          }}
+                          className="min-h-[40px] flex-1 rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIntercomQuickRequests(prev => prev.filter((_, i) => i !== index));
+                          }}
+                          className="min-h-[40px] px-2 rounded border border-red-200 text-red-500 hover:bg-red-50 transition"
+                          aria-label="Remove quick request"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setIntercomQuickRequests(prev => [...prev, ""])}
+                      className="min-h-[40px] w-full flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 text-xs font-semibold text-gray-500 hover:border-primary hover:text-primary transition"
+                    >
+                      <Plus size={14} />
+                      Add Quick Request
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Notification Sound</h4>
+                  <p className="text-[10px] text-gray-500">URL of the audio file that plays in the admin Intercom Inbox when a new message arrives while the tab is not focused.</p>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Sound File URL
+                    <input
+                      type="url"
+                      value={notificationSoundUrl}
+                      onChange={(e) => setNotificationSoundUrl(e.target.value)}
+                      placeholder="https://firebasestorage.googleapis.com/..."
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  {notificationSoundUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const audio = new Audio(notificationSoundUrl);
+                        audio.play().catch(() => alert("Could not play audio — check the URL is a valid audio file."));
+                      }}
+                      className="min-h-[36px] px-4 inline-flex items-center gap-1.5 rounded-lg border border-gray-250 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+                    >
+                      <Volume2 size={14} />
+                      Preview Sound
+                    </button>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-gray-150 flex justify-end">
+                  <button
+                    type="submit"
+                    className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                  >
+                    <Save size={14} />
+                    Save Intercom Settings
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 9: LEGAL CONTENT */}
+          {activeTab === "legal" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Legal Content</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Manage legal documents displayed on the guest site. Changes take effect immediately.</p>
+              </div>
+
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-xs text-blue-800">
+                <div className="flex items-start gap-2">
+                  <ShieldAlert size={14} className="shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Deployment-managed fields</p>
+                    <p className="mt-1 leading-relaxed">Some legal fields (legal name, DPO email, applicable law) are set at deployment in <code>hotel.config.ts</code> and require the development team to update.</p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={(e) => { e.preventDefault(); handleSaveLegal(); }} className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Privacy Policy</h4>
+                    {privacyPolicyLastUpdated && (
+                      <span className="text-[10px] text-gray-400">Last updated: {privacyPolicyLastUpdated}</span>
+                    )}
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Privacy Policy Body
+                    <textarea
+                      value={privacyPolicyBody}
+                      onChange={(e) => setPrivacyPolicyBody(e.target.value)}
+                      rows={12}
+                      placeholder="Enter the full Privacy Policy text. This is displayed on the guest-facing /privacy page. Uses plain text or simple markdown. If left blank, the page falls back to the deployment-configured content."
+                      className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
+                    />
+                  </label>
+                  <p className="text-[10px] text-gray-500">Displayed at <code>/privacy</code>. If left blank, the guest page uses a deployment-configured fallback. New date is auto-set on save.</p>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Cancellation Policy</h4>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Cancellation Policy
+                    <textarea
+                      value={cancellationPolicy}
+                      onChange={(e) => setCancellationPolicy(e.target.value)}
+                      rows={4}
+                      placeholder="Cancellations made 48 hours or more before check-in are eligible for a full refund..."
+                      className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
+                    />
+                  </label>
+                  <p className="text-[10px] text-gray-500">Shown at booking Step 3 and in confirmation emails. If left blank, a default policy is used.</p>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">House Rules</h4>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    House Rules
+                    <textarea
+                      value={houseRules}
+                      onChange={(e) => setHouseRules(e.target.value)}
+                      rows={4}
+                      placeholder="No smoking inside rooms. Quiet hours from 10 PM to 7 AM..."
+                      className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
+                    />
+                  </label>
+                  <p className="text-[10px] text-gray-500">Used in the guest registration PDF at check-in. If left blank, the field is omitted from the printed form.</p>
+                </div>
+
+                <div className="pt-2 border-t border-gray-150 flex justify-end">
+                  <button
+                    type="submit"
+                    className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                  >
+                    <Save size={14} />
+                    Save Legal Content
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </div>

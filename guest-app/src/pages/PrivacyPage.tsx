@@ -1,12 +1,82 @@
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Shield, Mail, ArrowLeft, Calendar, FileText } from "lucide-react";
 import { VERSION } from "@spark-inn/shared";
+import { doc, getDoc } from "firebase/firestore";
 import config from "@config";
+import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
 
 export function PrivacyPage() {
+  const [customBody, setCustomBody] = useState<string | null>(null);
+  const [customLastUpdated, setCustomLastUpdated] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const snap = await getDoc(doc(db, "settings", "websiteContent"));
+        if (!cancelled && snap.exists()) {
+          const data = snap.data() as Record<string, any>;
+          if (typeof data.privacyPolicyBody === "string" && data.privacyPolicyBody.trim().length > 0) {
+            setCustomBody(data.privacyPolicyBody);
+          }
+          if (typeof data.privacyPolicyLastUpdated === "string" && data.privacyPolicyLastUpdated.trim().length > 0) {
+            setCustomLastUpdated(data.privacyPolicyLastUpdated);
+          }
+        }
+      } catch {
+        // Fallback to config-driven content (already rendered below)
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const lastUpdated = customLastUpdated || config.privacyPolicyLastUpdated;
   const brandTitle = config.brandName;
-  
+
+  if (customBody) {
+    return (
+      <main className="min-h-screen bg-white font-body text-gray-900 flex flex-col justify-between select-text">
+        <div>
+          <header className="border-b border-gray-150 py-4">
+            <div className="mx-auto max-w-4xl px-4 sm:px-6 flex justify-between items-center">
+              <Link to="/" className="inline-flex items-center gap-2 text-xs font-semibold text-primary hover:underline">
+                <ArrowLeft size={16} />
+                Return to Homepage
+              </Link>
+              <span className="text-xs font-semibold text-gray-400">{config.applicableLaw}</span>
+            </div>
+          </header>
+          <article className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
+            <header className="mb-10 space-y-3">
+              <div className="flex items-center gap-2 text-primary">
+                <Shield size={24} />
+                <span className="text-xs uppercase font-bold tracking-widest">Privacy notice</span>
+              </div>
+              <h1 className="font-heading text-4xl text-gray-950 lowercase">privacy policy</h1>
+              <div className="flex items-center gap-4 text-xs text-gray-500 pt-1.5 border-y border-gray-100 py-3">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <Calendar size={14} />
+                  Last Updated: {lastUpdated}
+                </span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  <FileText size={14} />
+                  Version {VERSION}
+                </span>
+              </div>
+            </header>
+            <div className="prose prose-sm text-gray-650 leading-relaxed space-y-8 text-justify whitespace-pre-wrap">
+              {customBody}
+            </div>
+          </article>
+        </div>
+        <Footer />
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-white font-body text-gray-900 flex flex-col justify-between select-text">
       <div>
