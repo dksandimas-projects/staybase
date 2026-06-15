@@ -795,6 +795,125 @@ export async function handleConfirmBooking(req: any, res: any) {
   }
 }
 
+export async function handleCheckoutBooking(req: any, res: any) {
+  const { bookingId } = req.body;
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef.get();
+    if (!bookingDoc.exists) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+
+    const bookingData = bookingDoc.data()!;
+    if (bookingData.status !== "checked-in") {
+      return res.status(400).json({
+        success: false,
+        error: `Booking can only be checked out from 'checked-in' status (current: ${bookingData.status}).`
+      });
+    }
+
+    const checkedOutBy = req.staff?.email || "staff";
+    const totalPrice = Number(bookingData.totalPrice || 0);
+
+    let pointsAwarded = 0;
+    let memberId: string | null = bookingData.memberId || null;
+    let rewardsConfig: any = null;
+
+    // Try to find member either by memberId (if booking is already linked) or by guestEmail
+    let memberDoc: any = null;
+    if (memberId) {
+      memberDoc = await adminDb.collection("members").doc(memberId).get();
+    }
+    if (!memberDoc?.exists && bookingData.guestEmail) {
+      const guestEmail = String(bookingData.guestEmail).toLowerCase();
+      const membersSnap = await adminDb.collection("members")
+        .where("email", "==", guestEmail)
+        .limit(1)
+        .get();
+      if (!membersSnap.empty) {
+        memberDoc = membersSnap.docs[0];
+        memberId = memberDoc.id;
+        // Persist the link for future use
+        await bookingRef.update({ memberId });
+      }
+    }
+
+    if (memberDoc?.exists) {
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const pointsEnabled = rewardsConfig?.pointsEnabled !== false;
+
+      if (pointsEnabled && rewardsConfig) {
+        const earningMode = rewardsConfig.earningMode || "per-spend";
+        if (earningMode === "per-spend") {
+          const pointsPerHundred = Number(rewardsConfig.pointsPerHundred || 0);
+          pointsAwarded = Math.floor((totalPrice / 100) * pointsPerHundred);
+        } else {
+          pointsAwarded = Number(rewardsConfig.pointsPerBooking || 0);
+        }
+      }
+    }
+
+    await adminDb.runTransaction(async (transaction) => {
+      transaction.update(bookingRef, {
+        status: "checked-out",
+        checkedOutAt: new Date(),
+        checkedOutBy,
+        pointsAwarded,
+        updatedAt: new Date()
+      });
+
+      if (bookingData.roomId) {
+        const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
+        transaction.update(roomRef, {
+          status: "available",
+          housekeepingStatus: "dirty",
+          updatedAt: new Date()
+        });
+      }
+
+      if (memberId && pointsAwarded > 0) {
+        const memberRef = adminDb.collection("members").doc(memberId);
+        const memberDoc = await transaction.get(memberRef);
+        if (memberDoc.exists) {
+          const currentPoints = Number(memberDoc.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            updatedAt: new Date()
+          });
+
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: new Date()
+          });
+        }
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "checked-out",
+        pointsAwarded,
+        memberId
+      }
+    });
+  } catch (error: any) {
+    console.error("Checkout booking handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
 export async function handleLookupBooking(req: any, res: any) {
   const { bookingRef, guestEmail } = req.body || {};
   if (!bookingRef || !guestEmail) {
