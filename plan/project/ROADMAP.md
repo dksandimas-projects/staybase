@@ -326,7 +326,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > Goal: All P1 features complete before launch prep.
 
 - ✅ Booking Lookup page (`/my-booking`) — ref + email lookup wired to live Firestore via `/api/bookings/lookup`; cancel via `/api/bookings/cancel`; resend via `/api/email/booking-submitted` (pending/payment-uploaded) or `/api/email/booking-confirmed` (confirmed/checked-in); 60s resend cooldown + server-side rate limit; room-name enrichment from `rooms/{roomId}`
-- ⬜ Reports page — occupancy, revenue, bookings by source, PDF/CSV export
+- ✅ Reports page (`/reports`) — restructured into **Performance** + **Sales** tabs; Performance shows occupancy by room type, acquisition channels, and revenue trend; Sales shows 4 revenue KPI cards (Total/Room/Breakfast/Store), stacked bar by stream, revenue trend line, combined payment method pie with `Add to Bill = Uncollected` label, and sub-tabbed detail tables (Bookings / Breakfast / Store Orders) with search. CSV + Sales XLSX export (4 sheets via SheetJS). All aggregation live against `bookings` + `storeOrders` + `breakfastConfig` from context. PDF export and Full Data Backup (admin-only 8-sheet XLSX) deferred.
 - ⬜ Settings page — all 9 tabs (Hotel Info, Payment Methods, Email, Staff Accounts, Discounts, Vouchers, Intercom, Website Content, Legal Content)
 - ✅ Guest registration data capture wireframe — booking drawer at check-in
 - ⬜ Guest Registration PDF (jsPDF) — pre-filled from booking, printable at check-in
@@ -508,12 +508,12 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 20 | 19 | 1 (manual QA — see checklist) |
-| 9 — Remaining Features | 6 | 2 | 4 |
+| 9 — Remaining Features | 6 | 3 | 3 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
 | Audit Fixes | 46 | 15 | 31 |
-| **Total** | **215** | **131** | **84** |
+| **Total** | **215** | **132** | **83** |
 
 ---
 
