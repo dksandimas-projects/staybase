@@ -26,7 +26,7 @@ These 15 questions block day-one launch fixes. The "default" is the safest inter
 | W1.5 | 1.3 | Stock decrement on `placed` vs `confirmed`? Spec DECISIONS #37 says confirmed, STORE-MANAGEMENT.md says create. | **On confirmed** — change `handleCreateStoreOrder` to NOT decrement stock; add new `handleConfirmStoreOrder` that decrements inside a transaction. Cancel only restores stock that was decremented at confirmation. Backfill existing `placed` orders. | 1.3 SEV-2 #2a | ☐ |
 | W1.6 | 1.5 | Settings tab list count — Vouchers in Rates vs Settings? | **Vouchers stays in Rates** (per current implementation). Rates page is admin+front-desk accessible; Settings is admin-only. Vouchers need front-desk access (per spec) so they belong in Rates. | 1.5 SEV-2 (Settings tabs) | ☐ |
 | W1.7 | 1.5 | `includedInRoomRate` field on `breakfastConfig` — Phase 2 or dropped? | **Option 1: dropped** — only the add-on pricing model is supported. Booking flow's "Room Only" / "Room + Breakfast" toggle already covers the use case. The field was hypothetical — never seeded, never read, never documented in RATE-MANAGEMENT.md or SETTINGS.md. If a future hotel client needs "breakfast always included" as a differentiator, add it then as a scoped feature. See `DECISIONS-FEATURES.md #75`. | 1.5 (open Q) | ✅ (decision 2026-06-15) |
-| W1.8 | 1.6 | ContactPage form — wire to `/api/contact` or remove? | **Remove** — the spec does not list a contact form. Add a real backend only when the hotel asks for it. (Also closes 2.1 SEV-2 #6.) | 1.6 SEV-2 (Contact) | ☐ |
+| W1.8 | 1.6 | ContactPage form — wire to `/api/contact` or remove? | **Option C: wire to a real `/api/contact` endpoint** — match the corporate inquiry pattern (Zod schema + honeypot + Turnstile + rate-limit). New `contactInquiries/{id}` collection, new `contactInquiryEmail` template, new API route, new `handleCreateContactInquiry` handler. Full spec in `plan/features/CONTACT-INQUIRIES.md`. **Documentation first, build in Phase 1.** | 1.6 SEV-2 (Contact), 2.1 SEV-2 #6 | ✅ (decision 2026-06-15, build deferred to Phase 1) |
 | W1.9 | 1.7 | Booking Confirmation Receipt PDF — Phase 10B or dropped? | **Implement now** — it's a Phase 6 deliverable per `EMAIL-PDF-STORAGE.md` and blocks the `booking-confirmed` email's PDF attachment path. Add `printBookingReceiptPDF(booking)` next to `printRegistrationPDF`. | 1.7 SEV-1 #1 | ☐ |
 | W1.10 | 1.7 | Check-in reminder cron idempotency marker — schedule for production? | **Yes — add `reminderSentAt: Timestamp` to booking, skip if already set for `checkIn`'s date.** Add to the cron transaction. Close the at-least-once duplicate risk. | 1.7 SEV-3 #1 | ☐ |
 | W1.11 | Phase 2 | Firestore Timestamp vs JS Date policy for `bookings.checkIn` / `checkOut`? | **Always `Timestamp.fromDate()` on write, `data.checkIn.toDate()` on read.** Pick one format. Remove the dead ternary at `bookings.ts:281` and the `parseDateString` helpers. | 2.1 SEV-1 #2 | ☐ |
@@ -108,6 +108,6 @@ After approval, the decisions get copied to `plan/docs/DECISIONS-FEATURES.md` as
 
 ---
 
-*Status: 2 of 51 approved (W1.4, W1.7 — both 2026-06-15).*
+*Status: 3 of 51 approved (W1.4, W1.7, W1.8 — all 2026-06-15).*
 
 *Total: 51 questions in 4 waves. Wave 1 (15) is launch-blocking. Wave 2 (15) blocks SEV-2 polish. Wave 3 (12) is UI/UX. Wave 4 (9) is infrastructure.*
