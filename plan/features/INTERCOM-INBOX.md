@@ -29,7 +29,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Thread view (right panel) — full message thread for selected room
 - [ ] Messages: guest messages (left-aligned), front desk messages (right-aligned)
 - [ ] Quick request messages render as styled chip/badge — visually distinct from plain text (e.g. pill with icon, different background)
-- [ ] Store order messages render as a distinct order card — shows items, total, payment method, with a "View Order" link to Store Management
+- [x] Store order messages render as a distinct order card — shows items, total, payment method, with a "View Order" link to Store Management
 - [ ] New store order notification sound — same Web Audio API pattern as intercom messages
 - [ ] Reply input + Send button at bottom of thread
 - [x] Mark as Resolved button — available on active conversations
@@ -75,6 +75,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Open thread — guest messages marked as read, unread count clears
 - [ ] Reply from inbox — appears in guest's chat view in real-time
 - [ ] Quick request chip from guest renders as badge/chip (not plain text) in thread
+- [x] Store order message renders as a rich order card with items, total, payment method, and Store Management link
 - [ ] Notification sound plays when new message arrives on a different browser tab
 - [ ] Notification sound does NOT play when inbox tab is active and focused
 - [ ] Incoming call banner appears and notification sound plays regardless of which tab is focused
