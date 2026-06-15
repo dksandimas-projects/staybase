@@ -111,6 +111,17 @@ Store order status MUST return only guest-safe metadata (`status`, `updatedAt`) 
 
 ---
 
+### Admin Routes (`/api/admin/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/admin/create-staff` | POST | Admin | Create a staff Firebase Auth user, set the `role` custom claim, and mirror the profile in `guests/{uid}` |
+| `/api/admin/disable-staff` | POST | Admin | Disable a staff Firebase Auth user and mark `guests/{uid}.isActive` false; self-disable and last-active-admin disable are rejected |
+
+Staff accounts must be created and disabled through these Admin SDK routes. Never expose staff registration in client code, and never let client-side writes set Firebase Auth custom claims.
+
+---
+
 ### Member Routes (`/api/members/*`)
 
 | Route | Method | Auth | Purpose |

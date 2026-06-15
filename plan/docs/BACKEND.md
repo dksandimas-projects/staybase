@@ -124,7 +124,12 @@ Staff accounts only (Front Desk + Admin). Document ID = Firebase Auth UID.
 | `phone` | string | |
 | `nationality` | string | |
 | `role` | string | `"front-desk"` \| `"admin"` |
+| `isActive` | boolean | `false` when disabled through `/api/admin/disable-staff` |
+| `createdBy` | string | Admin UID that created the account |
+| `disabledAt` | timestamp \| null | Set when disabled |
+| `disabledBy` | string | Admin UID that disabled the account |
 | `createdAt` | timestamp | |
+| `updatedAt` | timestamp | |
 
 ---
 
@@ -423,7 +428,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 |---|---|---|
 | `rooms` | Public | Staff or Admin |
 | `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
-| `guests` | Owner or Staff/Admin | Owner or Admin |
+| `guests` | Owner or Staff/Admin | Create/disable via Admin SDK routes; profile update = Owner or Admin |
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
 | `corporateCodes` | Anyone (validation) | Admin only |

@@ -13,6 +13,7 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { adminAuth } from "./lib/firebase-admin";
 
 const staffOnlyEmailActions = new Set(["payment-confirmed", "booking-confirmed", "discount-rejected"]);
@@ -339,6 +340,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleUndoMemberPointsRedemption(req, res);
+  }
+
+  if (domain === "admin" && action === "create-staff" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can create staff accounts." });
+    }
+    (req as any).staff = authResult;
+    return await handleCreateStaff(req, res);
+  }
+
+  if (domain === "admin" && action === "disable-staff" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can disable staff accounts." });
+    }
+    (req as any).staff = authResult;
+    return await handleDisableStaff(req, res);
   }
 
   if (domain === "store" && action === "create-order" && req.method === "POST") {
