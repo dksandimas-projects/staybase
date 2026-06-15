@@ -408,7 +408,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ **[AUDIT-9]** Add `VITE_SENTRY_DSN=` to both app sections in `ENV-SETUP.md`
 - ✅ **[AUDIT-10]** Add `html2canvas` to the stack table in `CLAUDE.md` and `DECISIONS-ARCH.md`
 - ✅ **[AUDIT-11]** Decide and document check-in reminder mechanism in `EMAIL-PDF-STORAGE.md` (Vercel Cron); added the `vercel.json` cron entry spec, env requirement, and cron route alignment
-- ⬜ **[AUDIT-12]** Create `vercel.json` at repo root with CSP headers, X-Frame-Options, X-Content-Type-Options, Referrer-Policy; document in `FILE-STRUCTURE.md`
+- ✅ **[AUDIT-12]** Create `vercel.json` at repo root with CSP headers, X-Frame-Options, X-Content-Type-Options, Referrer-Policy; document in `FILE-STRUCTURE.md`
 
 ### 🟢 Anytime — Doc polish
 
