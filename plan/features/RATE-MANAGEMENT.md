@@ -46,6 +46,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] QR code image: `uploadBytes` to Firebase Storage, `getDownloadURL`, stored in payment method `qrUrl`
 - [ ] Rate changes do NOT retroactively update existing bookings — `ratePerNight` and `breakfastRate` both locked on booking creation
 - [ ] Breakfast rate saved to `settings/breakfastConfig.ratePerPersonPerNight`
+- [ ] **Breakfast pricing model: add-on only** (per `DECISIONS-FEATURES.md #75`). Booking flow Step 1 toggles "Room Only" vs "Room + Breakfast"; the latter adds `breakfastRate × guests × nights` to the room total. No `includedInRoomRate` field on `breakfastConfig` — if a future client needs "breakfast always included" as a differentiator, add it then.
 
 ## Edge Cases & States
 
