@@ -148,7 +148,8 @@ shared/
 │   ├── points.ts                       ← Points earning + redemption calculations
 │   ├── references.ts                   ← Booking ref, member number, store order ref generation
 │   ├── vouchers.ts                     ← Voucher validation logic (expiry, cap, room type, discount calc)
-│   └── corporate-codes.ts              ← Corporate access code validation logic (expiry, cap, active status)
+│   ├── corporate-codes.ts              ← Corporate access code validation logic (expiry, cap, active status)
+│   └── images.ts                       ← Client-side image compression before Firebase Storage upload
 ├── constants/
 │   └── index.ts                        ← Booking statuses, sources, etc.
 ├── animations.ts                       ← Shared Framer Motion variants (fadeUp, staggerContainer, slideInRight, etc.) — see plan/docs/FRONTEND.md §Animations
