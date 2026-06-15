@@ -317,9 +317,9 @@ export interface AdminContextType {
   updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"], cancellationReason?: string) => void | Promise<void>;
   billStoreOrder: (orderId: string) => void | Promise<void>;
   storeItems: StoreItem[];
-  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => void;
-  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => void;
-  deleteStoreItem: (itemId: string) => void;
+  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => Promise<void>;
+  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => Promise<void>;
+  deleteStoreItem: (itemId: string) => Promise<void>;
 
   // Configurations
   hotelConfig: any;
@@ -1403,69 +1403,82 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Store Catalog State
-  const [storeItems, setStoreItems] = useState<StoreItem[]>([
-    {
-      id: "item-1",
-      name: "San Miguel Pale Pilsen",
-      category: "drinks",
-      description: "Ice-cold local pilsner beer, 330ml can.",
-      price: 120,
-      stock: 18,
-      imageUrl: "https://images.unsplash.com/photo-1608270586620-248524c67de9?auto=format&fit=crop&q=80&w=256&h=256",
-      isActive: true,
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "item-2",
-      name: "Spark Still Water",
-      category: "drinks",
-      description: "Premium purified drinking water in a glass bottle.",
-      price: 60,
-      stock: null,
-      imageUrl: "https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&q=80&w=256&h=256",
-      isActive: true,
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "item-3",
-      name: "Bohol Peanut Kisses",
-      category: "snacks",
-      description: "Crisp local peanut cookies shaped like Chocolate Hills.",
-      price: 80,
-      stock: 4,
-      imageUrl: "https://images.unsplash.com/photo-1590080875515-8a3a8dc5735e?auto=format&fit=crop&q=80&w=256&h=256",
-      isActive: true,
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "item-4",
-      name: "Extra Beach Towel",
-      category: "rentals",
-      description: "Large microfiber towel for pool trips and beach days.",
-      price: 150,
-      stock: 0,
-      imageUrl: "",
-      isActive: false,
-      createdAt: "2026-06-01"
+  // Store Catalog State — live from Firestore
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+
+  const normalizeStoreCategory = (category: unknown): StoreItem["category"] => {
+    return ["drinks", "snacks", "toiletries", "rentals", "other"].includes(String(category))
+      ? String(category) as StoreItem["category"]
+      : "other";
+  };
+
+  useEffect(() => {
+    const storeItemsQuery = query(collection(db, "storeItems"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(
+      storeItemsQuery,
+      (snapshot) => {
+        setStoreItems(snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            name: data.name || "Store item",
+            category: normalizeStoreCategory(data.category),
+            description: data.description || "",
+            price: Number(data.price || 0),
+            stock: data.stock === null ? null : Math.max(0, Number(data.stock || 0)),
+            imageUrl: data.imageUrl || "",
+            isActive: data.isActive !== false,
+            createdAt: formatStoreDate(data.createdAt)
+          } satisfies StoreItem;
+        }));
+      },
+      (error) => {
+        console.error("Error listening to store items:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const addStoreItem = async (item: Omit<StoreItem, "id" | "createdAt">) => {
+    try {
+      await addDoc(collection(db, "storeItems"), {
+        ...item,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdBy: currentUser?.uid || currentUser?.email || ""
+      });
+    } catch (error) {
+      console.error("Error adding store item:", error);
+      alert(`Failed to add store item: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
-  ]);
-
-  const addStoreItem = (item: Omit<StoreItem, "id" | "createdAt">) => {
-    const nextItem: StoreItem = {
-      ...item,
-      id: `item-${Date.now()}`,
-      createdAt: new Date().toISOString()
-    };
-    setStoreItems(prev => [nextItem, ...prev]);
   };
 
-  const updateStoreItem = (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
-    setStoreItems(prev => prev.map(item => item.id === itemId ? { ...item, ...updates } : item));
+  const updateStoreItem = async (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
+    try {
+      await updateDoc(doc(db, "storeItems", itemId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.uid || currentUser?.email || ""
+      });
+    } catch (error) {
+      console.error("Error updating store item:", error);
+      alert(`Failed to update store item: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
   };
 
-  const deleteStoreItem = (itemId: string) => {
-    setStoreItems(prev => prev.filter(item => item.id !== itemId));
+  const deleteStoreItem = async (itemId: string) => {
+    try {
+      await updateDoc(doc(db, "storeItems", itemId), {
+        isActive: false,
+        deletedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.uid || currentUser?.email || ""
+      });
+    } catch (error) {
+      console.error("Error disabling store item:", error);
+      alert(`Failed to disable store item: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
   };
 
   // Settings Mock States
