@@ -64,10 +64,21 @@ Triggered by `/api/email/discount-rejected` when staff rejects a Senior Citizen 
 ### Email Logic Checklist
 
 - [ ] All email routes validate Firebase ID token (staff routes) or accept booking ref + email for guest-triggered resend
-- [ ] Check-in reminder: implement via a scheduled Vercel cron job or trigger on booking confirmation — checks all `confirmed` bookings where `checkIn = tomorrow`
+- [ ] Check-in reminder: implement via Vercel Cron — checks all `confirmed` bookings where `checkIn = tomorrow`
 - [ ] Resend client initialized once in `api/lib/resend.ts`
 - [ ] Email templates defined server-side as HTML strings or React Email components
 - [ ] On Resend API error: log error server-side, return error response — do not silently fail
+
+### Check-In Reminder Scheduling Decision
+
+Use Vercel Cron for check-in reminders. The cron job runs once daily against `/api/email/checkin-reminder`; when the route receives a cron-authenticated request with no booking body, it queries confirmed bookings whose `checkIn` is tomorrow in `config.timezone` and sends one reminder email per matching booking.
+
+`vercel.json` cron entry spec:
+- Path: `/api/email/checkin-reminder`
+- Schedule: daily at `0 0 * * *` UTC, which runs at 08:00 in Asia/Manila
+- Auth: Vercel sends `Authorization: Bearer {CRON_SECRET}`; `CRON_SECRET` must be configured in Vercel and must not use a `VITE_` prefix
+- Method: Vercel invokes cron paths with `GET`; the route also keeps staff-triggered `POST` support for manual resend/testing
+- Idempotency: before production launch, the cron sender should record a reminder-sent marker on each booking so retries do not send duplicate reminder emails
 
 ---
 

@@ -44,6 +44,9 @@ ADMIN_NOTIFICATION_EMAIL=sparkinn.dev@gmail.com
 
 # Cloudflare Turnstile (secret key — server-side only)
 TURNSTILE_SECRET_KEY=
+
+# Vercel Cron (server-side only — never prefix with VITE_)
+CRON_SECRET=
 ```
 
 ---
@@ -74,6 +77,7 @@ VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
 - `FIREBASE_PRIVATE_KEY` contains newlines — wrap in quotes in `.env` and use `.replace(/\\n/g, '\n')` when initializing the Admin SDK
 - In Vercel dashboard, set all env vars once — they apply to both the frontend build and the API functions in the same deployment
 - `FIREBASE_PROJECT_ID` appears twice (once as `VITE_FIREBASE_PROJECT_ID` for client, once as `FIREBASE_PROJECT_ID` for Admin SDK) — both are needed
+- `CRON_SECRET` protects scheduled Vercel Cron email jobs and must match the bearer token expected by `/api/email/checkin-reminder`
 
 ---
 
