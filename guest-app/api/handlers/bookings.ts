@@ -928,6 +928,20 @@ export async function handleCheckoutBooking(req: any, res: any) {
         });
       }
 
+      // Per W2.7 / decision #95: auto-archive the intercom thread on
+      // checkout. Sets `intercoms/{roomNumber}.resolved = true` so the
+      // thread moves out of the active inbox tab. Staff can reopen from
+      // the admin Inbox by toggling resolved: false.
+      const roomNumber = String(bookingData.roomNumber || "");
+      if (roomNumber) {
+        const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
+        transaction.set(
+          intercomRef,
+          { resolved: true, resolvedAt: new Date(), resolvedBy: checkedOutBy, roomNumber, updatedAt: new Date() },
+          { merge: true }
+        );
+      }
+
       if (memberId && pointsAwarded > 0) {
         const memberRef = adminDb.collection("members").doc(memberId);
         const memberDoc = await transaction.get(memberRef);
