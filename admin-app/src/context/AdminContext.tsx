@@ -946,54 +946,38 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   // Members Data State
-  const [members, setMembers] = useState<Member[]>([
-    {
-      id: "mem-42",
-      memberNumber: "SR-00042",
-      fullName: "Alex Mercer",
-      email: "member@sparkinn.com",
-      phone: "+63 912 345 6789",
-      photoUrl: "",
-      authProvider: "email",
-      isMember: true,
-      memberSince: "2025-06-02",
-      rewardsPoints: 2480,
-      tier: "standard",
-      isActive: true,
-      pointsHistory: [
-        {
-          id: "pt-1",
-          type: "earn",
-          points: 800,
-          description: "Stay Checkout Earnings (SI-08103)",
-          reason: "Checkout bonus points",
-          bookingId: "bk-3",
-          by: "system",
-          at: "2025-08-09"
-        },
-        {
-          id: "pt-2",
-          type: "manual",
-          points: 680,
-          description: "Loyalty Adjustment",
-          reason: "Front desk courtesy credit",
-          bookingId: null,
-          by: "admin",
-          at: "2025-08-08"
-        },
-        {
-          id: "pt-3",
-          type: "earn",
-          points: 1000,
-          description: "Welcome Rewards Bonus",
-          reason: "Registration welcome points",
-          bookingId: null,
-          by: "system",
-          at: "2025-06-02"
-        }
-      ]
-    }
-  ]);
+  // Per W1.12 / decision #85: real `onSnapshot` listener on the `members`
+  // collection. Replaces the hardcoded `useState<Member[]>([fake entry])`
+  // mock that hid all real members from the admin UI. Cleanup on unmount.
+  const [members, setMembers] = useState<Member[]>([]);
+  useEffect(() => {
+    const membersRef = collection(db, "members");
+    const unsubscribe = onSnapshot(membersRef, (snapshot) => {
+      const membersData: Member[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        membersData.push({
+          id: doc.id,
+          memberNumber: data.memberNumber || "",
+          fullName: data.fullName || "",
+          email: data.email || "",
+          phone: data.phone || "",
+          photoUrl: data.photoUrl || "",
+          authProvider: data.authProvider || "email",
+          isMember: data.isMember !== false,
+          memberSince: data.memberSince || "",
+          rewardsPoints: data.rewardsPoints || 0,
+          tier: data.tier || "standard",
+          isActive: data.isActive !== false,
+          pointsHistory: data.pointsHistory || []
+        });
+      });
+      // Sort by member number for stable display
+      membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
+      setMembers(membersData);
+    });
+    return unsubscribe;
+  }, []);
 
   const updateMemberPoints = (memberId: string, amount: number, type: PointsLog["type"], reason: string) => {
     setMembers(prev => prev.map(mem => {
