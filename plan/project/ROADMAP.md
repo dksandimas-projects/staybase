@@ -409,16 +409,18 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ## Phase 11.5 — Audit Fixes & Launch-Readiness *(P0 — inserted 2026-06-15)*
 > Goal: Close the launch-blocking SEV-1s from the end-to-end audit before staging is reviewed by the client. Code is structurally complete; this phase fills the day-one production gaps the audit exposed.
 > Source: `plan/project/AUDIT-E2E-2026-06-15.md` (238 findings — 23 SEV-1, 67 SEV-2, 94 SEV-3, 54 SEV-4)
-> Decision source: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (15 of 51 Wave 1 decisions resolved)
+> Decision source: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (51 of 51 questions Decided)
 >
 > **Status legend**:
 > - **Decided** — the spec/approach has been agreed in `DECISIONS-FEATURES.md`; no code change yet
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
-> - A decision can be Decided without being Implemented (most are — see Launch-Readiness Sprint below)
+> - A decision can be Decided without being Implemented (most are)
+>
+> **Current state** (as of 2026-06-16): **11 of 51 decisions Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1). 40 remain unimplemented. See Launch-Readiness Sprint + Phase 11.6 Batch 1 sections below for the 11 closed.
 
-### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 0/15 Implemented
+### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented
 
-These 15 questions from the audit are **decided** (documented in `DECISIONS-FEATURES.md`), but **none of them are implemented yet**. Each becomes an implementation ticket below or in Phase 11.6.
+15 questions from the audit are **decided** (documented in `DECISIONS-FEATURES.md`); 11 of them are also **implemented** (the Launch-Readiness Sprint + Batch 1). The 4 not-yet-implemented (#75, #77, #80, #81, #83) are scheduled for Phase 11.6 Batch 2.
 
 - **Decided** — **#75** Breakfast pricing model: add-on only (drop `includedInRoomRate`)
 - **Decided** — **#76** Contact form on `/contact` in scope for Phase 1 (wire to `/api/contact`) — see `plan/features/CONTACT-INQUIRIES.md`
@@ -437,13 +439,24 @@ These 15 questions from the audit are **decided** (documented in `DECISIONS-FEAT
 
 ### Launch-Readiness Sprint — 5 SEV-1 fixes (highest blast-radius, lowest effort)
 Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
-**0/5 implemented.** These are the next concrete work items.
+**5/5 implemented.** All Top-5 launch-readiness SEV-1s shipped on `origin/dev`.
 
-- [ ] **SEV-1 #1** Add `store-orders/{roomNumber}/payment-proof/` Storage rule — closes the 403 every GCash in-room store order hits. File: `firebase/storage.rules`. Branch: `fix/audit-storage-store-orders`. Effort: XS.
-- [ ] **SEV-1 #2** Fix CORS: replace `Access-Control-Allow-Origin: *` + `Allow-Credentials: true` with explicit allowlist from `config.domain` + `config.adminDomain`. File: `guest-app/api/[...route].ts:163-170`. Branch: `fix/audit-cors-allowlist`. Effort: XS.
-- [ ] **SEV-1 #3** Member discount applied server-side in `handleCreateBooking` — verify ID token, look up `memberId`, read `rewardsConfig.memberDiscountPct`, apply as 3rd stacking step. Closes the silent overcharge for Spark Rewards members. Files: `guest-app/api/handlers/bookings.ts`, `guest-app/src/pages/BookingPage.tsx:97` (drop TODO + hardcoded 10%). Branch: `fix/audit-member-discount-server`. Effort: M.
-- [ ] **SEV-1 #4** Lowercase `guestEmail` on write + read paths — fixes "No stays yet" for mixed-case emails, unbreaks self-cancel + lookup. Files: `guest-app/api/handlers/bookings.ts` (3 handlers), `guest-app/src/pages/StaysPage.tsx:47`. Branch: `fix/audit-email-case-lowercase`. Effort: S.
-- [ ] **SEV-1 #5** Replace `useState<Member[]>` mock in `AdminContext` with real `onSnapshot(collection(db, "members"))` listener. File: `admin-app/src/context/AdminContext.tsx:949-996`. Branch: `fix/audit-admin-members-listener`. Effort: M.
+- [x] **SEV-1 #1** Add `store-orders/{roomNumber}/payment-proof/` Storage rule — closes the 403 every GCash in-room store order hits. File: `firebase/storage.rules`. Branch: `fix/audit-storage-store-orders`. Commit: `1a1b5a4`. Effort: XS.
+- [x] **SEV-1 #2** Fix CORS: replace `Access-Control-Allow-Origin: *` + `Allow-Credentials: true` with explicit allowlist from `config.domain` + `config.adminDomain`. File: `guest-app/api/[...route].ts:163-170`. Branch: `fix/audit-cors-allowlist`. Commit: `2423089`. Effort: XS.
+- [x] **SEV-1 #3** Member discount applied server-side in `handleCreateBooking` — verify ID token, look up `memberId`, read `rewardsConfig.memberDiscountPct`, apply as 3rd stacking step. Closes the silent overcharge for Spark Rewards members. Files: `guest-app/api/handlers/bookings.ts`, `guest-app/src/pages/BookingPage.tsx:97` (drop TODO + hardcoded 10%). Branch: `fix/audit-member-discount-server`. Commit: `a3b7b56`. Effort: M.
+- [x] **SEV-1 #4** Lowercase `guestEmail` on write + read paths — fixes "No stays yet" for mixed-case emails, unbreaks self-cancel + lookup. Files: `guest-app/api/handlers/bookings.ts` (3 handlers), `guest-app/src/pages/StaysPage.tsx:47`. Branch: `fix/audit-email-case-lowercase`. Commit: `056e7cf`. Effort: S.
+- [x] **SEV-1 #5** Replace `useState<Member[]>` mock in `AdminContext` with real `onSnapshot(collection(db, "members"))` listener. File: `admin-app/src/context/AdminContext.tsx:949-996`. Branch: `fix/audit-admin-members-listener`. Commit: `5a9ed6a`. Effort: M.
+
+### Phase 11.6 Batch 1 — Quick wins (6 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-1`. Shipped in PR `821eb4e`.
+
+- [x] **W1.13** (commit `86bb50b`) Remove developer's personal name "Daniel Sandimas" hardcoded as default GCash account holder. **Closes decision #86.**
+- [x] **W1.14** (commit `56bf8d4`) Honeypot regression test — the corporate inquiry honeypot was already inside the `<form>` and CSS-hidden, so the commit is a guard test only. **Closes decision #87.**
+- [x] **W1.15** (commit `7266c34`) Housekeeping cycle order: `clean → dirty → in-progress → clean` (per `DASHBOARD-OVERVIEW.md`). **Closes decision #88.**
+- [x] **W2.6** (commit `4f6aa92`) Multiple concurrent calls: second wins — write `status: "ended"` to the old call doc when a new active call arrives. **Closes decision #94.**
+- [x] **W2.7** (commit `e787594`) Auto-archive intercom thread on checkout — set `intercoms/{roomNumber}.resolved = true` in the same transaction. **Closes decision #95.**
+- [x] **W2.8** (commit `bc8e01f`) Cancellation message sets `isCancelledOrder: true` so admin Inbox renders it as a distinct greyed-out "Cancelled" card. **Closes decision #96.**
+- [x] **W2.10** (commit `67beb4c`) `calls/{roomId}` retention: delete after 30s grace via `setTimeout(..., 30000) + deleteDoc`. **Closes decision #98.**
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -627,12 +640,12 @@ Branch convention: `fix/audit-<slug>`. Each fix ships with an integration test.
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 37 | 0 | 32 (decisions documented, unimplemented) + 5 (SEV-1 fixes, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) |
+| 11.5 — Audit Fixes & Launch-Readiness | 37 | 11 | 26 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4). 11/37 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **316** | **249** | **67** |
+| **Total** | **316** | **260** | **56** |
 
-*Phase 11.5 is shown as 0/20 in the table above because none of the SEV-1 fixes are implemented yet; 32 Wave 1+2+3+4 decisions are tracked separately in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` as "decided but not implemented". They contribute to "Spec closure" rather than the implementation count.*
+*Phase 11.5 is now 11/37 implemented. 5 SEV-1 fixes from the Launch-Readiness Sprint and 6 fixes from Phase 11.6 Batch 1 are shipped. 26 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (316) = previous total (279) + Phase 11.5 additions (37).*
 
 ---
 
