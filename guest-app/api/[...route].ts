@@ -18,6 +18,7 @@ import { handleEmailTrigger } from "./handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { adminAuth } from "./lib/firebase-admin";
+import config from "@config";
 
 const staffOnlyEmailActions = new Set(["payment-confirmed", "booking-confirmed", "discount-rejected"]);
 const publicEmailActions = new Set([
@@ -161,8 +162,30 @@ async function verifyTurnstile(token: string | undefined): Promise<{ success: bo
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 1. Enforce CORS
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // Per W4.6 / W1.13 / decision #106 / #86: explicit allowlist from config + dev origins.
+  // `Access-Control-Allow-Credentials` is removed — Firebase ID tokens ride in the
+  // Authorization header, not cookies, so credentials are not needed.
+  // (Closes SEV-1 #2 cross-cutting + 1.7 SEV-1 from the audit.)
+  const ALLOWED_ORIGINS = new Set<string>([
+    `https://${config.domain}`,
+    `https://${config.adminDomain}`,
+    `https://www.${config.domain}`,
+    "http://localhost:5173", // guest-app dev (Vite)
+    "http://localhost:5174", // admin-app dev (Vite)
+    "http://localhost:3000", // generic CRA / Next.js dev
+  ]);
+  const requestOrigin = (req.headers.origin || req.headers.referer || "") as string;
+  let allowOrigin = "";
+  try {
+    const originHost = new URL(requestOrigin).host;
+    if (ALLOWED_ORIGINS.has(requestOrigin) || ALLOWED_ORIGINS.has(`https://${originHost}`) || ALLOWED_ORIGINS.has(`http://${originHost}`)) {
+      allowOrigin = requestOrigin;
+    }
+  } catch {
+    // requestOrigin was empty or malformed — no allow-origin echoed
+  }
+  if (allowOrigin) res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
   res.setHeader(
     "Access-Control-Allow-Headers",
