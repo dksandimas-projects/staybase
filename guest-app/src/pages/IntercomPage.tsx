@@ -132,6 +132,7 @@ export function IntercomPage() {
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const guestPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const guestMediaStreamRef = useRef<MediaStream | null>(null);
+  const guestRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const callUnsubscribeRef = useRef<(() => void) | null>(null);
   const iceUnsubscribeRef = useRef<(() => void) | null>(null);
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -151,6 +152,11 @@ export function IntercomPage() {
     guestPeerConnectionRef.current = null;
     guestMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
     guestMediaStreamRef.current = null;
+    if (guestRemoteAudioRef.current) {
+      guestRemoteAudioRef.current.pause();
+      guestRemoteAudioRef.current.srcObject = null;
+      guestRemoteAudioRef.current = null;
+    }
   };
 
   // Init logic
@@ -507,6 +513,17 @@ export function IntercomPage() {
           candidate: event.candidate.toJSON(),
           from: "guest",
           createdAt: serverTimestamp()
+        });
+      };
+      peerConnection.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        if (!remoteStream) return;
+        const remoteAudio = guestRemoteAudioRef.current ?? new Audio();
+        remoteAudio.autoplay = true;
+        remoteAudio.srcObject = remoteStream;
+        guestRemoteAudioRef.current = remoteAudio;
+        void remoteAudio.play().catch(() => {
+          // Browser autoplay policy can still require guest interaction.
         });
       };
 
