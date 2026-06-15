@@ -1,10 +1,78 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useAdmin, IntercomMessage } from "../context/AdminContext";
+import { Link } from "react-router-dom";
+import { useAdmin, IntercomMessage, StoreOrder } from "../context/AdminContext";
+import { formatPrice } from "../utils/format";
 import { 
   MessageSquare, Send, PhoneOff, Phone,
-  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic
+  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink
 } from "lucide-react";
 import config from "@config";
+
+const paymentLabels: Record<StoreOrder["paymentMethod"], string> = {
+  cod: "Cash on delivery",
+  "add-to-bill": "Room bill",
+  gcash: "GCash"
+};
+
+function StoreOrderMessageCard({ message, order }: { message: IntercomMessage; order?: StoreOrder }) {
+  const itemRows = order?.items ?? [];
+  const orderRef = order?.orderRef || message.orderRef || "Pending ref";
+  const paymentLabel = order ? paymentLabels[order.paymentMethod] : "See order";
+  const bookingPath = `/bookings?tab=store${orderRef ? `&orderRef=${encodeURIComponent(orderRef)}` : ""}`;
+
+  return (
+    <div className="w-full max-w-md rounded-xl border border-primary/20 bg-primary-light/30 p-3 text-xs text-gray-800 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-primary shadow-sm ring-1 ring-primary/10">
+            <ShoppingBag size={15} />
+          </span>
+          <div>
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-primary-dark">Store order</span>
+            <p className="font-bold text-gray-950">{orderRef}</p>
+          </div>
+        </div>
+        {order?.status && (
+          <span className="rounded-full border border-primary/20 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-dark">
+            {order.status.replace(/-/g, " ")}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 space-y-2 rounded-lg bg-white/70 p-2 ring-1 ring-primary/10">
+        {itemRows.length > 0 ? (
+          itemRows.map((item) => (
+            <div key={`${item.itemId}-${item.name}`} className="flex items-start justify-between gap-3">
+              <span className="font-semibold text-gray-700">{item.quantity}x {item.name}</span>
+              <span className="font-bold text-gray-950">{formatPrice(item.price * item.quantity)}</span>
+            </div>
+          ))
+        ) : (
+          <p className="text-[11px] font-semibold text-gray-650">{message.text}</p>
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+        <div className="rounded-lg bg-white/70 px-2 py-1.5 ring-1 ring-primary/10">
+          <span className="block font-bold uppercase tracking-wider text-gray-400">Payment</span>
+          <span className="font-bold text-gray-850">{paymentLabel}</span>
+        </div>
+        <div className="rounded-lg bg-white/70 px-2 py-1.5 text-right ring-1 ring-primary/10">
+          <span className="block font-bold uppercase tracking-wider text-gray-400">Total</span>
+          <span className="font-bold text-primary-dark">{order ? formatPrice(order.totalAmount) : "View order"}</span>
+        </div>
+      </div>
+
+      <Link
+        to={bookingPath}
+        className="mt-3 inline-flex min-h-[34px] items-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
+      >
+        View Order
+        <ExternalLink size={11} />
+      </Link>
+    </div>
+  );
+}
 
 export function IntercomInboxPage() {
   const { 
@@ -17,7 +85,8 @@ export function IntercomInboxPage() {
     acceptCall, 
     declineCall,
     rooms,
-    hotelConfig
+    hotelConfig,
+    storeOrders
   } = useAdmin();
 
   // Active chat selection
@@ -169,6 +238,10 @@ export function IntercomInboxPage() {
     .filter((message) => message.sender === "guest" && !message.isRead)
     .map((message) => message.id)
     .join(",");
+  const storeOrdersByRef = useMemo(
+    () => new Map(storeOrders.map((order) => [order.orderRef, order])),
+    [storeOrders]
+  );
 
   useEffect(() => {
     if (selectedRoomNumber && filteredRooms.some((room) => room.roomNumber === selectedRoomNumber)) return;
@@ -412,6 +485,7 @@ export function IntercomInboxPage() {
             {activeChatMessages.length > 0 ? (
               activeChatMessages.map((msg) => {
                 const isFd = msg.sender === "front-desk";
+                const storeOrder = msg.orderRef ? storeOrdersByRef.get(msg.orderRef) : undefined;
 
                 return (
                   <div key={msg.id} className={`flex gap-3 max-w-[85%] ${isFd ? "ml-auto flex-row-reverse" : "mr-auto"}`}>
@@ -422,18 +496,22 @@ export function IntercomInboxPage() {
                     </div>
 
                     <div className="space-y-1">
-                      <div className={`rounded-xl p-3 text-xs leading-relaxed ${
-                        isFd 
-                          ? "bg-primary text-white font-medium shadow-sm rounded-tr-none" 
-                          : msg.isQuickRequest
-                            ? "bg-primary-light text-primary-dark border border-primary/20 font-bold rounded-tl-none"
-                            : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
-                      }`}>
-                        {msg.isQuickRequest && !isFd && (
-                          <span className="mb-1 block text-[9px] uppercase tracking-wider opacity-70">Quick request</span>
-                        )}
-                        {msg.text}
-                      </div>
+                      {msg.isStoreOrder && !isFd ? (
+                        <StoreOrderMessageCard message={msg} order={storeOrder} />
+                      ) : (
+                        <div className={`rounded-xl p-3 text-xs leading-relaxed ${
+                          isFd
+                            ? "bg-primary text-white font-medium shadow-sm rounded-tr-none"
+                            : msg.isQuickRequest
+                              ? "bg-primary-light text-primary-dark border border-primary/20 font-bold rounded-tl-none"
+                              : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
+                        }`}>
+                          {msg.isQuickRequest && !isFd && (
+                            <span className="mb-1 block text-[9px] uppercase tracking-wider opacity-70">Quick request</span>
+                          )}
+                          {msg.text}
+                        </div>
+                      )}
                       
                       <p className={`text-[8px] text-gray-400 font-semibold px-1 ${isFd ? "text-right" : "text-left"}`}>
                         {msg.timestamp}

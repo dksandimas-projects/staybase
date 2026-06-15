@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
 import { compressImageFile } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
@@ -31,6 +32,7 @@ import { db } from "../firebase/config";
 import { auth } from "../firebase/auth";
 
 export function BookingsPage() {
+  const [searchParams] = useSearchParams();
   const { 
     bookings, 
     rooms, 
@@ -46,7 +48,9 @@ export function BookingsPage() {
   } = useAdmin();
 
   // Main navigation tab
-  const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">("bookings");
+  const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">(
+    searchParams.get("tab") === "store" ? "store" : "bookings"
+  );
 
   // Booking Search and Filter States
   const [searchText, setSearchText] = useState("");
@@ -59,6 +63,16 @@ export function BookingsPage() {
   // Store Order Search and Filter States
   const [orderSearchText, setOrderSearchText] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
+
+  useEffect(() => {
+    if (searchParams.get("tab") !== "store") return;
+
+    setActiveMainTab("store");
+    const orderRef = searchParams.get("orderRef");
+    if (orderRef) {
+      setOrderSearchText(orderRef);
+    }
+  }, [searchParams]);
 
   // Store Order Drawer States
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
