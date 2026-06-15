@@ -849,6 +849,7 @@ export function IntercomPage() {
 
       void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
         isStoreOrder: true,
+        isCancelledOrder: true,
         orderRef: activeOrder.orderRef
       });
     } catch (error: any) {
