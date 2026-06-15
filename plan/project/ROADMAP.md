@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 15, 2026 (closed AUDIT-8 Spark Rewards promo perks schema)
+> Last updated: June 15, 2026 (closed Phase 6 — Email System + AUDIT-22, AUDIT-23)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -255,12 +255,13 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 - ✅ Resend client setup in `api/lib/resend.ts`
 - ✅ Firebase Admin SDK setup in `api/lib/firebase-admin.ts`
 - ✅ Email: booking acknowledgment / submitted (warning guest of manual review)
-- ⬜ Email: payment confirmed
-- ⬜ Email: booking confirmed
-- ⬜ Email: check-in reminder (scheduled — cron or trigger)
+- ✅ Email: payment confirmed — fired from `handleAddPayment` when running payment total reaches `totalPrice` (covers `pending` and `payment-uploaded` bookings; idempotent if already `confirmed`)
+- ✅ Email: booking confirmed — fired from new `POST /api/bookings/confirm` (staff route, status flip `pending`/`payment-uploaded` → `confirmed`) and from `handleCreateWalkin` when status resolves to `confirmed` (default + explicit; suppressed for `checked-in`)
+- ✅ Email: check-in reminder (scheduled — cron or trigger) — Vercel Cron entry in `vercel.json` hits `/api/email/checkin-reminder` daily at `0 0 * * *`; handler queries `confirmed` bookings checking in tomorrow; covered by `api/__tests__/email-cron.test.ts`
 - ✅ Email: booking cancelled
-- ⬜ Email: new corporate inquiry (to staff)
-- ⬜ Email branding — logo, primary color, hotel name from config
+- ✅ Email: new corporate inquiry (to staff) — fired from `corporate-inquiries.ts:43` after Firestore write
+- ✅ Email: discount rejected — fired from `handleRejectDiscount` (covered by AUDIT-1 wiring)
+- ✅ Email branding — `emailLayout()` reads `config.colors.primary`, `config.colors.sidebar`, `config.brandName`, `config.logos.navbar`, `config.address.*`, `config.frontDeskPhone`, `config.supportEmail`, `config.checkInTime`/`checkOutTime`, `config.locale`/`config.timezone`/`config.currency` — zero hardcoded brand strings
 
 ---
 
@@ -438,8 +439,8 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 
 - ⬜ **[AUDIT-20]** Add `/api/bookings/cancel` to `API-ROUTES.md` and as a Phase 9 checklist item — required by `BOOKING-LOOKUP.md` (`/my-booking` cancel action); currently undocumented anywhere
 - ⬜ **[AUDIT-21]** Add `/api/bookings/reject-discount` to `API-ROUTES.md` — required by `BOOKINGS-MANAGEMENT.md` discount rejection flow (Phase 5 marked done, but route was never added to the API surface)
-- ⬜ **[AUDIT-22]** Add "Email: discount rejected" as its own checklist item under Phase 6 — `api/handlers/email.ts` already implements this trigger per AUDIT-1 (done), but Phase 6's progress count doesn't track it, so it reads as untested/unwired
-- ⬜ **[AUDIT-23]** Add `discount-rejected` and `early-checkin-request` rows to the email routes table in `API-ROUTES.md` — table currently lists only 6 of the 7+ triggers defined in `EMAIL-PDF-STORAGE.md`
+- ✅ **[AUDIT-22]** Add "Email: discount rejected" as its own checklist item under Phase 6 — added as an explicit Phase 6 line item; handler wired from `handleRejectDiscount`
+- ✅ **[AUDIT-23]** Add `discount-rejected` and `early-checkin-request` rows to the email routes table in `API-ROUTES.md` — both rows added; `early-checkin-request` marked as Phase 10B planned and tracked under AUDIT-26
 - ⬜ **[AUDIT-24]** Define `storeCharges[]` on `bookings/{bookingId}` in `BACKEND.md §bookings` — `STORE-MANAGEMENT.md` references "Add to Booking Bill" writing to this field, but it doesn't exist in the schema; blocks the Phase 8 store billing → Phase 5 checkout folio link
 - ⬜ **[AUDIT-25]** Flag dependency in Phase 4 (closed) — Step 3 cancellation policy display and `/privacy` page should source from `settings/websiteContent.cancellationPolicy` / `.privacyPolicyBody`, both edited via Settings → Legal Content (Phase 9, not started). Until Phase 9 ships, these are either hardcoded (violates white-label rule) or only editable via Firebase console
 
@@ -494,15 +495,15 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 | 3 — Room System | 5 | 5 | 0 |
 | 4 — Booking Flow | 11 | 11 | 0 |
 | 5 — Admin Bookings | 8 | 8 | 0 |
-| 6 — Email System | 9 | 4 | 5 |
+| 6 — Email System | 10 | 10 | 0 |
 | 7 — Corporate & Vouchers | 12 | 12 | 0 |
 | 8 — Intercom | 10 | 2 | 8 |
 | 9 — Remaining Features | 5 | 1 | 4 |
 | 10 — Security & Polish | 10 | 0 | 10 |
 | 10B — Spark Rewards | 14 | 0 | 14 |
 | 11 — Staging & Launch | 14 | 0 | 14 |
-| Audit Fixes | 46 | 7 | 39 |
-| **Total** | **203** | **103** | **100** |
+| Audit Fixes | 46 | 11 | 35 |
+| **Total** | **204** | **111** | **93** |
 
 ---
 
