@@ -13,6 +13,7 @@ import {
   Phone,
   Plus,
   ShieldCheck,
+  Sparkles,
   UploadCloud,
   UserRound,
   Users,
@@ -38,6 +39,7 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
+import { useGuestAuth } from "../context/GuestAuthContext";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
@@ -85,9 +87,14 @@ export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading: roomsLoading } = useRooms();
+  const { memberProfile } = useGuestAuth();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
+
+  // Spark Rewards member discount: applied automatically at Step 1 when signed in
+  // Stacking order (per DECISIONS-FEATURES.md): senior/PWD -> voucher -> member discount
+  const memberDiscountPct = memberProfile ? 10 : 0; // TODO: pull from rewardsConfig (requires fetching settings/rewardsConfig)
 
   // Persistent unique booking ID pre-generated client-side
   const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
@@ -221,7 +228,8 @@ export function BookingPage() {
         breakfastRate: breakfastRate,
         hasBreakfast,
         discountPct,
-        voucherDiscount
+        voucherDiscount,
+        memberDiscountPct
       })
     : 0;
 
@@ -704,6 +712,12 @@ export function BookingPage() {
             room={selectedRoom}
             total={total}
             breakfastRate={breakfastRate}
+            discountPct={discountPct}
+            discountType={discountType}
+            voucherDiscount={voucherDiscount}
+            voucherApplied={voucherApplied}
+            memberDiscountPct={memberDiscountPct}
+            isMember={!!memberProfile}
           />
         </section>
 
@@ -1130,6 +1144,8 @@ export function BookingPage() {
             voucherDiscount={voucherDiscount}
             discountType={discountType}
             voucherApplied={voucherApplied}
+            memberDiscountPct={memberDiscountPct}
+            isMember={!!memberProfile}
           />
         </section>
 
@@ -1463,6 +1479,8 @@ interface BookingReviewAsideProps {
   discountType?: "none" | "senior" | "pwd";
   voucherApplied?: boolean;
   breakfastRate?: number;
+  memberDiscountPct?: number;
+  isMember?: boolean;
 }
 
 function BookingReviewAside({
@@ -1477,7 +1495,9 @@ function BookingReviewAside({
   voucherDiscount = 0,
   discountType = "none",
   voucherApplied = false,
-  breakfastRate
+  breakfastRate,
+  memberDiscountPct = 0,
+  isMember = false
 }: BookingReviewAsideProps) {
   if (!room) return null;
 
@@ -1502,6 +1522,9 @@ function BookingReviewAside({
   const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;
   const subtotal = roomTotal + breakfastTotal;
   const discountAmount = subtotal * (discountPct / 100);
+  const afterSeniorPwd = subtotal - discountAmount;
+  const afterVoucher = afterSeniorPwd - voucherDiscount;
+  const memberDiscountAmount = afterVoucher * (memberDiscountPct / 100);
 
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">
@@ -1537,6 +1560,15 @@ function BookingReviewAside({
               <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
                 <span>Voucher Discount</span>
                 <span>-{formatPrice(voucherDiscount)}</span>
+              </div>
+            ) : null}
+            {isMember && memberDiscountPct > 0 ? (
+              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles size={12} />
+                  Spark Rewards Member Rate ({memberDiscountPct}%)
+                </span>
+                <span>-{formatPrice(memberDiscountAmount)}</span>
               </div>
             ) : null}
             <div className="flex justify-between border-t border-dashed border-gray-200 pt-3 text-lg font-semibold text-gray-950">

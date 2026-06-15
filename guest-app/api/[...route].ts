@@ -6,6 +6,7 @@ import {
   handleRejectDiscount, 
   handleCancelBooking,
   handleConfirmBooking,
+  handleCheckoutBooking,
   handleLookupBooking
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -26,7 +27,8 @@ const publicEmailActions = new Set([
   "checkin-reminder",
   "booking-cancelled",
   "corporate-inquiry",
-  "discount-rejected"
+  "discount-rejected",
+  "early-checkin-request"
 ]);
 
 async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; role?: string; error?: string }> {
@@ -250,6 +252,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleConfirmBooking(req, res);
+  }
+
+  if (domain === "bookings" && action === "checkout" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many checkout requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleCheckoutBooking(req, res);
   }
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
