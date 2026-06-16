@@ -515,7 +515,10 @@ export function BookingPage() {
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
           paymentProofUrl: paymentProofUrl,
-          isCorporate: false,
+          // Per W1.3 / decision #79 / audit S1.5: the standard
+          // online booking flow is never corporate. The server
+          // derives `isCorporate` only from a validated
+          // `corporateCode` lookup, so this field is omitted.
           turnstileToken: turnstileToken || "mock_token",
           _hp: guestDetails._hp || ""
         })
