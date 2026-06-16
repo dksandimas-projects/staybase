@@ -20,7 +20,25 @@ import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { adminAuth } from "./lib/firebase-admin";
 import config from "@config";
 
-const staffOnlyEmailActions = new Set(["payment-confirmed", "booking-confirmed", "discount-rejected"]);
+const staffOnlyEmailActions = new Set([
+  "payment-confirmed",
+  "booking-confirmed",
+  "discount-rejected",
+  // Per W4.4 / decision #104: the 8 new templates are
+  // server-triggered from authenticated mutations; the public
+  // /api/email/* endpoint only re-sends for guest-driven actions.
+  // voucher-issued + store-order-* + staff-* are not in
+  // publicEmailActions below — they bypass the endpoint and are
+  // fired directly from the handler.
+  "voucher-issued",
+  "store-order-placed",
+  "store-order-confirmed",
+  "store-order-out-for-delivery",
+  "store-order-delivered",
+  "store-order-cancelled",
+  "staff-new-booking",
+  "staff-new-payment"
+]);
 const publicEmailActions = new Set([
   "booking-submitted",
   "payment-confirmed",
