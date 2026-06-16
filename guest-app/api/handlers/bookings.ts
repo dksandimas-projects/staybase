@@ -154,7 +154,14 @@ export async function handleCreateBooking(req: any, res: any) {
         throw new Error("Room is inactive");
       }
       if (roomData.status === "blocked") {
-        throw new Error("Room no longer available");
+        const blockedFrom = toDateOrNull(roomData.blockedFrom);
+        const blockedTo = toDateOrNull(roomData.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? checkInDate < blockedTo && checkOutDate > blockedFrom
+          : true;
+        if (windowActive) {
+          throw new Error("Room no longer available");
+        }
       }
       if (guests > roomData.maxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
@@ -527,7 +534,14 @@ export async function handleCreateWalkin(req: any, res: any) {
         throw new Error("Room is inactive");
       }
       if (roomData.status === "blocked") {
-        throw new Error("Room no longer available");
+        const blockedFrom = toDateOrNull(roomData.blockedFrom);
+        const blockedTo = toDateOrNull(roomData.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? checkInDate < blockedTo && checkOutDate > blockedFrom
+          : true;
+        if (windowActive) {
+          throw new Error("Room no longer available");
+        }
       }
       if (guests > roomData.maxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);

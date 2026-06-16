@@ -58,6 +58,8 @@ export interface Room {
   status: "available" | "occupied" | "blocked";
   housekeepingStatus: "clean" | "dirty" | "in-progress";
   blockReason: string;
+  blockedFrom: string | null;
+  blockedTo: string | null;
   remarks: string;
   qrToken: string;
 }
@@ -273,6 +275,7 @@ export interface StoreOrder {
   paymentProofUrl: string;
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
   stockRestoredAt: string | null;
+  stockDecrementedAt: string | null;
   isBilled: boolean;
   billedAt: string | null;
   cancellationReason: string;
@@ -444,6 +447,19 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     const roomsRef = collection(db, "rooms");
     const unsubscribe = onSnapshot(roomsRef, (snapshot) => {
       const roomsData: Room[] = [];
+      const parseDateString = (val: any) => {
+        if (!val) return null;
+        if (typeof val.toDate === "function") {
+          return val.toDate().toISOString().split("T")[0];
+        }
+        if (val instanceof Date) {
+          return val.toISOString().split("T")[0];
+        }
+        if (typeof val === "string") {
+          return val.split("T")[0];
+        }
+        return null;
+      };
       snapshot.forEach((doc) => {
         const data = doc.data();
         roomsData.push({
@@ -462,6 +478,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           isActive: data.isActive !== false,
           status: data.status || "available",
           housekeepingStatus: data.housekeepingStatus || "clean",
+          blockedFrom: parseDateString(data.blockedFrom),
+          blockedTo: parseDateString(data.blockedTo),
           blockReason: data.blockReason || "",
           remarks: data.remarks || "",
           qrToken: data.qrToken || ""
@@ -525,9 +543,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addRoomBlock = async (roomId: string, dates: { from: string; to: string }, reason: string) => {
     try {
       const roomRef = doc(db, "rooms", roomId);
+      const fromDate = new Date(`${dates.from}T00:00:00`);
+      const toDate = new Date(`${dates.to}T23:59:59`);
       await updateDoc(roomRef, {
         status: "blocked",
-        blockReason: `${reason} (${dates.from} to ${dates.to})`,
+        blockReason: reason,
+        blockedFrom: Timestamp.fromDate(fromDate),
+        blockedTo: Timestamp.fromDate(toDate),
         updatedAt: serverTimestamp()
       });
     } catch (error) {
@@ -1490,6 +1512,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             paymentProofUrl: data.paymentProofUrl || "",
             status: data.status || "placed",
             stockRestoredAt: data.stockRestoredAt ? formatStoreDate(data.stockRestoredAt) : null,
+            stockDecrementedAt: data.stockDecrementedAt ? formatStoreDate(data.stockDecrementedAt) : null,
             isBilled: !!data.isBilled,
             billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
             cancellationReason: data.cancellationReason || "",
@@ -1508,7 +1531,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
-    if (status === "cancelled") {
+    if (status === "cancelled" || status === "confirmed") {
       await runTransaction(db, async (transaction) => {
         const orderRef = doc(db, "storeOrders", orderId);
         const orderSnap = await transaction.get(orderRef);
@@ -1517,29 +1540,67 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         }
 
         const orderData = orderSnap.data();
-        const shouldRestoreStock = orderData.status === "placed" && !orderData.stockRestoredAt;
         const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
-        const itemRefs = shouldRestoreStock
-          ? orderItems.map((item: any) => doc(db, "storeItems", item.itemId))
-          : [];
-        const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
 
-        itemSnaps.forEach((itemSnap, index) => {
-          if (!itemSnap.exists()) return;
-          const itemData = itemSnap.data();
-          const stock = itemData.stock ?? null;
-          if (stock !== null) {
-            transaction.update(itemRefs[index], {
-              stock: Number(stock || 0) + Number(orderItems[index].quantity || 0),
-              updatedAt: serverTimestamp()
-            });
-          }
-        });
+        if (status === "cancelled") {
+          const shouldRestoreStock = !!orderData.stockDecrementedAt && !orderData.stockRestoredAt;
+          const itemRefs = shouldRestoreStock
+            ? orderItems.map((item: any) => doc(db, "storeItems", item.itemId))
+            : [];
+          const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+
+          itemSnaps.forEach((itemSnap, index) => {
+            if (!itemSnap.exists()) return;
+            const itemData = itemSnap.data();
+            const stock = itemData.stock ?? null;
+            if (stock !== null) {
+              transaction.update(itemRefs[index], {
+                stock: Number(stock || 0) + Number(orderItems[index].quantity || 0),
+                updatedAt: serverTimestamp()
+              });
+            }
+          });
+
+          transaction.update(orderRef, {
+            status,
+            cancellationReason,
+            stockRestoredAt: shouldRestoreStock ? serverTimestamp() : orderData.stockRestoredAt || null,
+            updatedAt: serverTimestamp(),
+            handledBy: currentUser?.uid || currentUser?.email || ""
+          });
+          return;
+        }
+
+        // status === "confirmed": decrement stock exactly once on placed -> confirmed transition
+        if (orderData.status === "placed" && !orderData.stockDecrementedAt) {
+          const itemRefs = orderItems.map((item: any) => doc(db, "storeItems", item.itemId));
+          const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+          itemSnaps.forEach((itemSnap, index) => {
+            if (!itemSnap.exists()) return;
+            const itemData = itemSnap.data();
+            const stock = itemData.stock ?? null;
+            if (stock !== null) {
+              const remaining = Number(stock || 0) - Number(orderItems[index].quantity || 0);
+              if (remaining < 0) {
+                throw new Error("INSUFFICIENT_STOCK");
+              }
+              transaction.update(itemRefs[index], {
+                stock: remaining,
+                updatedAt: serverTimestamp()
+              });
+            }
+          });
+          transaction.update(orderRef, {
+            status,
+            stockDecrementedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            handledBy: currentUser?.uid || currentUser?.email || ""
+          });
+          return;
+        }
 
         transaction.update(orderRef, {
           status,
-          cancellationReason,
-          stockRestoredAt: shouldRestoreStock ? serverTimestamp() : orderData.stockRestoredAt || null,
           updatedAt: serverTimestamp(),
           handledBy: currentUser?.uid || currentUser?.email || ""
         });
