@@ -80,8 +80,10 @@ Existing booking documents may still receive authenticated staff/admin operation
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/corporate/inquiry` | POST | None | Submit the public corporate inquiry form; API verifies Turnstile, checks honeypot, creates `corporateInquiries/{id}` with `status: "new"`, and sends the staff notification email |
+| `/api/corporate/convert-inquiry` | POST | Staff | Convert a `new` / `contacted` / `negotiating` corporate inquiry into a real `bookings` document. Pre-fills guest name/email/phone/companyName/specialRequests from the inquiry, accepts `roomId` / `checkIn` / `checkOut` / `guests` / `hasBreakfast` / `paymentMethod` / optional `ratePerNightOverride` from the body. Resolves the negotiated rate from the inquiry's attached `accessCodeId` (using `ratePerRoomType[roomType]` when present) or `room.corporateRate`. Creates the booking with `linkedInquiryId`, `isCorporate: true` (server-derived), `source: "corporate"` (per W2.15 / decision #103), and status `confirmed`. In the same transaction: flips the inquiry status to `converted`, persists `convertedBookingId` + `convertedBookingRef`, and appends a "Converted to booking ..." note. Fires `booking-confirmed` email (best-effort). |
 
 Guest-facing code must not create `corporateInquiries` directly with the Firestore client SDK. This route is the only public write path so bot checks and validation stay server-side.
+`/api/corporate/convert-inquiry` is staff-only because it mutates bookings + corporateInquiries together with a derived negotiated rate. It is the audit-mandated closure of SEV-1 #2 in `§1.4` (S4.2 — "Convert to booking" missing from Corporate Inquiries).
 
 ---
 
