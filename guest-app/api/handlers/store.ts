@@ -147,16 +147,6 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       const totalAmount = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
       const orderDocRef = adminDb.collection("storeOrders").doc();
 
-      orderItems.forEach((orderItem, index) => {
-        const itemData = itemDocs[index].data()!;
-        if (itemData.stock !== null && itemData.stock !== undefined) {
-          transaction.update(itemRefs[index], {
-            stock: itemData.stock - orderItem.quantity,
-            updatedAt: new Date()
-          });
-        }
-      });
-
       transaction.set(orderDocRef, {
         orderRef,
         roomId: body.roomId,
@@ -169,6 +159,7 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         paymentProofUrl: body.paymentProofUrl || "",
         status: "placed",
         stockRestoredAt: null,
+        stockDecrementedAt: null,
         isBilled: false,
         billedAt: null,
         cancellationReason: "",
@@ -270,7 +261,7 @@ export async function handleCancelStoreOrder(req: any, res: any) {
       const itemRefs = orderItems.map((item: any) => adminDb.collection("storeItems").doc(item.itemId));
       const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
 
-      if (!orderData.stockRestoredAt) {
+      if (!orderData.stockRestoredAt && orderData.stockDecrementedAt) {
         orderItems.forEach((item: any, index: number) => {
           const itemDoc = itemDocs[index];
           if (!itemDoc.exists) return;
