@@ -739,8 +739,8 @@ export async function handleCancelBooking(req: any, res: any) {
       bookingData = snapshot.docs[0].data();
     }
 
-    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled") {
-      return res.status(400).json({ success: false, error: `Booking cannot be cancelled because its status is already ${bookingData.status}.` });
+    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled" || bookingData.status === "confirmed" || bookingData.status === "payment-confirmed") {
+      return res.status(400).json({ success: false, error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk to cancel a confirmed booking.` });
     }
 
     await bookingDocumentRef.update({
