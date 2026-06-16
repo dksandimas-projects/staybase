@@ -1068,6 +1068,7 @@ export function BookingsPage() {
         roomNumber,
         roomType,
         guestName,
+        reminderSentAt: null,
         guestEmail: guestEmail || "walkin@guest.com",
         guestPhone: guestPhone || "n/a",
         numGuests,

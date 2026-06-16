@@ -260,9 +260,13 @@ export async function handleCreateBooking(req: any, res: any) {
       const subtotal = roomTotal + breakfastTotal;
 
       // 7. Voucher Validation
+      // Per W2.12 / decision #100: corporate bookings never accept
+      // promo vouchers. Silently zero out the discount + clear the
+      // code so the booking doc reflects `voucherDiscount: 0` even
+      // if a guest types a code into the corporate booking form.
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
-      if (voucherCode) {
+      if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
         const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         const voucherDoc = await transaction.get(voucherRef);
