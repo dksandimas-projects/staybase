@@ -53,6 +53,7 @@ HotelConfig {
   bookingRefPrefix: string        // e.g. "SI" → generates "SI-20260601-001"
   memberNumberPrefix: string      // e.g. "SR" → generates "SR-00042"
   storeName: string               // e.g. "Spark Essentials" — shown in store UI, emails, receipts
+  rewardsName: string             // loyalty program display name e.g. "Spark Rewards" (per W3.10)
 
   // Colors
   colors: {
@@ -91,7 +92,11 @@ HotelConfig {
   }
   favicon: string           // filename in public/brand/
 
-  // Room Types — fully flexible per hotel
+  // Room Types — runtime-editable per hotel, stored in
+  // settings/hotelConfig.roomTypes on Firestore (per W3.3). The
+  // local shape is the same; the default seed is the array below.
+  // The Room Types tab in /settings writes back via
+  // updateDoc(settings/hotelConfig, { roomTypes }).
   roomTypes: {
     value: string           // internal key e.g. "deluxe-sea-view" (used in Firestore)
     label: string           // display label e.g. "Deluxe Sea View"
@@ -109,6 +114,7 @@ HotelConfig {
   // Legal & Privacy
   dpoEmail: string          // Data Protection Officer contact email
   privacyPolicyLastUpdated: string  // e.g. "June 2, 2026"
+  termsLastUpdated: string          // e.g. "June 16, 2026" — per W3.11
   applicableLaw: string     // e.g. "Republic Act No. 10173 (Data Privacy Act of 2012)"
 
   // SEO & Meta
