@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 15, 2026 (closed Phase 6 — Email System + AUDIT-22, AUDIT-23)
+> Last updated: June 16, 2026 (closed Phase 11.6 Batch 11 — S6.2 settings-driven public content)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -416,7 +416,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **24 of 51 decisions + 2 launch-gate SEV-1s + 1 SEV-1 + 4 polish SEV-1s + 1 SEV-1 + 1 SEV-3 + 2 SEV-1s + 1 SEV-1 + 1 SEV-3 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5 + 4 from Phase 11.6 Batch 6 + 2 from Phase 11.6 Batch 7 + 2 from Phase 11.6 Batch 8 + 1 from Phase 11.6 Batch 9 + 1 from Phase 11.6 Batch 10). 27 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 + Batch 5 + Batch 6 + Batch 7 + Batch 8 + Batch 9 + Batch 10 sections below for the 29 closed.
+> **Current state** (as of 2026-06-16): **24 of 51 decisions + 2 launch-gate SEV-1s + 1 SEV-1 + 4 polish SEV-1s + 1 SEV-1 + 1 SEV-3 + 2 SEV-1s + 1 SEV-1 + 1 SEV-3 + 1 SEV-2 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5 + 4 from Phase 11.6 Batch 6 + 2 from Phase 11.6 Batch 7 + 2 from Phase 11.6 Batch 8 + 1 from Phase 11.6 Batch 9 + 1 from Phase 11.6 Batch 10 + 1 from Phase 11.6 Batch 11). 26 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 + Batch 5 + Batch 6 + Batch 7 + Batch 8 + Batch 9 + Batch 10 + Batch 11 sections below for the 30 closed.
 
 ### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
@@ -540,6 +540,29 @@ Branch: `feature/phase-11.6-batch-10`. Closes W4.4 / decision #104: 8 new server
 
 Tests:
 - 15 new regression tests in `guest-app/api/__tests__/batch-10-email-extensions.test.ts` cover: the EmailAction union includes all 8 new actions, all 4 new trigger exports exist, the voucher-issued template renders the code in a monospace block, the 5 store-order templates exist and use the shared `storeOrderBaseLayout`, the staff-new-* templates route to ADMIN_EMAIL, the voucher-issued route is in `staffOnlyEmailActions` and the handler requires staff auth, the booking handler fires staff-new-booking + staff-new-payment with the right guards, the store handler fires store-order-placed + store-order-cancelled, the AdminContext `addVoucher` posts to the new endpoint only when guestEmail is set, the RatesPage form passes the value through, and the Voucher type includes the new field.
+
+### Phase 11.6 Batch 11 — Settings-driven public content (1 fix, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-11`. Closes audit SEV-2 #S6.2: the Settings tab on the admin app now actually controls the public-facing HomePage, AboutPage, and CorporateStaysPage. Edits to the hero copy, amenities, services, Spark Rewards block, featured room IDs, corporate perks, about hero photo, and hotel mission/vision/story all flow to the live site.
+
+- [x] **S6.2** (commit `<pending>`) **Wire `settings/websiteContent` + `settings/hotelConfig` to the public pages.** Closes the Wave-3 SEV-2 from `AUDIT-E2E-2026-06-15.md`: the Settings UI persisted content but the public pages kept rendering the hard-coded `data/homepage.ts` and in-component strings, so admins could edit values that never reached guests.
+  - New `guest-app/src/hooks/usePublicSiteContent.ts` — single module-level cached fetch of both Firestore docs (`settings/websiteContent` and `settings/hotelConfig`) on first mount. Returns `{ loading, homepage, about, corporate }` with safe fallbacks to `data/homepage.ts`, `config.brandName`, and static brand copy when the docs are missing/empty. Services and sparkRewards perks are stored with `isEnabled: boolean` (default true when missing) so the hide-when-empty logic works.
+  - `guest-app/src/pages/HomePage.tsx`:
+    - Hero: `homepage.heroHeading` / `homepage.heroSubtext` / `homepage.heroPhotoUrl` (falls back to `homepageHeroImage` when the URL is empty).
+    - Featured rooms: filter `useRooms()` results by `homepage.featuredRoomIds` (falls back to first 3 rooms when the array is empty or matches nothing).
+    - Amenities: rendered from `homepage.amenities`; icons resolved by `amenity.icon` slug through a `lucide-react` map (falls back to round-robin `BedDouble`/`MapPin`/`Users`/`Sparkles`/`Wifi`/`Coffee`).
+    - Services: rendered from `homepage.services`, filtered to `isEnabled !== false`; the entire `<section>` is hidden when the visible list is empty (per `BACKEND.md §settings/websiteContent`).
+    - Spark Rewards: rendered from `homepage.sparkRewards`; the entire block is hidden when `isEnabled === false`, and individual perks with `isEnabled === false` are filtered out.
+  - `guest-app/src/pages/AboutPage.tsx`:
+    - Hero photo: `about.heroPhotoUrl` (falls back to the previous Unsplash URL when empty).
+    - Mission + Vision: `hotelConfig.missionStatement` / `hotelConfig.visionStatement` (falls back to the previous hard-coded copy, with `config.brandName` interpolated).
+    - Hotel story: `hotelConfig.hotelStory` (split on blank lines into paragraphs; falls back to a single-paragraph brand placeholder when empty so the page never renders a blank section).
+  - `guest-app/src/pages/CorporateStaysPage.tsx`:
+    - Hero heading + subtext + photo: `corporate.heroHeading` / `corporate.heroSubtext` / `corporate.heroPhotoUrl` (each falls back to the previous hard-coded strings/Unsplash URL when empty).
+    - Perks grid: the 6 hard-coded `<motion.div>` blocks are replaced with a `corporate.perks.map(...)` render. Icons are resolved by `perk.icon` slug through a `lucide-react` map (falls back to the existing 6-icon round-robin).
+  - `admin-app/src/pages/SettingsPage.tsx` and `admin-app/src/context/AdminContext.tsx` are unchanged — the admin-side `updateSettings("websiteContent", ...)` already persists the right shape; Batch 11 is purely the read-path wire.
+
+Tests:
+- 16 new regression tests in `admin-app/src/__tests__/batch-11-website-content.test.ts` cover: the hook exists and reads both `settings/websiteContent` + `settings/hotelConfig`; the hook returns `homepage`/`about`/`corporate` sections; services store `isEnabled` correctly; HomePage imports `usePublicSiteContent` and reads `heroHeading` / `heroSubtext` / `heroPhotoUrl` / `amenities` / `featuredRoomIds`; the hard-coded `>Your sanctuary in Bohol</` heading is gone; the hard-coded `const ids = ["room-201", "room-204", "room-301"]` block is gone; Services wrap in `visibleServices.length > 0 &&`; Spark Rewards wrap in `sparkRewardsVisible && visibleRewards.length > 0 &&`; the hard-coded `amenities`/`rewardPerks` imports from `data/homepage` are gone; AboutPage reads `about.heroPhotoUrl` + `about.missionStatement` + `about.visionStatement` + `about.hotelStory` and the hard-coded mission/vision strings + Unsplash URL are gone; CorporateStaysPage reads `corporate.heroPhotoUrl` + `corporate.heroHeading` + `corporate.heroSubtext` + `corporate.perks.map(...)` and the 6 hard-coded perk motion.div blocks + Unsplash URL are gone.
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -723,12 +746,12 @@ Tests:
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 50 | 29 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates). 29/50 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4 + 1 Phase 11.6 Batch 5 + 4 Phase 11.6 Batch 6 + 2 Phase 11.6 Batch 7 + 2 Phase 11.6 Batch 8 + 1 Phase 11.6 Batch 9 + 1 Phase 11.6 Batch 10. |
+| 11.5 — Audit Fixes & Launch-Readiness | 50 | 30 | 20 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content). 30/50 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4 + 1 Phase 11.6 Batch 5 + 4 Phase 11.6 Batch 6 + 2 Phase 11.6 Batch 7 + 2 Phase 11.6 Batch 8 + 1 Phase 11.6 Batch 9 + 1 Phase 11.6 Batch 10 + 1 Phase 11.6 Batch 11. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **329** | **278** | **51** |
+| **Total** | **329** | **279** | **50** |
 
-*Phase 11.5 is now 29/50 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (329) = previous total (328) + Phase 11.5 Batch 10 addition (1).*
+*Phase 11.5 is now 30/50 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (329) is unchanged from Batch 10 (the Batch 11 SEV-2 was already counted in the 50-item Phase 11.5 inventory).*
 
 ---
 
