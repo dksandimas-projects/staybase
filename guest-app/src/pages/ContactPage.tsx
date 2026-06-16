@@ -11,7 +11,7 @@ import { fadeUp } from "@spark-inn/shared";
 
 export function ContactPage() {
   const shouldReduceMotion = useReducedMotion();
-  
+
   // Contact Form states
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -19,26 +19,43 @@ export function ContactPage() {
   const [message, setMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const addressString = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
   const mapQuery = encodeURIComponent(addressString);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setShowSuccess(false);
+    setSubmitError("");
 
-    // Simulate sending message
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      const res = await fetch("/api/contact/inquiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          subject: subject.trim(),
+          message: message.trim()
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "We could not send your message. Please try again in a moment.");
+      }
       setShowSuccess(true);
       setName("");
       setEmail("");
       setSubject("");
       setMessage("");
-      // Hide alert after 5 seconds
       setTimeout(() => setShowSuccess(false), 5000);
-    }, 1200);
+    } catch (error: any) {
+      setSubmitError(error?.message || "We could not send your message. Please try again in a moment.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const transitionProps = shouldReduceMotion
@@ -172,11 +189,21 @@ export function ContactPage() {
 
                 <div className="rounded-card bg-white p-6 sm:p-8 shadow-sm ring-1 ring-gray-200">
                   {showSuccess && (
-                    <div className="mb-6 rounded-lg bg-green-50 border border-green-200 p-4 text-xs font-medium text-green-700 flex gap-2.5 items-start">
+                    <div className="mb-6 rounded-lg bg-green-50 border border-green-200 p-4 text-xs font-medium text-green-700 flex gap-2.5 items-start" role="status">
                       <CheckCircle2 size={16} className="shrink-0 text-green-600 mt-0.5" />
                       <div>
                         <p className="font-bold">Message Sent Successfully</p>
                         <p className="mt-0.5">Thank you for writing. Our front desk agent will reach out via email shortly.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {submitError && (
+                    <div className="mb-6 rounded-lg bg-red-50 border border-red-200 p-4 text-xs font-medium text-red-700 flex gap-2.5 items-start" role="alert">
+                      <AlertCircle size={16} className="shrink-0 text-red-600 mt-0.5" />
+                      <div>
+                        <p className="font-bold">We could not send your message.</p>
+                        <p className="mt-0.5">{submitError}</p>
                       </div>
                     </div>
                   )}
