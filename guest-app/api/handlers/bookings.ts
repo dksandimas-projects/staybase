@@ -1,5 +1,6 @@
 import { adminDb } from "../lib/firebase-admin";
 import { sendBookingTrigger } from "./email";
+import { validateCorporateCode } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 interface GuestDetails {
@@ -20,8 +21,8 @@ interface GuestDetails {
 interface CreateBookingBody {
   bookingId: string;
   roomId: string;
-  checkIn: string; // YYYY-MM-DD
-  checkOut: string; // YYYY-MM-DD
+  checkIn: string; // Yyyy-MM-DD
+  checkOut: string; // Yyyy-MM-DD
   guests: number;
   hasBreakfast: boolean;
   guestDetails: GuestDetails;
@@ -30,7 +31,11 @@ interface CreateBookingBody {
   voucherCode?: string;
   paymentMethod: string;
   paymentProofUrl?: string | null;
-  isCorporate: boolean;
+  // Per W1.3 / decision #79 / audit S1.5: the client no longer
+  // sets `isCorporate` directly. The server derives it from a
+  // validated `corporateCode` lookup. The `companyName` on the
+  // booking is sourced from the `corporateCodes` document for
+  // the validated code, never from `guestDetails.companyName`.
   corporateCode?: string;
   // Per W2.14 / decision #102: set when this booking is created from a
   // converted corporate inquiry. The convert-to-booking UI (per audit
@@ -75,7 +80,6 @@ export async function handleCreateBooking(req: any, res: any) {
     voucherCode,
     paymentMethod,
     paymentProofUrl,
-    isCorporate,
     corporateCode,
     linkedInquiryId
   } = body;
@@ -178,35 +182,52 @@ export async function handleCreateBooking(req: any, res: any) {
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 250 };
       const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
-      // 4. Handle Corporate Code validation if corporate is true
+      // 4. Handle Corporate Code validation. Per W1.3 / decision #79 /
+      // audit S1.5: the server is the only source of truth for
+      // `isCorporate` and `companyName`. A client posting
+      // `isCorporate: true, corporateCode: "INVALID"` no longer
+      // gets the corporate rate — the server independently looks
+      // up the code, validates it (active + not expired + under
+      // cap), and sets these fields from the corporateCodes doc.
       let activeRoomRate = roomData.pricePerNight;
       let corporateDetails: any = { isCorporate: false, corporateCode: "", companyName: "" };
 
-      if (isCorporate) {
-        corporateDetails.isCorporate = true;
-        corporateDetails.companyName = guestDetails.companyName || "";
-        if (corporateCode) {
-          corporateDetails.corporateCode = corporateCode;
-          const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
-          const corpCodeDoc = await transaction.get(corpCodeRef);
-          if (corpCodeDoc.exists) {
-            const corpData = corpCodeDoc.data()!;
-            if (corpData.isActive && (!corpData.expiresAt || corpData.expiresAt.toDate() > new Date())) {
-              if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomData.type] !== undefined) {
-                activeRoomRate = corpData.ratePerRoomType[roomData.type];
-              } else {
-                activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
-              }
-            } else {
-              activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
+      if (corporateCode) {
+        const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        const corpCodeDoc = await transaction.get(corpCodeRef);
+        if (corpCodeDoc.exists) {
+          const corpData = corpCodeDoc.data()!;
+          const corpValidation = validateCorporateCode({
+            isActive: corpData.isActive !== false,
+            expiresAt: corpData.expiresAt ? corpData.expiresAt.toDate() : null,
+            usageCap: corpData.usageCap ?? null,
+            usageCount: corpData.usageCount || 0
+          });
+          if (corpValidation.valid) {
+            corporateDetails.isCorporate = true;
+            corporateDetails.corporateCode = corporateCode;
+            // The doc's companyName is the source of truth — the
+            // body's guestDetails.companyName is informational only.
+            corporateDetails.companyName = corpData.companyName || "";
+            if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomData.type] !== undefined) {
+              activeRoomRate = corpData.ratePerRoomType[roomData.type];
+            } else if (roomData.corporateRate) {
+              activeRoomRate = roomData.corporateRate;
             }
           } else {
-            activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
+            // Invalid code: fall back to standard rate, do NOT set
+            // isCorporate. The booking still goes through but
+            // without any corporate discount — the server never
+            // trusts the body's claim.
+            activeRoomRate = roomData.pricePerNight;
           }
         } else {
-          activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
+          // Code not found in DB — fall back to standard rate.
+          activeRoomRate = roomData.pricePerNight;
         }
       }
+      // No corporateCode at all → activeRoomRate stays as
+      // roomData.pricePerNight, isCorporate stays false.
 
       // 5. Calculate Nightly Rate Total (support weekend rate)
       let roomTotal = 0;
@@ -216,7 +237,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // Let's check: shared/utils/dates.ts checks day === 0 (Sun) or day === 6 (Sat)
         const day = dateCursor.getUTCDay();
         const isWeekend = day === 0 || day === 6;
-        if (isWeekend && !isCorporate && roomData.weekendRate) {
+        if (isWeekend && !corporateDetails.isCorporate && roomData.weekendRate) {
           roomTotal += roomData.weekendRate;
         } else {
           roomTotal += activeRoomRate;
@@ -355,7 +376,7 @@ export async function handleCreateBooking(req: any, res: any) {
         status: paymentProofUrl ? "payment-uploaded" : "pending",
         paymentMethod,
         paymentProofUrl: paymentProofUrl || "",
-        source: isCorporate ? "corporate" : "online",
+        source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
