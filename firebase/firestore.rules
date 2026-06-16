@@ -69,6 +69,11 @@ service cloud.firestore {
       allow create: if isStaff();
     }
 
+    match /contactInquiries/{inquiryId} {
+      allow read, update, delete: if isStaff();
+      allow create: if isStaff();
+    }
+
     match /corporateCodes/{code} {
       allow read: if true;
       allow write: if isAdmin();
