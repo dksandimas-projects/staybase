@@ -77,11 +77,23 @@ export function CorporateBookingPage() {
   const [accessCode, setAccessCode] = useState("");
   const [codeError, setCodeError] = useState("");
   const [isValidating, setIsValidating] = useState(false);
-  
+
   const [companyName, setCompanyName] = useState(() => sessionStorage.getItem("corp_companyName") ?? "");
   const [activeCode, setActiveCode] = useState(() => sessionStorage.getItem("corp_code") ?? "");
   const [discountPercent, setDiscountPercent] = useState(() => Number(sessionStorage.getItem("corp_discount") ?? "0"));
   const [isFlatRate, setIsFlatRate] = useState(() => sessionStorage.getItem("corp_isFlatRate") === "true");
+  // Per audit S4.1 / decision #101: store the negotiated
+  // ratePerRoomType map returned by /api/validate/corporate-code so
+  // the client picks the negotiated rate for the chosen room type
+  // (not the flat `room.corporateRate` fallback).
+  const [ratePerRoomType, setRatePerRoomType] = useState<Record<string, number>>(() => {
+    try {
+      const stored = sessionStorage.getItem("corp_ratePerRoomType");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Booking states
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
@@ -181,7 +193,14 @@ export function CorporateBookingPage() {
   const breakfastRatePerPerson = breakfastConfig.ratePerPersonPerNight;
 
   // Calculate pricing
-  const baseRate = selectedRoom ? selectedRoom.corporateRate : 0;
+  // Per audit S4.1 / decision #101: prefer the negotiated rate for
+  // the chosen room type from the corporateCodes/{code} doc. Fall
+  // back to the room's flat corporateRate only when the negotiated
+  // map has no entry for this room type.
+  const negotiatedRate = selectedRoom && ratePerRoomType && ratePerRoomType[selectedRoom.type] !== undefined
+    ? ratePerRoomType[selectedRoom.type]
+    : (selectedRoom ? selectedRoom.corporateRate : 0);
+  const baseRate = negotiatedRate;
   // Apply additional code discount if active
   const ratePerNight = Math.round(baseRate * (1 - discountPercent / 100));
 
@@ -291,10 +310,18 @@ export function CorporateBookingPage() {
         setActiveCode(result.data.code);
         setDiscountPercent(0);
         setIsFlatRate(false);
+        // Per audit S4.1 / decision #101: capture the negotiated
+        // ratePerRoomType map returned by the server. Each room
+        // type has its own negotiated rate; falling back to the
+        // flat `room.corporateRate` only happens when the map has
+        // no entry for the chosen room type.
+        const nextRatePerRoomType = result.data.ratePerRoomType || {};
+        setRatePerRoomType(nextRatePerRoomType);
         sessionStorage.setItem("corp_companyName", result.data.companyName);
         sessionStorage.setItem("corp_code", result.data.code);
         sessionStorage.setItem("corp_discount", "0");
         sessionStorage.setItem("corp_isFlatRate", "false");
+        sessionStorage.setItem("corp_ratePerRoomType", JSON.stringify(nextRatePerRoomType));
       } else {
         setCodeError(result.error || corporateCodeMessages.invalid);
       }
@@ -408,7 +435,11 @@ export function CorporateBookingPage() {
         discountType: "" as const,
         discountIdPhotoUrl: null,
         paymentMethod: "pay-at-hotel",
-        isCorporate: true,
+        // Per W1.3 / decision #79 / audit S1.5: the server
+        // derives `isCorporate` from the validated `corporateCode`
+        // lookup. The client no longer sets it. The booking body's
+        // companyName is also overridden by the doc's companyName
+        // server-side.
         corporateCode: activeCode || undefined,
         _hp: "",
       };
