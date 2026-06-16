@@ -6,7 +6,7 @@
 
 ## Overview
 
-Admin-only page at `/settings`. Organized into tabs. Covers hotel information, payment methods, email configuration, staff account management, discount rules, voucher management, intercom quick requests, and website content editing for all public pages.
+Admin-only page at `/settings`. Organized into tabs. Covers hotel information, email configuration, staff account management, discount rules, intercom quick requests, and website content editing for all public pages. **Booking payment methods are managed in Rates** — see `plan/features/RATE-MANAGEMENT.md` (per W3.1).
 
 ---
 

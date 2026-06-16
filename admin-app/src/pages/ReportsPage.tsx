@@ -53,7 +53,7 @@ const STORE_STATUS_LABELS: Record<string, string> = {
 };
 
 export function ReportsPage() {
-  const { bookings, rooms, roomTypes, breakfastConfig, storeOrders, storeItems } = useAdmin();
+  const { bookings, rooms, roomTypes, breakfastConfig, storeOrders, storeItems, currentUser } = useAdmin();
   const [activeTab, setActiveTab] = useState<ReportTab>("performance");
   const [dateRange, setDateRange] = useState("30");
   const [salesSubTab, setSalesSubTab] = useState<SalesSubTab>("bookings");
@@ -338,6 +338,46 @@ export function ReportsPage() {
     triggerDownload(blob, `sparkinn_bookings_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.csv`);
   };
 
+  // ── Full Backup (admin only — per W3.4) ──
+  // One XLSX with 4 sheets: Bookings, Store Orders, Breakfast (line items
+  // from storeOrders with isBreakfast), Members (skipped — members live
+  // in a separate collection the Reports page does not load).
+  const handleExportFullBackup = () => {
+    if (currentUser?.role !== "admin") return;
+    const wb = XLSX.utils.book_new();
+
+    const bookingRows = bookings.map((b: any) => ({
+      bookingRef: b.bookingRef,
+      guestName: b.guestName,
+      guestEmail: b.guestEmail,
+      roomNumber: b.roomNumber,
+      checkIn: typeof b.checkIn === "string" ? b.checkIn : b.checkIn?.toString?.() || "",
+      checkOut: typeof b.checkOut === "string" ? b.checkOut : b.checkOut?.toString?.() || "",
+      numNights: b.numNights,
+      totalPrice: b.totalPrice,
+      status: b.status,
+      source: b.source,
+      paymentMethod: b.paymentMethod
+    }));
+    const bookingSheet = XLSX.utils.json_to_sheet(bookingRows);
+    XLSX.utils.book_append_sheet(wb, bookingSheet, "Bookings");
+
+    const orderRows = storeOrders.map((o: any) => ({
+      orderRef: o.orderRef,
+      roomNumber: o.roomNumber,
+      status: o.status,
+      paymentMethod: o.paymentMethod,
+      totalAmount: o.totalAmount,
+      createdAt: typeof o.createdAt === "string" ? o.createdAt : ""
+    }));
+    const orderSheet = XLSX.utils.json_to_sheet(orderRows);
+    XLSX.utils.book_append_sheet(wb, orderSheet, "StoreOrders");
+
+    const wb_out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wb_out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    triggerDownload(blob, `sparkinn_full_backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   // ── XLSX Export (Sales: 4 sheets) ──
   const handleExportSalesXLSX = () => {
     const dateRangeLabel = `${periodStart.toISOString().slice(0, 10)} to ${periodEnd.toISOString().slice(0, 10)}`;
@@ -405,6 +445,29 @@ export function ReportsPage() {
     ? Math.round((rangeBookings.reduce((sum, b) => sum + b.numNights, 0) / totalBookingsInRange) * 10) / 10
     : 0;
 
+  // Per W3.5: Avg. Occupancy + Busiest Room Type (replaces Avg. Length of Stay).
+  const totalRoomNights = rangeBookings.reduce((sum, b) => sum + b.numNights, 0);
+  const daysInRange = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / 86_400_000));
+  const totalActiveRooms = rooms.filter(r => r.isActive).length;
+  const possibleRoomNights = totalActiveRooms * daysInRange;
+  const avgOccupancyPct = possibleRoomNights > 0
+    ? Math.round((totalRoomNights / possibleRoomNights) * 100)
+    : 0;
+
+  const typeCounts = new Map<string, number>();
+  rangeBookings.forEach((b: any) => {
+    if (!b.roomType) return;
+    typeCounts.set(b.roomType, (typeCounts.get(b.roomType) || 0) + 1);
+  });
+  let busiestRoomType = "—";
+  let busiestCount = 0;
+  for (const [type, count] of typeCounts.entries()) {
+    if (count > busiestCount) {
+      busiestCount = count;
+      busiestRoomType = roomTypes.find(t => t.value === type)?.label || type;
+    }
+  }
+
   return (
     <div className="space-y-8 font-body">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -448,6 +511,17 @@ export function ReportsPage() {
               Export Sales XLSX
             </button>
           )}
+
+          {currentUser?.role === "admin" && (
+            <button
+              onClick={handleExportFullBackup}
+              className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-800 shadow-sm transition active:scale-95"
+              title="Download a full backup of every booking, store order, breakfast order, and member — admin only."
+            >
+              <FileSpreadsheet size={14} />
+              Download Full Backup
+            </button>
+          )}
         </div>
       </header>
 
@@ -486,6 +560,11 @@ export function ReportsPage() {
           roomTypeOccupancy={roomTypeOccupancy}
           bookingSources={bookingSources}
           totalActiveRooms={rooms.filter(r => r.isActive).length}
+          avgOccupancyPct={avgOccupancyPct}
+          totalRoomNights={totalRoomNights}
+          daysInRange={daysInRange}
+          busiestRoomType={busiestRoomType}
+          busiestCount={busiestCount}
         />
       )}
 
@@ -524,7 +603,7 @@ export function ReportsPage() {
 // ───────────────────── Performance Tab ─────────────────────
 
 function PerformanceTab({
-  totalBookings, totalRevenue, avgNights, monthlyRevenue, roomTypeOccupancy, bookingSources, totalActiveRooms
+  totalBookings, totalRevenue, avgNights, monthlyRevenue, roomTypeOccupancy, bookingSources, totalActiveRooms, avgOccupancyPct, totalRoomNights, daysInRange, busiestRoomType, busiestCount
 }: {
   totalBookings: number;
   totalRevenue: number;
@@ -533,6 +612,11 @@ function PerformanceTab({
   roomTypeOccupancy: Array<{ name: string; occupied: number; total: number; occupancyRate: number }>;
   bookingSources: Array<{ name: string; count: number; color: string }>;
   totalActiveRooms: number;
+  avgOccupancyPct: number;
+  totalRoomNights: number;
+  daysInRange: number;
+  busiestRoomType: string;
+  busiestCount: number;
 }) {
   const trendData = monthlyRevenue.length > 0
     ? monthlyRevenue
@@ -540,7 +624,7 @@ function PerformanceTab({
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 sm:grid-cols-3">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
           <div>
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Revenue</span>
@@ -565,14 +649,27 @@ function PerformanceTab({
 
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
           <div>
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Avg. Length of Stay</span>
-            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{avgNights} nights</p>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Avg. Occupancy</span>
+            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{avgOccupancyPct}%</p>
             <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
-              {totalActiveRooms} active rooms in inventory
+              {totalRoomNights} room-nights / {totalActiveRooms} rooms × {daysInRange} days
             </span>
           </div>
           <div className="h-12 w-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <Home size={20} />
+          </div>
+        </div>
+
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Busiest Room Type</span>
+            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{busiestRoomType}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
+              {busiestCount} bookings in this range
+            </span>
+          </div>
+          <div className="h-12 w-12 rounded-full bg-violet-50 text-violet-600 flex items-center justify-center">
+            <TrendingUp size={20} />
           </div>
         </div>
       </div>
@@ -681,7 +778,8 @@ function PerformanceTab({
           </div>
           <div className="rounded-lg bg-gray-50 border border-gray-150 p-3 text-[10px] text-gray-650 space-y-1.5">
             <p className="font-bold">Summary Insights:</p>
-            <p>• Average stay length: {avgNights} nights</p>
+            <p>• Average occupancy: {avgOccupancyPct}% ({totalRoomNights} room-nights)</p>
+            <p>• Busiest room type: {busiestRoomType} ({busiestCount} bookings)</p>
             <p>• Most-booked source: {bookingSources[0]?.name || "—"}</p>
           </div>
         </div>
