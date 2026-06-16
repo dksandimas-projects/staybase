@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { Shield, Mail, ArrowLeft, Calendar, FileText } from "lucide-react";
+import { Shield, Mail, Calendar, FileText } from "lucide-react";
 import { VERSION } from "@spark-inn/shared";
 import { doc, getDoc } from "firebase/firestore";
 import config from "@config";
 import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
+import { Navbar } from "../components/Navbar";
 
 export function PrivacyPage() {
   const [customBody, setCustomBody] = useState<string | null>(null);
@@ -40,15 +40,7 @@ export function PrivacyPage() {
     return (
       <main className="min-h-screen bg-white font-body text-gray-900 flex flex-col justify-between select-text">
         <div>
-          <header className="border-b border-gray-150 py-4">
-            <div className="mx-auto max-w-4xl px-4 sm:px-6 flex justify-between items-center">
-              <Link to="/" className="inline-flex items-center gap-2 text-xs font-semibold text-primary hover:underline">
-                <ArrowLeft size={16} />
-                Return to Homepage
-              </Link>
-              <span className="text-xs font-semibold text-gray-400">{config.applicableLaw}</span>
-            </div>
-          </header>
+          <Navbar />
           <article className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
             <header className="mb-10 space-y-3">
               <div className="flex items-center gap-2 text-primary">
@@ -80,18 +72,8 @@ export function PrivacyPage() {
   return (
     <main className="min-h-screen bg-white font-body text-gray-900 flex flex-col justify-between select-text">
       <div>
-        {/* Navigation Bar Header */}
-        <header className="border-b border-gray-150 py-4">
-          <div className="mx-auto max-w-4xl px-4 sm:px-6 flex justify-between items-center">
-            <Link to="/" className="inline-flex items-center gap-2 text-xs font-semibold text-primary hover:underline">
-              <ArrowLeft size={16} />
-              Return to Homepage
-            </Link>
-            <span className="text-xs font-semibold text-gray-400">
-              {config.applicableLaw}
-            </span>
-          </div>
-        </header>
+        {/* Navigation Bar Header (per W3.8 — replaced with global Navbar) */}
+        <Navbar />
 
         {/* Content Area */}
         <article className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
@@ -154,9 +136,9 @@ export function PrivacyPage() {
               </p>
             </section>
 
-            {/* How Long We Keep It */}
+            {/* How Long We Keep It (per W3.9) */}
             <section className="space-y-3">
-              <h2 className="text-base font-bold text-gray-950 border-l-2 border-primary pl-2.5">3. Data Retention Policy</h2>
+              <h2 className="text-base font-bold text-gray-950 border-l-2 border-primary pl-2.5">3. How Long We Keep It</h2>
               <p>
                 We retain your personal data only as long as necessary to achieve reservation and audit obligations:
               </p>

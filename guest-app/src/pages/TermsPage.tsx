@@ -1,22 +1,16 @@
 import { Link } from "react-router-dom";
-import { ArrowLeft, Calendar, FileText, Scale, Mail } from "lucide-react";
+import { Calendar, FileText, Scale, Mail } from "lucide-react";
 import { VERSION } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
+import { Navbar } from "../components/Navbar";
 
 export function TermsPage() {
   return (
     <main className="flex min-h-screen flex-col justify-between bg-white font-body text-gray-900 select-text">
       <div>
-        <header className="border-b border-gray-150 py-4">
-          <div className="mx-auto flex max-w-4xl items-center justify-between px-4 sm:px-6">
-            <Link to="/" className="inline-flex items-center gap-2 text-xs font-semibold text-primary hover:underline">
-              <ArrowLeft size={16} />
-              Return to Homepage
-            </Link>
-            <span className="text-xs font-semibold text-gray-400">Guest terms</span>
-          </div>
-        </header>
+        {/* Per W3.8 — replaced with global Navbar */}
+        <Navbar />
 
         <article className="mx-auto max-w-4xl px-4 py-12 sm:px-6">
           <header className="mb-10 space-y-3">
@@ -29,7 +23,7 @@ export function TermsPage() {
             <div className="flex flex-wrap items-center gap-4 border-y border-gray-100 py-3 text-xs text-gray-500">
               <span className="flex items-center gap-1.5 font-medium">
                 <Calendar size={14} />
-                Last Updated: June 13, 2026
+                Last Updated: {config.termsLastUpdated}
               </span>
               <span className="flex items-center gap-1.5 font-medium">
                 <FileText size={14} />

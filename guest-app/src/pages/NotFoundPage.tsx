@@ -3,7 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { Compass, Home } from "lucide-react";
 import config from "@config";
 import { brandAsset } from "../utils/brand";
-import { scaleIn } from "@spark-inn/shared";
+import { scaleIn, VERSION } from "@spark-inn/shared";
 import { PrimaryButton } from "../components/PrimaryButton";
 
 export function NotFoundPage() {
@@ -50,6 +50,9 @@ export function NotFoundPage() {
             Back to Homepage
           </PrimaryButton>
         </div>
+
+        {/* Per W3.12: tiny version badge to resolve the spec contradiction. */}
+        <p className="mt-4 text-[10px] font-mono text-gray-400">v{VERSION}</p>
       </motion.div>
     </main>
   );
