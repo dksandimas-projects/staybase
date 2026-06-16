@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { 
-  Coins, 
-  Users, 
-  Briefcase, 
-  CheckCircle2, 
-  ShieldCheck, 
-  Wifi, 
-  ChevronRight, 
+import {
+  Coins,
+  Users,
+  Briefcase,
+  CheckCircle2,
+  ShieldCheck,
+  Wifi,
+  ChevronRight,
   ArrowRight,
   Info,
   Calendar,
@@ -16,7 +16,8 @@ import {
   User,
   Mail,
   Phone,
-  HelpCircle
+  HelpCircle,
+  type LucideIcon
 } from "lucide-react";
 import config from "@config";
 import { Navbar } from "../components/Navbar";
@@ -28,6 +29,31 @@ import { rooms } from "../data/rooms";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
+import { usePublicSiteContent, type ContentItem } from "../hooks/usePublicSiteContent";
+
+const PERK_ICON_MAP: Record<string, LucideIcon> = {
+  coins: Coins,
+  percent: Coins,
+  money: Coins,
+  users: Users,
+  group: Users,
+  briefcase: Briefcase,
+  support: Briefcase,
+  wifi: Wifi,
+  network: Wifi,
+  shield: ShieldCheck,
+  security: ShieldCheck,
+  calendar: Calendar,
+  date: Calendar,
+  help: HelpCircle,
+  flexible: HelpCircle
+};
+
+function resolvePerkIcon(name: string | undefined, fallback: LucideIcon): LucideIcon {
+  if (!name) return fallback;
+  const icon = PERK_ICON_MAP[name.toLowerCase()];
+  return icon ?? fallback;
+}
 
 export function CorporateStaysPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -71,6 +97,12 @@ export function CorporateStaysPage() {
         whileInView: "visible",
         viewport: { once: true, margin: "-80px" }
       };
+
+  const { corporate } = usePublicSiteContent();
+  const corpHeroPhoto = corporate.heroPhotoUrl;
+  const corpHeading = corporate.heroHeading;
+  const corpSubtext = corporate.heroSubtext;
+  const perkFallbacks: LucideIcon[] = [Coins, Users, Briefcase, Wifi, ShieldCheck, HelpCircle];
 
   const scrollToForm = (interestRoomName?: string) => {
     if (interestRoomName) {
@@ -174,11 +206,11 @@ export function CorporateStaysPage() {
           <img
             className="w-full h-full object-cover"
             alt="Sophisticated corporate meeting room and lounge"
-            src="https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80"
+            src={corpHeroPhoto}
           />
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-transparent z-0" />
-        
+
         <motion.div
           animate="visible"
           className="relative z-10 mx-auto max-w-4xl text-center pt-12"
@@ -189,10 +221,10 @@ export function CorporateStaysPage() {
             Curated hospitality for executive comfort
           </p>
           <h1 className="mt-4 font-heading text-4xl leading-tight text-white sm:text-6xl lg:text-7xl">
-            Elevated Stays for Modern Business
+            {corpHeading}
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-300 sm:text-lg">
-            Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol. Partner with {config.brandName} for reliable corporate solutions.
+            {corpSubtext}
           </p>
           <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row sm:items-center">
             <PrimaryButton to="/corporate/book" className="min-w-[220px] shadow-lg">
@@ -230,100 +262,29 @@ export function CorporateStaysPage() {
             <div className="mt-4 mx-auto w-16 h-1 bg-primary rounded" />
           </motion.div>
 
-          <motion.div 
-            className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3" 
-            variants={staggerContainer} 
+          <motion.div
+            className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3"
+            variants={staggerContainer}
             {...entranceProps}
           >
-            {/* Perk 1 */}
-            <motion.div 
-              className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
-              variants={staggerChild}
-              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
-                <Coins size={24} />
-              </div>
-              <h3 className="mt-6 text-lg font-semibold text-gray-900">Negotiated Rates</h3>
-              <p className="mt-3 text-sm leading-6 text-gray-600">
-                Unlock exclusive fixed-rate packages tailored to your company's annual travel volume. Control and predict your hospitality budget with ease.
-              </p>
-            </motion.div>
-
-            {/* Perk 2 */}
-            <motion.div 
-              className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
-              variants={staggerChild}
-              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
-                <Users size={24} />
-              </div>
-              <h3 className="mt-6 text-lg font-semibold text-gray-900">Group Bookings</h3>
-              <p className="mt-3 text-sm leading-6 text-gray-600">
-                Coordinated logistics for team building retreats, board meetings, and product launches. Keep your organization unified and fully refreshed.
-              </p>
-            </motion.div>
-
-            {/* Perk 3 */}
-            <motion.div 
-              className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
-              variants={staggerChild}
-              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
-                <Briefcase size={24} />
-              </div>
-              <h3 className="mt-6 text-lg font-semibold text-gray-900">Dedicated Support</h3>
-              <p className="mt-3 text-sm leading-6 text-gray-600">
-                A personal account manager handles reservations, customized invoices, and check-in assistance, giving your team peace of mind.
-              </p>
-            </motion.div>
-
-            {/* Perk 4 */}
-            <motion.div 
-              className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
-              variants={staggerChild}
-              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
-                <Wifi size={24} />
-              </div>
-              <h3 className="mt-6 text-lg font-semibold text-gray-900">High-Speed Wi-Fi</h3>
-              <p className="mt-3 text-sm leading-6 text-gray-600">
-                Dedicated high-bandwidth networks are active throughout our property. Perform remote work, host video calls, and stay in touch without delays.
-              </p>
-            </motion.div>
-
-            {/* Perk 5 */}
-            <motion.div 
-              className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
-              variants={staggerChild}
-              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
-                <ShieldCheck size={24} />
-              </div>
-              <h3 className="mt-6 text-lg font-semibold text-gray-900">Premium Security</h3>
-              <p className="mt-3 text-sm leading-6 text-gray-600">
-                Enjoy a peaceful, secure stay with 24/7 staff, encrypted access locks, and strict privacy protocols for high-profile business visitors.
-              </p>
-            </motion.div>
-
-            {/* Perk 6 */}
-            <motion.div 
-              className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
-              variants={staggerChild}
-              whileHover={shouldReduceMotion ? undefined : { y: -4 }}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
-                <HelpCircle size={24} />
-              </div>
-              <h3 className="mt-6 text-lg font-semibold text-gray-900">Flexible Bookings</h3>
-              <p className="mt-3 text-sm leading-6 text-gray-600">
-                Business plans change. Corporate agreements enjoy reduced cancellation fees, priority rescheduling, and same-day room re-allocations.
-              </p>
-            </motion.div>
+            {corporate.perks.map((perk: ContentItem, index: number) => {
+              const fallback = perkFallbacks[index % perkFallbacks.length];
+              const Icon = resolvePerkIcon(perk.icon, fallback);
+              return (
+                <motion.div
+                  key={perk.title}
+                  className="rounded-card bg-white p-8 shadow-sm ring-1 ring-gray-100 hover:shadow-md transition group"
+                  variants={staggerChild}
+                  whileHover={shouldReduceMotion ? undefined : { y: -4 }}
+                >
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary group-hover:bg-primary group-hover:text-white transition">
+                    <Icon size={24} />
+                  </div>
+                  <h3 className="mt-6 text-lg font-semibold text-gray-900">{perk.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-gray-600">{perk.description}</p>
+                </motion.div>
+              );
+            })}
           </motion.div>
         </div>
       </section>
