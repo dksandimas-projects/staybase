@@ -11,7 +11,7 @@ import {
 } from "./handlers/bookings";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
-import { handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
+import { handleCreateCorporateInquiry, handleConvertInquiryToBooking } from "./handlers/corporate-inquiries";
 import { handleGenerateReference } from "./handlers/reference";
 import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption, handleEraseMemberAccount } from "./handlers/members";
 import { handleEmailTrigger } from "./handlers/email";
@@ -357,6 +357,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleCreateCorporateInquiry(req, res);
+  }
+
+  // Per W2.14 / decision #102 / audit S4.2: staff can convert a
+  // corporate inquiry into a real bookings document. The new
+  // booking is pre-filled from the inquiry (company, contact,
+  // preferred dates, numRooms), linked back via linkedInquiryId,
+  // and the inquiry status flips to "converted" + a note + the
+  // back-link is persisted. The booking source is "corporate" per
+  // W2.15 / decision #103.
+  if (domain === "corporate" && action === "convert-inquiry" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleConvertInquiryToBooking(req, res);
   }
 
   if (domain === "reference" && action === "generate" && req.method === "POST") {
