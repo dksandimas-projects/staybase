@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
 import { sendCorporateInquiryTrigger, sendBookingTrigger } from "./email";
+import { toDateOrNull } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 const inquirySchema = z.object({
@@ -161,7 +163,16 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
         throw new Error("Room is inactive.");
       }
       if (roomData.status === "blocked") {
-        throw new Error("Room is blocked for the selected dates.");
+        const blockedFrom = toDateOrNull(roomData.blockedFrom);
+        const blockedTo = toDateOrNull(roomData.blockedTo);
+        const checkInDate = new Date(`${inquiry.preferredDates.split(" to ")[0] || inquiry.preferredDates}T00:00:00Z`);
+        const checkOutDate = new Date(`${inquiry.preferredDates.split(" to ")[1] || inquiry.preferredDates}T00:00:00Z`);
+        const windowActive = blockedFrom && blockedTo
+          ? checkInDate < blockedTo && checkOutDate > blockedFrom
+          : true;
+        if (windowActive) {
+          throw new Error("Room is blocked for the selected dates.");
+        }
       }
       if (guests > roomData.maxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
