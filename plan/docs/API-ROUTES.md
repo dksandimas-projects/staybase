@@ -144,9 +144,12 @@ Staff accounts must be created and disabled through these Admin SDK routes. Neve
 | `/api/members/register` | POST | Signed-in guest | Enroll the authenticated guest in Spark Rewards, generate the sequential `memberNumber`, create or update `members/{uid}`, and link past bookings by email |
 | `/api/members/redeem-points` | POST | Staff | Redeem member points against a booking; transactionally deducts member balance, lowers `booking.totalPrice`, stores redemption fields, and appends a `pointsHistory` entry |
 | `/api/members/undo-redemption` | POST | Admin | Undo a points redemption while the booking is still `confirmed`; transactionally restores booking total, returns member points, clears redemption fields, and logs the reversal |
+| `/api/members/delete-account` | POST | Signed-in guest | Erase the calling member's account per RA 10173 right to erasure: anonymize every linked booking (write a no-PII audit record to `bookings/audit/records/{id}` first, then scrub `guestName` / `guestEmail` / `guestPhone` / `memberId`), recursively delete the `pointsHistory` subcollection, delete `members/{uid}`, and delete the Firebase Auth user. Body must include `{ confirmation: "erase-my-account" }`. |
 
 Member registration must be server-side because `memberNumber` is sequential and cannot be trusted to client code. Guest apps may update editable profile fields after enrollment where Firestore rules allow it, but they must not create member documents or assign `memberNumber` directly.
 Points redemption routes are server-side because they change booking money fields and member balances together. Never update those documents independently from client code.
+Account erasure is server-side because the call must transactionally audit + anonymize linked bookings, recursively wipe subcollections, and remove the Auth user. The client must never delete the member document or `pointsHistory` entries directly — the handler is the only safe path.
+The audit collection `bookings/audit/records/{id}` is staff-read-only via Firestore rules (`allow read: if isStaff(); allow write: if false;`); only Admin SDK writes from the API route are permitted.
 
 ---
 
