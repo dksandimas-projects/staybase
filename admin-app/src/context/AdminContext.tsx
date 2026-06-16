@@ -309,6 +309,16 @@ export interface AdminContextType {
   corporateInquiries: CorporateInquiry[];
   updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => void;
   addInquiryNote: (inquiryId: string, text: string) => void;
+  convertInquiryToBooking: (input: {
+    inquiryId: string;
+    roomId: string;
+    checkIn: string;
+    checkOut: string;
+    guests: number;
+    hasBreakfast: boolean;
+    paymentMethod: string;
+    ratePerNightOverride?: number | null;
+  }) => Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }>;
 
   // Members
   members: Member[];
@@ -965,6 +975,64 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error("Error adding inquiry note:", error);
+    }
+  };
+
+  // Per W2.14 / decision #102 / audit S4.2: convert a corporate
+  // inquiry into a real bookings document via the server-side
+  // /api/corporate/convert-inquiry route. The handler is
+  // staff-only, transactionally creates the booking with
+  // linkedInquiryId + isCorporate (server-derived) + source:
+  // "corporate", flips the inquiry status to "converted", and
+  // appends a back-link note. We pre-allocate the bookingId
+  // here so the booking is at a known doc id.
+  const convertInquiryToBooking = async (input: {
+    inquiryId: string;
+    roomId: string;
+    checkIn: string;
+    checkOut: string;
+    guests: number;
+    hasBreakfast: boolean;
+    paymentMethod: string;
+    ratePerNightOverride?: number | null;
+  }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : import.meta.env.VITE_GUEST_APP_URL || "";
+      const bookingId = doc(collection(db, "bookings")).id;
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          inquiryId: input.inquiryId,
+          bookingId,
+          roomId: input.roomId,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          guests: input.guests,
+          hasBreakfast: input.hasBreakfast,
+          paymentMethod: input.paymentMethod,
+          ratePerNightOverride: input.ratePerNightOverride ?? null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        return { success: false, error: data?.error || "Failed to convert inquiry into a booking." };
+      }
+      return {
+        success: true,
+        bookingId: data.data?.bookingId || bookingId,
+        bookingRef: data.data?.bookingRef,
+        totalPrice: data.data?.totalPrice
+      };
+    } catch (err: any) {
+      console.error("Convert inquiry failed:", err);
+      return { success: false, error: err?.message || "Failed to convert inquiry into a booking." };
     }
   };
 
@@ -1830,6 +1898,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         corporateInquiries,
         updateInquiryStatus,
         addInquiryNote,
+        convertInquiryToBooking,
         members,
         updateMemberPoints,
         toggleMemberActive,
