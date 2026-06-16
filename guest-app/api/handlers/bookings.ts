@@ -1,6 +1,7 @@
 import { adminDb } from "../lib/firebase-admin";
+import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
-import { validateCorporateCode } from "@spark-inn/shared";
+import { toDateOrNull, validateCorporateCode } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 interface GuestDetails {
@@ -167,8 +168,9 @@ export async function handleCreateBooking(req: any, res: any) {
       
       const hasConflict = bookingsSnapshot.docs.some((doc) => {
         const data = doc.data();
-        const existingCheckIn = data.checkIn.toDate();
-        const existingCheckOut = data.checkOut.toDate();
+        const existingCheckIn = toDateOrNull(data.checkIn);
+        const existingCheckOut = toDateOrNull(data.checkOut);
+        if (!existingCheckIn || !existingCheckOut) return false;
         return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
       });
 
@@ -353,8 +355,8 @@ export async function handleCreateBooking(req: any, res: any) {
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
-        checkIn: adminDb.doc(`rooms/${roomId}`).firestore.valueType ? checkInDate : checkInDate, // Firestore Timestamps
-        checkOut: checkOutDate,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
         ratePerNight: activeRoomRate,
         totalPrice,
@@ -539,8 +541,9 @@ export async function handleCreateWalkin(req: any, res: any) {
       
       const hasConflict = bookingsSnapshot.docs.some((doc) => {
         const data = doc.data();
-        const existingCheckIn = data.checkIn.toDate();
-        const existingCheckOut = data.checkOut.toDate();
+        const existingCheckIn = toDateOrNull(data.checkIn);
+        const existingCheckOut = toDateOrNull(data.checkOut);
+        if (!existingCheckIn || !existingCheckOut) return false;
         return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
       });
 
@@ -607,8 +610,8 @@ export async function handleCreateWalkin(req: any, res: any) {
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
-        checkIn: checkInDate,
-        checkOut: checkOutDate,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
         ratePerNight: roomData.pricePerNight,
         totalPrice: finalTotalPrice,
