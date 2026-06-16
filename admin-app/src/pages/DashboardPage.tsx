@@ -3,28 +3,70 @@ import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { BedDouble, Check, RefreshCw, AlertTriangle, ShieldCheck } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import config from "@config";
 
 export function DashboardPage() {
   const { rooms, bookings, toggleHousekeepingStatus, roomTypes } = useAdmin();
 
   // Metrics Calculations
+  // Per audit S5.1: guard against `rooms.length === 0` (first paint
+  // for every session) so the Occupancy Rate stat does not render
+  // `NaN%`. When there are no rooms, the metric is `0%`.
   const totalRoomsCount = rooms.length;
   const occupiedRoomsCount = rooms.filter(r => r.status === "occupied").length;
-  const occupancyPercentage = Math.round((occupiedRoomsCount / totalRoomsCount) * 100);
+  const occupancyPercentage = totalRoomsCount === 0
+    ? 0
+    : Math.round((occupiedRoomsCount / totalRoomsCount) * 100);
 
   const activeBookingsCount = bookings.filter(b => b.status === "confirmed" || b.status === "checked-in").length;
   const checkedInToday = bookings.filter(b => b.status === "checked-in").length;
   const dirtyRoomsCount = rooms.filter(r => r.housekeepingStatus === "dirty").length;
 
-  const chartData = [
-    { day: "Mon", rate: 60 },
-    { day: "Tue", rate: 65 },
-    { day: "Wed", rate: 70 },
-    { day: "Thu", rate: 68 },
-    { day: "Fri", rate: 85 },
-    { day: "Sat", rate: 90 },
-    { day: "Sun", rate: 80 }
-  ];
+  // Per audit S5.3: replace the hardcoded weekly chart with a live
+  // computation of occupancy rate per day for the last 7 days. A
+  // booking is "active" on day D if D >= checkIn and D < checkOut and
+  // the booking is not cancelled. The rate is the number of distinct
+  // rooms occupied divided by totalRoomsCount, or 0 when there are
+  // no rooms. Days are computed in the hotel's local timezone
+  // (config.timezone) to match the rest of the dashboard.
+  const chartData = (() => {
+    const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const toLocalDateKey = (date: Date) => {
+      const tz = config.timezone || "Asia/Manila";
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).formatToParts(date);
+      const year = parts.find(p => p.type === "year")?.value || "0000";
+      const month = parts.find(p => p.type === "month")?.value || "01";
+      const day = parts.find(p => p.type === "day")?.value || "01";
+      return `${year}-${month}-${day}`;
+    };
+
+    const today = new Date();
+    const days: { day: string; rate: number }[] = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dayKey = toLocalDateKey(d);
+      const dayLabel = DAY_LABELS[d.getDay()];
+
+      const occupied = new Set<string>();
+      bookings.forEach((b) => {
+        if (!b.checkIn || !b.checkOut || b.status === "cancelled") return;
+        if (b.checkIn <= dayKey && dayKey < b.checkOut) {
+          if (b.roomNumber) occupied.add(b.roomNumber);
+        }
+      });
+      const rate = totalRoomsCount === 0
+        ? 0
+        : Math.round((occupied.size / totalRoomsCount) * 100);
+      days.push({ day: dayLabel, rate });
+    }
+    return days;
+  })();
 
   // Helper to format room type labels
   const roomTypesLabels = roomTypes.reduce((acc, t) => {
