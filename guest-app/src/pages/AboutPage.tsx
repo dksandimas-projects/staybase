@@ -4,6 +4,7 @@ import config from "@config";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { fadeUp, staggerContainer, scaleIn } from "@spark-inn/shared";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 export function AboutPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -15,7 +16,14 @@ export function AboutPage() {
         viewport: { once: true, margin: "-40px" }
       };
 
-  const aboutHeroImage = "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&q=80&w=1600&h=600";
+  const { about } = usePublicSiteContent();
+  const aboutHeroImage = about.heroPhotoUrl;
+  const missionText = about.missionStatement;
+  const visionText = about.visionStatement;
+  const storyParagraphs = about.hotelStory
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
 
   return (
     <main className="min-h-screen bg-white font-body text-gray-900 flex flex-col justify-between">
@@ -74,7 +82,7 @@ export function AboutPage() {
                     our mission
                   </h2>
                   <p className="text-sm leading-relaxed text-gray-650">
-                    To deliver peaceful, consistent stays shaped by genuine, intentional hospitality. We believe that hospitality is not merely a service, but a philosophy of care where every detail is deliberate and every guest feels deeply valued.
+                    {missionText}
                   </p>
                 </div>
                 <div className="mt-6 flex items-center gap-2 text-xs font-bold text-primary">
@@ -97,7 +105,7 @@ export function AboutPage() {
                     our vision
                   </h2>
                   <p className="text-sm leading-relaxed text-gray-650">
-                    To establish {config.brandName} as the gold standard of boutique lodging in Bohol, recognized for providing curated sanctuaries where travelers find ultimate comfort, reliable modern amenities, and a deep connection to island tranquility.
+                    {visionText}
                   </p>
                 </div>
                 <div className="mt-6 flex items-center gap-2 text-xs font-bold text-primary">
@@ -123,18 +131,13 @@ export function AboutPage() {
               variants={fadeUp}
               className="prose prose-sm text-gray-650 leading-relaxed space-y-6 text-justify"
             >
-              <p>
-                Founded in the heart of Tagbilaran City, Bohol, {config.brandName} was born out of a desire to redefine the boutique hotel experience. We observed that while travelers appreciated the unique characters of boutique stays, they often missed the reliability and consistency of global chains. We set out to bridge this gap, creating a sanctuary where style meets structure, and comfort is guaranteed.
-              </p>
-              <p>
-                Our location was chosen with care—providing our guests with a peaceful retreat that is simultaneously connected to the rich historical landmarks, business districts, and natural wonders of Bohol. From the sandy beaches of Panglao to the famous Chocolate Hills, {config.brandName} serves as the perfect home base for both leisure explorers and corporate stay travelers.
-              </p>
-              <p>
-                Every element of {config.brandName} is curated. Our rooms are engineered for quiet comfort, featuring premium soundproofing, custom orthopedic beds, and optimized layouts. We combine these physical comforts with a service team that is trained to anticipate guest needs, offering a warm and authentic Filipino welcome that feels like family.
-              </p>
-              <p>
-                As we continue to grow and welcome guests from around the world, our promise remains steadfast: to provide peaceful, consistent stays shaped by genuine, intentional hospitality. We invite you to experience the spark that makes our hospitality warm and our lodging exceptional.
-              </p>
+              {storyParagraphs.length > 0 ? (
+                storyParagraphs.map((paragraph, idx) => <p key={idx}>{paragraph}</p>)
+              ) : (
+                <p>
+                  {`Founded in the heart of Tagbilaran City, Bohol, ${config.brandName} was born out of a desire to redefine the boutique hotel experience.`}
+                </p>
+              )}
             </motion.div>
           </div>
         </section>
