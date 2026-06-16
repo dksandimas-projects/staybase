@@ -34,9 +34,24 @@ Guests have the following rights under RA 10173. The hotel must be able to fulfi
 - **Right to be informed** — covered by the Privacy Policy page (`/privacy`) and consent checkbox at booking
 - **Right to access** — guest can request a copy of their booking data via email to the hotel
 - **Right to correction** — guest can request correction of inaccurate data
-- **Right to erasure** — guest can request deletion of their data; hotel must comply unless data is needed for legal/regulatory purposes (e.g. tax records)
+- **Right to erasure** — guest can request deletion of their data through `My Profile → Delete Account` (calls `/api/members/delete-account`, per W1.4 / decision #49 / audit S2.3) or by emailing the DPO. Hotel complies unless data is needed for legal/regulatory purposes (e.g. RA 11862 guest registry records within their 6-month retention window)
 - **Right to object** — guest can object to processing for non-essential purposes
 - **Right to data portability** — provide data in a readable format upon request
+
+### Member Account Erasure Flow
+
+Online account deletion (Spark Rewards) flows through the server-side `/api/members/delete-account` route. The handler runs an Admin SDK transaction and post-transaction cleanup in this order:
+
+1. Verify Firebase ID token — UID of caller must match the member being erased
+2. Body must include `{ confirmation: "erase-my-account" }` to prevent accidental POSTs
+3. Transaction: for every booking with `memberId == uid`, write an anonymized audit record to `bookings/audit/records/{bookingId}` (contains `bookingRef`, `roomId`/`roomNumber`/`roomType`, `checkIn`/`checkOut`, `numNights`, `numGuests`, `totalPrice`, `status`, `source`, `createdAt`, `erasedAt`, `erasedByUid` — no PII) and then scrub the booking of `memberId`, `guestName`, `guestEmail`, `guestPhone`. Mark the member doc `isErased: true`, blank `fullName` / `email` / `phone` / `photoUrl`, zero `rewardsPoints`, and set `isActive: false`.
+4. After the transaction commits, read every `members/{uid}/pointsHistory` doc and delete in a batch (Firestore transactions cannot list collections).
+5. Delete the `members/{uid}` document outright.
+6. Delete the Firebase Auth user via `adminAuth.deleteUser(uid)`. Treat `auth/user-not-found` as success (already gone).
+
+Firestore rule for the new audit collection (`bookings/audit/records/{id}`): `allow read: if isStaff(); allow write: if false;`. Server-only writes, staff-only reads.
+
+Guest registry records collected at physical check-in (nationality, ID type, ID number) are out of scope for this online erasure flow — they are retained for a minimum of 6 months per RA 11862. The deletion confirmation modal links to this policy so guests are not surprised.
 
 ### Data Protection Officer (DPO)
 
