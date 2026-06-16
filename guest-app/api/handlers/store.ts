@@ -1,5 +1,6 @@
 import { generateStoreOrderRef } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
+import { sendStoreOrderTrigger } from "./email";
 
 interface StoreOrderItemInput {
   itemId: string;
@@ -186,6 +187,37 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       };
     });
 
+    // Per W4.4 / decision #104: fire the placed email after the
+    // transaction commits. The guest's email is looked up from
+    // the active booking (if any) by Admin SDK. Idempotent — the
+    // email helper no-ops if guestEmail is missing.
+    if (responseData) {
+      try {
+        let guestEmail = "";
+        if (responseData.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(responseData.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+        if (guestEmail) {
+          await sendStoreOrderTrigger("store-order-placed", {
+            orderRef: responseData.orderRef,
+            orderId: responseData.orderId,
+            roomNumber: body.roomNumber,
+            guestEmail,
+            guestName: body.guestName.trim(),
+            items: responseData.items,
+            totalAmount: responseData.totalAmount,
+            paymentMethod: body.paymentMethod,
+            status: "placed"
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send store-order-placed email:", emailErr);
+      }
+    }
+
     return res.status(200).json({ success: true, data: responseData });
   } catch (error: any) {
     console.error("Store order creation failed:", error);
@@ -215,6 +247,7 @@ export async function handleCancelStoreOrder(req: any, res: any) {
   }
 
   try {
+    let cancelledOrder: any = null;
     await adminDb.runTransaction(async (transaction) => {
       const orderRef = adminDb.collection("storeOrders").doc(body.orderId);
       const orderDoc = await transaction.get(orderRef);
@@ -257,7 +290,45 @@ export async function handleCancelStoreOrder(req: any, res: any) {
         stockRestoredAt: new Date(),
         updatedAt: new Date()
       });
+
+      // Capture the order snapshot for the post-transaction
+      // email. The guest's email is looked up from the active
+      // booking (if any) — see post-transaction block below.
+      cancelledOrder = orderData;
     });
+
+    // Per W4.4 / decision #104: fire the cancelled email. We
+    // re-read the order to get the latest status (cancelled) +
+    // the cancellation reason.
+    if (cancelledOrder) {
+      try {
+        let guestEmail = "";
+        if (cancelledOrder.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(cancelledOrder.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+        if (guestEmail) {
+          const freshDoc = await adminDb.collection("storeOrders").doc(cancelledOrder.orderRef || "").get();
+          const fresh = freshDoc.exists ? freshDoc.data() : cancelledOrder;
+          await sendStoreOrderTrigger("store-order-cancelled", {
+            orderRef: fresh.orderRef,
+            orderId: body.orderId,
+            roomNumber: body.roomNumber,
+            guestEmail,
+            guestName: fresh.guestName,
+            items: fresh.items,
+            totalAmount: fresh.totalAmount,
+            paymentMethod: fresh.paymentMethod,
+            status: "cancelled",
+            cancellationReason: body.cancellationReason || "Guest cancelled from intercom"
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send store-order-cancelled email:", emailErr);
+      }
+    }
 
     return res.status(200).json({ success: true });
   } catch (error: any) {

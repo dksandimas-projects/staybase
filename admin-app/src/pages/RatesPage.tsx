@@ -39,6 +39,10 @@ export function RatesPage() {
   const [usageCap, setUsageCap] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [applicableRooms, setApplicableRooms] = useState<string[]>([]);
+  // Per W4.4 / decision #104: optional guest email — when set,
+  // the server fires a voucher-issued email to the guest with
+  // the code in a large monospace block.
+  const [vchGuestEmail, setVchGuestEmail] = useState("");
 
   // Corporate Code Form States
   const [corpCode, setCorpCode] = useState("");
@@ -127,7 +131,8 @@ export function RatesPage() {
       expiresAt: expiresAt || null,
       applicableRoomTypes: applicableRooms,
       isActive: true,
-      createdBy: "admin"
+      createdBy: "admin",
+      guestEmail: vchGuestEmail.trim() || null
     });
 
     setVchCode("");
@@ -663,6 +668,21 @@ export function RatesPage() {
               />
             </label>
           </div>
+
+          {/* Per W4.4 / decision #104: optional guest email — when set, the
+              server fires a voucher-issued email to the guest with the
+              code in a large monospace block. */}
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+            Guest Email (optional — sends the code to this address)
+            <input
+              type="email"
+              placeholder="guest@example.com"
+              value={vchGuestEmail}
+              onChange={(e) => setVchGuestEmail(e.target.value)}
+              className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+            />
+            <span className="text-[10px] font-medium text-gray-500">Leave blank to keep the code in the admin only.</span>
+          </label>
 
           {/* Room type check lists */}
           <div className="space-y-2">
