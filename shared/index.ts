@@ -3,6 +3,7 @@ export * from "./animations";
 export * from "./constants";
 export * from "./schemas/booking";
 export * from "./types";
+export * from "./utils/calendar";
 export * from "./utils/dates";
 export * from "./utils/images";
 export * from "./utils/points";
