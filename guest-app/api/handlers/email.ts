@@ -11,7 +11,19 @@ type EmailAction =
   | "booking-cancelled"
   | "corporate-inquiry"
   | "discount-rejected"
-  | "early-checkin-request";
+  | "early-checkin-request"
+  // Per W4.4 / decision #104 / audit-email-extensions: 8 new
+  // server-triggered templates. Voucher-issued is admin-driven;
+  // store-order-* are guest status updates; staff-* notify the
+  // hotel team when they are not logged in.
+  | "voucher-issued"
+  | "store-order-placed"
+  | "store-order-confirmed"
+  | "store-order-out-for-delivery"
+  | "store-order-delivered"
+  | "store-order-cancelled"
+  | "staff-new-booking"
+  | "staff-new-payment";
 
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || config.supportEmail;
 const ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || config.supportEmail;
@@ -426,6 +438,323 @@ export async function sendEarlyCheckinRequestTrigger(booking: any, request: any)
   );
 }
 
+// ─── W4.4 / decision #104 email extensions ──────────────────────────
+// All 8 templates below are server-triggered (no public form posts
+// to these endpoints). The recipients are looked up server-side
+// from the booking (guest emails) or from
+// settings/hotelConfig.staffEmail (staff emails) — clients cannot
+// override them. Per the spec, the corresponding booking / store
+// records carry `emailNotificationsSent` timestamps for idempotency.
+
+function voucherCodeBlock(code: string) {
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0;">
+      <tr>
+        <td align="center" style="background: ${config.colors.primaryLight}; border: 2px dashed ${config.colors.primary}; border-radius: 12px; padding: 22px 14px;">
+          <p style="margin: 0 0 8px; color: ${config.colors.primaryDark}; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 800;">Your promo code</p>
+          <p style="margin: 0; color: #111827; font-size: 30px; letter-spacing: 0.18em; font-weight: 800; font-family: 'JetBrains Mono', 'Courier New', monospace;">${escapeHtml(code)}</p>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+function voucherIssuedEmail(voucher: any) {
+  const valueLabel = voucher.discountType === "percent"
+    ? `${voucher.discountValue}% off`
+    : `${formatMoney(voucher.discountValue)} off`;
+  const roomTypeLabel = Array.isArray(voucher.applicableRoomTypes) && voucher.applicableRoomTypes.length > 0
+    ? voucher.applicableRoomTypes.join(", ")
+    : "any room";
+  return emailLayout({
+    preheader: `Your ${config.brandName} voucher ${voucher.code} is ready.`,
+    eyebrow: "Voucher issued",
+    title: "A voucher has been added to your account",
+    intro: `Dear guest, ${escapeHtml(config.brandName)} has issued a promo voucher for your next stay. Enter the code at checkout to redeem.`,
+    body: `
+      ${callout("warm", `${valueLabel} on ${escapeHtml(roomTypeLabel)}`, `Use this code when you start a new booking — it will be applied automatically on the review step.`)}
+      ${voucherCodeBlock(voucher.code)}
+      ${card("Voucher details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Discount", valueLabel)}
+        ${row("Expires", voucher.expiresAt ? formatDate(voucher.expiresAt) : "No expiry")}
+        ${row("Room types", escapeHtml(roomTypeLabel))}
+        ${voucher.usageCap ? row("Usage cap", `${voucher.usageCap} total use${voucher.usageCap === 1 ? "" : "s"}`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Start a booking",
+    ctaUrl: siteUrl("/rooms")
+  });
+}
+
+export async function sendVoucherIssuedTrigger(voucher: any) {
+  if (!voucher?.guestEmail) return;
+  await sendEmail(
+    voucher.guestEmail,
+    `[${config.brandName}] Your voucher: ${voucher.code}`,
+    voucherIssuedEmail(voucher)
+  );
+}
+
+// ─── Store order lifecycle emails ──────────────────────────────────
+
+function storeOrderItemsTable(items: any[] = []) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return "<p style='margin: 0; color: #6b7280; font-size: 14px;'>No items.</p>";
+  }
+  const rows = items.map((item) => `
+    <tr>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(item.name || "Item")}</td>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px; text-align: center;">${Number(item.quantity || 0)}</td>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px; text-align: right;">${formatMoney(item.price || 0)}</td>
+      <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 700; text-align: right;">${formatMoney(Number(item.price || 0) * Number(item.quantity || 0))}</td>
+    </tr>
+  `).join("");
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid #e5e7eb;">
+          <th align="left" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Item</th>
+          <th align="center" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Qty</th>
+          <th align="right" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Unit</th>
+          <th align="right" style="padding: 8px 0; color: #6b7280; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;">Line</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function storeOrderTotalsRow(total: number, paymentMethod: string) {
+  return row("Payment method", paymentMethod) + row("Total", formatMoney(total));
+}
+
+function storeOrderBaseLayout(action: EmailAction, order: any) {
+  const paymentLabel = order.paymentMethod === "cod" ? "Cash on delivery"
+    : order.paymentMethod === "add-to-bill" ? "Add to room bill"
+    : order.paymentMethod === "gcash" ? "GCash"
+    : "—";
+  return {
+    order,
+    paymentLabel,
+    itemsTable: storeOrderItemsTable(order.items),
+    totalRow: storeOrderTotalsRow(order.totalAmount || 0, paymentLabel),
+    deepLink: `${siteUrl("/intercom")}?room=${encodeURIComponent(order.roomNumber || "")}&order=${encodeURIComponent(order.orderRef || "")}`
+  };
+}
+
+function storeOrderPlacedEmail(order: any) {
+  const { paymentLabel, itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-placed", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} received.`,
+    eyebrow: "Order received",
+    title: "We have your in-room order",
+    intro: `Thank you for ordering from the ${escapeHtml(config.brandName)} in-room store. Your items are being prepared and we'll bring them to your room in about 15 minutes.`,
+    body: `
+      ${callout("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
+      ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "—")}
+        ${row("Room", order.roomNumber ? `Room ${order.roomNumber}` : "—")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Open the chat",
+    ctaUrl: deepLink
+  });
+}
+
+function storeOrderConfirmedEmail(order: any) {
+  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-confirmed", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} confirmed.`,
+    eyebrow: "Order confirmed",
+    title: "Your order is confirmed and being prepared",
+    intro: `Your order from the ${escapeHtml(config.brandName)} in-room store has been confirmed. Our team is preparing your items now.`,
+    body: `
+      ${callout("warm", "In the kitchen", "Our team is preparing your items. You'll get another email when your order is on its way.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "—")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Open the chat",
+    ctaUrl: deepLink
+  });
+}
+
+function storeOrderOutForDeliveryEmail(order: any) {
+  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-out-for-delivery", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} is on its way.`,
+    eyebrow: "Order on the way",
+    title: "Your order is heading to your room",
+    intro: `Your order from the ${escapeHtml(config.brandName)} in-room store is on its way. Please keep your door accessible — our team will be there shortly.`,
+    body: `
+      ${callout("warm", "On the way", "Your order is being delivered to your room. You can track progress in the Intercom chat.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "—")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Open the chat",
+    ctaUrl: deepLink
+  });
+}
+
+function storeOrderDeliveredEmail(order: any) {
+  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-delivered", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} delivered.`,
+    eyebrow: "Order delivered",
+    title: "Your order has arrived — enjoy!",
+    intro: `Your order from the ${escapeHtml(config.brandName)} in-room store has been delivered. We hope you enjoy it.`,
+    body: `
+      ${callout("green", "Delivered", "Your items are in your room. We would love to hear how it went — please share feedback with the front desk.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "—")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Send feedback",
+    ctaUrl: siteUrl("/contact")
+  });
+}
+
+function storeOrderCancelledEmail(order: any) {
+  const alreadyBilled = order.status === "delivered" && order.paymentMethod === "add-to-bill";
+  const refundNote = alreadyBilled
+    ? "This order was already added to your room bill — no refund is needed."
+    : order.paymentMethod === "gcash"
+      ? "If you paid via GCash, the front desk will reach out within 24 hours to coordinate a refund."
+      : "No payment was captured for this order.";
+  const { itemsTable, totalRow } = storeOrderBaseLayout("store-order-cancelled", order);
+  return emailLayout({
+    preheader: `Order ${order.orderRef} cancelled.`,
+    eyebrow: "Order cancelled",
+    title: "Your order has been cancelled",
+    intro: `Your order from the ${escapeHtml(config.brandName)} in-room store has been cancelled. ${escapeHtml(refundNote)}`,
+    body: `
+      ${callout("red", "Cancellation recorded", order.cancellationReason ? `Reason: ${escapeHtml(order.cancellationReason)}` : "No reason was provided.")}
+      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Order ref", order.orderRef || "—")}
+        ${itemsTable}
+        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
+        ${totalRow}
+      </table>`)}
+    `,
+    ctaLabel: "Contact support",
+    ctaUrl: `mailto:${config.supportEmail}`
+  });
+}
+
+export async function sendStoreOrderTrigger(action: EmailAction, order: any) {
+  if (!order?.guestEmail) return;
+  const map: Partial<Record<EmailAction, { subject: string; html: string }>> = {
+    "store-order-placed": {
+      subject: `[${config.brandName}] Order placed: ${order.orderRef || "in-room"}`,
+      html: storeOrderPlacedEmail(order)
+    },
+    "store-order-confirmed": {
+      subject: `[${config.brandName}] Order confirmed: ${order.orderRef || "in-room"}`,
+      html: storeOrderConfirmedEmail(order)
+    },
+    "store-order-out-for-delivery": {
+      subject: `[${config.brandName}] Order on its way: ${order.orderRef || "in-room"}`,
+      html: storeOrderOutForDeliveryEmail(order)
+    },
+    "store-order-delivered": {
+      subject: `[${config.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
+      html: storeOrderDeliveredEmail(order)
+    },
+    "store-order-cancelled": {
+      subject: `[${config.brandName}] Order cancelled: ${order.orderRef || "in-room"}`,
+      html: storeOrderCancelledEmail(order)
+    }
+  };
+  const template = map[action];
+  if (!template) {
+    throw new Error("Unsupported store order email trigger.");
+  }
+  await sendEmail(order.guestEmail, template.subject, template.html);
+}
+
+// ─── Staff notifications ──────────────────────────────────────────
+
+function staffNewBookingEmail(booking: any) {
+  return emailLayout({
+    preheader: `New online booking ${booking.bookingRef}.`,
+    eyebrow: "New online booking",
+    title: "A new online booking just came in",
+    intro: `A new online booking was created. Review the details and follow up with the guest as needed.`,
+    body: `
+      ${callout("warm", "Action needed", "Verify the payment method and any discount / corporate code with the guest. Confirm the booking once verified.")}
+      ${card("Booking details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest", booking.guestName)}
+        ${row("Email", booking.guestEmail)}
+        ${row("Phone", booking.guestPhone || "—")}
+        ${row("Room", booking.roomNumber ? `Room ${booking.roomNumber} (${booking.roomType || ""})` : "—")}
+        ${row("Check-in", `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`)}
+        ${row("Check-out", `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`)}
+        ${row("Nights", `${booking.numNights || 0} night(s)`)}
+        ${row("Payment method", booking.paymentMethod || "—")}
+        ${row("Total", formatMoney(booking.totalPrice))}
+        ${row("Source", booking.source || "online")}
+        ${booking.specialRequests ? row("Special requests", escapeHtml(booking.specialRequests)) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Review booking",
+    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`)
+  });
+}
+
+function staffNewPaymentEmail(booking: any, payment: any) {
+  const proofUrl = payment?.paymentProofUrl || booking.paymentProofUrl || "";
+  return emailLayout({
+    preheader: `New payment proof for ${booking.bookingRef}.`,
+    eyebrow: "New payment proof",
+    title: "A guest uploaded a payment proof",
+    intro: `A guest uploaded a payment proof for an existing booking. Review the screenshot and verify the payment.`,
+    body: `
+      ${callout("warm", "Verify payment", "Open the payment screenshot, confirm the amount matches the booking total, and update the booking to payment-confirmed once verified.")}
+      ${card("Payment and booking", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest", booking.guestName)}
+        ${row("Amount", formatMoney(payment?.amount || booking.totalPrice))}
+        ${row("Method", payment?.method || booking.paymentMethod || "—")}
+        ${row("Note", payment?.note ? escapeHtml(payment.note) : "—")}
+        ${row("Total due", formatMoney(booking.totalPrice))}
+        ${proofUrl ? row("Screenshot", `<a href="${escapeHtml(proofUrl)}" style="color: ${config.colors.primary}; text-decoration: none;">View screenshot</a>`) : ""}
+      </table>`)}
+    `,
+    ctaLabel: "Review payment",
+    ctaUrl: adminUrl(`/bookings?ref=${encodeURIComponent(booking.bookingRef || "")}`)
+  });
+}
+
+export async function sendStaffNewBookingTrigger(booking: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] New online booking: ${booking.bookingRef}`,
+    staffNewBookingEmail(booking)
+  );
+}
+
+export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] New payment proof: ${booking.bookingRef}`,
+    staffNewPaymentEmail(booking, payment)
+  );
+}
+
 async function getTomorrowConfirmedBookings() {
   const nowLocal = new Date(new Date().toLocaleString("en-US", { timeZone: config.timezone }));
   const start = new Date(nowLocal);
@@ -506,6 +835,24 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
         notes: req.body?.notes
       };
       await sendEarlyCheckinRequestTrigger(booking, request);
+      return res.status(200).json({ success: true });
+    }
+
+    // Per W4.4 / decision #104: voucher-issued is a staff-triggered
+    // re-send path. The normal addVoucher flow fires the email
+    // inline from the AdminContext; this endpoint exists for the
+    // "Email to guest" action on an existing voucher. The
+    // recipient (voucher.guestEmail) is server-controlled from
+    // the voucher doc.
+    if (action === "voucher-issued") {
+      if (!(req as any).staff?.success) {
+        return res.status(401).json({ success: false, error: "Staff authentication is required to issue voucher emails." });
+      }
+      const voucherInput = req.body?.voucher;
+      if (!voucherInput?.code || !voucherInput?.guestEmail) {
+        return res.status(400).json({ success: false, error: "Voucher code and guestEmail are required." });
+      }
+      await sendVoucherIssuedTrigger(voucherInput);
       return res.status(200).json({ success: true });
     }
 
