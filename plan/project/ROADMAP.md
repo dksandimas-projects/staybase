@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 16, 2026 (closed Phase 11.6 Batch 15 — room block structured + store stock on confirmed)
+> Last updated: June 16, 2026 (closed Phase 11.6 Batches 16-20 — all audit items shipped, 50/50 Implemented)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -416,7 +416,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **24 of 51 decisions + 2 launch-gate SEV-1s + 1 SEV-1 + 4 polish SEV-1s + 1 SEV-1 + 1 SEV-3 + 2 SEV-1s + 1 SEV-1 + 1 SEV-3 + 1 SEV-2 + 1 launch-gate SEV-2 + 1 launch-gate SEV-2 + 1 SEV-1 + 2 SEV-2s Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5 + 4 from Phase 11.6 Batch 6 + 2 from Phase 11.6 Batch 7 + 2 from Phase 11.6 Batch 8 + 1 from Phase 11.6 Batch 9 + 1 from Phase 11.6 Batch 10 + 1 from Phase 11.6 Batch 11 + 1 from Phase 11.6 Batch 12 + 1 from Phase 11.6 Batch 13 + 1 from Phase 11.6 Batch 14 + 2 from Phase 11.6 Batch 15). 21 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 + Batch 5 + Batch 6 + Batch 7 + Batch 8 + Batch 9 + Batch 10 + Batch 11 + Batch 12 + Batch 13 + Batch 14 + Batch 15 sections below for the 35 closed. All five launch-gate items from the Top-5 audit are closed, and all 23 original SEV-1s from the audit are now shipped.
+> **Current state** (as of 2026-06-16): **All 50 audit items Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5 + 4 from Phase 11.6 Batch 6 + 2 from Phase 11.6 Batch 7 + 2 from Phase 11.6 Batch 8 + 1 from Phase 11.6 Batch 9 + 1 from Phase 11.6 Batch 10 + 1 from Phase 11.6 Batch 11 + 1 from Phase 11.6 Batch 12 + 1 from Phase 11.6 Batch 13 + 1 from Phase 11.6 Batch 14 + 2 from Phase 11.6 Batch 15 + 2 from Phase 11.6 Batch 16 + 2 from Phase 11.6 Batch 17 + 6 from Phase 11.6 Batch 18 + 6 from Phase 11.6 Batch 19 + 2 from Phase 11.6 Batch 20). 0 decisions remain unimplemented. All 23 SEV-1s + all 5 Top-5 launch-gates + all 9 SEV-2s + 12 Wave 3 spec closures + 2 Wave 4 sub-items are closed. **The audit is fully shipped on dev.**
 
 ### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
@@ -639,6 +639,49 @@ Tests:
   - **#80** `handleCreateStoreOrder` no longer contains the legacy `itemData.stock - orderItem.quantity` decrement and initializes `stockDecrementedAt: null`; `handleCancelStoreOrder` only restores when `!orderData.stockRestoredAt && orderData.stockDecrementedAt`; `AdminContext.updateStoreOrderStatus` has the new `orderData.status === "placed" && !orderData.stockDecrementedAt` confirmed branch that writes `stockDecrementedAt: serverTimestamp()`; the `StoreOrder` type exposes `stockDecrementedAt: string | null`.
 - Existing 176/177 `guest-app/api/__tests__` tests still pass (only the pre-existing `store-confirm-order` failure remains, out of scope).
 
+### Phase 11.6 Batch 16 — #75 (no-op) + #76 (contact form wired) (2 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-16`. Closes the last two decided-but-unimplemented non-Wave-3 audit items.
+
+- [x] **#75 — includedInRoomRate is dropped** — the field was never seeded, never read, never documented. A regression test scans `guest-app/src` + `shared` + `admin-app/src` and fails if any source file references the field.
+- [x] **#76 — Contact form wired to `/api/contact/inquiry`** — the public `/contact` page was a `setTimeout` stub. New `guest-app/api/handlers/contact.ts` + `handleCreateContactInquiry` (validates name + email + subject + message, basic spam filter, writes to the `contactInquiries` collection, fires a staff email via the new `sendContactInquiryTrigger` + `contactInquiryEmail` layout). Dispatched in `[...route].ts` at `domain='contact' action='inquiry'` behind the same 5/min rate limit, honeypot short-circuit, and Turnstile check as `/api/corporate/inquiry`. `ContactPage.handleSubmit` now POSTs to the real endpoint, surfaces a `role='alert'` error state on failure, clears the form on success. New Firestore rule: `match /contactInquiries/{inquiryId}` allows staff reads + staff creates.
+- 11 regression tests in `admin-app/src/__tests__/batch-16-contact-includedinroomrate.test.ts`.
+
+### Phase 11.6 Batch 17 — #83 (cron reminderSentAt) + #100 (corporate no-promo) (2 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-17`.
+
+- [x] **#83 — Cron reminderSentAt idempotency** — `/api/email/checkin-reminder` previously re-sent the reminder on every Vercel cron re-run. The handler now filters out bookings that already have `reminderSentAt` set, sends for the remaining ones, writes the stamp on each booking it sent to, and reports `{ sent, skipped }` in the response. `Booking` type + admin `Booking` type + admin snapshot mapper + `BookingsPage` walk-in form all expose `reminderSentAt: string | null`. The existing `email-cron` test got a second test case for the skip path + the mock learned `.doc().update()`.
+- [x] **#100 — Corporate bookings never accept promo vouchers** — `handleCreateBooking` now gates the entire voucher branch on `!corporateDetails.isCorporate`. The booking doc is always written with `voucherCode: ''` + `voucherDiscount: 0` when `isCorporate`, regardless of what the client supplied. The walk-in handler is already a no-op (voucherCode: '' hard-coded), so no change there.
+- 10 regression tests in `admin-app/src/__tests__/batch-17-cron-corporate.test.ts`.
+
+### Phase 11.6 Batch 18 — Wave 3 batch 1 (W3.1-W3.6) (6 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-18`.
+
+- [x] **W3.1** — `SETTINGS.md` header now cross-references Rates for booking payment methods.
+- [x] **W3.2** — Spark Rewards tab is admin-only with an explicit `isAdmin` guard. Non-admins now see an amber 'Admin-only section' panel.
+- [x] **W3.3** — Room types are now sourced from `settings/hotelConfig.roomTypes` (Firestore) instead of `localStorage`. The save handler writes the full array back. `addRoomType` / `updateRoomType` / `deleteRoomType` are now async.
+- [x] **W3.4** — Reports "Download Full Backup" is admin-gated with a page-level `isAdmin` check. The XLSX backup button exports Bookings + StoreOrders sheets.
+- [x] **W3.5** — Reports "Avg. Length of Stay" is replaced with "Avg. Occupancy" + a "Busiest Room Type" card.
+- [x] **W3.6** — AboutPage Brand Promise banner is kept (already shipped).
+- 17 regression tests in `admin-app/src/__tests__/batch-18-wave3-batch1.test.ts`.
+
+### Phase 11.6 Batch 19 — Wave 3 batch 2 (W3.7-W3.12) (6 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-19`.
+
+- [x] **W3.7** — CorporateStaysPage "Integration Process" + "Retreat CTA" sections are kept.
+- [x] **W3.8** — PrivacyPage + TermsPage now use the global `<Navbar />` instead of a custom thin header.
+- [x] **W3.9** — PrivacyPage §3 heading renamed from "Data Retention Policy" to "How Long We Keep It".
+- [x] **W3.10** — `config.rewardsName` added; the RewardsLandingPage hero chip interpolates `{config.rewardsName}`.
+- [x] **W3.11** — `config.termsLastUpdated` added; TermsPage renders `{config.termsLastUpdated}` instead of a hard-coded date.
+- [x] **W3.12** — NotFoundPage renders a tiny `<p>v{VERSION}</p>` badge.
+- 14 regression tests in `admin-app/src/__tests__/batch-19-wave3-batch2.test.ts`.
+
+### Phase 11.6 Batch 20 — Wave 4 (W4.2 + W4.3) (2 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-20`.
+
+- [x] **W4.2** — Vite build-time transform plugin that substitutes the static `<meta>` tags in `index.html` with values from `hotel.config.ts` (brandName, domain, ogImage). The plugin is added to both apps' `vite.config.ts` (guest-app + admin-app).
+- [x] **W4.3** — `plan/docs/WHITE-LABEL.md` schema is synced to the actual fields in `hotel.config.ts`: `rewardsName` (W3.10), `termsLastUpdated` (W3.11), roomTypes note (W3.3 migration to Firestore).
+- 13 regression tests in `admin-app/src/__tests__/batch-20-wave4.test.ts`.
+
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
 - ~18 remaining SEV-1s from the audit (not in the launch-readiness top 5)
@@ -821,12 +864,12 @@ Tests:
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 50 | 35 | 15 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed). 35/50 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4 + 1 Phase 11.6 Batch 5 + 4 Phase 11.6 Batch 6 + 2 Phase 11.6 Batch 7 + 2 Phase 11.6 Batch 8 + 1 Phase 11.6 Batch 9 + 1 Phase 11.6 Batch 10 + 1 Phase 11.6 Batch 11 + 1 Phase 11.6 Batch 12 + 1 Phase 11.6 Batch 13 + 1 Phase 11.6 Batch 14 + 2 Phase 11.6 Batch 15. **All 5 Top-5 launch-blockers and all 23 original SEV-1s from the audit are now closed.** |
+| 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **329** | **284** | **45** |
+| **Total** | **329** | **296** | **33** |
 
-*Phase 11.5 is now 35/50 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) from Batch 15 are shipped. **All 5 Top-5 launch-blockers and all 23 original SEV-1s from the audit are now closed.** 15 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (329) is unchanged from Batch 10 (the Batch 11–15 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
+*Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 
 ---
 
