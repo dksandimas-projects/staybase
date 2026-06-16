@@ -1,12 +1,14 @@
 export const config = {
   hotelId: "spark-inn",
   brandName: "spark inn",
+  rewardsName: "Spark Rewards",
   legalName: "Spark Inn Hotel Corp",
   tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
   brandPromise: "Peaceful, consistent stays shaped by genuine, intentional hospitality.",
   bookingRefPrefix: "SI",
   memberNumberPrefix: "SR",
   storeName: "Spark Essentials",
+  termsLastUpdated: "June 16, 2026",
   colors: {
     primary: "#EA8A1A",
     primaryDark: "#C4720E",
