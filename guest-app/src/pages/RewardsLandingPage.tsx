@@ -108,7 +108,7 @@ export function RewardsLandingPage() {
           variants={fadeUp}
         >
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary-light mb-6 backdrop-blur-sm">
-            <Sparkles size={14} /> Spark Rewards Loyalty Program
+            <Sparkles size={14} /> {config.rewardsName} Loyalty Program
           </div>
           <h1 className="font-heading text-4xl leading-none text-white sm:text-7xl lg:text-8xl tracking-tight">
             Earn Every Stay
