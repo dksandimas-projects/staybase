@@ -416,7 +416,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **18 of 51 decisions + 1 launch-gate SEV-1 + 1 launch-gate SEV-1 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4). 33 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 sections below for the 18 closed.
+> **Current state** (as of 2026-06-16): **19 of 51 decisions + 2 launch-gate SEV-1s + 1 launch-gate SEV-1 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5). 32 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 + Batch 5 sections below for the 19 closed.
 
 ### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
@@ -476,6 +476,11 @@ Branch: `feature/phase-11.6-batch-3`. Ships the launch-gate UI for staff provisi
 Branch: `feature/phase-11.6-batch-4`. Ships the staff-side booking receipt PDF for the front desk.
 
 - [x] **S7.1** (commit `<pending>`) **Add `printBookingReceiptPDF()` to `BookingsPage.tsx` + drawer button.** Closes the launch gate from `AUDIT-E2E-2026-06-15.md` Top 5 launch-blockers: front desk had no way to print/email a booking summary. Implements the spec in `plan/features/EMAIL-PDF-STORAGE.md §Booking Confirmation Receipt` end-to-end: header (brand + title + booking ref + generated-on), guest info, stay info, pricing breakdown (subtotal, Senior/PWD discount, voucher, Spark Rewards points redemption, total), special requests, payments-collected section (date + method + amount per payment, total collected, outstanding balance — green if settled, red if outstanding), or "Payment Method + Amount Due" fallback when no payments are recorded, and a BIR-receipt disclaimer footer. Client-side jsPDF, A4, no server round-trip; opens in a new tab. 13 regression tests in `admin-app/src/__tests__/booking-receipt-pdf.test.ts` cover the builder, every required section, and the drawer button. **Closes decision #82 + audit S7.1 launch-gate SEV-1.**
+
+### Phase 11.6 Batch 5 — Compliance: RA 10173 account erasure (1 fix, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-5`. Closes the audit SEV-1 compliance gap on account deletion.
+
+- [x] **S2.3** (commit `<pending>`) **Add server-side `/api/members/delete-account` flow + anonymized booking audit trail.** Closes `AUDIT-E2E-2026-06-15.md` SEV-1 #S2.3: `ProfilePage.handleDeleteAccount` only deleted the member doc + Auth user; `pointsHistory` subcollection, `bookings.memberId`, and the booking PII all remained — failing the RA 10173 right to erasure. Files: `guest-app/api/handlers/members.ts` (new `handleEraseMemberAccount` — Admin SDK transaction: for every booking with `memberId == uid`, write a no-PII audit record to `bookings/audit/records/{id}` then scrub `memberId`/`guestName`/`guestEmail`/`guestPhone` from the booking; flag the member doc `isErased: true` with all PII blanked), `guest-app/api/[...route].ts` (new route dispatch with 5/min rate limit, signed-in guest auth, `confirmation: "erase-my-account"` body requirement), `firebase/firestore.rules` (new `bookings/audit/records/{id}` rule: staff-read, server-write-only), `guest-app/src/pages/ProfilePage.tsx` (handleDeleteAccount now POSTs to the API instead of touching Firestore + Auth client-side; confirmation modal copy now explains anonymization + RA 11862 retention carve-out), `guest-app/src/pages/TermsPage.tsx` (new §9 "Data Retention and Erasure" section explains the flow + the 6-month guest-registry retention per RA 11862), `plan/docs/API-ROUTES.md` (new route row + audit collection rule + "server-only" rationale), `plan/docs/SECURITY.md` (new "Member Account Erasure Flow" section documenting the 6-step algorithm and the new Firestore rule). 8 regression tests in `guest-app/api/__tests__/members-delete-account.test.ts` cover auth, confirmation string, missing member, audit + anonymization per booking, pointsHistory batch delete, member doc + auth user delete, auth/user-not-found idempotency, and response counts. **Closes decision #49 (existing) + audit S2.3 SEV-1.**
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -659,12 +664,12 @@ Branch: `feature/phase-11.6-batch-4`. Ships the staff-side booking receipt PDF f
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 39 | 18 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF). 18/39 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4. |
+| 11.5 — Audit Fixes & Launch-Readiness | 40 | 19 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure). 19/40 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4 + 1 Phase 11.6 Batch 5. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **318** | **267** | **51** |
+| **Total** | **319** | **268** | **51** |
 
-*Phase 11.5 is now 18/39 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (318) = previous total (317) + Phase 11.5 Batch 4 addition (1).*
+*Phase 11.5 is now 19/40 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (319) = previous total (318) + Phase 11.5 Batch 5 addition (1).*
 
 ---
 

@@ -13,7 +13,7 @@ import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption, handleEraseMemberAccount } from "./handlers/members";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
@@ -400,6 +400,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleUndoMemberPointsRedemption(req, res);
+  }
+
+  if (domain === "members" && action === "delete-account" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many account deletion requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+    return await handleEraseMemberAccount(req, res);
   }
 
   if (domain === "admin" && action === "create-staff" && req.method === "POST") {
