@@ -171,6 +171,11 @@ export interface Voucher {
   isActive: boolean;
   createdBy: string;
   createdAt: string;
+  // Per W4.4 / decision #104: when a voucher is issued to a
+  // specific guest, their email is captured here and the
+  // voucher-issued email is fired (server-rendered, with the
+  // code in a large monospace block).
+  guestEmail: string | null;
 }
 
 export interface CorporateCode {
@@ -808,6 +813,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             isActive: data.isActive !== false,
             createdBy: data.createdBy || "",
             createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
+            guestEmail: data.guestEmail || null,
           });
         });
 
@@ -831,6 +837,39 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         createdBy: staff?.uid || "unknown",
         createdAt: Timestamp.now(),
       });
+
+      // Per W4.4 / decision #104: when a voucher is issued with
+      // a non-empty guestEmail, fire the voucher-issued email so
+      // the guest knows the code. The server validates the email
+      // + room types and renders the template; the client cannot
+      // override the recipient.
+      if (voucher.guestEmail && voucher.guestEmail.trim()) {
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+            ? "http://localhost:3000"
+            : import.meta.env.VITE_GUEST_APP_URL || "";
+          await fetch(`${baseUrl.replace(/\/$/, "")}/api/email/voucher-issued`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": token ? `Bearer ${token}` : ""
+            },
+            body: JSON.stringify({
+              voucher: {
+                code: voucher.code,
+                discountType: voucher.discountType,
+                discountValue: voucher.discountValue,
+                expiresAt: voucher.expiresAt,
+                applicableRoomTypes: voucher.applicableRoomTypes || [],
+                guestEmail: voucher.guestEmail
+              }
+            })
+          });
+        } catch (emailErr) {
+          console.error("Failed to send voucher-issued email:", emailErr);
+        }
+      }
     } catch (error) {
       console.error("Error adding voucher:", error);
     }

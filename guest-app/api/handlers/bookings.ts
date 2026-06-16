@@ -1,5 +1,5 @@
 import { adminDb } from "../lib/firebase-admin";
-import { sendBookingTrigger } from "./email";
+import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
 import { validateCorporateCode } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
@@ -430,6 +430,28 @@ export async function handleCreateBooking(req: any, res: any) {
       console.error("Failed to send acknowledgment email:", emailErr);
     }
 
+    // Per W4.4 / decision #104: also notify the staff team of the
+    // new online booking. Source is "online" (corporate / walkin
+    // bookings take a different path with their own notifications).
+    // Persist a timestamp on the booking so a re-fire via the
+    // /api/email/staff-new-booking endpoint won't double-send.
+    try {
+      if (!computedData.emailNotificationsSent?.staffNewBooking) {
+        await adminDb.collection("bookings").doc(bookingId).update({
+          "emailNotificationsSent.staffNewBooking": new Date()
+        });
+        await sendStaffNewBookingTrigger({
+          ...computedData,
+          bookingRef: finalBookingRef,
+          guestEmail: computedData.email,
+          paymentMethod,
+          source: computedData.source || "online"
+        });
+      }
+    } catch (staffEmailErr) {
+      console.error("Failed to send staff-new-booking email:", staffEmailErr);
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -825,6 +847,21 @@ export async function handleAddPayment(req: any, res: any) {
 
       if (fullyPaid && isConfirmableStatus) {
         await sendBookingTrigger("payment-confirmed", bookingData);
+      }
+
+      // Per W4.4 / decision #104: notify staff when a guest
+      // uploads a payment proof. The `paymentProofUrl` lives on
+      // the booking doc when the guest uploads via Step 3.
+      // Idempotent via the emailNotificationsSent.staffNewPayment
+      // timestamp — only fire once per booking.
+      if (bookingData.paymentProofUrl && !bookingData.emailNotificationsSent?.staffNewPayment) {
+        await bookingRef.update({
+          "emailNotificationsSent.staffNewPayment": new Date()
+        });
+        await sendStaffNewPaymentTrigger(
+          { ...bookingData, bookingRef: bookingData.bookingRef },
+          { ...paymentRecord, paymentProofUrl: bookingData.paymentProofUrl }
+        );
       }
     } catch (emailErr) {
       console.error("Failed to send payment confirmation email:", emailErr);

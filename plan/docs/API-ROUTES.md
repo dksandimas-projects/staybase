@@ -49,6 +49,14 @@ Guest member routes require a valid Firebase ID token for the signed-in guest. T
 | `/api/email/discount-rejected` | Staff rejects Senior/PWD discount ID | Guest |
 | `/api/email/corporate-inquiry` | New corporate inquiry submitted | Staff (admin email) |
 | `/api/email/early-checkin-request` | Spark Rewards member requests early check-in for an upcoming booking (from My Rewards page or Intercom) | Staff (admin email) |
+| `/api/email/voucher-issued` | Staff re-send path for the voucher-issued template. The normal addVoucher flow fires the email inline from the AdminContext; this endpoint exists for the "Email to guest" action on an existing voucher. Body: `{ voucher: { code, discountType, discountValue, expiresAt, applicableRoomTypes, guestEmail } }`. Recipient (`voucher.guestEmail`) is server-controlled. | Staff |
+| `/api/email/store-order-placed` | Triggered by `handleCreateStoreOrder` after the transaction commits; not exposed as a public endpoint. Recipient is looked up server-side from `bookings/{bookingId}.guestEmail`. | Guest (server-resolved) |
+| `/api/email/store-order-confirmed` | Triggered by `handleConfirmStoreOrder` when stock is decremented (DECISIONS-FEATURES.md #80). | Guest (server-resolved) |
+| `/api/email/store-order-out-for-delivery` | Triggered by `updateStoreOrderStatus` when status flips to `out-for-delivery`. | Guest (server-resolved) |
+| `/api/email/store-order-delivered` | Triggered by `updateStoreOrderStatus` when status flips to `delivered`. | Guest (server-resolved) |
+| `/api/email/store-order-cancelled` | Triggered by `handleCancelStoreOrder` (guest-initiated) OR `updateStoreOrderStatus` when admin cancels. | Guest (server-resolved) |
+| `/api/email/staff-new-booking` | Triggered by `handleCreateBooking` (not walk-in) after the transaction commits. Recipient is `ADMIN_EMAIL` (env `RESEND_ADMIN_EMAIL`, default `config.supportEmail`). | Staff (server-resolved) |
+| `/api/email/staff-new-payment` | Triggered by `handleAddPayment` only when `paymentProofUrl` is set on the booking. Idempotent via `emailNotificationsSent.staffNewPayment` timestamp. | Staff (server-resolved) |
 
 All email routes use Resend. Templates are defined server-side. See `plan/features/EMAIL-PDF-STORAGE.md` for full email flow details.
 
