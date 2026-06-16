@@ -71,9 +71,14 @@ export function SettingsPage() {
 
   // 3. Rewards Config states
   const [pointsEnabled, setPointsEnabled] = useState(rewardsConfig.pointsEnabled);
+  const [earningMode, setEarningMode] = useState<"per-booking" | "per-spend">(rewardsConfig.earningMode);
+  const [pointsPerBooking, setPointsPerBooking] = useState(String(rewardsConfig.pointsPerBooking));
   const [pointsPerHundred, setPointsPerHundred] = useState(String(rewardsConfig.pointsPerHundred));
+  const [pointsRedemptionRate, setPointsRedemptionRate] = useState(String(rewardsConfig.pointsRedemptionRate));
   const [memberDiscountEnabled, setMemberDiscountEnabled] = useState(rewardsConfig.memberDiscountEnabled);
   const [memberDiscountPct, setMemberDiscountPct] = useState(String(rewardsConfig.memberDiscountPct));
+  const [rewardsName, setRewardsName] = useState(rewardsConfig.rewardsName);
+  const [rewardsTagline, setRewardsTagline] = useState(rewardsConfig.rewardsTagline);
 
   // 4. Breakfast Config states
   const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
@@ -126,7 +131,16 @@ export function SettingsPage() {
     setCancellationPolicy(websiteContent.cancellationPolicy || "");
     setHouseRules(websiteContent.houseRules || "");
     setPrivacyPolicyLastUpdated(websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || "");
-  }, [storeConfig, hotelConfig, websiteContent]);
+    setPointsEnabled(rewardsConfig.pointsEnabled !== false);
+    setEarningMode(rewardsConfig.earningMode === "per-booking" ? "per-booking" : "per-spend");
+    setPointsPerBooking(String(rewardsConfig.pointsPerBooking ?? 50));
+    setPointsPerHundred(String(rewardsConfig.pointsPerHundred ?? 10));
+    setPointsRedemptionRate(String(rewardsConfig.pointsRedemptionRate ?? 100));
+    setMemberDiscountEnabled(rewardsConfig.memberDiscountEnabled !== false);
+    setMemberDiscountPct(String(rewardsConfig.memberDiscountPct ?? 10));
+    setRewardsName(rewardsConfig.rewardsName || "Spark Rewards");
+    setRewardsTagline(rewardsConfig.rewardsTagline || "");
+  }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
@@ -154,9 +168,14 @@ export function SettingsPage() {
     e.preventDefault();
     await updateSettings("rewardsConfig", {
       pointsEnabled,
+      earningMode,
+      pointsPerBooking: parseFloat(pointsPerBooking) || 0,
       pointsPerHundred: parseFloat(pointsPerHundred) || 0,
+      pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
       memberDiscountEnabled,
-      memberDiscountPct: parseFloat(memberDiscountPct) || 0
+      memberDiscountPct: parseFloat(memberDiscountPct) || 0,
+      rewardsName: rewardsName.trim() || "Spark Rewards",
+      rewardsTagline: rewardsTagline.trim()
     });
   };
 
@@ -569,8 +588,37 @@ export function SettingsPage() {
           {activeTab === "rewards" && (
             <form onSubmit={handleSaveRewards} className="space-y-6 text-xs">
               <div>
-                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Spark Rewards Modifiers</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">Fine-tune loyalty point distributions and member discount rules.</p>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">{rewardsName} Modifiers</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Fine-tune loyalty point distributions, redemption rate, and member discount rules.</p>
+              </div>
+
+              {/* Program Identity */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Program Identity</h4>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Program Display Name
+                    <input
+                      type="text"
+                      required
+                      value={rewardsName}
+                      onChange={(e) => setRewardsName(e.target.value)}
+                      placeholder="Spark Rewards"
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Program Tagline
+                    <input
+                      type="text"
+                      value={rewardsTagline}
+                      onChange={(e) => setRewardsTagline(e.target.value)}
+                      placeholder="Earn points on completed stays, unlock member-only perks."
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                </div>
               </div>
 
               {/* Toggles */}
@@ -602,18 +650,82 @@ export function SettingsPage() {
                       memberDiscountEnabled ? "translate-x-5" : "translate-x-0"
                     }`} />
                   </button>
-                  Enable Member Base Room 10% Discount
+                  Enable Member Base Room Discount
                 </label>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              {/* Earning Mode */}
+              <div className="space-y-3">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Earning Mode</h4>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
+                    earningMode === "per-spend"
+                      ? "border-primary bg-primary/5"
+                      : "border-gray-200 bg-white hover:border-gray-300"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="earningMode"
+                      value="per-spend"
+                      checked={earningMode === "per-spend"}
+                      onChange={() => setEarningMode("per-spend")}
+                      disabled={!pointsEnabled}
+                      className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
+                    />
+                    <div>
+                      <p className="text-xs font-bold text-gray-800">Per ₱100 spent</p>
+                      <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards points based on booking subtotal. Best for properties with wide price ranges.</p>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
+                    earningMode === "per-booking"
+                      ? "border-primary bg-primary/5"
+                      : "border-gray-200 bg-white hover:border-gray-300"
+                  }`}>
+                    <input
+                      type="radio"
+                      name="earningMode"
+                      value="per-booking"
+                      checked={earningMode === "per-booking"}
+                      onChange={() => setEarningMode("per-booking")}
+                      disabled={!pointsEnabled}
+                      className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
+                    />
+                    <div>
+                      <p className="text-xs font-bold text-gray-800">Flat per completed stay</p>
+                      <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards a fixed number of points per stay regardless of total. Simpler for members to predict.</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Points Granted per ₱100 Spent
+                  {earningMode === "per-booking" ? "Points per Completed Stay" : "Points Granted per ₱100 Spent"}
                   <input
                     type="number"
                     required
-                    value={pointsPerHundred}
-                    onChange={(e) => setPointsPerHundred(e.target.value)}
+                    min="0"
+                    value={earningMode === "per-booking" ? pointsPerBooking : pointsPerHundred}
+                    onChange={(e) =>
+                      earningMode === "per-booking"
+                        ? setPointsPerBooking(e.target.value)
+                        : setPointsPerHundred(e.target.value)
+                    }
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Points per ₱1 Redemption Rate
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={pointsRedemptionRate}
+                    onChange={(e) => setPointsRedemptionRate(e.target.value)}
                     disabled={!pointsEnabled}
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
                   />
@@ -624,6 +736,8 @@ export function SettingsPage() {
                   <input
                     type="number"
                     required
+                    min="0"
+                    max="100"
                     value={memberDiscountPct}
                     onChange={(e) => setMemberDiscountPct(e.target.value)}
                     disabled={!memberDiscountEnabled}
@@ -631,6 +745,11 @@ export function SettingsPage() {
                   />
                 </label>
               </div>
+
+              <p className="text-[10px] leading-relaxed text-gray-500">
+                Redemption rate is the number of points required to redeem ₱1 at booking checkout (server reads <code>settings/rewardsConfig.pointsRedemptionRate</code>).
+                Earning mode is the server-side branch in <code>handleCreateBooking</code> that decides whether to award by subtotal or by flat count.
+              </p>
 
               <div className="pt-2 border-t border-gray-150 flex justify-end">
                 <button
