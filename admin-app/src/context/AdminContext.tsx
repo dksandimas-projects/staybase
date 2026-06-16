@@ -1720,6 +1720,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     hotelStory: "A hospitality story built on consistency...",
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
+    roomTypes: [...DEFAULT_ROOM_TYPES],
     bookingPaymentMethods: [
       { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "" },
       { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "" },
@@ -1822,35 +1823,45 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Room Types State
+  // Room Types State — sourced from settings/hotelConfig.roomTypes
+  // (per W3.3). The hotelConfig onSnapshot writes to the local
+  // state when the field is present; the admin save handler below
+  // persists back to Firestore.
   const [roomTypes, setRoomTypes] = useState<{ value: string; label: string; shortLabel: string }[]>(() => {
-    const saved = localStorage.getItem("sim_admin_room_types");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
     return [...DEFAULT_ROOM_TYPES];
   });
 
-  const saveRoomTypes = (newTypes: typeof roomTypes) => {
+  useEffect(() => {
+    if (Array.isArray(hotelConfig.roomTypes) && hotelConfig.roomTypes.length > 0) {
+      setRoomTypes(hotelConfig.roomTypes);
+    }
+  }, [hotelConfig.roomTypes]);
+
+  const saveRoomTypes = async (newTypes: typeof roomTypes) => {
     setRoomTypes(newTypes);
-    localStorage.setItem("sim_admin_room_types", JSON.stringify(newTypes));
+    try {
+      await updateDoc(doc(db, "settings", "hotelConfig"), {
+        roomTypes: newTypes,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Failed to save room types to Firestore:", error);
+    }
   };
 
-  const addRoomType = (rt: { value: string; label: string; shortLabel: string }) => {
+  const addRoomType = async (rt: { value: string; label: string; shortLabel: string }) => {
     const updated = [...roomTypes, rt];
-    saveRoomTypes(updated);
+    await saveRoomTypes(updated);
   };
 
-  const updateRoomType = (value: string, updates: Partial<{ label: string; shortLabel: string }>) => {
+  const updateRoomType = async (value: string, updates: Partial<{ label: string; shortLabel: string }>) => {
     const updated = roomTypes.map(t => t.value === value ? { ...t, ...updates } : t);
-    saveRoomTypes(updated);
+    await saveRoomTypes(updated);
   };
 
-  const deleteRoomType = (value: string) => {
+  const deleteRoomType = async (value: string) => {
     const updated = roomTypes.filter(t => t.value !== value);
-    saveRoomTypes(updated);
+    await saveRoomTypes(updated);
   };
 
   // Staff Accounts — live from `guests/{uid}` where role is staff (front-desk | admin).

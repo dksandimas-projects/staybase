@@ -584,8 +584,9 @@ export function SettingsPage() {
             </form>
           )}
 
-          {/* TAB 3: REWARDS CONFIG */}
+          {/* TAB 3: REWARDS CONFIG — admin-only (per W3.2) */}
           {activeTab === "rewards" && (
+            isAdmin ? (
             <form onSubmit={handleSaveRewards} className="space-y-6 text-xs">
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">{rewardsName} Modifiers</h3>
@@ -761,6 +762,12 @@ export function SettingsPage() {
                 </button>
               </div>
             </form>
+            ) : (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+                <p className="font-semibold">Admin-only section</p>
+                <p className="mt-1 leading-relaxed">The {rewardsName} settings are restricted to admin accounts. Ask a hotel owner to make loyalty changes.</p>
+              </div>
+            )
           )}
 
           {/* TAB 4: BREAKFAST MENU CONFIG */}
