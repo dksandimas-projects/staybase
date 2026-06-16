@@ -2,11 +2,14 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAdmin, IntercomMessage, StoreOrder } from "../context/AdminContext";
 import { formatPrice } from "../utils/format";
-import { 
+import {
   MessageSquare, Send, PhoneOff, Phone,
-  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink
+  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink,
+  Bell, BellOff
 } from "lucide-react";
 import config from "@config";
+
+const NOTIFICATION_MUTED_KEY = "intercom-notification-muted";
 
 const paymentLabels: Record<StoreOrder["paymentMethod"], string> = {
   cod: "Cash on delivery",
@@ -95,12 +98,25 @@ export function IntercomInboxPage() {
   const [replyText, setReplyText] = useState("");
   const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
   const [isNotificationAudioUnlocked, setIsNotificationAudioUnlocked] = useState(false);
+  // Per audit W2.9 / decision #97: per-staff mute preference stored
+  // in localStorage so the inbox stays quiet across reloads. Defaults
+  // to `false` (sounds on). The header exposes a Bell / BellOff
+  // toggle so the user can flip it without leaving the page.
+  const [isNotificationMuted, setIsNotificationMuted] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(NOTIFICATION_MUTED_KEY) === "true";
+  });
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const notificationBufferRef = useRef<AudioBuffer | null>(null);
   const notificationInitializedRef = useRef(false);
   const previousUnreadGuestIdsRef = useRef<Set<string>>(new Set());
   const previousRingingCallKeyRef = useRef("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(NOTIFICATION_MUTED_KEY, isNotificationMuted ? "true" : "false");
+  }, [isNotificationMuted]);
 
   // Call timer simulation state
   const [callDuration, setCallDuration] = useState(0);
@@ -278,13 +294,13 @@ export function IntercomInboxPage() {
     const currentUnreadGuestIds = new Set(unreadGuestMessages.map((message) => message.id));
     const hasNewUnreadGuestMessage = unreadGuestMessages.some((message) => !previousUnreadGuestIdsRef.current.has(message.id));
 
-    if (notificationInitializedRef.current && hasNewUnreadGuestMessage && !isInboxFocused) {
+    if (notificationInitializedRef.current && hasNewUnreadGuestMessage && !isInboxFocused && !isNotificationMuted) {
       playNotificationSound();
     }
 
     notificationInitializedRef.current = true;
     previousUnreadGuestIdsRef.current = currentUnreadGuestIds;
-  }, [isInboxFocused, unreadGuestMessages]);
+  }, [isInboxFocused, isNotificationMuted, unreadGuestMessages]);
 
   useEffect(() => {
     const ringingCallKey = incomingCall?.status === "ringing" ? incomingCall.roomId : "";
@@ -308,6 +324,23 @@ export function IntercomInboxPage() {
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase">intercom & reception</h1>
           <p className="text-xs text-gray-500 mt-1">Review active room chat logs, dispatch quick-request orders, and process voice signaling calls.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsNotificationMuted((prev) => !prev)}
+            className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition ${
+              isNotificationMuted
+                ? "border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
+                : "border-primary/30 bg-primary-light text-primary-dark hover:bg-primary/10"
+            }`}
+            title={isNotificationMuted ? "Notification sound is muted. Click to unmute." : "Notification sound is on. Click to mute."}
+            aria-label={isNotificationMuted ? "Unmute notification sound" : "Mute notification sound"}
+            aria-pressed={isNotificationMuted}
+          >
+            {isNotificationMuted ? <BellOff size={14} /> : <Bell size={14} />}
+            {isNotificationMuted ? "Sound Off" : "Sound On"}
+          </button>
         </div>
       </header>
 
