@@ -886,8 +886,16 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
 
     if (action === "checkin-reminder" && !req.body?.bookingId && !req.body?.bookingRef) {
       const bookings = await getTomorrowConfirmedBookings();
-      await Promise.all(bookings.map((booking) => sendBookingTrigger(action, booking)));
-      return res.status(200).json({ success: true, data: { sent: bookings.length } });
+      const pending = bookings.filter((booking: any) => !booking?.reminderSentAt);
+      await Promise.all(pending.map((booking: any) => sendBookingTrigger(action, booking)));
+      const sentIds = pending.map((booking: any) => booking?.id).filter(Boolean);
+      if (sentIds.length > 0) {
+        const stamp = new Date();
+        await Promise.all(sentIds.map((id: string) =>
+          adminDb.collection("bookings").doc(id).update({ reminderSentAt: stamp }).catch(() => null)
+        ));
+      }
+      return res.status(200).json({ success: true, data: { sent: pending.length, skipped: bookings.length - pending.length } });
     }
 
     const hasStaff = Boolean((req as any).staff?.success);

@@ -115,6 +115,7 @@ export interface Booking {
   pointsRedeemedAt: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
@@ -639,6 +640,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             pointsRedeemedAt: data.pointsRedeemedAt || null,
             hasBreakfast: !!data.hasBreakfast,
             breakfastRate: data.breakfastRate || 0,
+            reminderSentAt: data.reminderSentAt ? parseDateTimeString(data.reminderSentAt) : null,
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
             cancellationReason: data.cancellationReason || "",

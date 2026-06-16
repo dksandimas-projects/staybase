@@ -78,6 +78,7 @@ export interface Booking {
   pointsRedeemedAt: Date | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
