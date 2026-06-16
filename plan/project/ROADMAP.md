@@ -416,7 +416,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 > - **Implemented** — the code change has shipped on `origin/dev` and tests pass
 > - A decision can be Decided without being Implemented (most are)
 >
-> **Current state** (as of 2026-06-16): **19 of 51 decisions + 2 launch-gate SEV-1s + 1 SEV-1 + 4 polish SEV-1s Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5 + 4 from Phase 11.6 Batch 6). 32 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 + Batch 5 + Batch 6 sections below for the 23 closed.
+> **Current state** (as of 2026-06-16): **21 of 51 decisions + 2 launch-gate SEV-1s + 1 SEV-1 + 4 polish SEV-1s + 1 SEV-1 + 1 SEV-3 Implemented** (5 from Launch-Readiness Sprint + 6 from Phase 11.6 Batch 1 + 5 from Phase 11.6 Batch 2 + 1 from Phase 11.6 Batch 3 + 1 from Phase 11.6 Batch 4 + 1 from Phase 11.6 Batch 5 + 4 from Phase 11.6 Batch 6 + 2 from Phase 11.6 Batch 7). 30 decisions remain unimplemented. See Launch-Readiness Sprint + Batch 1 + Batch 2 + Batch 3 + Batch 4 + Batch 5 + Batch 6 + Batch 7 sections below for the 25 closed.
 
 ### Wave 1 — Decision Triage (2026-06-15) — 15/15 Decided, 11/15 Implemented (5 in Launch-Readiness + 6 in Batch 1)
 
@@ -493,6 +493,15 @@ Branch: `feature/phase-11.6-batch-6`. Closes 4 embarrassments the audit flagged 
 Tests:
 - 8 new regression tests in `admin-app/src/__tests__/batch-6-small-fixes.test.ts` cover all 4 fixes via source-pattern assertions: cancel guard includes the new statuses, frame-src allowlist contains the Google Maps origins, NaN% guard renders for empty rooms, hardcoded chart data is gone, and the live chart iterates `bookings` + `cancelled` + adds `roomNumber` to a `Set`.
 - 2 new behavioral tests in `guest-app/api/__tests__/bookings-create.test.ts` confirm the cancel handler now rejects self-cancel for `confirmed` and `payment-confirmed` with a 400. The pre-existing happy-path cancel test was updated to use `status: "pending"` (the only state where self-cancel is valid).
+
+### Phase 11.6 Batch 7 — Notification mute + real enroll flow (2 fixes, completed 2026-06-16)
+Branch: `feature/phase-11.6-batch-7`. Closes the last 2 outstanding SEV-1/SEV-3 items from the audit's `§1.2 Spark Rewards` and `§1.3 Intercom` clusters.
+
+- [x] **W2.9** Per-staff notification sound mute. `admin-app/src/pages/IntercomInboxPage.tsx:104-119` adds a `Bell` / `BellOff` toggle in the inbox header that flips `isNotificationMuted`. The state is hydrated from `localStorage["intercom-notification-muted"]` on mount and persisted to the same key on every change (per-staff, no Firestore round-trip). The sound-play effect now requires `!isNotificationMuted` in addition to the existing `notificationInitialized` + `hasNewUnreadGuestMessage` + `!isInboxFocused` guards. The button is keyboard accessible (44px min height) and exposes `aria-pressed` + `aria-label` that flip with the state.
+- [x] **S2.4** `RewardsLandingPage` enroll button is no longer a UI mock. `guest-app/src/pages/RewardsLandingPage.tsx` now uses the real `useGuestAuth` context (not the sessionStorage sim state) and posts to `/api/members/register` with a `Bearer <idToken>` header on enroll. The page now derives `isMember` from `memberProfile?.isMember`, redirects to `/account/rewards` on success, and shows real loading + error states (the AlertCircle error block has `role="alert"` for screen readers). The "Wireframe Tester Panel" dev widget is removed from production markup, the `setTimeout(..., 1000)` fake enroll is gone, and all three `sim_auth_state` sessionStorage keys are deleted.
+
+Tests:
+- 11 new regression tests in `admin-app/src/__tests__/batch-7-mute-enroll.test.ts` cover both fixes via source-pattern assertions: Bell/BellOff import, localStorage hydration + persistence, the new `!isNotificationMuted` guard in the sound-play effect, the toggle button's `aria-pressed`/`aria-label`/icon swap, the page's switch to `useGuestAuth`, the removal of `sessionStorage` / `setTimeout` / the Wireframe Tester Panel, the real `/api/members/register` POST with `Bearer` token, the loading/error UI, and the `navigate("/account/rewards")` redirect.
 
 ### Deferred to Phase 11.6 (post-launch polish)
 - 36 spec questions remain in `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Waves 2-4) — need decisions before implementation
@@ -676,12 +685,12 @@ Tests:
 | 10 — Security & Polish | 12 | 7 | 5 (operational/QA) |
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
-| 11.5 — Audit Fixes & Launch-Readiness | 44 | 23 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart). 23/44 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4 + 1 Phase 11.6 Batch 5 + 4 Phase 11.6 Batch 6. |
+| 11.5 — Audit Fixes & Launch-Readiness | 46 | 25 | 21 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring). 25/46 implemented: 5 SEV-1 launch-readiness + 6 Phase 11.6 Batch 1 + 5 Phase 11.6 Batch 2 + 1 Phase 11.6 Batch 3 + 1 Phase 11.6 Batch 4 + 1 Phase 11.6 Batch 5 + 4 Phase 11.6 Batch 6 + 2 Phase 11.6 Batch 7. |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **323** | **272** | **51** |
+| **Total** | **325** | **274** | **51** |
 
-*Phase 11.5 is now 23/44 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (323) = previous total (319) + Phase 11.5 Batch 6 additions (4).*
+*Phase 11.5 is now 25/46 implemented. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 are shipped. 20 decisions are still "Decided but not implemented" — tracked in `AUDIT-OPEN-QUESTIONS-2026-06-15.md` (Closed in column). The total (325) = previous total (323) + Phase 11.5 Batch 7 additions (2).*
 
 ---
 
