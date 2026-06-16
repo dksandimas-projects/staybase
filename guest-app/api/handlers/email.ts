@@ -405,6 +405,34 @@ export async function sendCorporateInquiryTrigger(inquiry: any) {
   );
 }
 
+function contactInquiryEmail(inquiry: any) {
+  return emailLayout({
+    preheader: `Website contact from ${inquiry.name} — ${inquiry.subject}`,
+    eyebrow: "Website contact",
+    title: "A guest reached out via the contact page",
+    intro: `${escapeHtml(inquiry.name)} (${escapeHtml(inquiry.email)}) used the public /contact form. Reply directly to their email to follow up.`,
+    body: `
+      ${card("Inquiry", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Name", inquiry.name)}
+        ${row("Email", inquiry.email)}
+        ${row("Subject", inquiry.subject)}
+        ${row("Source", inquiry.source || "contact-page")}
+      </table>`)}
+      ${callout("warm", "Message", escapeHtml(inquiry.message))}
+    `,
+    ctaLabel: "Open contact inbox",
+    ctaUrl: adminUrl("/contact")
+  });
+}
+
+export async function sendContactInquiryTrigger(inquiry: any) {
+  await sendEmail(
+    ADMIN_EMAIL,
+    `[${config.brandName}] New contact: ${inquiry.subject || "Website message"}`,
+    contactInquiryEmail(inquiry)
+  );
+}
+
 function earlyCheckinRequestEmail(booking: any, request: any) {
   const requestedTime = request.requestedCheckInTime || "Not specified";
   const notes = request.notes || "No additional notes";
