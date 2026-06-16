@@ -17,6 +17,11 @@ vi.mock("../lib/firebase-admin", () => {
     where: function () {
       return this;
     },
+    doc: function (id: string) {
+      return {
+        update: vi.fn().mockResolvedValue(undefined)
+      };
+    },
     get: async () => ({
       docs: mockBookings.map((booking) => ({
         id: booking.id,
@@ -82,10 +87,25 @@ describe("/api/email/checkin-reminder cron", () => {
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 1 } });
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 1, skipped: 0 } });
     expect(resend.emails.send).toHaveBeenCalledTimes(1);
     expect(resend.emails.send).toHaveBeenCalledWith(expect.objectContaining({
       to: "maria@example.test"
     }));
+  });
+
+  test("skips bookings that already have reminderSentAt set (idempotency)", async () => {
+    mockBookings = [{
+      ...mockBookings[0],
+      reminderSentAt: new Date("2026-06-15T12:00:00.000Z")
+    }];
+    const req = mockRequest({ authorization: "Bearer test-cron-secret" });
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: { sent: 0, skipped: 1 } });
+    expect(resend.emails.send).not.toHaveBeenCalled();
   });
 });
