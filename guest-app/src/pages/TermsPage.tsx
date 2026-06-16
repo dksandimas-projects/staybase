@@ -107,14 +107,24 @@ export function TermsPage() {
             </section>
 
             <section className="space-y-3">
-              <h2 className="border-l-2 border-primary pl-2.5 text-base font-bold text-gray-950">9. Governing Law</h2>
+              <h2 className="border-l-2 border-primary pl-2.5 text-base font-bold text-gray-950">9. Data Retention and Erasure</h2>
+              <p>
+                Per RA 10173 (Data Privacy Act of 2012) you may request erasure of your personal data at any time through your online account or by contacting the hotel. Erasure scrubs your name, email, phone, profile photo, and points history from the booking system. Booking records are anonymized for internal accounting — the booking reference, dates, room type, and total are kept without your identifying details.
+              </p>
+              <p>
+                Guest registry records (nationality, ID type, ID number) collected at physical check-in are required by law to be retained for a minimum of 6 months under RA 11862 (Expanded Anti-Trafficking in Persons Act) and cannot be erased within that window. After 6 months, those records are also deleted.
+              </p>
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="border-l-2 border-primary pl-2.5 text-base font-bold text-gray-950">10. Governing Law</h2>
               <p>
                 These terms are governed by the laws of the Republic of the Philippines. Any dispute related to a booking, stay, or guest service will be handled in the proper venue in Tagbilaran City, Bohol, unless applicable law requires otherwise.
               </p>
             </section>
 
             <section className="space-y-3.5">
-              <h2 className="border-l-2 border-primary pl-2.5 text-base font-bold text-gray-950">10. Contact</h2>
+              <h2 className="border-l-2 border-primary pl-2.5 text-base font-bold text-gray-950">11. Contact</h2>
               <p>
                 For booking concerns, cancellation requests, or questions about these terms, contact the hotel directly.
               </p>

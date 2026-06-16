@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { generateMemberNumber, validatePointsRedemption } from "@spark-inn/shared";
 import config from "../../../hotel.config";
-import { adminDb } from "../lib/firebase-admin";
+import { adminAuth, adminDb } from "../lib/firebase-admin";
 
 const registerMemberSchema = z.object({
   fullName: z.string().trim().max(120).optional().default(""),
@@ -19,6 +19,10 @@ const redeemPointsSchema = z.object({
 
 const undoRedemptionSchema = z.object({
   bookingId: z.string().trim().min(1).max(120)
+}).strict();
+
+const eraseAccountSchema = z.object({
+  confirmation: z.literal("erase-my-account")
 }).strict();
 
 function getAuthUser(req: any) {
@@ -357,6 +361,164 @@ export async function handleUndoMemberPointsRedemption(req: any, res: any) {
     return res.status(400).json({
       success: false,
       error: error?.message || "We could not undo this points redemption."
+    });
+  }
+}
+
+// Per W1.4 / decision #49 / audit S2.3: member account deletion must
+// trigger full RA 10173 right to erasure. Anonymizes all linked
+// bookings (writes a no-PII audit record to
+// `bookings/audit/records/{id}` first, then scrubs guestName /
+// guestEmail / guestPhone / memberId from the booking doc),
+// recursively deletes the `pointsHistory` subcollection, deletes the
+// member document, and deletes the Firebase Auth user. Cannot be
+// triggered for someone else — the caller's ID token UID must match
+// the member being erased.
+export async function handleEraseMemberAccount(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const authUser = getAuthUser(req);
+  if (!authUser.uid || !authUser.email) {
+    return res.status(401).json({ success: false, error: "Sign in before requesting account erasure." });
+  }
+
+  const parsed = eraseAccountSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please confirm account erasure by sending the 'erase-my-account' confirmation string."
+    });
+  }
+
+  const uid = authUser.uid;
+  const erasedAt = new Date();
+  let auditBookingsCount = 0;
+  let anonymizedBookingsCount = 0;
+  let deletedHistoryCount = 0;
+
+  try {
+    // Step 1: transactionally audit + anonymize every booking linked
+    // to this member. Anonymization must succeed for all linked
+    // bookings before we touch the member doc, so the booking PII is
+    // gone even if the function aborts later.
+    await adminDb.runTransaction(async (transaction: any) => {
+      const memberRef = adminDb.collection("members").doc(uid);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member account was not found.");
+      }
+
+      const linkedBookingsSnap = await adminDb
+        .collection("bookings")
+        .where("memberId", "==", uid)
+        .get();
+
+      linkedBookingsSnap.forEach((bookingDoc: any) => {
+        const data = bookingDoc.data();
+        const auditRef = adminDb
+          .collection("bookings").doc("audit").collection("records").doc(bookingDoc.id);
+        transaction.set(auditRef, {
+          bookingRef: data.bookingRef || "",
+          roomId: data.roomId || "",
+          roomNumber: data.roomNumber || "",
+          roomType: data.roomType || "",
+          checkIn: data.checkIn || null,
+          checkOut: data.checkOut || null,
+          numNights: Number(data.numNights || 0),
+          numGuests: Number(data.numGuests || 0),
+          totalPrice: Number(data.totalPrice || 0),
+          status: data.status || "",
+          source: data.source || "",
+          createdAt: data.createdAt || null,
+          erasedAt,
+          erasedByUid: uid
+        });
+        auditBookingsCount += 1;
+
+        transaction.update(bookingDoc.ref, {
+          memberId: null,
+          guestName: "Erased",
+          guestEmail: "erased@invalid",
+          guestPhone: "",
+          erasedAt,
+          erasedByUid: uid,
+          updatedAt: erasedAt
+        });
+        anonymizedBookingsCount += 1;
+      });
+
+      transaction.set(memberRef, {
+        isErased: true,
+        erasedAt,
+        fullName: "Erased",
+        email: "erased@invalid",
+        phone: "",
+        photoUrl: "",
+        rewardsPoints: 0,
+        isActive: false,
+        updatedAt: erasedAt
+      }, { merge: true });
+    });
+
+    // Step 2: recursively delete the pointsHistory subcollection.
+    // Done outside the transaction because Firestore transactions
+    // cannot list collections. Read-then-batch-delete is the
+    // documented pattern.
+    const historySnap = await adminDb
+      .collection("members").doc(uid)
+      .collection("pointsHistory")
+      .get();
+
+    if (!historySnap.empty) {
+      const batch = adminDb.batch();
+      historySnap.forEach((doc: any) => batch.delete(doc.ref));
+      await batch.commit();
+      deletedHistoryCount = historySnap.size;
+    }
+
+    // Step 3: delete the member document. Anonymized + flagged above
+    // already; this removes the PII row outright.
+    await adminDb.collection("members").doc(uid).delete();
+
+    // Step 4: delete the Firebase Auth user. If this fails (e.g.
+    // recent login required) the booking anonymization is already
+    // done and idempotent — the client may retry.
+    try {
+      await adminAuth.deleteUser(uid);
+    } catch (authError: any) {
+      if (authError?.code === "auth/user-not-found") {
+        // Already gone — treat as success
+      } else {
+        throw authError;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        uid,
+        auditBookingsCount,
+        anonymizedBookingsCount,
+        deletedHistoryCount,
+        erasedAt: erasedAt.toISOString()
+      }
+    });
+  } catch (error: any) {
+    if (error?.message === "Member account was not found.") {
+      return res.status(404).json({ success: false, error: error.message });
+    }
+    if (error?.code === "auth/requires-recent-login") {
+      return res.status(401).json({
+        success: false,
+        error: "Please sign in again before requesting account erasure."
+      });
+    }
+    console.error("Member account erasure failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "We could not erase your account right now. Please try again."
     });
   }
 }

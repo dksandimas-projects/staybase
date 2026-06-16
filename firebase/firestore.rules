@@ -31,6 +31,15 @@ service cloud.firestore {
       }
     }
 
+    // Per W1.4 / decision #49 / audit S2.3: anonymized booking audit
+    // records written by /api/members/delete-account. Staff can read
+    // for accounting / RA 11862 compliance; clients cannot write or
+    // read; server-side only.
+    match /bookings/audit/records/{auditId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
     match /guests/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
       allow create, update: if isAdmin() || (signedIn() && request.auth.uid == userId);

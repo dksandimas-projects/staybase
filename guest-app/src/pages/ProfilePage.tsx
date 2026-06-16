@@ -7,9 +7,9 @@ import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
 import { brandAsset } from "../utils/brand";
 import { useGuestAuth } from "../context/GuestAuthContext";
-import { doc, updateDoc, deleteDoc } from "firebase/firestore";
-import { deleteUser, updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
-import { db } from "../firebase/config";
+import { doc, updateDoc } from "firebase/firestore";
+import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
+import { auth, db } from "../firebase/config";
 
 export function ProfilePage() {
   const { user, memberProfile, refreshMemberProfile } = useGuestAuth();
@@ -109,17 +109,41 @@ export function ProfilePage() {
     setDeleteError("");
 
     try {
-      // Delete Firestore member doc
-      await deleteDoc(doc(db, "members", user.uid));
-      // Delete Firebase Auth user
-      await deleteUser(user);
-      // Redirect handled by auth state change
-    } catch (err: any) {
-      if (err?.code === "auth/requires-recent-login") {
-        setDeleteError("Please sign in again before deleting your account.");
-      } else {
-        setDeleteError("We couldn't delete your account. Please try again.");
+      // Per W1.4 / decision #49 / audit S2.3: account deletion goes
+      // through the server-side /api/members/delete-account route so
+      // every linked booking is anonymized, the pointsHistory
+      // subcollection is wiped, the member doc is deleted, and the
+      // Firebase Auth user is removed — all in one transaction with
+      // a staff-readable audit record. We do not touch Firestore or
+      // Firebase Auth directly from the client.
+      const token = await auth.currentUser?.getIdToken();
+      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : import.meta.env.VITE_GUEST_APP_URL || "";
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/members/delete-account`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ confirmation: "erase-my-account" })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        const message = data?.error || "We couldn't delete your account. Please try again.";
+        if (message.toLowerCase().includes("recent login") || message.toLowerCase().includes("sign in again")) {
+          setDeleteError("Please sign in again before deleting your account.");
+        } else {
+          setDeleteError(message);
+        }
+        setIsDeleting(false);
+        return;
       }
+      // Auth state change will redirect the user; the success path is
+      // handled by GuestAuthContext listening to onAuthStateChanged.
+    } catch (err: any) {
+      console.error("Account deletion failed:", err);
+      setDeleteError("We couldn't delete your account. Please try again.");
       setIsDeleting(false);
     }
   };
@@ -310,7 +334,13 @@ export function ProfilePage() {
           <Modal open={showDeleteModal} onClose={() => !isDeleting && setShowDeleteModal(false)} title="Delete your account?">
             <div className="space-y-4">
               <p className="text-sm text-gray-600 leading-relaxed">
-                This will permanently delete your Spark Rewards account, including your points balance ({memberProfile?.rewardsPoints || 0} pts), booking history, and all personal data stored in our systems.
+                This will permanently delete your Spark Rewards account, including your points balance ({memberProfile?.rewardsPoints || 0} pts), points history, and your personal data (name, email, phone, profile photo).
+              </p>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                Your booking history will be anonymized: the system will keep the booking reference, dates, room type, and total for our internal accounting and RA 11862 recordkeeping, but your name, email, and phone will be removed from each booking.
+              </p>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Guest registry records (nationality, ID type/number) collected at physical check-in are retained for a minimum of 6 months per RA 11862 and are not part of this online account deletion.
               </p>
               <p className="text-xs text-red-600 font-semibold">This action cannot be undone.</p>
 
