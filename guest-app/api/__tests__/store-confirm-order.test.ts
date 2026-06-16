@@ -141,7 +141,27 @@ describe("/api/store/order-status", () => {
     vi.clearAllMocks();
   });
 
-  test("creates an order with server-side stock decrement and active booking lookup", async () => {
+  test("creates an order with deferred stock decrement and active booking lookup", async () => {
+    // Per W2.12 / decision #80 (Batch 15): stock is decremented on
+    // the placed -> confirmed transition (handled by
+    // AdminContext.updateStoreOrderStatus), not at order creation.
+    // The create handler now seeds the order doc with
+    // stockDecrementedAt: null + status: "placed" and does not
+    // touch storeItems at all.
+    //
+    // Also: the per-day counter key is computed from the Manila
+    // timezone at call time, so the test derives it dynamically
+    // from `new Date()` to match the handler.
+    const d = new Date();
+    const manilaStr = d.toLocaleString("en-US", { timeZone: "Asia/Manila" });
+    const manilaDate = new Date(manilaStr);
+    const todayStr = `${manilaDate.getFullYear()}-${String(manilaDate.getMonth() + 1).padStart(2, "0")}-${String(manilaDate.getDate()).padStart(2, "0")}`;
+
+    // Seed today's counter so the handler takes the `update` path
+    // (sequence goes from 4 to 5, matching the original intent).
+    mockState.counters[`store-orders-${todayStr}`] = { count: 4 };
+    const expectedRef = `SO-${todayStr.replace(/-/g, "")}-005`;
+
     const req = {
       method: "POST",
       body: {
@@ -162,35 +182,33 @@ describe("/api/store/order-status", () => {
     expect(mockState.writes).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: "update",
-        path: "storeItems/coffee",
-        data: expect.objectContaining({ stock: 3 })
-      }),
-      expect.objectContaining({
-        type: "update",
-        path: "counters/store-orders-2026-06-15",
+        path: `counters/store-orders-${todayStr}`,
         data: { count: 5 }
       }),
       expect.objectContaining({
         type: "set",
         path: "storeOrders/generated_1",
         data: expect.objectContaining({
-          orderRef: expect.stringMatching(/^SO-\d{8}-005$/),
+          orderRef: expectedRef,
           roomNumber: "202",
           bookingId: "booking_123",
           guestName: "Maria Santos",
           totalAmount: 330,
           paymentMethod: "cod",
-          status: "placed"
+          status: "placed",
+          stockDecrementedAt: null
         })
       })
     ]));
+    // No stock decrement at create time (deferred to confirmation).
+    expect(mockState.writes.some((write) => write.path === "storeItems/coffee")).toBe(false);
     expect(mockState.writes.some((write) => write.path === "storeItems/tea")).toBe(false);
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
       data: expect.objectContaining({
         orderId: "generated_1",
-        orderRef: expect.stringMatching(/^SO-\d{8}-005$/),
+        orderRef: expectedRef,
         totalAmount: 330,
         bookingId: "booking_123"
       })
