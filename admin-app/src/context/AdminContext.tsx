@@ -1689,7 +1689,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     pointsPerHundred: 10,
     memberDiscountEnabled: true,
     memberDiscountPct: 10,
-    pointsRedemptionRate: 100
+    pointsRedemptionRate: 100,
+    rewardsName: "Spark Rewards",
+    rewardsTagline: "Earn points on completed stays, unlock member-only perks."
   });
 
   const [breakfastConfig, setBreakfastConfig] = useState({
