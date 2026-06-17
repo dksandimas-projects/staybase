@@ -68,6 +68,24 @@ Destructive actions (cancel booking, block room, delete voucher) require a singl
 - [ ] Empty states explain why data is missing and what to do (not just "No results")
 - [ ] Keyboard-navigable for power users (Tab order is logical, Enter submits forms)
 
+### Admin App — Mobile UX Checklist (apply to every staff-facing screen)
+
+> Full spec: `plan/features/ADMIN-MOBILE.md`. This checklist is the per-screen essentials — load ADMIN-MOBILE.md for the per-page rules and component patterns.
+
+- [ ] Layout works at 375px (iPhone SE) without horizontal page scroll
+- [ ] Sidebar collapses to a hamburger on mobile; never permanently overlaps content
+- [ ] All form fields and buttons are minimum 44×44px touch targets
+- [ ] No table requires horizontal page scroll — switch to a card list below 768px (per `DataTable.renderMobileCard`)
+- [ ] Drawer becomes a full-screen bottom sheet on mobile with a sticky action footer
+- [ ] Modal becomes a full-screen sheet on mobile
+- [ ] Intercom chat shows one pane at a time on mobile (threads OR chat, not both)
+- [ ] Primary action of the screen is reachable in the bottom 50% of the viewport (one-handed use)
+- [ ] Safe-area-insets respected on iOS notched devices (`pb-[env(safe-area-inset-bottom)]` on sticky footers)
+- [ ] No native browser `alert()` / `confirm()` / `prompt()` on mobile — use inline forms + toast (per `DECISIONS-FEATURES.md #106g` and ADMIN-MOBILE.md)
+- [ ] Hamburger, close, and icon-only buttons have `aria-label`; sidebar uses `aria-expanded` + `aria-controls`; drawer uses `role="dialog"` + `aria-modal="true"`
+- [ ] Focus is trapped inside open drawer/modal; restored to trigger on close
+- [ ] All animations respect `prefers-reduced-motion` (Framer `useReducedMotion()`)
+
 ---
 
 ## Config-Driven Tokens

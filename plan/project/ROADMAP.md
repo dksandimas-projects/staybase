@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 16, 2026 (closed Phase 11.6 Batches 16-20 — all audit items shipped, 50/50 Implemented)
+> Last updated: June 17, 2026 (Phase 11.7 planned — Admin Mobile UX; spec landed in `plan/features/ADMIN-MOBILE.md`, decision #107)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -742,6 +742,55 @@ Branch: `feature/phase-11.6-batch-20`.
 - Open questions: `plan/project/AUDIT-OPEN-QUESTIONS-2026-06-15.md`
 - Decisions: `plan/docs/DECISIONS-FEATURES.md` (#75-#106)
 - Specs updated: `EMAIL-PDF-STORAGE.md`, `ROOM-MANAGEMENT.md`, `STORE-MANAGEMENT.md`, `TYPES.md`, `CONTACT-INQUIRIES.md` (new), `STATIC-PAGES.md`, `API-ROUTES.md`, `CORPORATE-BOOKING.md`, `INTERCOM-INBOX.md`, `EMAIL-AUDIT-EXTENSIONS.md` (new)
+
+---
+
+## Phase 11.7 — Admin Mobile UX (P1) *(planned 2026-06-17)*
+> Goal: Make the admin app usable on a phone. Mobile is **complement, not replacement** for the desktop dashboard — most common use case is "quick lookup / log a payment" away from the desk. No PWA, no offline, no install prompt (per `DECISIONS-ARCH.md #47`).
+> Spec: `plan/features/ADMIN-MOBILE.md` · Decision: `DECISIONS-FEATURES.md #107`
+
+- [ ] **P0 — Foundations**
+  - [ ] `useBreakpoint` hook (single source of truth for `mobile | tablet | desktop`)
+  - [ ] Responsive `Sidebar` (three modes: mobile slide-in / tablet icon-only / desktop full)
+  - [ ] Hamburger button in `AdminLayout` header (mobile only)
+  - [ ] Compact sticky mobile header
+  - [ ] Page padding responsive: `p-4 sm:p-6 lg:p-8`
+  - [ ] `<meta name="viewport">` add `viewport-fit=cover` for iOS safe areas
+- [ ] **P0 — Drawer / Modal / Toast**
+  - [ ] `Drawer` becomes full-screen bottom sheet on mobile with sticky action footer
+  - [ ] `Modal` becomes full-screen sheet on mobile
+  - [ ] Replace all `alert()` / `confirm()` / `prompt()` with inline forms + `<Toast>` system (extends #106g to the whole admin app — BookingsPage, RoomsPage, MembersPage, SettingsPage, RatesPage, CorporateInquiriesPage, IntercomInboxPage, AdminContext)
+  - [ ] New shared `<Toast>` + `useToast` hook in `admin-app/src/components/` (or `shared/components/`)
+- [ ] **P0 — DataTable mobile card view**
+  - [ ] Add `renderMobileCard?: (row: T) => ReactNode` prop to `DataTable`
+  - [ ] Switch to card list below 768px (status + ref on top, primary, secondary, action at bottom)
+  - [ ] Update `DataTable` skeleton to be card-shaped
+  - [ ] Pass `renderMobileCard` from Bookings, Store Orders, Members, Vouchers, Reports (Sales tables), Settings (room types, store items)
+- [ ] **P1 — Per-page work**
+  - [ ] Bookings: sticky CTA, sticky drawer footer, collapsible sections, mobile card table, walk-in modal full-screen
+  - [ ] Rooms: form grid `grid-cols-1 sm:grid-cols-2` (3 hardcoded `grid-cols-2` blocks), drawer bottom-sheet
+  - [ ] Intercom: split-pane → one-pane mobile with "← Back to threads", sticky chat input, full-screen call modal
+  - [ ] Settings: 260px nav → horizontal scrollable tab bar; 2 `<table class="min-w-full">` → card view
+  - [ ] Reports: 5 `overflow-x-auto` tables → card view; verify 3-tab list doesn't truncate
+  - [ ] Rates: rate table → card view; 3-col form grid
+  - [ ] Members: `grid-cols-1 sm:grid-cols-2` (line 253); drawer bottom-sheet
+  - [ ] Corporate Inquiries: 2 `grid-cols-2` blocks (line 358, 382) → responsive
+  - [ ] QR Management: `grid grid-cols-3 gap-2` (line 366) — verify or stack
+- [ ] **P2 — Accessibility & polish**
+  - [ ] Hamburger `aria-label` + `aria-expanded` + `aria-controls`; closed sidebar uses `aria-hidden` + `inert`
+  - [ ] Drawer/modal: `role="dialog"`, `aria-modal="true"`, `aria-labelledby`; focus trap; restore focus on close
+  - [ ] Tab bar: `role="tablist"` + `role="tab"` + `aria-selected`; arrow-key nav
+  - [ ] Card list items as `<button>` with accessible name
+  - [ ] Safe-area-insets on sticky bottom elements
+  - [ ] All animations respect `prefers-reduced-motion` (Framer `useReducedMotion()`)
+- [ ] **P2 — Testing**
+  - [ ] Manual QA matrix (18 screens × 6 breakpoints) — see `ADMIN-MOBILE.md §Manual QA matrix`
+  - [ ] Real device testing: iPhone SE, iPhone 14, Pixel 7, iPad, iPad landscape, desktop
+  - [ ] Unit test for `useBreakpoint` hook in `admin-app/src/__tests__/`
+  - [ ] Optional: Playwright visual regression at 375/768/1024 for the 5 highest-traffic screens
+
+### Estimate
+~6 dev days. Implementation order and per-step scope in `ADMIN-MOBILE.md §Implementation order`.
 
 ---
 
