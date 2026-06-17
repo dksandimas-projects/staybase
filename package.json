@@ -8,7 +8,7 @@
     "shared"
   ],
   "scripts": {
-    "prepare": "husky || true",
+    "prepare": "command -v husky >/dev/null 2>&1 && husky || true",
     "dev:guest": "npm run dev -w guest-app",
     "dev:admin": "npm run dev -w admin-app",
     "build:guest": "npm run build -w guest-app",
