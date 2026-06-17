@@ -1,24 +1,24 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { 
-  handleCreateBooking, 
-  handleCreateWalkin, 
-  handleAddPayment, 
-  handleRejectDiscount, 
+import {
+  handleCreateBooking,
+  handleCreateWalkin,
+  handleAddPayment,
+  handleRejectDiscount,
   handleCancelBooking,
   handleConfirmBooking,
   handleCheckoutBooking,
   handleLookupBooking
-} from "./handlers/bookings";
-import { handleValidateVoucher } from "./handlers/vouchers";
-import { handleValidateCorporateCode } from "./handlers/corporate-codes";
-import { handleCreateCorporateInquiry, handleConvertInquiryToBooking } from "./handlers/corporate-inquiries";
-import { handleCreateContactInquiry } from "./handlers/contact";
-import { handleGenerateReference } from "./handlers/reference";
-import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption, handleEraseMemberAccount } from "./handlers/members";
-import { handleEmailTrigger } from "./handlers/email";
-import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
-import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
-import { adminAuth } from "./lib/firebase-admin";
+} from "../server/handlers/bookings";
+import { handleValidateVoucher } from "../server/handlers/vouchers";
+import { handleValidateCorporateCode } from "../server/handlers/corporate-codes";
+import { handleCreateCorporateInquiry, handleConvertInquiryToBooking } from "../server/handlers/corporate-inquiries";
+import { handleCreateContactInquiry } from "../server/handlers/contact";
+import { handleGenerateReference } from "../server/handlers/reference";
+import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption, handleEraseMemberAccount } from "../server/handlers/members";
+import { handleEmailTrigger } from "../server/handlers/email";
+import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
+import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
+import { adminAuth } from "../server/lib/firebase-admin";
 import config from "@config";
 
 const staffOnlyEmailActions = new Set([

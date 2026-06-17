@@ -166,7 +166,7 @@ if (existsSync(resolve(repoRoot, "vercel.json"))) {
 
 // 8. Firestore private key handling
 section("8. Firebase Admin SDK init");
-const firebaseAdminPath = "guest-app/api/lib/firebase-admin.ts";
+const firebaseAdminPath = "guest-app/server/lib/firebase-admin.ts";
 if (existsSync(resolve(repoRoot, firebaseAdminPath))) {
   const content = readFileSync(resolve(repoRoot, firebaseAdminPath), "utf8");
   if (content.includes(".replace(/\\\\n/g, \"\\n\")") || content.includes('replace(/\\\\n/g, "\\n")')) {

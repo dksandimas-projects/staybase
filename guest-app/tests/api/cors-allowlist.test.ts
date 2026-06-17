@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 
 describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
   const src = readFileSync(
-    resolve(__dirname, "../[...route].ts"),
+    resolve(__dirname, "../../api/[...route].ts"),
     "utf8"
   );
 

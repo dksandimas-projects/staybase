@@ -14,7 +14,7 @@ const {
   mockSet: vi.fn()
 }));
 
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const createDocRef = (path: string) => ({ path });
 
   return {
@@ -38,7 +38,7 @@ vi.mock("../lib/firebase-admin", () => {
   };
 });
 
-import { handleRedeemMemberPoints, handleUndoMemberPointsRedemption } from "../handlers/members";
+import { handleRedeemMemberPoints, handleUndoMemberPointsRedemption } from "../../server/handlers/members";
 
 const mockResponse = () => {
   const res: any = {};

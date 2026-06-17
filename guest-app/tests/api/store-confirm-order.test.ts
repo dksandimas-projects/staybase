@@ -10,7 +10,7 @@ const mockState = vi.hoisted(() => ({
   newDocCounter: 0
 }));
 
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const createDocRef = (path: string) => {
     const [coll, docId] = path.split("/");
     return {
@@ -87,7 +87,7 @@ vi.mock("../lib/firebase-admin", () => {
   };
 });
 
-import { handleCreateStoreOrder, handleGetStoreOrderStatus } from "../handlers/store";
+import { handleCreateStoreOrder, handleGetStoreOrderStatus } from "../../server/handlers/store";
 
 const mockResponse = () => {
   const res: any = {};

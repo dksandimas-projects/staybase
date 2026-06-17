@@ -9,7 +9,7 @@ const { mockBookings, mockRooms, handleLookupBooking } = vi.hoisted(() => {
 });
 
 // We import the real handler, but mock the firebase-admin module + verify behavior
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const docRef = (path: string) => {
     const segments = path.split("/");
     const coll = segments[0];
@@ -69,12 +69,12 @@ vi.mock("../lib/firebase-admin", () => {
 });
 
 // Mock the email handler so the route file imports don't blow up if anything references it
-vi.mock("../handlers/email", () => ({
+vi.mock("../../server/handlers/email", () => ({
   sendBookingTrigger: vi.fn().mockResolvedValue(undefined),
   sendCorporateInquiryTrigger: vi.fn().mockResolvedValue(undefined)
 }));
 
-import { handleLookupBooking as realHandleLookupBooking } from "../handlers/bookings";
+import { handleLookupBooking as realHandleLookupBooking } from "../../server/handlers/bookings";
 
 const mockResponse = () => {
   const res: any = {};

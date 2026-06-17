@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import handler from "../[...route]";
-import { resend } from "../lib/resend";
+import handler from "../../api/[...route]";
+import { resend } from "../../server/lib/resend";
 
 let mockBookings: any[] = [];
 
-vi.mock("../lib/resend", () => ({
+vi.mock("../../server/lib/resend", () => ({
   resend: {
     emails: {
       send: vi.fn().mockResolvedValue({ id: "mock_email_id" })
@@ -12,7 +12,7 @@ vi.mock("../lib/resend", () => ({
   }
 }));
 
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const mockCollection = () => ({
     where: function () {
       return this;
