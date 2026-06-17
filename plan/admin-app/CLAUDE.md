@@ -43,9 +43,18 @@ See `plan/features/AUTH-ROLES.md` for full implementation details.
 ## Layout
 
 All authenticated pages share a persistent layout:
-- **Sidebar** (`Sidebar.tsx`) — always `#111827` dark background, `spark-orange` active state, displays `spark inn v{VERSION}` at the bottom
+- **Sidebar** (`Sidebar.tsx`) — always `#111827` dark background, `primary` active state, displays `spark inn v{VERSION}` at the bottom
 - **Main content area** — `gray-50` background
-- Sidebar collapses to icon-only on tablet (768px)
+- Sidebar is responsive — three modes per `plan/features/ADMIN-MOBILE.md §Sidebar`:
+  - **Mobile (< 768px):** hidden by default, slides in from the left as a drawer with a backdrop when the hamburger button in the header is tapped. Body scroll locked. ESC closes. Route change auto-closes.
+  - **Tablet (768–1023px):** icon-only (64px), labels hidden, `title` attribute tooltips.
+  - **Desktop (≥ 1024px):** full 240px width, labels visible.
+- **Header** is sticky on mobile (`sticky top-0 z-20`); compact layout per `ADMIN-MOBILE.md §Header`.
+- **Drawers** (`Drawer.tsx`) become full-screen bottom sheets on mobile (slide up, sticky header + sticky action footer). Right-side slide-in on tablet+. See `ADMIN-MOBILE.md §Drawer`.
+- **Modals** (`Modal.tsx`) become full-screen sheets on mobile. Centered on tablet+. See `ADMIN-MOBILE.md §Modal`.
+- **Page padding** in `<main>` is `p-4 sm:p-6 lg:p-8`.
+
+> Full responsive rules, breakpoints, component patterns, and per-page mobile requirements: see `plan/features/ADMIN-MOBILE.md`.
 
 ---
 
