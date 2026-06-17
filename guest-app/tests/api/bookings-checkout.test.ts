@@ -13,12 +13,12 @@ const { mockBookings, mockRooms, mockSettings, mockMembers, mockPointsHistory, m
   };
 });
 
-vi.mock("../handlers/email", () => ({
+vi.mock("../../server/handlers/email", () => ({
   sendBookingTrigger,
   sendCorporateInquiryTrigger: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const docRef = (path: string) => {
     const segments = path.split("/");
     const coll = segments[0];
@@ -157,7 +157,7 @@ vi.mock("../lib/firebase-admin", () => {
   };
 });
 
-import { handleCheckoutBooking } from "../handlers/bookings";
+import { handleCheckoutBooking } from "../../server/handlers/bookings";
 
 const mockResponse = () => {
   const res: any = {};

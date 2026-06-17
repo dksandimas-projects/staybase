@@ -17,7 +17,7 @@ const routeSrc = readFileSync(
   "utf8"
 );
 const handlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/corporate-inquiries.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/corporate-inquiries.ts"),
   "utf8"
 );
 const adminContextSrc = readFileSync(
@@ -33,7 +33,7 @@ describe("Phase 11.6 Batch 9 — convert corporate inquiry to booking (audit S4.
   describe("server route + handler", () => {
     it("imports the new handleConvertInquiryToBooking handler", () => {
       expect(routeSrc).toMatch(
-        /import\s*\{\s*handleCreateCorporateInquiry\s*,\s*handleConvertInquiryToBooking\s*\}\s*from\s*["']\.\/handlers\/corporate-inquiries["']/
+        /import\s*\{\s*handleCreateCorporateInquiry\s*,\s*handleConvertInquiryToBooking\s*\}\s*from\s*["']\.\.\/server\/handlers\/corporate-inquiries["']/
       );
     });
 

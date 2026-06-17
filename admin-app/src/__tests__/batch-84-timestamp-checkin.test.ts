@@ -24,7 +24,7 @@ import { resolve } from "node:path";
 //     when the value is unparseable (legacy ISO docs become inert).
 
 const bookingsSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/bookings.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/bookings.ts"),
   "utf8"
 );
 const sharedIndexSrc = readFileSync(

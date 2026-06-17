@@ -19,11 +19,11 @@ const contactPageSrc = readFileSync(
   "utf8"
 );
 const contactHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/contact.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/contact.ts"),
   "utf8"
 );
 const emailHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/email.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/email.ts"),
   "utf8"
 );
 const dispatcherSrc = readFileSync(

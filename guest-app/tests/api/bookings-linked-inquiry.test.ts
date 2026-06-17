@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 
 describe("bookings.ts — linkedInquiryId on booking doc (decision #102)", () => {
   const src = readFileSync(
-    resolve(__dirname, "../handlers/bookings.ts"),
+    resolve(__dirname, "../../server/handlers/bookings.ts"),
     "utf8"
   );
 

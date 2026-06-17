@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import handler from "../[...route]";
+import handler from "../../api/[...route]";
 
 // Global mock state
 let mockRooms: Record<string, any> = {};
@@ -13,7 +13,7 @@ let setCalls: any[] = [];
 let updateCalls: any[] = [];
 
 // Mock Resend
-vi.mock("../lib/resend", () => ({
+vi.mock("../../server/lib/resend", () => ({
   resend: {
     emails: {
       send: vi.fn().mockResolvedValue({ id: "mock_email_id" })
@@ -22,7 +22,7 @@ vi.mock("../lib/resend", () => ({
 }));
 
 // Mock Firebase Admin SDK
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const createDocRef = (path: string) => {
     const [coll, docId] = path.split("/");
     return {
