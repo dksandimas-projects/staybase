@@ -18,15 +18,15 @@ import { resolve } from "node:path";
 // `admin-app/src/context/AdminContext.tsx`.
 
 const storeHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/store.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/store.ts"),
   "utf8"
 );
 const bookingsHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/bookings.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/bookings.ts"),
   "utf8"
 );
 const corpInquiriesHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/corporate-inquiries.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/corporate-inquiries.ts"),
   "utf8"
 );
 const adminCtxSrc = readFileSync(

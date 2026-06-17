@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 
 describe("bookings.ts — member discount server-side (SEV-1 #3)", () => {
   const src = readFileSync(
-    resolve(__dirname, "../handlers/bookings.ts"),
+    resolve(__dirname, "../../server/handlers/bookings.ts"),
     "utf8"
   );
 

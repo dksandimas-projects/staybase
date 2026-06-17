@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 // sneaking back in.
 
 const bookingsSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/bookings.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/bookings.ts"),
   "utf8"
 );
 const corporateBookingSrc = readFileSync(

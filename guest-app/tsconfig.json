@@ -23,5 +23,5 @@
     }
   },
   "include": ["src", "../hotel.config.ts", "../shared"],
-  "exclude": ["../shared/__tests__", "api/__tests__"]
+  "exclude": ["../shared/__tests__", "tests/api"]
 }
