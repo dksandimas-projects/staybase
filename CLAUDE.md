@@ -49,7 +49,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Task type | Read these MDs |
 |---|---|
 | Guest UI task | `plan/docs/FRONTEND.md` + `plan/guest-app/CLAUDE.md` + relevant feature MD |
-| Admin UI task | `plan/docs/FRONTEND.md` + `plan/admin-app/CLAUDE.md` + relevant feature MD |
+| Admin UI task | `plan/docs/FRONTEND.md` + `plan/admin-app/CLAUDE.md` + `plan/features/ADMIN-MOBILE.md` + relevant feature MD |
 | Data / API task | `plan/docs/BACKEND.md` + `plan/docs/TYPES.md` + `plan/docs/API-ROUTES.md` |
 | Full feature build | All of the above + `plan/docs/DECISIONS-FEATURES.md` |
 | Auth / roles | `plan/features/AUTH-ROLES.md` + `plan/docs/BACKEND.md` |
@@ -111,6 +111,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/INTERCOM-INBOX.md` — Chat list, notification sound, quick request badges
 - `plan/features/QR-MANAGEMENT.md` — QR per room, regenerate, print
 - `plan/features/SETTINGS.md` — Hotel info, payment methods, staff accounts, website content
+- `plan/features/ADMIN-MOBILE.md` — Admin app responsive layout — sidebar / header / drawer / data table for < 768px
 
 ### plan/features/ — Spark Rewards
 - `plan/features/SPARK-REWARDS.md` — guest auth, member registration, profile portal, points, admin member management
