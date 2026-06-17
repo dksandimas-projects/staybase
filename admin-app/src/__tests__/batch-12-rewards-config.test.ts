@@ -26,11 +26,11 @@ const adminCtxSrc = readFileSync(
   "utf8"
 );
 const bookingsSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/bookings.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/bookings.ts"),
   "utf8"
 );
 const membersSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/members.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/members.ts"),
   "utf8"
 );
 

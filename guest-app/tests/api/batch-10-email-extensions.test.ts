@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 // RatesPage wiring for the voucher-issued email.
 
 const emailSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/email.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/email.ts"),
   "utf8"
 );
 const routeSrc = readFileSync(
@@ -21,11 +21,11 @@ const routeSrc = readFileSync(
   "utf8"
 );
 const bookingsSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/bookings.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/bookings.ts"),
   "utf8"
 );
 const storeSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/store.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/store.ts"),
   "utf8"
 );
 const adminContextSrc = readFileSync(

@@ -4,7 +4,7 @@ const { mockAdd } = vi.hoisted(() => ({
   mockAdd: vi.fn()
 }));
 
-vi.mock("../lib/firebase-admin", () => ({
+vi.mock("../../server/lib/firebase-admin", () => ({
   adminDb: {
     collection: vi.fn().mockImplementation(() => ({
       add: mockAdd
@@ -12,11 +12,11 @@ vi.mock("../lib/firebase-admin", () => ({
   }
 }));
 
-vi.mock("../handlers/email", () => ({
+vi.mock("../../server/handlers/email", () => ({
   sendCorporateInquiryTrigger: vi.fn().mockResolvedValue(undefined)
 }));
 
-import { handleCreateCorporateInquiry } from "../handlers/corporate-inquiries";
+import { handleCreateCorporateInquiry } from "../../server/handlers/corporate-inquiries";
 
 const mockResponse = () => {
   const res: any = {};

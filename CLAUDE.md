@@ -59,6 +59,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Email / PDF | `plan/features/EMAIL-PDF-STORAGE.md` + `plan/docs/API-ROUTES.md` |
 | Security / PII / compliance | `plan/docs/SECURITY.md` + `plan/docs/GOTCHAS.md` + `plan/docs/DECISIONS-FEATURES.md` |
 | New feature / architecture | `plan/docs/DECISIONS-ARCH.md` + `plan/docs/GOTCHAS.md` |
+| Vercel deployment / function count | `plan/docs/VERCEL-FUNCTION-LIMIT.md` + `plan/docs/FILE-STRUCTURE.md` |
 | White-label deployment | `plan/docs/WHITE-LABEL.md` + `plan/docs/DECISIONS-ARCH.md` |
 | Spark Essentials store | `plan/features/STORE-GUEST.md` + `plan/features/STORE-MANAGEMENT.md` + `plan/docs/BACKEND.md` |
 | Spark Rewards / member auth | `plan/features/SPARK-REWARDS.md` + `plan/docs/BACKEND.md` |
@@ -76,6 +77,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/docs/TYPES.md` — Canonical TypeScript types for all shared models
 - `plan/docs/ENV-SETUP.md` — All environment variables
 - `plan/docs/FILE-STRUCTURE.md` — Full folder tree, naming conventions
+- `plan/docs/VERCEL-FUNCTION-LIMIT.md` — Hobby plan 12-function cap: layout rules, what counts, how to verify, what NOT to do
 - `plan/docs/DECISIONS-ARCH.md` — Architecture, stack, tooling, security, white-label decisions
 - `plan/docs/DECISIONS-FEATURES.md` — Feature scope, product, business rules, compliance decisions
 - `plan/docs/GOTCHAS.md` — What agents must never do

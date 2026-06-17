@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 
 describe("bookings.ts — guestEmail lowercase normalization (SEV-1 #4)", () => {
   const src = readFileSync(
-    resolve(__dirname, "../handlers/bookings.ts"),
+    resolve(__dirname, "../../server/handlers/bookings.ts"),
     "utf8"
   );
 

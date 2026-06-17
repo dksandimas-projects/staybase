@@ -10,7 +10,7 @@ const { mockMemberDoc, mockCounterDoc, mockBookingDocs, mockSet, mockUpdate, moc
   mockBatchCommit: vi.fn(),
 }));
 
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const memberRef = { path: "members/member_123" };
   const counterRef = { path: "counters/memberNumbers" };
 
@@ -54,7 +54,7 @@ vi.mock("../lib/firebase-admin", () => {
   };
 });
 
-import { handleRegisterMember } from "../handlers/members";
+import { handleRegisterMember } from "../../server/handlers/members";
 
 const mockResponse = () => {
   const res: any = {};

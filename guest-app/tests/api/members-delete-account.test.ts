@@ -26,7 +26,7 @@ const {
   mockMemberDocGet: vi.fn()
 }));
 
-vi.mock("../lib/firebase-admin", () => ({
+vi.mock("../../server/lib/firebase-admin", () => ({
   adminAuth: {
     deleteUser: mockAuthDelete
   },
@@ -88,7 +88,7 @@ vi.mock("../lib/firebase-admin", () => ({
   }
 }));
 
-import { handleEraseMemberAccount } from "../handlers/members";
+import { handleEraseMemberAccount } from "../../server/handlers/members";
 
 const mockResponse = () => {
   const res: any = {};

@@ -16,11 +16,11 @@ import { resolve } from "node:path";
 // `voucherDiscount: 0` regardless of what the client supplied.
 
 const emailHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/email.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/email.ts"),
   "utf8"
 );
 const bookingsHandlerSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/handlers/bookings.ts"),
+  resolve(__dirname, "../../../guest-app/server/handlers/bookings.ts"),
   "utf8"
 );
 const bookingTypeSrc = readFileSync(

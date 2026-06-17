@@ -12,6 +12,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 1 | Hosting: single Vercel project (monorepo) — guest-app + api/ deployed together, admin-app as a second deployment from the same project |
 | 2 | Firebase usage: Auth + Firestore + Storage ONLY — no Firebase Hosting, no Cloud Functions |
 | 3 | API: Single Vercel catch-all `/api/[...route].ts` living inside `guest-app/` — deployed as part of the guest app Vercel deployment |
+| 3a | Server-side modules (handlers, lib) live in `guest-app/server/` — **not** under `api/` — to keep the function count at 1 (Vercel Hobby plan = 12-function cap). Integration tests live in `guest-app/tests/api/`. See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for the full rules. |
 | 4 | Email: Resend via Vercel API routes (not Firebase Cloud Functions) |
 | 5 | Shared code: `shared/` is an npm workspace package (`@spark-inn/shared`) — imported by both apps and api/ without path alias hacks |
 | 6 | Two separate React + Vite apps — `guest-app/` and `admin-app/` — sharing one Firebase project |

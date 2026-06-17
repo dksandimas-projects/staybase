@@ -17,7 +17,7 @@ spark-inn/
 │
 ├── guest-app/                   ← Public booking website + API routes (deployed together on Vercel)
 │   ├── package.json             ← depends on @spark-inn/shared
-│   └── api/                     ← Vercel serverless API routes (lives inside guest-app/)
+│   └── api/                     ← Vercel serverless API routes — only `[...route].ts` lives here (lives inside guest-app/)
 ├── admin-app/                   ← Front desk dashboard (second deployment, same Vercel project)
 │   └── package.json             ← depends on @spark-inn/shared
 ├── shared/                      ← Shared package — types, utils, constants, VERSION
@@ -63,8 +63,9 @@ guest-app/
 │   │   ├── useRooms.ts
 │   │   └── useBookings.ts
 │   └── App.tsx
-├── api/                                ← Vercel serverless API routes (co-located with guest-app)
-│   ├── [...route].ts                   ← Catch-all handler
+├── api/                                ← Vercel serverless API routes (co-located with guest-app) — ONLY the catch-all lives here
+│   └── [...route].ts                   ← Catch-all handler (single Vercel function — see plan/docs/VERCEL-FUNCTION-LIMIT.md)
+├── server/                             ← Server-side modules imported by the catch-all — NOT scanned by Vercel
 │   ├── handlers/
 │   │   ├── email.ts
 │   │   ├── bookings.ts
@@ -129,7 +130,9 @@ One Vercel project for the entire monorepo. Two deployments configured:
 
 Vercel automatically picks up `guest-app/api/` as serverless functions when root is set to `guest-app/`. No separate project needed. Both deployments share the same env vars set in the single Vercel project dashboard.
 
-Root `vercel.json` owns deployment-wide security headers and the scheduled check-in reminder cron entry. Headers include CSP, clickjacking protection, MIME sniffing protection, referrer policy, and permissions policy. The cron entry calls `/api/email/checkin-reminder` daily using the `CRON_SECRET` bearer-token flow documented in `plan/features/EMAIL-PDF-STORAGE.md`.
+> **Hobby plan = 12 serverless functions max.** `guest-app/api/` contains exactly one file (`[...route].ts`) so we deploy with **1 function**. All handler and lib modules live under `guest-app/server/` (not scanned by Vercel). See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for the full rules and verification steps.
+
+Root `vercel.json` owns deployment-wide security headers, the build command (`npm run build:guest`), the output directory (`guest-app/dist`), and the scheduled check-in reminder cron entry. Headers include CSP, clickjacking protection, MIME sniffing protection, referrer policy, and permissions policy. The cron entry calls `/api/email/checkin-reminder` daily using the `CRON_SECRET` bearer-token flow documented in `plan/features/EMAIL-PDF-STORAGE.md`.
 
 ---
 
@@ -167,18 +170,17 @@ Unit tests run with `vitest` from `shared/`. No Firebase emulator needed — all
 
 ---
 
-## `guest-app/api/__tests__/` — Integration Tests
+## `guest-app/tests/api/` — Integration Tests
 
 ```
-guest-app/api/
-└── __tests__/                          ← Integration tests (Vitest + Firebase emulator)
+guest-app/tests/api/                          ← Integration tests (Vitest + Firebase emulator)
     ├── bookings-create.test.ts         ← I-1: availability locking, concurrent requests, idempotency
     ├── store-confirm-order.test.ts     ← I-2: stock decrement/restore, concurrent last-item orders
     ├── members-redeem-points.test.ts   ← I-3: redemption, balance update, history log, undo
     └── corporate-code.test.ts         ← I-4: usage count, cap, expiry, isActive checks
 ```
 
-Integration tests require `firebase emulators:start` (Firestore + Auth emulators). Run with `vitest` from `guest-app/`. See `plan/docs/DECISIONS-ARCH.md §Testing Strategy` for full test coverage spec.
+Tests live in `tests/api/` (NOT `api/__tests__/`) — any `.ts` file inside `api/` counts as a Vercel function on Hobby plan. See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for why. Run with `npm run test:guest:api` from `guest-app/`. See `plan/docs/DECISIONS-ARCH.md §Testing Strategy` for full test coverage spec.
 
 Imported as `@spark-inn/shared` in both apps and in `api/` handlers — works in Vite (frontend) and Node.js (serverless) without any path alias hacks.
 

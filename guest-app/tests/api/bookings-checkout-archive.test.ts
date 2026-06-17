@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 
 describe("bookings.ts — auto-archive intercom thread on checkout (decision #95)", () => {
   const src = readFileSync(
-    resolve(__dirname, "../handlers/bookings.ts"),
+    resolve(__dirname, "../../server/handlers/bookings.ts"),
     "utf8"
   );
 

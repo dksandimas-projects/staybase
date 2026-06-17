@@ -29,6 +29,7 @@ Things agents must never do. Check this file before implementing any feature.
 
 - **`shared/` is an npm workspace package (`@spark-inn/shared`)** — always import from the package name, never via relative paths like `../../shared/types`. Relative imports break when files move.
 - **`api/` handlers run in Node.js, not Vite** — they cannot use Vite path aliases. Import `@spark-inn/shared` via the workspace package (works in Node.js), and import `hotel.config.ts` via relative path (`../../hotel.config.ts`).
+- **Never add files under `guest-app/api/` other than `[...route].ts`** — Vercel treats every `.ts` file in `api/` (and subdirs) as a separate serverless function. Hobby plan caps at 12. Handlers, lib, and tests all live outside `api/` (`server/` and `tests/api/`). See `plan/docs/VERCEL-FUNCTION-LIMIT.md`.
 - **Always run `npm install` from the repo root** — not from inside individual app folders. The root `package.json` manages all workspace dependencies together.
 - **Never add `@spark-inn/shared` to `devDependencies`** — it must be in `dependencies` so Vercel can resolve it during deployment.
 

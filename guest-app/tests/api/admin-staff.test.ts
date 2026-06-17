@@ -14,7 +14,7 @@ const {
   mockGuestSet: vi.fn()
 }));
 
-vi.mock("../lib/firebase-admin", () => ({
+vi.mock("../../server/lib/firebase-admin", () => ({
   adminAuth: {
     createUser: mockCreateUser,
     setCustomUserClaims: mockSetCustomUserClaims,
@@ -46,7 +46,7 @@ vi.mock("../lib/firebase-admin", () => ({
   }
 }));
 
-import { handleCreateStaff, handleDisableStaff } from "../handlers/admin";
+import { handleCreateStaff, handleDisableStaff } from "../../server/handlers/admin";
 
 const mockResponse = () => {
   const res: any = {};
