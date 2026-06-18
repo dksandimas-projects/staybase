@@ -13,6 +13,7 @@ import config from "@config";
 import { auth } from "../firebase/auth";
 import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { db } from "../firebase/config";
+import { notify } from "../components/Toast";
 
 type StaffRole = "front-desk" | "admin";
 
@@ -734,7 +735,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error("Error updating booking status:", error);
-      alert("Failed to update booking status: " + (error instanceof Error ? error.message : String(error)));
+      notify.error("Failed to update booking status", error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -1673,7 +1674,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       console.error("Error adding store item:", error);
-      alert(`Failed to add store item: ${error instanceof Error ? error.message : "Unknown error"}`);
+      notify.error("Failed to add store item", error instanceof Error ? error.message : "Unknown error");
     }
   };
 
@@ -1686,7 +1687,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       console.error("Error updating store item:", error);
-      alert(`Failed to update store item: ${error instanceof Error ? error.message : "Unknown error"}`);
+      notify.error("Failed to update store item", error instanceof Error ? error.message : "Unknown error");
     }
   };
 
@@ -1700,7 +1701,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       console.error("Error disabling store item:", error);
-      alert(`Failed to disable store item: ${error instanceof Error ? error.message : "Unknown error"}`);
+      notify.error("Failed to disable store item", error instanceof Error ? error.message : "Unknown error");
     }
   };
 
@@ -1819,7 +1820,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       await setDoc(docRef, data, { merge: true });
     } catch (error) {
       console.error(`Error updating ${section}:`, error);
-      alert(`Failed to save settings: ${error instanceof Error ? error.message : "Unknown error"}`);
+      notify.error("Failed to save settings", error instanceof Error ? error.message : "Unknown error");
     }
   };
 
