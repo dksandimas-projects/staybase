@@ -65,6 +65,7 @@ export function BottomTabBar({ variant = "bookings", unreadAlertCount = 0 }: Bot
             role="tab"
             aria-selected={active}
             aria-current={active ? "page" : undefined}
+            data-active={active}
             onClick={() => navigate(tab.path)}
             className={cn(
               "relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 px-1 py-2 text-[10px] font-semibold transition",
