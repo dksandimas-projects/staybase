@@ -2,6 +2,11 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAdmin, IntercomMessage, StoreOrder } from "../context/AdminContext";
 import { formatPrice } from "../utils/format";
+import { useBreakpoint } from "../utils/useBreakpoint";
+import { Drawer } from "../components/Drawer";
+import { IntercomChatPanel, type ThreadFilter } from "../components/IntercomChatPanel";
+import { StoreOrderMessageCard } from "../components/StoreOrderMessageCard";
+import { ArrowLeft } from "lucide-react";
 import {
   MessageSquare, Send, PhoneOff, Phone,
   ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink,
@@ -11,72 +16,6 @@ import config from "@config";
 
 const NOTIFICATION_MUTED_KEY = "intercom-notification-muted";
 
-const paymentLabels: Record<StoreOrder["paymentMethod"], string> = {
-  cod: "Cash on delivery",
-  "add-to-bill": "Room bill",
-  gcash: "GCash"
-};
-
-function StoreOrderMessageCard({ message, order }: { message: IntercomMessage; order?: StoreOrder }) {
-  const itemRows = order?.items ?? [];
-  const orderRef = order?.orderRef || message.orderRef || "Pending ref";
-  const paymentLabel = order ? paymentLabels[order.paymentMethod] : "See order";
-  const bookingPath = `/bookings?tab=store${orderRef ? `&orderRef=${encodeURIComponent(orderRef)}` : ""}`;
-
-  return (
-    <div className="w-full max-w-md rounded-xl border border-primary/20 bg-primary-light/30 p-3 text-xs text-gray-800 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-primary shadow-sm ring-1 ring-primary/10">
-            <ShoppingBag size={15} />
-          </span>
-          <div>
-            <span className="block text-[9px] font-bold uppercase tracking-wider text-primary-dark">Store order</span>
-            <p className="font-bold text-gray-950">{orderRef}</p>
-          </div>
-        </div>
-        {order?.status && (
-          <span className="rounded-full border border-primary/20 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-dark">
-            {order.status.replace(/-/g, " ")}
-          </span>
-        )}
-      </div>
-
-      <div className="mt-3 space-y-2 rounded-lg bg-white/70 p-2 ring-1 ring-primary/10">
-        {itemRows.length > 0 ? (
-          itemRows.map((item) => (
-            <div key={`${item.itemId}-${item.name}`} className="flex items-start justify-between gap-3">
-              <span className="font-semibold text-gray-700">{item.quantity}x {item.name}</span>
-              <span className="font-bold text-gray-950">{formatPrice(item.price * item.quantity)}</span>
-            </div>
-          ))
-        ) : (
-          <p className="text-[11px] font-semibold text-gray-650">{message.text}</p>
-        )}
-      </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
-        <div className="rounded-lg bg-white/70 px-2 py-1.5 ring-1 ring-primary/10">
-          <span className="block font-bold uppercase tracking-wider text-gray-400">Payment</span>
-          <span className="font-bold text-gray-850">{paymentLabel}</span>
-        </div>
-        <div className="rounded-lg bg-white/70 px-2 py-1.5 text-right ring-1 ring-primary/10">
-          <span className="block font-bold uppercase tracking-wider text-gray-400">Total</span>
-          <span className="font-bold text-primary-dark">{order ? formatPrice(order.totalAmount) : "View order"}</span>
-        </div>
-      </div>
-
-      <Link
-        to={bookingPath}
-        className="mt-3 inline-flex min-h-[34px] items-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
-      >
-        View Order
-        <ExternalLink size={11} />
-      </Link>
-    </div>
-  );
-}
-
 export function IntercomInboxPage() {
   const { 
     intercoms, 
@@ -84,13 +23,14 @@ export function IntercomInboxPage() {
     sendIntercomMessage, 
     markChatAsRead, 
     setIntercomResolved,
-    incomingCall, 
-    acceptCall, 
+    incomingCall,
+    acceptCall,
     declineCall,
     rooms,
     hotelConfig,
     storeOrders
   } = useAdmin();
+  const { isMobile } = useBreakpoint();
 
   // Active chat selection
   const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("");
@@ -98,6 +38,9 @@ export function IntercomInboxPage() {
   const [replyText, setReplyText] = useState("");
   const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
   const [isNotificationAudioUnlocked, setIsNotificationAudioUnlocked] = useState(false);
+  // Mobile chat drawer — opens when the user taps a thread on mobile.
+  // On desktop, the chat is always visible inline so this stays false.
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   // Per audit W2.9 / decision #97: per-staff mute preference stored
   // in localStorage so the inbox stays quiet across reloads. Defaults
   // to `false` (sounds on). The header exposes a Bell / BellOff
@@ -106,7 +49,6 @@ export function IntercomInboxPage() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(NOTIFICATION_MUTED_KEY) === "true";
   });
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const notificationBufferRef = useRef<AudioBuffer | null>(null);
   const notificationInitializedRef = useRef(false);
@@ -121,11 +63,6 @@ export function IntercomInboxPage() {
   // Call timer simulation state
   const [callDuration, setCallDuration] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Auto scroll to bottom of chat
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [intercoms, selectedRoomNumber]);
 
   useEffect(() => {
     const updateFocusState = () => {
@@ -218,7 +155,12 @@ export function IntercomInboxPage() {
   const handleSelectRoom = (roomNum: string) => {
     setSelectedRoomNumber(roomNum);
     markChatAsRead(roomNum);
+    if (isMobile) {
+      setIsMobileChatOpen(true);
+    }
   };
+
+  const closeMobileChat = () => setIsMobileChatOpen(false);
 
   // Helper: Format duration seconds to MM:SS
   const formatTime = (secs: number) => {
@@ -272,9 +214,13 @@ export function IntercomInboxPage() {
   );
 
   useEffect(() => {
+    // On mobile, the user explicitly taps a thread to open it. Auto-
+    // selecting the first thread would open the chat drawer on every
+    // mount and on every rooms/filter change, which is jarring.
+    if (isMobile) return;
     if (selectedRoomNumber && filteredRooms.some((room) => room.roomNumber === selectedRoomNumber)) return;
     setSelectedRoomNumber(filteredRooms[0]?.roomNumber || "");
-  }, [filteredRooms, selectedRoomNumber]);
+  }, [filteredRooms, isMobile, selectedRoomNumber]);
 
   useEffect(() => {
     if (!isInboxFocused || !selectedRoomNumber || !selectedUnreadSignature) return;
@@ -491,120 +437,48 @@ export function IntercomInboxPage() {
           </div>
         </div>
 
-        {/* Right: Message dialog box */}
-        <div className="rounded-card bg-white shadow-sm ring-1 ring-gray-200 flex flex-col justify-between overflow-hidden min-h-[460px]">
-          {/* Header */}
-          <div className="bg-gray-50/50 border-b border-gray-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-                {selectedRoomNumber || "--"}
-              </div>
-              <div>
-                <h3 className="font-bold text-xs text-gray-900 leading-none">Intercom Feed Room {selectedRoomNumber || "unselected"}</h3>
-                <span className="text-[9px] text-gray-400 capitalize mt-1 inline-block">
-                  {isSelectedThreadResolved ? "Resolved conversation" : "Active stay room link"}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`inline-flex items-center gap-1 text-[10px] font-bold border px-2 py-0.5 rounded ${
-                isSelectedThreadResolved
-                  ? "border-green-200 bg-green-50 text-green-700"
-                  : "border-primary/20 bg-primary/5 text-primary-dark"
-              }`}>
-                <CheckCheck size={10} />
-                {isSelectedThreadResolved ? "Resolved" : "Operational feed online"}
-              </span>
-
-              <button
-                type="button"
-                disabled={!selectedRoomNumber}
-                onClick={() => void handleToggleResolved()}
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-[10px] font-bold text-gray-700 transition hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSelectedThreadResolved ? <RotateCcw size={12} /> : <ArchiveRestore size={12} />}
-                {isSelectedThreadResolved ? "Reopen" : "Mark Resolved"}
-              </button>
-            </div>
-          </div>
-
-          {/* Message History Viewport */}
-          <div className="flex-1 p-6 space-y-4 overflow-y-auto max-h-[340px] bg-gray-50/20">
-            {activeChatMessages.length > 0 ? (
-              activeChatMessages.map((msg) => {
-                const isFd = msg.sender === "front-desk";
-                const storeOrder = msg.orderRef ? storeOrdersByRef.get(msg.orderRef) : undefined;
-
-                return (
-                  <div key={msg.id} className={`flex gap-3 max-w-[85%] ${isFd ? "ml-auto flex-row-reverse" : "mr-auto"}`}>
-                    <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                      isFd ? "bg-primary/10 text-primary" : "bg-gray-150 text-gray-650"
-                    }`}>
-                      {isFd ? "FD" : <User size={12} />}
-                    </div>
-
-                    <div className="space-y-1">
-                      {msg.isStoreOrder && !isFd ? (
-                        <StoreOrderMessageCard message={msg} order={storeOrder} />
-                      ) : (
-                        <div className={`rounded-xl p-3 text-xs leading-relaxed ${
-                          isFd
-                            ? "bg-primary text-white font-medium shadow-sm rounded-tr-none"
-                            : msg.isQuickRequest
-                              ? "bg-primary-light text-primary-dark border border-primary/20 font-bold rounded-tl-none"
-                              : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
-                        }`}>
-                          {msg.isQuickRequest && !isFd && (
-                            <span className="mb-1 block text-[9px] uppercase tracking-wider opacity-70">Quick request</span>
-                          )}
-                          {msg.text}
-                        </div>
-                      )}
-                      
-                      <p className={`text-[8px] text-gray-400 font-semibold px-1 ${isFd ? "text-right" : "text-left"}`}>
-                        {msg.timestamp}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 space-y-2">
-                <MessageSquare size={32} className="text-gray-300" />
-                <p className="text-xs italic">
-                  {selectedRoomNumber
-                    ? `No message feeds recorded for Room ${selectedRoomNumber}. Send a greeting below.`
-                    : `No ${threadFilter} conversations to show.`}
-                </p>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Reply Form */}
-          <form onSubmit={handleSendMessage} className="border-t border-gray-200 p-4 flex gap-3 bg-white">
-            <input
-              type="text"
-              required
-              disabled={!selectedRoomNumber}
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              placeholder={selectedRoomNumber ? `Type reply statement to Room ${selectedRoomNumber}...` : "Select a room conversation first"}
-              className="min-h-[44px] flex-1 rounded-lg border border-gray-250 bg-white px-3 text-xs outline-none focus:border-primary"
-            />
-            
-            <button
-              type="submit"
-              disabled={!selectedRoomNumber}
-              className="min-h-[44px] px-5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm flex items-center gap-1.5 transition active:scale-95"
-            >
-              <Send size={12} />
-              Send
-            </button>
-          </form>
-        </div>
+        {/* Right: Message dialog box — desktop only. On mobile, the chat
+            is shown in a full-screen Drawer (see below) so the user
+            sees a single-pane thread list and opens a chat on tap. */}
+        {!isMobile && (
+          <IntercomChatPanel
+            roomNumber={selectedRoomNumber}
+            messages={activeChatMessages}
+            storeOrdersByRef={storeOrdersByRef}
+            threadFilter={threadFilter as ThreadFilter}
+            isResolved={isSelectedThreadResolved}
+            onToggleResolved={() => void handleToggleResolved()}
+            replyText={replyText}
+            onReplyTextChange={setReplyText}
+            onSend={() => handleSendMessage({ preventDefault: () => undefined } as unknown as React.FormEvent)}
+            variant="panel"
+          />
+        )}
       </div>
+
+      {/* Mobile chat drawer — full-screen bottom sheet with a
+          'Back to threads' button. The bottom tab bar still
+          floats over it (per the persistent-inside-drawers rule). */}
+      <Drawer
+        title={selectedRoomNumber ? `Room ${selectedRoomNumber}` : "Chat"}
+        open={isMobile && isMobileChatOpen && Boolean(selectedRoomNumber)}
+        onClose={closeMobileChat}
+      >
+        <IntercomChatPanel
+          roomNumber={selectedRoomNumber}
+          messages={activeChatMessages}
+          storeOrdersByRef={storeOrdersByRef}
+          threadFilter={threadFilter as ThreadFilter}
+          isResolved={isSelectedThreadResolved}
+          onToggleResolved={() => void handleToggleResolved()}
+          replyText={replyText}
+          onReplyTextChange={setReplyText}
+          onSend={() => handleSendMessage({ preventDefault: () => undefined } as unknown as React.FormEvent)}
+          onBack={closeMobileChat}
+          BackIcon={ArrowLeft}
+          variant="drawer"
+        />
+      </Drawer>
     </div>
   );
 }
