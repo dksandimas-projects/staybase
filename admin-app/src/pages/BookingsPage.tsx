@@ -36,7 +36,7 @@ import { db } from "../firebase/config";
 import { auth } from "../firebase/auth";
 
 export function BookingsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { 
     bookings, 
     rooms, 
@@ -233,16 +233,45 @@ export function BookingsPage() {
     }
   ];
 
+  // Operational filter — driven by the bottom tab bar via ?filter=...
+  // arrivals   = today's check-ins with status confirmed or checked-in
+  // departures = today's check-outs with status checked-in (per the
+  //              confirmed -> checked-in -> checked-out status flow)
+  // in-house   = status === "checked-in"
+  const operationalFilter = searchParams.get("filter");
+  const today = new Date().toISOString().split("T")[0];
+  const matchesOperationalFilter = (booking: Booking) => {
+    if (!operationalFilter) return true;
+    if (operationalFilter === "arrivals") {
+      return booking.checkIn === today && (booking.status === "confirmed" || booking.status === "checked-in");
+    }
+    if (operationalFilter === "departures") {
+      return booking.checkOut === today && booking.status === "checked-in";
+    }
+    if (operationalFilter === "in-house") {
+      return booking.status === "checked-in";
+    }
+    return true;
+  };
+
+  const filterLabels: Record<string, string> = {
+    arrivals: "Today's arrivals",
+    departures: "Today's departures",
+    "in-house": "Currently in-house"
+  };
+  const activeFilterLabel = operationalFilter ? filterLabels[operationalFilter] : null;
+
   // Filtering Rows logic
   const filteredRows = bookings.filter((booking) => {
-    const matchesSearch = 
+    const matchesSearch =
       booking.guestName.toLowerCase().includes(searchText.toLowerCase()) ||
       booking.bookingRef.toLowerCase().includes(searchText.toLowerCase()) ||
       booking.roomNumber.includes(searchText);
 
     const matchesStatus = statusFilter === "all" || booking.status === statusFilter;
+    const matchesFilter = matchesOperationalFilter(booking);
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesFilter;
   });
 
   const handleRowClick = (row: Booking) => {
@@ -1251,7 +1280,25 @@ export function BookingsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase font-medium">bookings & store orders</h1>
-          <p className="text-xs text-gray-500 mt-1">Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries.</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {activeFilterLabel
+              ? activeFilterLabel
+              : "Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries."}
+          </p>
+          {activeFilterLabel && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = new URLSearchParams(searchParams);
+                next.delete("filter");
+                const query = next.toString();
+                setSearchParams(query ? `?${query}` : "", { replace: true });
+              }}
+              className="mt-2 inline-flex min-h-[32px] items-center gap-1 rounded-full bg-primary/10 px-3 text-[10px] font-bold uppercase tracking-wider text-primary-dark"
+            >
+              Filter: {operationalFilter} <span aria-hidden="true">×</span> clear
+            </button>
+          )}
         </div>
         {activeMainTab === "bookings" && (
           <button
