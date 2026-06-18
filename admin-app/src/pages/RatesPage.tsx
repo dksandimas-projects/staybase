@@ -340,6 +340,34 @@ export function RatesPage() {
     }
   ];
 
+  const renderVoucherCard = (row: Voucher) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-sm font-bold text-primary-dark">{row.code}</span>
+        <StatusBadge label={row.isActive ? "Active" : "Inactive"} status={row.isActive ? "confirmed" : "dirty"} />
+      </div>
+      <p className="text-base font-bold text-gray-900">
+        {row.discountType === "percent" ? `${row.discountValue}% Off` : `${formatPrice(row.discountValue)} Off`}
+      </p>
+      <p className="text-xs text-gray-500">
+        {row.usageCount} {row.usageCap ? `/ ${row.usageCap} limit` : "usages"} · {row.expiresAt || "Never expires"}
+      </p>
+    </div>
+  );
+
+  const renderCorpCard = (row: CorporateCode & { id: string }) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-sm font-bold text-primary-dark">{row.code}</span>
+        <StatusBadge label={row.isActive ? "Active" : "Inactive"} status={row.isActive ? "confirmed" : "dirty"} />
+      </div>
+      <p className="text-base font-bold text-gray-900">{row.companyName}</p>
+      <p className="text-xs text-gray-500">
+        Double {formatPrice(row.ratePerRoomType["standard-double"] || 0)} · Exec {formatPrice(row.ratePerRoomType["executive"] || 0)} · {row.usageCount} bookings
+      </p>
+    </div>
+  );
+
   return (
     <div className="space-y-8 font-body">
       <header>
@@ -591,6 +619,8 @@ export function RatesPage() {
         <DataTable
           columns={voucherColumns}
           rows={vouchers}
+          renderMobileCard={renderVoucherCard}
+          emptyMessage="No vouchers configured yet."
         />
       </div>
 
@@ -614,6 +644,8 @@ export function RatesPage() {
         <DataTable
           columns={corpColumns}
           rows={corporateCodes.map(c => ({ ...c, id: c.code }))}
+          renderMobileCard={renderCorpCard}
+          emptyMessage="No corporate codes configured yet."
         />
       </div>
 

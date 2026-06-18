@@ -26,7 +26,8 @@ import {
   ImageIcon,
   Utensils,
   Save,
-  ShieldCheck
+  ShieldCheck,
+  BedDouble
 } from "lucide-react";
 import config from "@config";
 import { jsPDF } from "jspdf";
@@ -298,6 +299,55 @@ export function BookingsPage() {
       )
     }
   ];
+
+  const renderBookingCard = (row: Booking) => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+          REF: {row.bookingRef}
+        </span>
+        <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+      </div>
+      <p className="text-base font-bold text-gray-900">{row.guestName}</p>
+      <div className="flex items-center gap-3 text-xs text-gray-600">
+        <span className="flex items-center gap-1">
+          <Calendar size={12} className="text-gray-400" aria-hidden="true" />
+          {row.checkIn} – {row.checkOut}
+        </span>
+        <span className="flex items-center gap-1">
+          <BedDouble size={12} className="text-gray-400" aria-hidden="true" />
+          Room {row.roomNumber}
+        </span>
+      </div>
+      <p className="text-xs text-gray-500">
+        {row.numNights} {row.numNights === 1 ? "night" : "nights"} · {row.numGuests} {row.numGuests === 1 ? "guest" : "guests"}
+      </p>
+      <p className="text-lg font-bold text-primary-dark">{formatPrice(row.totalPrice)}</p>
+    </div>
+  );
+
+  const renderOrderCard = (row: any) => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+          REF: {row.orderRef}
+        </span>
+        <StatusBadge
+          label={row.status.replace("-", " ")}
+          status={row.status === "delivered" ? "confirmed" : row.status === "cancelled" ? "dirty" : "pending"}
+        />
+      </div>
+      <p className="text-base font-bold text-gray-900">{row.guestName}</p>
+      <p className="flex items-center gap-1 text-xs text-gray-600">
+        <BedDouble size={12} className="text-gray-400" aria-hidden="true" />
+        Room {row.roomNumber}
+      </p>
+      <p className="line-clamp-2 text-xs text-gray-500">
+        {row.items.map((i: any) => `${i.quantity}x ${i.name}`).join(", ")}
+      </p>
+      <p className="text-lg font-bold text-primary-dark">{formatPrice(row.totalAmount)}</p>
+    </div>
+  );
 
   // Filtering store orders
   const filteredOrders = storeOrders.filter((order) => {
@@ -1283,6 +1333,8 @@ export function BookingsPage() {
             columns={columns}
             rows={filteredRows}
             onRowClick={handleRowClick}
+            renderMobileCard={renderBookingCard}
+            emptyMessage="No bookings match the current filters."
           />
         </>
       ) : (
@@ -1298,7 +1350,7 @@ export function BookingsPage() {
                 className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
               />
             </div>
-            
+
             <div className="w-full sm:w-48">
               <select
                 value={orderStatusFilter}
@@ -1320,6 +1372,8 @@ export function BookingsPage() {
             columns={storeColumns}
             rows={filteredOrders}
             onRowClick={handleOrderRowClick}
+            renderMobileCard={renderOrderCard}
+            emptyMessage="No orders match the current filters."
           />
         </>
       )}
