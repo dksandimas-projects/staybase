@@ -1359,49 +1359,83 @@ export function SettingsPage() {
 
               {/* Room Types Listing Table */}
               <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-                <table className="min-w-full divide-y divide-gray-150 text-xs">
-                  <thead>
-                    <tr className="bg-gray-50 text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
-                      <th className="px-4 py-2.5">Identifier Key</th>
-                      <th className="px-4 py-2.5">Display Label</th>
-                      <th className="px-4 py-2.5">Short Abbreviation</th>
-                      <th className="px-4 py-2.5 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 font-medium">
+                {isMobile ? (
+                  <ul className="divide-y divide-gray-100 font-medium">
                     {roomTypes.map((type) => (
-                      <tr key={type.value} className="text-gray-800 hover:bg-gray-50/50">
-                        <td className="px-4 py-3 font-mono text-[11px] text-gray-900">{type.value}</td>
-                        <td className="px-4 py-3 text-gray-700">{type.label}</td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-105 text-gray-700 border border-gray-200">
+                      <li key={type.value} className="flex items-start justify-between gap-3 p-4">
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <p className="text-sm font-semibold text-gray-900 truncate">{type.label}</p>
+                          <p className="font-mono text-[11px] text-gray-500 truncate">{type.value}</p>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700 border border-gray-200">
                             {type.shortLabel}
                           </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (pendingDeleteRoomType === type.value) {
-                                deleteRoomType(type.value);
-                                setPendingDeleteRoomType(null);
-                              } else {
-                                setPendingDeleteRoomType(type.value);
-                              }
-                            }}
-                            className={`font-bold hover:underline ${
-                              pendingDeleteRoomType === type.value
-                                ? "text-red-700"
-                                : "text-red-650 hover:text-red-700"
-                            }`}
-                          >
-                            {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
-                          </button>
-                        </td>
-                      </tr>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (pendingDeleteRoomType === type.value) {
+                              deleteRoomType(type.value);
+                              setPendingDeleteRoomType(null);
+                            } else {
+                              setPendingDeleteRoomType(type.value);
+                            }
+                          }}
+                          className={`shrink-0 font-bold hover:underline min-h-[44px] px-2 ${
+                            pendingDeleteRoomType === type.value
+                              ? "text-red-700"
+                              : "text-red-650 hover:text-red-700"
+                          }`}
+                        >
+                          {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
+                        </button>
+                      </li>
                     ))}
-                  </tbody>
-                </table>
+                  </ul>
+                ) : (
+                  <table className="min-w-full divide-y divide-gray-150 text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                        <th className="px-4 py-2.5">Identifier Key</th>
+                        <th className="px-4 py-2.5">Display Label</th>
+                        <th className="px-4 py-2.5">Short Abbreviation</th>
+                        <th className="px-4 py-2.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 font-medium">
+                      {roomTypes.map((type) => (
+                        <tr key={type.value} className="text-gray-800 hover:bg-gray-50/50">
+                          <td className="px-4 py-3 font-mono text-[11px] text-gray-900">{type.value}</td>
+                          <td className="px-4 py-3 text-gray-700">{type.label}</td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-105 text-gray-700 border border-gray-200">
+                              {type.shortLabel}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (pendingDeleteRoomType === type.value) {
+                                  deleteRoomType(type.value);
+                                  setPendingDeleteRoomType(null);
+                                } else {
+                                  setPendingDeleteRoomType(type.value);
+                                }
+                              }}
+                              className={`font-bold hover:underline ${
+                                pendingDeleteRoomType === type.value
+                                  ? "text-red-700"
+                                  : "text-red-650 hover:text-red-700"
+                              }`}
+                            >
+                              {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
               {/* Add Room Type Form */}
@@ -1757,51 +1791,42 @@ export function SettingsPage() {
                       </div>
                     ) : (
                       <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-                        <table className="min-w-full divide-y divide-gray-150 text-xs">
-                          <thead>
-                            <tr className="bg-gray-50 text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
-                              <th className="px-4 py-2.5">Name</th>
-                              <th className="px-4 py-2.5">Email</th>
-                              <th className="px-4 py-2.5">Role</th>
-                              <th className="px-4 py-2.5">Status</th>
-                              <th className="px-4 py-2.5 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 font-medium">
+                        {isMobile ? (
+                          <ul className="divide-y divide-gray-100 font-medium">
                             {staff.map((member) => {
                               const isCurrentUser = member.uid === currentUser?.uid;
                               return (
-                                <tr key={member.uid} className="text-gray-800 hover:bg-gray-50/50">
-                                  <td className="px-4 py-3 font-semibold text-gray-900">
-                                    {member.fullName || "(no name)"}
-                                    {isCurrentUser ? <span className="ml-2 inline-flex items-center rounded-full bg-primary-light px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-dark">You</span> : null}
-                                  </td>
-                                  <td className="px-4 py-3 text-gray-700 font-mono text-[11px]">{member.email}</td>
-                                  <td className="px-4 py-3">
-                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-                                      member.role === "admin"
-                                        ? "border-primary/30 bg-primary-light text-primary-dark"
-                                        : "border-gray-200 bg-gray-100 text-gray-600"
-                                    }`}>
-                                      {member.role === "admin" ? "Admin" : "Front Desk"}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-                                      member.isActive
-                                        ? "border-emerald-100 bg-emerald-50 text-emerald-700"
-                                        : "border-gray-200 bg-gray-100 text-gray-500"
-                                    }`}>
-                                      {member.isActive ? "Active" : "Disabled"}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3 text-right">
+                                <li key={member.uid} className="flex items-start justify-between gap-3 p-4">
+                                  <div className="min-w-0 flex-1 space-y-1.5">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">
+                                      {member.fullName || "(no name)"}
+                                      {isCurrentUser ? <span className="ml-2 inline-flex items-center rounded-full bg-primary-light px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-dark">You</span> : null}
+                                    </p>
+                                    <p className="font-mono text-[11px] text-gray-500 truncate">{member.email}</p>
+                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                        member.role === "admin"
+                                          ? "border-primary/30 bg-primary-light text-primary-dark"
+                                          : "border-gray-200 bg-gray-100 text-gray-600"
+                                      }`}>
+                                        {member.role === "admin" ? "Admin" : "Front Desk"}
+                                      </span>
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                        member.isActive
+                                          ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                                          : "border-gray-200 bg-gray-100 text-gray-500"
+                                      }`}>
+                                        {member.isActive ? "Active" : "Disabled"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="shrink-0">
                                     {member.isActive ? (
                                       <button
                                         type="button"
                                         disabled={isCurrentUser}
                                         onClick={() => openDisableStaffConfirm(member)}
-                                        className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                         title={isCurrentUser ? "You cannot disable your own account" : "Disable this staff account"}
                                       >
                                         <Lock size={13} />
@@ -1810,12 +1835,72 @@ export function SettingsPage() {
                                     ) : (
                                       <span className="text-[10px] text-gray-400 italic">No actions</span>
                                     )}
-                                  </td>
-                                </tr>
+                                  </div>
+                                </li>
                               );
                             })}
-                          </tbody>
-                        </table>
+                          </ul>
+                        ) : (
+                          <table className="min-w-full divide-y divide-gray-150 text-xs">
+                            <thead>
+                              <tr className="bg-gray-50 text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                                <th className="px-4 py-2.5">Name</th>
+                                <th className="px-4 py-2.5">Email</th>
+                                <th className="px-4 py-2.5">Role</th>
+                                <th className="px-4 py-2.5">Status</th>
+                                <th className="px-4 py-2.5 text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 font-medium">
+                              {staff.map((member) => {
+                                const isCurrentUser = member.uid === currentUser?.uid;
+                                return (
+                                  <tr key={member.uid} className="text-gray-800 hover:bg-gray-50/50">
+                                    <td className="px-4 py-3 font-semibold text-gray-900">
+                                      {member.fullName || "(no name)"}
+                                      {isCurrentUser ? <span className="ml-2 inline-flex items-center rounded-full bg-primary-light px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary-dark">You</span> : null}
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-700 font-mono text-[11px]">{member.email}</td>
+                                    <td className="px-4 py-3">
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                        member.role === "admin"
+                                          ? "border-primary/30 bg-primary-light text-primary-dark"
+                                          : "border-gray-200 bg-gray-100 text-gray-600"
+                                      }`}>
+                                        {member.role === "admin" ? "Admin" : "Front Desk"}
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                        member.isActive
+                                          ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                                          : "border-gray-200 bg-gray-100 text-gray-500"
+                                      }`}>
+                                        {member.isActive ? "Active" : "Disabled"}
+                                      </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-right">
+                                      {member.isActive ? (
+                                        <button
+                                          type="button"
+                                          disabled={isCurrentUser}
+                                          onClick={() => openDisableStaffConfirm(member)}
+                                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                          title={isCurrentUser ? "You cannot disable your own account" : "Disable this staff account"}
+                                        >
+                                          <Lock size={13} />
+                                          Disable
+                                        </button>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-400 italic">No actions</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
                       </div>
                     )}
                   </div>
