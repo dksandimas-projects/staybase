@@ -221,6 +221,25 @@ export function CorporateInquiriesPage() {
     }
   ];
 
+  const renderInquiryCard = (row: CorporateInquiry) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <StatusBadge
+          label={row.status.replace("-", " ")}
+          status={row.status === "converted" ? "confirmed" : row.status === "declined" ? "dirty" : "pending"}
+        />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+          {row.numRooms ?? 0} {row.numRooms === 1 ? "room" : "rooms"}
+        </span>
+      </div>
+      <p className="text-base font-bold text-gray-900">{row.companyName}</p>
+      <p className="text-xs text-gray-600">{row.contactPerson}</p>
+      <p className="text-[10px] text-gray-400">
+        Submitted {new Date(row.createdAt).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}
+      </p>
+    </div>
+  );
+
   // Filtering row listings
   const filteredInquiries = corporateInquiries.filter(inq => {
     if (activeTab === "all") return true;
@@ -256,6 +275,8 @@ export function CorporateInquiriesPage() {
         columns={columns}
         rows={filteredInquiries}
         onRowClick={handleRowClick}
+        renderMobileCard={renderInquiryCard}
+        emptyMessage="No inquiries match the current filters."
       />
 
       {/* Inquiry Detail Drawer (D-03) */}
