@@ -7,7 +7,9 @@ import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { ConfirmForm } from "../components/ConfirmForm";
 import { useToast } from "../components/Toast";
+import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { formatPrice } from "../utils/format";
 import {
   Calendar,
@@ -49,6 +51,12 @@ export function BookingsPage() {
     currentUser
   } = useAdmin();
   const toast = useToast();
+  const discountApproveConfirm = useTwoClickConfirm<"approve">();
+  const checkoutWithBalanceConfirm = useTwoClickConfirm<"confirm">();
+
+  const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
+  const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
+  const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
 
   // Main navigation tab
   const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">(
@@ -311,9 +319,66 @@ export function BookingsPage() {
   const handleStatusTransition = (status: Booking["status"]) => {
     if (selectedBooking) {
       updateBookingStatus(selectedBooking.id, status);
-      // Update selected booking details in drawer local state
       setSelectedBooking(prev => prev ? { ...prev, status } : null);
     }
+  };
+
+  const handleRejectDiscount = async (reason: string) => {
+    if (!selectedBooking) return;
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : import.meta.env.VITE_GUEST_APP_URL || "";
+
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/reject-discount`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId: selectedBooking.id,
+          reason
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to reject discount");
+      }
+
+      const updatedFields = {
+        discountRejected: true,
+        discountRejectedBy: currentUser?.email || "staff",
+        discountRejectionReason: reason,
+        discountVerified: false,
+        discountPct: 0,
+        totalPrice: selectedBooking.originalTotalPrice ?? selectedBooking.totalPrice
+      };
+
+      syncSelectedBooking(updatedFields);
+      toast.success("Discount rejected", "Full rate restored. Guest notified by email.");
+      setShowDiscountRejectForm(false);
+    } catch (err: any) {
+      console.error("Failed to reject discount:", err);
+      toast.error("Failed to reject discount", err.message);
+    }
+  };
+
+  const handleCancelBooking = async (reason: string) => {
+    if (!selectedBooking) return;
+    updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason });
+    setSelectedBooking(prev => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
+    toast.success("Booking cancelled", reason ? `Reason: ${reason}` : "Guest will be notified by email.");
+    setShowBookingCancelForm(false);
+  };
+
+  const handleCancelOrder = async (reason: string) => {
+    if (!selectedOrder) return;
+    void updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
+    setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
+    toast.success("Order cancelled", reason ? `Reason: ${reason}` : `Order ${selectedOrder.orderRef} cancelled.`);
+    setShowOrderCancelForm(false);
   };
 
   const getStayDates = (booking: Booking) => {
@@ -1640,85 +1705,62 @@ export function BookingsPage() {
                   )}
 
                   {!selectedBooking.discountVerified && !selectedBooking.discountRejected && (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (confirm("Verify and approve this discount?")) {
+                    showDiscountRejectForm ? (
+                      <ConfirmForm
+                        title="Reject this discount?"
+                        message={
+                          <>
+                            The guest will be charged the full rate (<strong>{formatPrice(selectedBooking.originalTotalPrice ?? selectedBooking.totalPrice)}</strong> instead of the discounted amount. They are notified by email.
+                          </>
+                        }
+                        reasonLabel="Rejection reason (for the audit log)"
+                        reasonPlaceholder="e.g. ID expired, name mismatch, invalid OSCA card"
+                        confirmLabel="Reject discount"
+                        cancelLabel="Back"
+                        variant="danger"
+                        onConfirm={(reason) => void handleRejectDiscount(reason)}
+                        onCancel={() => setShowDiscountRejectForm(false)}
+                      />
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!discountApproveConfirm.arm("approve")) return;
                             try {
                               const updatedFields = {
                                 discountVerified: true,
                                 discountVerifiedBy: currentUser?.email || "staff",
                                 discountRejected: false
                               };
-                              
+
                               const bookingDocRef = doc(db, "bookings", selectedBooking.id);
                               await updateDoc(bookingDocRef, {
                                 ...updatedFields,
                                 updatedAt: serverTimestamp()
                               });
-                              
+
                               syncSelectedBooking(updatedFields);
                               toast.success("Discount approved", `Verified by ${currentUser?.email || "staff"}`);
                             } catch (err: any) {
                               console.error("Failed to verify discount:", err);
                               toast.error("Failed to verify discount", err.message);
+                              discountApproveConfirm.cancel();
                             }
-                          }
-                        }}
-                        className="flex-grow min-h-[36px] inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
-                      >
-                        Approve Discount
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const reason = prompt("Enter discount rejection reason:");
-                          if (reason !== null) {
-                            try {
-                              const token = await auth.currentUser?.getIdToken();
-                              const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-                                ? "http://localhost:3000"
-                                : import.meta.env.VITE_GUEST_APP_URL || "";
-                              
-                              const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/reject-discount`, {
-                                method: "POST",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                  "Authorization": token ? `Bearer ${token}` : ""
-                                },
-                                body: JSON.stringify({
-                                  bookingId: selectedBooking.id,
-                                  reason
-                                })
-                              });
-                              const data = await res.json();
-                              if (!res.ok || !data.success) {
-                                throw new Error(data.error || "Failed to reject discount");
-                              }
-                              
-                              const updatedFields = {
-                                discountRejected: true,
-                                discountRejectedBy: currentUser?.email || "staff",
-                                discountRejectionReason: reason,
-                                discountVerified: false,
-                                discountPct: 0,
-                                totalPrice: selectedBooking.originalTotalPrice ?? selectedBooking.totalPrice
-                              };
-                              
-                              syncSelectedBooking(updatedFields);
-                              toast.success("Discount rejected", "Full rate restored. Guest notified by email.");
-                            } catch (err: any) {
-                              console.error("Failed to reject discount:", err);
-                              toast.error("Failed to reject discount", err.message);
-                            }
-                          }
-                        }}
-                        className="flex-grow min-h-[36px] inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-[11px] font-bold text-red-600 transition"
-                      >
-                        Reject Discount
-                      </button>
-                    </div>
+                          }}
+                          className="flex-grow min-h-[36px] inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
+                        >
+                          {discountApproveConfirm.isPending("approve") ? "Click to confirm" : "Approve Discount"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowDiscountRejectForm(true)}
+                          className="flex-grow min-h-[36px] inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-[11px] font-bold text-red-600 transition"
+                        >
+                          Reject Discount
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
               </div>
@@ -1903,30 +1945,42 @@ export function BookingsPage() {
                 <button
                   onClick={() => {
                     const folio = getBookingFolio(selectedBooking);
-                    if (folio.balance > 0 && !confirm(`This folio still has ${formatPrice(folio.balance)} due. Continue checkout anyway?`)) {
-                      return;
-                    }
+                    if (folio.balance > 0 && !checkoutWithBalanceConfirm.arm("confirm")) return;
                     handleStatusTransition("checked-out");
                   }}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-gray-900 hover:bg-black text-xs font-bold text-white shadow-sm transition active:scale-95"
+                  className={`min-h-[44px] w-full inline-flex items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm transition active:scale-95 ${
+                    getBookingFolio(selectedBooking).balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
+                      ? "bg-orange-600 hover:bg-orange-700"
+                      : "bg-gray-900 hover:bg-black"
+                  }`}
                 >
-                  Check Out Room Folio
+                  {checkoutWithBalanceConfirm.isPending("confirm")
+                    ? `Confirm — ${formatPrice(getBookingFolio(selectedBooking).balance)} still due`
+                    : "Check Out Room Folio"}
                 </button>
               )}
 
               {selectedBooking.status !== "checked-out" && selectedBooking.status !== "cancelled" && (
-                <button
-                  onClick={() => {
-                    const reason = prompt("Enter cancellation reason:");
-                    if (reason !== null) {
-                      updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason });
-                      setSelectedBooking(prev => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
-                    }
-                  }}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition"
-                >
-                  Cancel Booking
-                </button>
+                showBookingCancelForm ? (
+                  <ConfirmForm
+                    title="Cancel this booking?"
+                    message="The guest will be notified by email. The booking record is kept in the audit log."
+                    reasonLabel="Cancellation reason (optional)"
+                    reasonPlaceholder="e.g. guest requested, no-show, double-booked"
+                    confirmLabel="Cancel booking"
+                    cancelLabel="Back"
+                    variant="danger"
+                    onConfirm={(reason) => void handleCancelBooking(reason)}
+                    onCancel={() => setShowBookingCancelForm(false)}
+                  />
+                ) : (
+                  <button
+                    onClick={() => setShowBookingCancelForm(true)}
+                    className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition"
+                  >
+                    Cancel Booking
+                  </button>
+                )
               )}
             </div>
           </div>
@@ -2033,57 +2087,73 @@ export function BookingsPage() {
             {/* Order status actions */}
             <div className="pt-4 border-t border-gray-150 flex flex-col gap-2">
               {selectedOrder.status === "placed" && (
-                <>
-                  <button
-                    onClick={() => {
-                      void updateStoreOrderStatus(selectedOrder.id, "confirmed");
-                      setSelectedOrder((prev: any) => prev ? { ...prev, status: "confirmed" } : null);
-                    }}
-                    className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
-                  >
-                    Confirm & Prepare Order
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      const reason = prompt("Enter cancellation reason:");
-                      if (reason !== null) {
-                        void updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
-                        setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
-                      }
-                    }}
-                    className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition"
-                  >
-                    Cancel Order
-                  </button>
-                </>
+                showOrderCancelForm ? (
+                  <ConfirmForm
+                    title="Cancel this order?"
+                    message={`Order ${selectedOrder.orderRef} will be marked as cancelled. The guest will be notified by email.`}
+                    reasonLabel="Cancellation reason (optional)"
+                    reasonPlaceholder="e.g. out of stock, guest requested, wrong address"
+                    confirmLabel="Cancel order"
+                    cancelLabel="Back"
+                    variant="danger"
+                    onConfirm={(reason) => void handleCancelOrder(reason)}
+                    onCancel={() => setShowOrderCancelForm(false)}
+                  />
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        void updateStoreOrderStatus(selectedOrder.id, "confirmed");
+                        setSelectedOrder((prev: any) => prev ? { ...prev, status: "confirmed" } : null);
+                      }}
+                      className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
+                    >
+                      Confirm & Prepare Order
+                    </button>
+
+                    <button
+                      onClick={() => setShowOrderCancelForm(true)}
+                      className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-600 transition"
+                    >
+                      Cancel Order
+                    </button>
+                  </>
+                )
               )}
 
               {selectedOrder.status === "confirmed" && (
-                <>
-                  <button
-                    onClick={() => {
-                      void updateStoreOrderStatus(selectedOrder.id, "out-for-delivery");
-                      setSelectedOrder((prev: any) => prev ? { ...prev, status: "out-for-delivery" } : null);
-                    }}
-                    className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
-                  >
-                    Dispatch Out for Delivery
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      const reason = prompt("Enter cancellation reason:");
-                      if (reason !== null) {
-                        void updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
-                        setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
-                      }
-                    }}
-                    className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-650 transition"
-                  >
-                    Cancel Order
-                  </button>
-                </>
+                showOrderCancelForm ? (
+                  <ConfirmForm
+                    title="Cancel this order?"
+                    message={`Order ${selectedOrder.orderRef} will be marked as cancelled. The guest will be notified by email.`}
+                    reasonLabel="Cancellation reason (optional)"
+                    reasonPlaceholder="e.g. out of stock, guest requested, wrong address"
+                    confirmLabel="Cancel order"
+                    cancelLabel="Back"
+                    variant="danger"
+                    onConfirm={(reason) => void handleCancelOrder(reason)}
+                    onCancel={() => setShowOrderCancelForm(false)}
+                  />
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        void updateStoreOrderStatus(selectedOrder.id, "out-for-delivery");
+                        setSelectedOrder((prev: any) => prev ? { ...prev, status: "out-for-delivery" } : null);
+                      }}
+                      className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
+                    >
+                      Dispatch Out for Delivery
+                    </button>
+
+                    <button
+                      onClick={() => setShowOrderCancelForm(true)}
+                      className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-xs font-bold text-red-650 transition"
+                    >
+                      Cancel Order
+                    </button>
+                  </>
+                )
               )}
 
               {selectedOrder.status === "out-for-delivery" && (
