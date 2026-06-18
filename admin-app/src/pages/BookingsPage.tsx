@@ -27,7 +27,8 @@ import {
   Utensils,
   Save,
   ShieldCheck,
-  BedDouble
+  BedDouble,
+  MoreVertical
 } from "lucide-react";
 import config from "@config";
 import { jsPDF } from "jspdf";
@@ -329,6 +330,11 @@ export function BookingsPage() {
     }
   ];
 
+  const isBookingPaid = (row: Booking) => {
+    const paid = (row.onsitePayments ?? []).reduce((sum, p) => sum + (p.amount || 0), 0);
+    return paid >= row.totalPrice && row.totalPrice > 0;
+  };
+
   const renderBookingCard = (row: Booking) => (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -351,7 +357,31 @@ export function BookingsPage() {
       <p className="text-xs text-gray-500">
         {row.numNights} {row.numNights === 1 ? "night" : "nights"} · {row.numGuests} {row.numGuests === 1 ? "guest" : "guests"}
       </p>
-      <p className="text-lg font-bold text-primary-dark">{formatPrice(row.totalPrice)}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-lg font-bold text-primary-dark">{formatPrice(row.totalPrice)}</p>
+        {isBookingPaid(row) ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700"
+            aria-label="Fully paid"
+          >
+            <span aria-hidden="true">●</span> Paid
+          </span>
+        ) : null}
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          aria-label={`Open actions for booking ${row.bookingRef}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSelectedBooking(row);
+            setIsDrawerOpen(true);
+          }}
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 active:bg-gray-200"
+        >
+          <MoreVertical size={18} aria-hidden="true" />
+        </button>
+      </div>
     </div>
   );
 
@@ -2292,31 +2322,29 @@ export function BookingsPage() {
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       >
-        <form onSubmit={handleWalkinSubmit} className="space-y-5 text-sm">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Guest Full Name
-              <input
-                type="text"
-                required
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                placeholder="Maria Santos"
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
-              />
-            </label>
+        <form onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Guest Full Name
+            <input
+              type="text"
+              required
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              placeholder="Maria Santos"
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
+            />
+          </label>
 
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Guest Phone
-              <input
-                type="tel"
-                value={guestPhone}
-                onChange={(e) => setGuestPhone(e.target.value)}
-                placeholder="+63 912 345 6789"
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
-              />
-            </label>
-          </div>
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Guest Phone
+            <input
+              type="tel"
+              value={guestPhone}
+              onChange={(e) => setGuestPhone(e.target.value)}
+              placeholder="+63 912 345 6789"
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
+            />
+          </label>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Email Address
@@ -2329,103 +2357,98 @@ export function BookingsPage() {
             />
           </label>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Room Type
-              <select
-                value={roomType}
-                onChange={(e) => {
-                  setRoomType(e.target.value);
-                  // Automatically trigger selection of first available room in next list
-                  const matching = rooms.filter(r => r.type === e.target.value && r.status === "available");
-                  if (matching.length > 0) {
-                    setRoomNumber(matching[0].roomNumber);
-                  } else {
-                    setRoomNumber("");
-                  }
-                }}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
-              >
-                {roomTypes.map(t => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </label>
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Room Type
+            <select
+              value={roomType}
+              onChange={(e) => {
+                setRoomType(e.target.value);
+                const matching = rooms.filter(r => r.type === e.target.value && r.status === "available");
+                if (matching.length > 0) {
+                  setRoomNumber(matching[0].roomNumber);
+                } else {
+                  setRoomNumber("");
+                }
+              }}
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+            >
+              {roomTypes.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </label>
 
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Select Available Room Number
-              <select
-                value={roomNumber}
-                onChange={(e) => setRoomNumber(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
-                required
-              >
-                {availableRoomsOfType.length > 0 ? (
-                  availableRoomsOfType.map(r => (
-                    <option key={r.id} value={r.roomNumber}>Room {r.roomNumber} (₱{r.pricePerNight}/night)</option>
-                  ))
-                ) : (
-                  <option value="" disabled>No vacant rooms available</option>
-                )}
-              </select>
-            </label>
-          </div>
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Select Available Room Number
+            <select
+              value={roomNumber}
+              onChange={(e) => setRoomNumber(e.target.value)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
+              required
+            >
+              {availableRoomsOfType.length > 0 ? (
+                availableRoomsOfType.map(r => (
+                  <option key={r.id} value={r.roomNumber}>Room {r.roomNumber} (₱{r.pricePerNight}/night)</option>
+                ))
+              ) : (
+                <option value="" disabled>No vacant rooms available</option>
+              )}
+            </select>
+          </label>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Check-In Date
-              <input
-                type="date"
-                required
-                value={checkInDate}
-                onChange={(e) => setCheckInDate(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-white py-2 px-3 text-xs"
-              />
-            </label>
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Check-In Date
+            <input
+              type="date"
+              required
+              value={checkInDate}
+              onChange={(e) => setCheckInDate(e.target.value)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-white py-2 px-3 text-xs"
+            />
+          </label>
 
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Check-Out Date
-              <input
-                type="date"
-                required
-                value={checkOutDate}
-                onChange={(e) => setCheckOutDate(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-white py-2 px-3 text-xs"
-              />
-            </label>
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Check-Out Date
+            <input
+              type="date"
+              required
+              value={checkOutDate}
+              onChange={(e) => setCheckOutDate(e.target.value)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-white py-2 px-3 text-xs"
+            />
+          </label>
 
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Number of Guests
-              <input
-                type="number"
-                min={1}
-                required
-                value={numGuests}
-                onChange={(e) => setNumGuests(parseInt(e.target.value) || 1)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs"
-              />
-            </label>
-          </div>
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Number of Guests
+            <input
+              type="number"
+              min={1}
+              required
+              value={numGuests}
+              onChange={(e) => setNumGuests(parseInt(e.target.value) || 1)}
+              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs"
+            />
+          </label>
 
-          <div className="grid gap-4 sm:grid-cols-2 items-center pt-2">
-            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+          <div className="space-y-2 pt-1">
+            <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
                 checked={hasBreakfast}
                 onChange={(e) => setHasBreakfast(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
               />
-              Include Daily Breakfast (+₱{breakfastConfig.ratePerPersonPerNight || 300}/guest/night)
+              <span>Include Daily Breakfast (+₱{breakfastConfig.ratePerPersonPerNight || 300}/guest/night)</span>
             </label>
 
-            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+            <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
                 checked={immediateCheckIn}
                 onChange={(e) => setImmediateCheckIn(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
               />
-              Check-In Guest Immediately
+              <span>Check-In Guest Immediately</span>
             </label>
           </div>
 
