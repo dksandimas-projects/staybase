@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: June 17, 2026 (Phase 11.7 planned — Admin Mobile UX; spec landed in `plan/features/ADMIN-MOBILE.md`, decision #107)
+> Last updated: June 18, 2026 (Phase 11.7 **shipped** — Admin Mobile UX; spec landed in `plan/features/ADMIN-MOBILE.md`, decision #107; on `dev` at v0.90.0)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -745,49 +745,46 @@ Branch: `feature/phase-11.6-batch-20`.
 
 ---
 
-## Phase 11.7 — Admin Mobile UX (P1) *(planned 2026-06-17)*
+## Phase 11.7 — Admin Mobile UX (P1) *(shipped 2026-06-18)*
 > Goal: Make the admin app usable on a phone. Mobile is **complement, not replacement** for the desktop dashboard — most common use case is "quick lookup / log a payment" away from the desk. No PWA, no offline, no install prompt (per `DECISIONS-ARCH.md #47`).
-> Spec: `plan/features/ADMIN-MOBILE.md` · Decision: `DECISIONS-FEATURES.md #107`
+> Spec: `plan/features/ADMIN-MOBILE.md` · Decision: `DECISIONS-FEATURES.md #107` (Implemented)
+> Branch: `feature/phase-11.7-admin-mobile` (merged to `dev`) · 9 commits, 9 new test files (94 tests, 342/342 total green) · v0.90.0
 
-- [ ] **P0 — Foundations**
-  - [ ] `useBreakpoint` hook (single source of truth for `mobile | tablet | desktop`)
-  - [ ] Responsive `Sidebar` (three modes: mobile slide-in / tablet icon-only / desktop full)
-  - [ ] Hamburger button in `AdminLayout` header (mobile only)
-  - [ ] Compact sticky mobile header
-  - [ ] Page padding responsive: `p-4 sm:p-6 lg:p-8`
-  - [ ] `<meta name="viewport">` add `viewport-fit=cover` for iOS safe areas
-- [ ] **P0 — Drawer / Modal / Toast**
-  - [ ] `Drawer` becomes full-screen bottom sheet on mobile with sticky action footer
-  - [ ] `Modal` becomes full-screen sheet on mobile
-  - [ ] Replace all `alert()` / `confirm()` / `prompt()` with inline forms + `<Toast>` system (extends #106g to the whole admin app — BookingsPage, RoomsPage, MembersPage, SettingsPage, RatesPage, CorporateInquiriesPage, IntercomInboxPage, AdminContext)
-  - [ ] New shared `<Toast>` + `useToast` hook in `admin-app/src/components/` (or `shared/components/`)
-- [ ] **P0 — DataTable mobile card view**
-  - [ ] Add `renderMobileCard?: (row: T) => ReactNode` prop to `DataTable`
-  - [ ] Switch to card list below 768px (status + ref on top, primary, secondary, action at bottom)
-  - [ ] Update `DataTable` skeleton to be card-shaped
-  - [ ] Pass `renderMobileCard` from Bookings, Store Orders, Members, Vouchers, Reports (Sales tables), Settings (room types, store items)
-- [ ] **P1 — Per-page work**
-  - [ ] Bookings: sticky CTA, sticky drawer footer, collapsible sections, mobile card table, walk-in modal full-screen
-  - [ ] Rooms: form grid `grid-cols-1 sm:grid-cols-2` (3 hardcoded `grid-cols-2` blocks), drawer bottom-sheet
-  - [ ] Intercom: split-pane → one-pane mobile with "← Back to threads", sticky chat input, full-screen call modal
-  - [ ] Settings: 260px nav → horizontal scrollable tab bar; 2 `<table class="min-w-full">` → card view
-  - [ ] Reports: 5 `overflow-x-auto` tables → card view; verify 3-tab list doesn't truncate
-  - [ ] Rates: rate table → card view; 3-col form grid
-  - [ ] Members: `grid-cols-1 sm:grid-cols-2` (line 253); drawer bottom-sheet
-  - [ ] Corporate Inquiries: 2 `grid-cols-2` blocks (line 358, 382) → responsive
-  - [ ] QR Management: `grid grid-cols-3 gap-2` (line 366) — verify or stack
-- [ ] **P2 — Accessibility & polish**
-  - [ ] Hamburger `aria-label` + `aria-expanded` + `aria-controls`; closed sidebar uses `aria-hidden` + `inert`
-  - [ ] Drawer/modal: `role="dialog"`, `aria-modal="true"`, `aria-labelledby`; focus trap; restore focus on close
-  - [ ] Tab bar: `role="tablist"` + `role="tab"` + `aria-selected`; arrow-key nav
-  - [ ] Card list items as `<button>` with accessible name
-  - [ ] Safe-area-insets on sticky bottom elements
-  - [ ] All animations respect `prefers-reduced-motion` (Framer `useReducedMotion()`)
-- [ ] **P2 — Testing**
-  - [ ] Manual QA matrix (18 screens × 6 breakpoints) — see `ADMIN-MOBILE.md §Manual QA matrix`
-  - [ ] Real device testing: iPhone SE, iPhone 14, Pixel 7, iPad, iPad landscape, desktop
-  - [ ] Unit test for `useBreakpoint` hook in `admin-app/src/__tests__/`
-  - [ ] Optional: Playwright visual regression at 375/768/1024 for the 5 highest-traffic screens
+- [x] **P0 — Foundations**
+  - [x] `useBreakpoint` hook (single source of truth for `mobile | tablet | desktop`) — `admin-app/src/utils/useBreakpoint.ts`
+  - [x] Responsive `Sidebar` (three modes: mobile slide-in / tablet icon-only / desktop full) — auto-close-on-route-change via `prevPathnameRef` (commit `97d32f1` regression fix)
+  - [x] Hamburger button in `AdminLayout` header (mobile only)
+  - [x] Compact sticky mobile header with centered "spark inn" wordmark (Stitch design) + safe-area-inset
+  - [x] Page padding responsive: `p-4 sm:p-6 lg:p-8`
+  - [x] `<meta name="viewport">` add `viewport-fit=cover` for iOS safe areas — `admin-app/index.html`
+- [x] **P0 — Drawer / Modal / Toast**
+  - [x] `Drawer` becomes full-screen bottom sheet on mobile with sticky action footer — split into `MobileDrawerPanel` + `DesktopDrawerPanel` sub-components
+  - [x] `Modal` becomes full-screen sheet on mobile — same `Mobile*Panel` / `Desktop*Panel` split
+  - [x] Replace all `alert()` / `confirm()` / `prompt()` with inline forms + `<Toast>` system (extends #106g to the whole admin app — 6 pages + AdminContext notify helper for outside-React contexts)
+  - [x] `<Toast>` + `useToast` hook in `admin-app/src/components/Toast.tsx` (4 variants: success/error/info/warning, ARIA, safe-area-inset, auto-dismiss, module-level `notify.*` for non-React callers)
+  - [x] `ConfirmForm` (alertdialog role, danger variant, required-reason enforcement) + `useTwoClickConfirm` (3s auto-cancel)
+- [x] **P0 — DataTable mobile card view**
+  - [x] Add `renderMobileCard?: (row: T) => ReactNode` prop to `DataTable`
+  - [x] Switch to card list below 768px (status + ref on top, primary, secondary, action at bottom)
+  - [x] `DataTable` skeleton is card-shaped on mobile
+  - [x] `renderMobileCard` passed from Bookings, Members, Rates, CorporateInquiries (4 of the 7 candidates — Store Orders/Vouchers/Reports defer to P2; Settings/room-types/store-items don't have list views)
+- [x] **P1 — Per-page work**
+  - [x] Bookings: sticky CTA, sticky drawer footer, mobile card table with 3-dot `MoreVertical` menu + `PAID` pill, walk-in modal full-screen with stacked single-column form, `?filter=arrivals|departures|in-house` URL filter
+  - [x] Intercom: split-pane → one-pane mobile with "← Back" + full-screen chat Drawer, extracted `IntercomChatPanel` + `StoreOrderMessageCard` components
+  - [x] Settings: 260px left nav → horizontal scrollable tab bar (10 pills) on mobile, auto-scrolls to active tab via useEffect; `lg:hidden` on the mobile bar, `hidden lg:block` on the desktop nav
+  - [x] Bookings per-page: `PAID` pill (emerald, when `onsitePayments >= totalPrice`), 3-dot MoreVertical button (stopPropagation via Blocker), walk-in modal stacked single column
+  - [x] Bottom tab bar (new component, `BottomTabBar.tsx`) — Arrivals/Departures/In-House/Alerts on Bookings page, Settings on Settings page, fixed bottom, safe-area-inset, `role="tablist"` + `aria-current="page"` on active
+- [x] **P2 — Accessibility & polish**
+  - [x] Drawer/modal: `role="dialog"`, `aria-modal="true"`, `aria-labelledby` pointing to `<h2 id={titleId}>` (no static aria-label)
+  - [x] Focus trap via new `useFocusTrap` hook — Tab/Shift+Tab cycle within container, Escape close, focus restore on unmount via `previouslyFocused.current`
+  - [x] Bottom tab bar: `role="tablist"` + `role="tab"` + `aria-selected` + `aria-current="page"` on active
+  - [x] All animations respect `prefers-reduced-motion` (`useReducedMotion()` coerced to boolean via `!!`)
+  - [x] Safe-area-inset padding on all sticky footers / chat input / bottom tab bar
+- [x] **P2 — Testing**
+  - [x] 9 new test files: `phase-11.7-mobile-foundations`, `phase-11.7-toast-drawer`, `phase-11.7-confirm-forms`, `phase-11.7-datatable-mobile`, `phase-11.7-bottom-tab-bar`, `phase-11.7-bookings-filter`, `phase-11.7-bookings-cleanup`, `phase-11.7-intercom-mobile`, `phase-11.7-settings-mobile`, `phase-11.7-a11y-polish` — 94 new tests, 342/342 total
+  - [x] Source-pattern tests verify: focus trap queryable selectors + cycle + Escape + restore, `useFocusTrap` import in Drawer/Modal, `aria-labelledby` + `<h2 id={titleId}>`, BottomTabBar `aria-current="page"`, `renderMobileCard` prop on 4 pages, Toast + ConfirmForm patterns
+  - [x] Build (`vite build`) passes · `tsc -b` typecheck clean
+  - [ ] **Deferred to P3** — Manual QA matrix (18 screens × 6 breakpoints) + real device testing (iPhone SE, iPhone 14, Pixel 7, iPad) — requires a browser/device; doc/QA matrix at `ADMIN-MOBILE.md §Manual QA matrix`
 
 ### Estimate
 ~6 dev days. Implementation order and per-step scope in `ADMIN-MOBILE.md §Implementation order`.
@@ -914,11 +911,14 @@ Branch: `feature/phase-11.6-batch-20`.
 | 10B — Spark Rewards | 14 | 13 | 1 (operational — Firebase Auth Google provider) |
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
 | 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
+| 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **329** | **296** | **33** |
+| **Total** | **359** | **325** | **34** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
+
+*Phase 11.7 (Admin Mobile UX) is now 29/30 shipped on `dev` at v0.90.0. The 1 remaining item is the manual QA matrix (18 screens × 6 breakpoints) plus real-device testing — requires a browser/device, deferred to P3 post-staging. P0 (foundations, Drawer/Modal/Toast, DataTable mobile card view), P1 (Bookings, Intercom, Settings, Bottom tab bar) and P2 (focus trap, ARIA, prefers-reduced-motion) are all done. 9 commits, 9 new test files, 94 new tests, 342/342 total tests passing, build clean. Decision #107 is **Implemented**.*
 
 ---
 

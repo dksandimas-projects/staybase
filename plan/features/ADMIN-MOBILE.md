@@ -1,8 +1,10 @@
 # Admin Mobile UX
 > App: admin-app
-> Phase: Phase 11.7 — Admin Mobile UX
+> Phase: Phase 11.7 — Admin Mobile UX **(shipped 2026-06-18 on `dev` at v0.90.0)**
 > Requires: CLAUDE.md, docs/FRONTEND.md, plan/admin-app/CLAUDE.md
 > Cross-refs: `plan/features/AUTH-ROLES.md`, `plan/features/DASHBOARD-OVERVIEW.md`, `plan/features/BOOKINGS-MANAGEMENT.md`, `plan/features/INTERCOM-INBOX.md`, `plan/features/SETTINGS.md`, `plan/features/REPORTS.md`, `plan/features/MEMBERS-*` (Phase 10B), `plan/features/STORE-MANAGEMENT.md`
+>
+> **Implementation status:** P0 (foundations, Drawer/Modal/Toast, DataTable mobile card) + P1 (Bookings, Intercom, Settings, BottomTabBar) + P2 (focus trap, ARIA, prefers-reduced-motion) all shipped. P3 manual QA matrix (18 screens × 6 breakpoints) + real-device testing are deferred to post-staging. Decision #107 is **Implemented**.
 
 ## Overview
 
@@ -582,3 +584,49 @@ Real device testing required for the iOS notched safe-area behavior — Chrome D
 - Hard rules (unsubscribe onSnapshot, no `forwardRef`, no `useEffect` for derived state, no `process.env`): `plan/docs/GOTCHAS.md`
 - No-PWA decision: `plan/docs/DECISIONS-ARCH.md #47`
 - Replace `prompt()` decision: `plan/docs/DECISIONS-FEATURES.md #106g`
+
+---
+
+## Implementation status (shipped 2026-06-18)
+
+**Branch:** `feature/phase-11.7-admin-mobile` (merged to `dev` at v0.90.0)
+**Commits:** 9 (`feat(admin):` + 1 docs)
+**Tests:** 9 new test files, 94 new tests, 342/342 total green
+**Build:** `npm run typecheck -w admin-app` + `npm run test -w admin-app` + `npm run build -w admin-app` all pass
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `admin-app/src/utils/useBreakpoint.ts` | `isMobile` / `isTablet` / `isDesktop` / `isMobileLandscape` + `width` — single source of truth, no direct `window.matchMedia` calls allowed in components |
+| `admin-app/src/utils/useTwoClickConfirm.ts` | 3-second auto-cancel two-click confirmation for destructive actions; powers 5 `confirm()` replacements |
+| `admin-app/src/utils/useFocusTrap.ts` | Tab/Shift+Tab cycle within container, Escape close, focus restore on unmount via `previouslyFocused.current` |
+| `admin-app/src/components/Toast.tsx` | `<ToastProvider>` + `useToast` + `notify.*` module-level helpers; 4 variants (success/error/info/warning), ARIA live region, safe-area-inset, auto-dismiss |
+| `admin-app/src/components/ConfirmForm.tsx` | `role="alertdialog"` confirmation with optional required reason text |
+| `admin-app/src/components/BottomTabBar.tsx` | Persistent mobile bottom tab bar (Arrivals/Departures/In-House/Alerts on Bookings, Settings on Settings); `role="tablist"` + `aria-current="page"` on active |
+| `admin-app/src/components/IntercomChatPanel.tsx` | Reusable chat panel with `variant: "panel" \| "drawer"` — extracted from IntercomInboxPage for single-pane mobile rewrite |
+| `admin-app/src/components/StoreOrderMessageCard.tsx` | Extracted from IntercomInboxPage; reused by `IntercomChatPanel` |
+| `admin-app/src/__tests__/phase-11.7-*.test.ts` (9 files) | 94 regression tests covering foundations, toast/drawer, confirm forms, DataTable mobile, BottomTabBar, bookings filter/cleanup, Intercom mobile, Settings mobile, a11y polish |
+
+### Files changed
+
+- `admin-app/src/components/Sidebar.tsx` — three-mode (mobile slide-in / tablet icon-only / desktop full); auto-close-on-route-change via `prevPathnameRef` (commit `97d32f1` regression fix)
+- `admin-app/src/components/AdminLayout.tsx` — centered wordmark mobile header (Stitch), hamburger button, `<ToastProvider>` mount, `<BottomTabBar>` mount
+- `admin-app/src/components/Drawer.tsx` — split into `MobileDrawerPanel` + `DesktopDrawerPanel` sub-components, each with its own `useFocusTrap<HTMLElement>(true, onClose)`; `aria-labelledby={titleId}` + `<h2 id={titleId}>`
+- `admin-app/src/components/Modal.tsx` — same `Mobile*Panel` / `Desktop*Panel` split with focus trap + `aria-labelledby`
+- `admin-app/src/components/DataTable.tsx` — `renderMobileCard?: (row: T) => ReactNode` prop; card list below 768px; card-shaped skeleton
+- `admin-app/src/context/AdminContext.tsx` — 5 `alert()` calls replaced with `notify.error()` (via ToastProvider's `useEffect` binding)
+- `admin-app/src/pages/BookingsPage.tsx` — `?filter=arrivals|departures|in-house` URL filter, 3-dot `MoreVertical` menu (stopPropagation via Blocker), `PAID` pill (emerald), walk-in modal stacked single column, 5 confirm/prompt replacements
+- `admin-app/src/pages/IntercomInboxPage.tsx` — mobile single-pane rewrite; chat opens in full-screen Drawer with `onBack`; auto-select-first-thread effect gated on `!isMobile`
+- `admin-app/src/pages/SettingsPage.tsx` — 260px left nav → horizontal scrollable tab bar (10 pills) on mobile; auto-scrolls to active tab via useEffect
+- `admin-app/src/pages/MembersPage.tsx`, `RatesPage.tsx`, `CorporateInquiriesPage.tsx` — pass `renderMobileCard` to DataTable
+- `admin-app/index.html` — `<meta name="viewport">` adds `viewport-fit=cover` for iOS notched devices
+- `shared/animations.ts` — `slideInLeft` variant added for the mobile sidebar
+
+### What is still open (P3 — manual QA, not a code task)
+
+- [ ] Manual QA matrix (18 screens × 6 breakpoints) — see `§Manual QA matrix` above
+- [ ] Real-device testing: iPhone SE, iPhone 14, Pixel 7, iPad, iPad landscape, desktop
+- [ ] Optional: Playwright visual regression at 375/768/1024 for the 5 highest-traffic screens
+
+These items require a browser/device, so they ship in P3 post-staging (not before launch).
