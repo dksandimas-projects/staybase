@@ -10,6 +10,7 @@ import {
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
+import { useToast } from "../components/Toast";
 
 type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
 type StoreCategory = StoreItem["category"];
@@ -49,6 +50,7 @@ export function SettingsPage() {
     createStaff,
     disableStaff
   } = useAdmin();
+  const toast = useToast();
 
   // Active Settings Section Tab
   const [activeTab, setActiveTab] = useState<TabId>("hotel");
@@ -1347,13 +1349,13 @@ export function SettingsPage() {
 
                     if (!value || !label || !shortLabel) return;
                     if (roomTypes.some(t => t.value === value)) {
-                      alert("A room type with this identifier key already exists.");
+                      toast.error("Duplicate room type", `A room type with key "${value}" already exists.`);
                       return;
                     }
 
                     addRoomType({ value, label, shortLabel });
                     form.reset();
-                    alert("New room type classification added successfully!");
+                    toast.success("Room type added", `${label} (${shortLabel})`);
                   }}
                   className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
                 >
@@ -1532,7 +1534,7 @@ export function SettingsPage() {
                       type="button"
                       onClick={() => {
                         const audio = new Audio(notificationSoundUrl);
-                        audio.play().catch(() => alert("Could not play audio — check the URL is a valid audio file."));
+                        audio.play().catch(() => toast.error("Could not play audio", "Check the URL is a valid audio file."));
                       }}
                       className="min-h-[36px] px-4 inline-flex items-center gap-1.5 rounded-lg border border-gray-250 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
                     >

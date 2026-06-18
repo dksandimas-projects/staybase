@@ -3,6 +3,7 @@ import { useAdmin, Member, PointsLog } from "../context/AdminContext";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
 import { Award, User, Mail, Phone, Calendar, Plus, ShieldAlert, AwardIcon, Coins, History } from "lucide-react";
 import config from "@config";
 
@@ -12,6 +13,7 @@ export function MembersPage() {
     updateMemberPoints, 
     toggleMemberActive 
   } = useAdmin();
+  const toast = useToast();
 
   // Search and Drawer state
   const [searchText, setSearchText] = useState("");
@@ -59,7 +61,7 @@ export function MembersPage() {
 
     setAdjustAmount("");
     setAdjustReason("");
-    alert("Member rewards balance adjusted and logged successfully.");
+    toast.success("Points balance updated", `${amountNum > 0 ? "+" : ""}${amountNum} pts — ${adjustType}`);
   };
 
   const handleToggleAccount = () => {

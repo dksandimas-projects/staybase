@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { Lock, LogOut, User, Shield, Menu } from "lucide-react";
 import { Sidebar } from "./Sidebar";
+import { ToastProvider } from "./Toast";
 import { useAdmin } from "../context/AdminContext";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { useEffect, useState } from "react";
@@ -42,6 +43,7 @@ export function AdminLayout() {
   const isUserRestricted = currentUser.role !== "admin";
 
   return (
+    <ToastProvider>
     <div className="flex min-h-screen bg-gray-50 font-body text-gray-900">
       {/* Sidebar Navigation — three-mode responsive per ADMIN-MOBILE.md */}
       <Sidebar
@@ -173,5 +175,6 @@ export function AdminLayout() {
         </main>
       </div>
     </div>
+    </ToastProvider>
   );
 }

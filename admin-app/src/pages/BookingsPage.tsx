@@ -7,6 +7,7 @@ import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { useToast } from "../components/Toast";
 import { formatPrice } from "../utils/format";
 import {
   Calendar,
@@ -47,6 +48,7 @@ export function BookingsPage() {
     websiteContent,
     currentUser
   } = useAdmin();
+  const toast = useToast();
 
   // Main navigation tab
   const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">(
@@ -1042,12 +1044,12 @@ export function BookingsPage() {
         if (result.success) {
           setPaymentAmount("");
           setPaymentNote("");
-          alert("Payment recorded successfully.");
+          toast.success("Payment recorded", `${formatPrice(amount)} via ${paymentMethod.toUpperCase()}`);
         } else {
-          alert(result.error || "Failed to record payment.");
+          toast.error("Failed to record payment", result.error);
         }
       } catch (err: any) {
-        alert("Error: " + err.message);
+        toast.error("Failed to record payment", err.message);
       }
     }
   };
@@ -1057,7 +1059,7 @@ export function BookingsPage() {
   const handleWalkinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!guestName || !roomNumber) {
-      alert("Please fill in the guest name and select an available room.");
+      toast.warning("Missing details", "Please fill in the guest name and select an available room.");
       return;
     }
 
@@ -1118,12 +1120,12 @@ export function BookingsPage() {
         setPriceOverride("");
         setHasBreakfast(false);
         setIsModalOpen(false);
-        alert("Walk-in booking created successfully!");
+        toast.success("Walk-in booking created", `Room ${roomNumber} for ${guestName}`);
       } else {
-        alert(result.error || "Failed to create walk-in booking.");
+        toast.error("Failed to create walk-in booking", result.error);
       }
     } catch (err: any) {
-      alert("Error: " + err.message);
+      toast.error("Failed to create walk-in booking", err.message);
     } finally {
       setIsWalkinSubmitting(false);
     }
@@ -1657,10 +1659,10 @@ export function BookingsPage() {
                               });
                               
                               syncSelectedBooking(updatedFields);
-                              alert("Discount approved successfully!");
+                              toast.success("Discount approved", `Verified by ${currentUser?.email || "staff"}`);
                             } catch (err: any) {
                               console.error("Failed to verify discount:", err);
-                              alert("Error: " + err.message);
+                              toast.error("Failed to verify discount", err.message);
                             }
                           }
                         }}
@@ -1705,10 +1707,10 @@ export function BookingsPage() {
                               };
                               
                               syncSelectedBooking(updatedFields);
-                              alert("Discount rejected. Full rate restored.");
+                              toast.success("Discount rejected", "Full rate restored. Guest notified by email.");
                             } catch (err: any) {
                               console.error("Failed to reject discount:", err);
-                              alert("Error: " + err.message);
+                              toast.error("Failed to reject discount", err.message);
                             }
                           }
                         }}
@@ -2101,7 +2103,7 @@ export function BookingsPage() {
                   onClick={() => {
                     void billStoreOrder(selectedOrder.id);
                     setSelectedOrder((prev: any) => prev ? { ...prev, isBilled: true, billedAt: new Date().toISOString() } : null);
-                    alert("Order amount added to guest's room bill successfully.");
+                    toast.success("Order charged to folio", `${formatPrice(selectedOrder.totalAmount)} added to Room ${selectedOrder.roomNumber}`);
                   }}
                   className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
                 >
