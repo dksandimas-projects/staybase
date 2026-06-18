@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAdmin, type StoreItem } from "../context/AdminContext";
 import { compressImageFile } from "@spark-inn/shared";
-import { 
-  Settings, Globe, Gift, Coffee, ShoppingBag, 
+import {
+  Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock
@@ -11,6 +11,7 @@ import config from "@config";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { useBreakpoint } from "../utils/useBreakpoint";
 
 type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
 type StoreCategory = StoreItem["category"];
@@ -51,9 +52,26 @@ export function SettingsPage() {
     disableStaff
   } = useAdmin();
   const toast = useToast();
+  const { isMobile } = useBreakpoint();
 
   // Active Settings Section Tab
   const [activeTab, setActiveTab] = useState<TabId>("hotel");
+
+  // On mobile, auto-scroll the horizontal tab bar to the active tab so
+  // it's always visible. The user can still scroll the bar sideways to
+  // reach any tab that falls outside the viewport.
+  const tabBarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!isMobile) return;
+    const bar = tabBarRef.current;
+    if (!bar) return;
+    const activeEl = bar.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`);
+    if (activeEl) {
+      const left = activeEl.offsetLeft - bar.offsetLeft;
+      const targetLeft = left - (bar.clientWidth - activeEl.clientWidth) / 2;
+      bar.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
+    }
+  }, [activeTab, isMobile]);
 
   // Local state form mirrors
   // 1. Hotel Config Form States
@@ -400,10 +418,38 @@ export function SettingsPage() {
         <p className="text-xs text-gray-500 mt-1">Configure guest check-in defaults, landing page banners, loyalty multipliers, and food items.</p>
       </header>
 
+      {/* Mobile horizontal tab bar — single-line, scrolls sideways.
+          The active tab is auto-scrolled into view (see the
+          useEffect above). On desktop the same tabs render as a
+          vertical 260px left nav (the <aside> below). */}
+      <div ref={tabBarRef} className="lg:hidden -mx-4 overflow-x-auto px-4 pb-1">
+        <div className="flex min-w-max gap-1.5">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isTabActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                data-tab-id={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold transition ${
+                  isTabActive
+                    ? "bg-primary text-white shadow-sm"
+                    : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                <Icon size={14} aria-hidden="true" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Split tab view layout */}
       <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
-        {/* Left: Section Selection Navigation */}
-        <aside className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 h-fit space-y-1">
+        {/* Left: Section Selection Navigation — desktop only */}
+        <aside className="hidden lg:block rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 h-fit space-y-1">
           <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-3 mb-3">Settings Categories</h2>
           {tabs.map((tab) => {
             const Icon = tab.icon;
