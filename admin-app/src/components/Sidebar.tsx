@@ -1,5 +1,5 @@
 import { VERSION, slideInLeft } from "@spark-inn/shared";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Award,
@@ -110,6 +110,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
   const { isMobile, isTablet } = useBreakpoint();
   const location = useLocation();
   const prefersReducedMotion = useReducedMotion();
+  const prevPathnameRef = useRef(location.pathname);
 
   const unreadIntercomCount = useMemo(
     () => Object.values(intercoms)
@@ -138,9 +139,10 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
   }, [isMobile, isOpen]);
 
   useEffect(() => {
-    if (!isMobile || !isOpen || !onClose) return;
-    onClose();
-  }, [location.pathname, isMobile, isOpen, onClose]);
+    if (location.pathname === prevPathnameRef.current) return;
+    prevPathnameRef.current = location.pathname;
+    onClose?.();
+  }, [location.pathname, onClose]);
 
   if (isMobile) {
     return (
