@@ -92,6 +92,18 @@ export function SettingsPage() {
   const [lowStockThreshold, setLowStockThreshold] = useState(String(storeConfig.lowStockThreshold));
   const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodSetting[]>(storeConfig.paymentMethods);
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
+  const [pendingDeleteStoreItemId, setPendingDeleteStoreItemId] = useState<string | null>(null);
+  const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingDeleteStoreItemId) return;
+    const timer = setTimeout(() => setPendingDeleteStoreItemId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteStoreItemId]);
+  useEffect(() => {
+    if (!pendingDeleteRoomType) return;
+    const timer = setTimeout(() => setPendingDeleteRoomType(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteRoomType]);
   const [isStoreItemModalOpen, setIsStoreItemModalOpen] = useState(false);
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
   const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
@@ -1079,16 +1091,23 @@ export function SettingsPage() {
                         </button>
                         <button
                           type="button"
-                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50"
+                          className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold transition ${
+                            pendingDeleteStoreItemId === item.id
+                              ? "border-red-300 bg-red-600 text-white"
+                              : "border-red-100 text-red-650 hover:bg-red-50"
+                          }`}
                           onClick={() => {
-                            if (confirm(`Delete "${item.name}" from the wireframe catalog?`)) {
+                            if (pendingDeleteStoreItemId === item.id) {
                               deleteStoreItem(item.id);
                               if (editingStoreItemId === item.id) setEditingStoreItemId(null);
+                              setPendingDeleteStoreItemId(null);
+                            } else {
+                              setPendingDeleteStoreItemId(item.id);
                             }
                           }}
                         >
                           <Trash2 size={13} />
-                          Delete
+                          {pendingDeleteStoreItemId === item.id ? "Click to confirm" : "Delete"}
                         </button>
                       </div>
                     </div>
@@ -1317,13 +1336,20 @@ export function SettingsPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (confirm(`Are you sure you want to delete the "${type.label}" room type?`)) {
+                              if (pendingDeleteRoomType === type.value) {
                                 deleteRoomType(type.value);
+                                setPendingDeleteRoomType(null);
+                              } else {
+                                setPendingDeleteRoomType(type.value);
                               }
                             }}
-                            className="text-red-650 hover:text-red-700 font-bold hover:underline"
+                            className={`font-bold hover:underline ${
+                              pendingDeleteRoomType === type.value
+                                ? "text-red-700"
+                                : "text-red-650 hover:text-red-700"
+                            }`}
                           >
-                            Delete
+                            {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
                           </button>
                         </td>
                       </tr>

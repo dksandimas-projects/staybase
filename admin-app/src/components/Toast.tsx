@@ -3,6 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode
@@ -31,6 +32,15 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 const DEFAULT_DURATION_MS = 4000;
 const ERROR_DURATION_MS = 6000;
+
+let externalShow: ToastContextValue["show"] | null = null;
+
+export const notify = {
+  success: (title: string, message?: string) => externalShow?.({ variant: "success", title, message }),
+  error: (title: string, message?: string) => externalShow?.({ variant: "error", title, message, durationMs: ERROR_DURATION_MS }),
+  info: (title: string, message?: string) => externalShow?.({ variant: "info", title, message }),
+  warning: (title: string, message?: string) => externalShow?.({ variant: "warning", title, message })
+};
 
 function makeId() {
   return `toast-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -113,6 +123,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     warning: (title, message) => show({ variant: "warning", title, message }),
     dismiss
   }), [show, dismiss]);
+
+  useEffect(() => {
+    externalShow = show;
+    return () => {
+      externalShow = null;
+    };
+  }, [show]);
 
   return (
     <ToastContext.Provider value={value}>

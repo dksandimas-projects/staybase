@@ -5,19 +5,19 @@ import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatPrice } from "../utils/format";
-import { 
-  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck, 
-  Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone 
+import {
+  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck,
+  Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone
 } from "lucide-react";
 import config from "@config";
 
 export function RatesPage() {
-  const { 
+  const {
     rooms,
-    vouchers, 
-    addVoucher, 
-    toggleVoucherActive, 
-    corporateCodes, 
+    vouchers,
+    addVoucher,
+    toggleVoucherActive,
+    corporateCodes,
     addCorporateCode,
     toggleCorporateCodeActive,
     deleteCorporateCode,
@@ -31,6 +31,15 @@ export function RatesPage() {
   // Modal State
   const [isVchModalOpen, setIsVchModalOpen] = useState(false);
   const [isCorpModalOpen, setIsCorpModalOpen] = useState(false);
+
+  // Two-click confirm state for the delete-corporate-code action.
+  // Set to the code being confirmed; click 2 within 3s executes the delete.
+  const [pendingDeleteCode, setPendingDeleteCode] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingDeleteCode) return;
+    const timer = setTimeout(() => setPendingDeleteCode(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteCode]);
 
   // Voucher Form States
   const [vchCode, setVchCode] = useState("");
@@ -310,14 +319,21 @@ export function RatesPage() {
           </button>
           <button
             onClick={() => {
-              if (confirm(`Are you sure you want to delete corporate code ${row.code}?`)) {
+              if (pendingDeleteCode === row.code) {
                 deleteCorporateCode(row.code);
+                setPendingDeleteCode(null);
+              } else {
+                setPendingDeleteCode(row.code);
               }
             }}
-            className="min-h-[32px] px-3.5 inline-flex items-center gap-1 rounded bg-gray-50 text-gray-700 hover:bg-gray-200 text-xs font-semibold shadow-sm transition"
+            className={`min-h-[32px] px-3.5 inline-flex items-center gap-1 rounded text-xs font-semibold shadow-sm transition ${
+              pendingDeleteCode === row.code
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "bg-gray-50 text-gray-700 hover:bg-gray-200"
+            }`}
           >
             <Trash2 size={12} className="inline mr-1" />
-            Delete
+            {pendingDeleteCode === row.code ? "Click to confirm" : "Delete"}
           </button>
         </div>
       )
