@@ -103,6 +103,16 @@ describe("Phase 11.7 — Admin Mobile UX (P0 foundations)", () => {
       expect(sidebarSrc).toMatch(/location\.pathname/);
     });
 
+    it("auto-close effect does NOT depend on isOpen (regression: hamburger must not close itself)", () => {
+      // Bug fix: previously the effect dep array included isOpen, so
+      // the effect fired when the user opened the sidebar (isOpen:
+      // false -> true) and immediately called onClose(), making the
+      // sidebar appear to not open. The fix uses a prevPathnameRef
+      // and only fires on actual pathname changes.
+      expect(sidebarSrc).toMatch(/prevPathnameRef\.current\s*=\s*location\.pathname/);
+      expect(sidebarSrc).toMatch(/location\.pathname\s*===\s*prevPathnameRef\.current/);
+    });
+
     it("uses role/aria attributes for the mobile drawer", () => {
       expect(sidebarSrc).toMatch(/role\s*=\s*["']dialog["']/);
       expect(sidebarSrc).toMatch(/aria-modal\s*=\s*["']true["']/);
