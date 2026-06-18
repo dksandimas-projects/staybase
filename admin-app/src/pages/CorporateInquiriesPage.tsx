@@ -5,6 +5,7 @@ import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { DataTable, DataTableColumn } from "../components/DataTable";
+import { useToast } from "../components/Toast";
 import { Users, Plus, Mail, Phone, Calendar, ClipboardList, Send, Sparkles, ArrowRightCircle, AlertCircle } from "lucide-react";
 import config from "@config";
 
@@ -19,6 +20,7 @@ export function CorporateInquiriesPage() {
     convertInquiryToBooking,
     rooms
   } = useAdmin();
+  const toast = useToast();
 
   // Selected Inquiry Drawer State
   const [selectedInquiry, setSelectedInquiry] = useState<CorporateInquiry | null>(null);
@@ -107,7 +109,7 @@ export function CorporateInquiriesPage() {
       accessCodeId: promoCodeToGenerate.trim().toUpperCase()
     });
 
-    alert(`Negotiated corporate code ${promoCodeToGenerate.trim().toUpperCase()} active!`);
+    toast.success("Corporate code issued", `Code ${promoCodeToGenerate.trim().toUpperCase()} is now active`);
   };
 
   // Per W2.14 / decision #102 / audit S4.2: open the
