@@ -1,18 +1,29 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { Lock, LogOut, User, Shield, Menu } from "lucide-react";
 import { Sidebar } from "./Sidebar";
+import { BottomTabBar } from "./BottomTabBar";
 import { ToastProvider } from "./Toast";
 import { useAdmin } from "../context/AdminContext";
 import { useBreakpoint } from "../utils/useBreakpoint";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import config from "@config";
 
 export function AdminLayout() {
-  const { authLoading, currentUser, signOut } = useAdmin();
+  const { authLoading, currentUser, signOut, intercoms } = useAdmin();
   const location = useLocation();
   const { isMobile } = useBreakpoint();
 
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const unreadAlertCount = useMemo(
+    () => Object.values(intercoms)
+      .flat()
+      .filter((m) => m.sender === "guest" && !m.isRead)
+      .length,
+    [intercoms]
+  );
+
+  const bottomTabVariant = location.pathname === "/settings" ? "settings" : "bookings";
 
   useEffect(() => {
     if (!isMobile && isMobileSidebarOpen) {
@@ -138,10 +149,17 @@ export function AdminLayout() {
           </div>
         </header>
 
-        {/* Content Body Container — responsive padding per ADMIN-MOBILE.md */}
+        {/* Content Body Container — responsive padding per ADMIN-MOBILE.md.
+            On mobile, the bottom tab bar is 56px tall + safe-area-inset-bottom,
+            so we add that much padding so the last row of content is not
+            hidden under the bar. */}
         <main
           className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8"
-          style={{ paddingBottom: isMobile ? "max(1rem, env(safe-area-inset-bottom))" : undefined }}
+          style={{
+            paddingBottom: isMobile
+              ? "max(5rem, calc(56px + env(safe-area-inset-bottom) + 1rem))"
+              : undefined
+          }}
         >
           {isPathRestricted && isUserRestricted ? (
             /* Restricted Route Access Denied Overlay */
@@ -174,6 +192,11 @@ export function AdminLayout() {
           )}
         </main>
       </div>
+
+      {/* Bottom tab bar — mobile-only, persists across pages (and inside
+          drawers per Stitch mobile design). The variant switches between
+          "bookings" and "settings" based on the current route. */}
+      <BottomTabBar variant={bottomTabVariant} unreadAlertCount={unreadAlertCount} />
     </div>
     </ToastProvider>
   );
