@@ -5,6 +5,7 @@ import { AlertTriangle, Check, Download, Printer, QrCode, RefreshCcw } from "luc
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import config from "@config";
 import { useAdmin, Room } from "../context/AdminContext";
+import { useToast } from "../components/Toast";
 import { db } from "../firebase/config";
 
 const qrSize = 136;
@@ -53,10 +54,10 @@ function getPrintableCard(room: Room, compact = false) {
   `;
 }
 
-function openPrintWindow(title: string, cardsHtml: string, isAll = false) {
+function openPrintWindow(title: string, cardsHtml: string, isAll: boolean, onPopupBlocked: () => void) {
   const printWindow = window.open("", "_blank");
   if (!printWindow) {
-    alert("Print was blocked. Please allow popups for this page, then try again.");
+    onPopupBlocked();
     return;
   }
 
@@ -152,6 +153,7 @@ function openPrintWindow(title: string, cardsHtml: string, isAll = false) {
 
 export function QRManagementPage() {
   const { rooms } = useAdmin();
+  const toast = useToast();
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [regeneratingRoom, setRegeneratingRoom] = useState<Room | null>(null);
@@ -187,7 +189,12 @@ export function QRManagementPage() {
   const selectNone = () => setSelectedRoomIds([]);
 
   const handlePrintRoom = (room: Room) => {
-    openPrintWindow(`Room ${room.roomNumber} QR - ${config.brandName}`, getPrintableCard(room));
+    openPrintWindow(
+      `Room ${room.roomNumber} QR - ${config.brandName}`,
+      getPrintableCard(room),
+      false,
+      () => toast.error("Print blocked", "Please allow popups for this page, then try again.")
+    );
   };
 
   const handlePrintAll = () => {
@@ -199,7 +206,8 @@ export function QRManagementPage() {
     openPrintWindow(
       `QR Room Cards - ${config.brandName}`,
       selectedRooms.map(room => getPrintableCard(room, true)).join(""),
-      true
+      true,
+      () => toast.error("Print blocked", "Please allow popups for this page, then try again.")
     );
   };
 

@@ -2,12 +2,14 @@ import { useState } from "react";
 import { useAdmin, Room } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
 import { formatPrice } from "../utils/format";
 import { BedDouble, Edit3, ShieldAlert, Sparkles, Plus, AlertCircle, EyeOff } from "lucide-react";
 import config from "@config";
 
 export function RoomsPage() {
   const { rooms, updateRoomConfig, addRoomBlock, roomTypes } = useAdmin();
+  const toast = useToast();
 
   // Selected Room Drawer States
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -45,7 +47,7 @@ export function RoomsPage() {
         pricePerNight,
         status
       });
-      alert("Room configurations updated successfully.");
+      toast.success("Room updated", `Room ${selectedRoom.roomNumber} configuration saved`);
       setIsDrawerOpen(false);
     }
   };
@@ -54,7 +56,7 @@ export function RoomsPage() {
     e.preventDefault();
     if (selectedRoom && blockFromDate && blockToDate && blockReason) {
       addRoomBlock(selectedRoom.id, { from: blockFromDate, to: blockToDate }, blockReason);
-      alert(`Room ${selectedRoom.roomNumber} has been blocked for maintenance.`);
+      toast.success("Room blocked", `Room ${selectedRoom.roomNumber} blocked for maintenance through ${blockToDate}`);
       setIsDrawerOpen(false);
     }
   };
