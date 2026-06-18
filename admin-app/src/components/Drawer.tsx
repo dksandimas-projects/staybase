@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { slideInBottom, slideInRight } from "@spark-inn/shared";
-import type { ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { cn } from "../utils/cn";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { useFocusTrap } from "../utils/useFocusTrap";
 
 interface DrawerProps {
   title: string;
@@ -16,7 +17,8 @@ interface DrawerProps {
 
 export function Drawer({ title, children, footer, open, onClose, className }: DrawerProps) {
   const { isMobile } = useBreakpoint();
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = !!useReducedMotion();
+  const titleId = useId();
 
   useLockBodyScroll(open && isMobile);
 
@@ -35,68 +37,29 @@ export function Drawer({ title, children, footer, open, onClose, className }: Dr
             aria-hidden="true"
           />
           {isMobile ? (
-            <motion.aside
+            <MobileDrawerPanel
               key="drawer-panel-mobile"
-              variants={prefersReducedMotion ? undefined : slideInBottom}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              role="dialog"
-              aria-modal="true"
-              aria-label={title}
-              className="fixed inset-x-0 bottom-0 z-50 flex max-h-[95vh] flex-col rounded-t-card-lg bg-white shadow-xl"
-              style={{ paddingTop: "env(safe-area-inset-top)" }}
+              title={title}
+              titleId={titleId}
+              prefersReducedMotion={prefersReducedMotion}
+              onClose={onClose}
+              footer={footer}
+              className={className}
             >
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-5 py-4">
-                <div className="mx-auto h-1 w-12 rounded-full bg-gray-200" aria-hidden="true" />
-                <h2 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold text-gray-950">{title}</h2>
-                <button
-                  type="button"
-                  aria-label="Close"
-                  className="ml-auto flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
-                  onClick={onClose}
-                >
-                  <X size={20} aria-hidden="true" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-              {footer ? (
-                <div
-                  className="shrink-0 border-t border-gray-200 bg-white px-5 py-3"
-                  style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
-                >
-                  {footer}
-                </div>
-              ) : null}
-            </motion.aside>
+              {children}
+            </MobileDrawerPanel>
           ) : (
-            <motion.aside
+            <DesktopDrawerPanel
               key="drawer-panel-desktop"
-              variants={prefersReducedMotion ? undefined : slideInRight}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              role="dialog"
-              aria-modal="true"
-              aria-label={title}
-              className={cn("ml-auto flex h-full w-full flex-col bg-white shadow-xl", className || "max-w-[480px]")}
+              title={title}
+              titleId={titleId}
+              prefersReducedMotion={prefersReducedMotion}
+              onClose={onClose}
+              footer={footer}
+              className={className}
             >
-              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
-                <h2 className="text-lg font-semibold text-gray-950">{title}</h2>
-                <button
-                  type="button"
-                  aria-label="Close"
-                  className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
-                  onClick={onClose}
-                >
-                  <X size={20} aria-hidden="true" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-5">{children}</div>
-              {footer ? (
-                <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div>
-              ) : null}
-            </motion.aside>
+              {children}
+            </DesktopDrawerPanel>
           )}
         </>
       )}
@@ -104,7 +67,109 @@ export function Drawer({ title, children, footer, open, onClose, className }: Dr
   );
 }
 
-import { useEffect } from "react";
+function MobileDrawerPanel({
+  title,
+  titleId,
+  prefersReducedMotion,
+  onClose,
+  footer,
+  children
+}: {
+  title: string;
+  titleId: string;
+  prefersReducedMotion: boolean;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  const trapRef = useFocusTrap<HTMLElement>(true, onClose);
+  return (
+    <motion.aside
+      ref={trapRef}
+      variants={prefersReducedMotion ? undefined : slideInBottom}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className="fixed inset-x-0 bottom-0 z-50 flex max-h-[95vh] flex-col rounded-t-card-lg bg-white shadow-xl"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-5 py-4">
+        <div className="mx-auto h-1 w-12 rounded-full bg-gray-200" aria-hidden="true" />
+        <h2 id={titleId} className="absolute left-1/2 -translate-x-1/2 text-base font-semibold text-gray-950">
+          {title}
+        </h2>
+        <button
+          type="button"
+          aria-label="Close"
+          className="ml-auto flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+          onClick={onClose}
+        >
+          <X size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      {footer ? (
+        <div
+          className="shrink-0 border-t border-gray-200 bg-white px-5 py-3"
+          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+        >
+          {footer}
+        </div>
+      ) : null}
+    </motion.aside>
+  );
+}
+
+function DesktopDrawerPanel({
+  title,
+  titleId,
+  prefersReducedMotion,
+  onClose,
+  footer,
+  className,
+  children
+}: {
+  title: string;
+  titleId: string;
+  prefersReducedMotion: boolean;
+  onClose: () => void;
+  footer?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  const trapRef = useFocusTrap<HTMLElement>(true, onClose);
+  return (
+    <motion.aside
+      ref={trapRef}
+      variants={prefersReducedMotion ? undefined : slideInRight}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      className={cn("ml-auto flex h-full w-full flex-col bg-white shadow-xl", className || "max-w-[480px]")}
+    >
+      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
+        <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
+        <button
+          type="button"
+          aria-label="Close"
+          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+          onClick={onClose}
+        >
+          <X size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5">{children}</div>
+      {footer ? <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div> : null}
+    </motion.aside>
+  );
+}
 
 function useLockBodyScroll(lock: boolean) {
   useEffect(() => {
