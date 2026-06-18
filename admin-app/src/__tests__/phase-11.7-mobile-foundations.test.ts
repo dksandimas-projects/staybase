@@ -122,9 +122,25 @@ describe("Phase 11.7 — Admin Mobile UX (P0 foundations)", () => {
       expect(layoutSrc).toMatch(/aria-controls\s*=\s*["']admin-sidebar["']/);
     });
 
-    it("uses responsive header padding (px-4 sm:px-6 lg:px-8, py-3 sm:py-4)", () => {
-      expect(layoutSrc).toMatch(/px-4[^"]*sm:px-6[^"]*lg:px-8/);
-      expect(layoutSrc).toMatch(/py-3[^"]*sm:py-4/);
+    it("uses responsive header padding (sm:px-6 lg:px-8, sm:py-4)", () => {
+      expect(layoutSrc).toMatch(/sm:px-6[^"]*lg:px-8/);
+      expect(layoutSrc).toMatch(/sm:py-4/);
+    });
+
+    it("renders a centered brand wordmark on mobile (per Stitch mobile design)", () => {
+      // The mobile header centers the "spark inn" wordmark between the
+      // hamburger and the right-side action, per the Stitch mobile designs.
+      expect(layoutSrc).toMatch(/absolute\s+left-1\/2[^"]*-translate-x-1\/2/);
+      expect(layoutSrc).toMatch(/font-heading[^"]*text-lg[^"]*text-primary/);
+    });
+
+    it("hides the Operational Dashboard label on mobile", () => {
+      // The "Operational Dashboard" label is rendered inside a ternary that
+      // branches on isMobile — true branch is the hamburger button, false
+      // branch (tablet+) shows the label. Confirm the label is wrapped in
+      // the !isMobile branch.
+      const ternaryMatch = layoutSrc.match(/isMobile\s*\?\s*\([\s\S]*?\)\s*:\s*\([\s\S]*?Operational Dashboard[\s\S]*?\)/);
+      expect(ternaryMatch, "expected Operational Dashboard in the !isMobile branch").toBeTruthy();
     });
 
     it("uses responsive main padding (p-4 sm:p-6 lg:p-8)", () => {

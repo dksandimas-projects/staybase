@@ -4,6 +4,7 @@ import { Sidebar } from "./Sidebar";
 import { useAdmin } from "../context/AdminContext";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { useEffect, useState } from "react";
+import config from "@config";
 
 export function AdminLayout() {
   const { authLoading, currentUser, signOut } = useAdmin();
@@ -50,10 +51,21 @@ export function AdminLayout() {
 
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top Header Navbar — sticky on mobile, compact layout per ADMIN-MOBILE.md */}
-        <header className="sticky top-0 z-30 flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-4 py-3 sm:px-6 sm:py-4 lg:px-8" style={{ paddingTop: isMobile ? "max(0.75rem, env(safe-area-inset-top))" : undefined }}>
+        {/* Top Header Navbar — responsive per ADMIN-MOBILE.md §Header
+            Mobile:   [☰] [spark inn wordmark] [contextual action]
+            Tablet+:  [☰ or full nav] [page label] [avatar + role] [Sign Out] */}
+        <header
+          className="sticky top-0 z-30 flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 bg-white sm:px-6 sm:py-4 lg:px-8"
+          style={{
+            paddingTop: isMobile ? "max(0.75rem, env(safe-area-inset-top))" : undefined,
+            paddingLeft: isMobile ? "max(1rem, env(safe-area-inset-left))" : undefined,
+            paddingRight: isMobile ? "max(1rem, env(safe-area-inset-right))" : undefined,
+            paddingBottom: isMobile ? "0.75rem" : undefined
+          }}
+        >
+          {/* Left zone */}
           <div className="flex min-w-0 items-center gap-2">
-            {isMobile && (
+            {isMobile ? (
               <button
                 type="button"
                 onClick={() => setMobileSidebarOpen(true)}
@@ -62,41 +74,65 @@ export function AdminLayout() {
                 aria-controls="admin-sidebar"
                 className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-gray-700 hover:bg-gray-100 active:bg-gray-200"
               >
-                <Menu size={20} />
+                <Menu size={20} aria-hidden="true" />
               </button>
+            ) : (
+              <span className="truncate text-xs font-semibold capitalize text-gray-500">
+                Operational Dashboard
+              </span>
             )}
-            <span className="truncate text-xs font-semibold text-gray-500 capitalize">
-              Operational Dashboard
-            </span>
           </div>
 
-          {/* User Profile Info & Sign Out */}
-          <div className="flex items-center gap-2 sm:gap-4">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
-                <User size={16} />
-              </div>
-              <div className="hidden text-left sm:block">
-                <p className="text-xs font-bold leading-none text-gray-900">{currentUser.email}</p>
-                <span className={`mt-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-                  currentUser.role === "admin" ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"
-                }`}>
-                  {currentUser.role === "admin" ? "Admin" : "Front Desk"}
-                </span>
-              </div>
-            </div>
-
-            <div className="hidden h-6 w-px bg-gray-200 sm:block" />
-
-            <button
-              onClick={() => void signOut()}
-              aria-label="Sign out"
-              className="flex min-h-11 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-bold text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 sm:min-h-[44px] sm:px-3.5"
-              title="Sign Out"
+          {/* Center zone — mobile wordmark per Stitch design */}
+          {isMobile && (
+            <span
+              className="pointer-events-none absolute left-1/2 -translate-x-1/2 font-heading text-lg font-semibold text-primary"
+              aria-hidden="true"
             >
-              <LogOut size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </button>
+              {config.brandName}
+            </span>
+          )}
+
+          {/* Right zone */}
+          <div className="flex items-center gap-2 sm:gap-4">
+            {isMobile ? (
+              <button
+                type="button"
+                aria-label="Account and sign out"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full bg-primary/10 text-primary active:bg-primary/20"
+                title="Account"
+              >
+                <User size={18} aria-hidden="true" />
+              </button>
+            ) : (
+              <>
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
+                    <User size={16} aria-hidden="true" />
+                  </div>
+                  <div className="hidden text-left sm:block">
+                    <p className="text-xs font-bold leading-none text-gray-900">{currentUser.email}</p>
+                    <span className={`mt-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                      currentUser.role === "admin" ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"
+                    }`}>
+                      {currentUser.role === "admin" ? "Admin" : "Front Desk"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="hidden h-6 w-px bg-gray-200 sm:block" />
+
+                <button
+                  onClick={() => void signOut()}
+                  aria-label="Sign out"
+                  className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3.5 text-xs font-bold text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  title="Sign Out"
+                >
+                  <LogOut size={14} aria-hidden="true" />
+                  <span>Sign Out</span>
+                </button>
+              </>
+            )}
           </div>
         </header>
 
