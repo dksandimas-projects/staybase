@@ -18,9 +18,6 @@ export interface Room {
   name: string;
   roomNumber: string;
   type: RoomType;
-  description: string;
-  bedDefinition: string;
-  amenities: string[];
   isActive: boolean;
   status: RoomStatus;
   housekeepingStatus: HousekeepingStatus;
@@ -31,14 +28,16 @@ export interface Room {
   updatedAt: Date;
 }
 
-// `maxCapacity`, `pricePerNight`, `weekendRate`, and `corporateRate` were
-// moved off the Room document and onto the RoomType entry (see
-// `RoomTypeEntry` in `shared/constants/index.ts`) as part of W3.6 /
-// `plan/features/RATE-MANAGEMENT.md §W3.6`. The Rates tab is the single
-// edit surface for the rate matrix; the room type's `maxCapacity` is the
-// canonical occupancy for every room of that type. Consumers join the
-// type by `Room.type` at read time (see `useRoomTypes` + the
-// `getRoomTypeImages` / `getRoomTypeRates` helpers).
+// `bedDefinition`, `description`, `amenities`, `maxCapacity`,
+// `pricePerNight`, `weekendRate`, and `corporateRate` were moved off the
+// Room document and onto the RoomType entry (see `RoomTypeEntry` in
+// `shared/constants/index.ts`) across W3.6 and W3.7. All rooms of a
+// type now share the same bed, description, amenities, occupancy cap,
+// and rate matrix. The Rates tab is the canonical edit surface for
+// the rate matrix; the Room Types section of Settings (with its new
+// Edit modal as of W3.7) is the canonical edit surface for the rest.
+// Consumers join the type by `Room.type` at read time via `useRoomTypes`
+// + the `getRoomTypeImages` / `getRoomTypeRates` helpers.
 
 export interface Booking {
   id: string;
