@@ -15,6 +15,15 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
+    // Per W3.5 / `plan/features/SETTINGS.md §Room Types`: photos are
+    // stored on the room type, not the individual room. Public read
+    // (guests need to render room cards / detail / featured rooms);
+    // staff-only write (admin manages photos in Settings).
+    match /room-types/{typeValue}/{fileName} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     match /bookings/{bookingId}/payment-proof/{fileName} {
       allow read: if isStaff();
       allow write: if true;

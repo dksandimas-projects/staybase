@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useAdmin, type StoreItem } from "../context/AdminContext";
-import { compressImageFile } from "@spark-inn/shared";
+import { compressImageFile, MAX_ROOM_TYPE_PHOTOS, type RoomTypeEntry } from "@spark-inn/shared";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
-  Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock
+  Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
+  Upload, ChevronLeft, ChevronRight, X
 } from "lucide-react";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -41,7 +42,11 @@ export function SettingsPage() {
     updateSettings,
     roomTypes,
     addRoomType,
+    updateRoomType,
     deleteRoomType,
+    uploadRoomTypePhoto,
+    removeRoomTypePhoto,
+    reorderRoomTypePhotos,
     storeItems,
     addStoreItem,
     updateStoreItem,
@@ -122,6 +127,18 @@ export function SettingsPage() {
     const timer = setTimeout(() => setPendingDeleteRoomType(null), 3000);
     return () => clearTimeout(timer);
   }, [pendingDeleteRoomType]);
+
+  // Room type photos manager state (per `plan/features/SETTINGS.md §Room Types`).
+  const [photoTarget, setPhotoTarget] = useState<RoomTypeEntry | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photoFileInputRef = useRef<HTMLInputElement | null>(null);
+  // The room types stream can replace `photoTarget` while the modal is open;
+  // re-sync whenever the underlying type changes.
+  useEffect(() => {
+    if (!photoTarget) return;
+    const fresh = roomTypes.find((t) => t.value === photoTarget.value);
+    if (fresh && fresh !== photoTarget) setPhotoTarget(fresh);
+  }, [roomTypes, photoTarget]);
   const [isStoreItemModalOpen, setIsStoreItemModalOpen] = useState(false);
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
   const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
@@ -1369,25 +1386,38 @@ export function SettingsPage() {
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-700 border border-gray-200">
                             {type.shortLabel}
                           </span>
+                          <p className="text-[11px] text-gray-500 pt-1">
+                            {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos
+                          </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (pendingDeleteRoomType === type.value) {
-                              deleteRoomType(type.value);
-                              setPendingDeleteRoomType(null);
-                            } else {
-                              setPendingDeleteRoomType(type.value);
-                            }
-                          }}
-                          className={`shrink-0 font-bold hover:underline min-h-[44px] px-2 ${
-                            pendingDeleteRoomType === type.value
-                              ? "text-red-700"
-                              : "text-red-650 hover:text-red-700"
-                          }`}
-                        >
-                          {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
-                        </button>
+                        <div className="flex flex-col items-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPhotoTarget(type)}
+                            className="min-h-[44px] inline-flex items-center gap-1 rounded border border-primary px-2 text-[11px] font-bold text-primary hover:bg-primary-light"
+                          >
+                            <ImageIcon size={12} />
+                            Photos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (pendingDeleteRoomType === type.value) {
+                                deleteRoomType(type.value);
+                                setPendingDeleteRoomType(null);
+                              } else {
+                                setPendingDeleteRoomType(type.value);
+                              }
+                            }}
+                            className={`shrink-0 font-bold hover:underline min-h-[44px] px-2 ${
+                              pendingDeleteRoomType === type.value
+                                ? "text-red-700"
+                                : "text-red-650 hover:text-red-700"
+                            }`}
+                          >
+                            {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -1398,6 +1428,7 @@ export function SettingsPage() {
                         <th className="px-4 py-2.5">Identifier Key</th>
                         <th className="px-4 py-2.5">Display Label</th>
                         <th className="px-4 py-2.5">Short Abbreviation</th>
+                        <th className="px-4 py-2.5">Photos</th>
                         <th className="px-4 py-2.5 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -1410,6 +1441,16 @@ export function SettingsPage() {
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-105 text-gray-700 border border-gray-200">
                               {type.shortLabel}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => setPhotoTarget(type)}
+                              className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-700 hover:border-primary hover:text-primary"
+                            >
+                              <ImageIcon size={12} />
+                              {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS}
+                            </button>
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -1513,6 +1554,158 @@ export function SettingsPage() {
               </div>
             </div>
           )}
+
+          {/* ROOM TYPE PHOTOS MANAGER (per `plan/features/SETTINGS.md §Room Types`) */}
+          <Modal
+            title={photoTarget ? `Photos · ${photoTarget.label}` : "Room type photos"}
+            open={!!photoTarget}
+            onClose={() => {
+              setPhotoTarget(null);
+              setPhotoUploading(false);
+              if (photoFileInputRef.current) photoFileInputRef.current.value = "";
+            }}
+            footer={
+              photoTarget ? (
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoTarget(null);
+                      setPhotoUploading(false);
+                      if (photoFileInputRef.current) photoFileInputRef.current.value = "";
+                    }}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 sm:min-h-[40px]"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => photoFileInputRef.current?.click()}
+                    disabled={photoUploading || photoTarget.imageUrls.length >= MAX_ROOM_TYPE_PHOTOS}
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[40px]"
+                  >
+                    <Upload size={14} />
+                    {photoUploading ? "Uploading…" : "Add photos"}
+                  </button>
+                </div>
+              ) : null
+            }
+          >
+            {photoTarget ? (
+              <div className="space-y-4 text-sm">
+                <input
+                  ref={photoFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length === 0) return;
+                    const remaining = MAX_ROOM_TYPE_PHOTOS - photoTarget.imageUrls.length;
+                    if (files.length > remaining) {
+                      toast.warning(
+                        "Some photos skipped",
+                        `Only ${remaining} slot${remaining === 1 ? "" : "s"} remaining (max ${MAX_ROOM_TYPE_PHOTOS} per type).`
+                      );
+                    }
+                    const accepted = files.slice(0, remaining);
+                    setPhotoUploading(true);
+                    let successCount = 0;
+                    for (const file of accepted) {
+                      try {
+                        const compressed = await compressImageFile(file);
+                        const result = await uploadRoomTypePhoto(photoTarget.value, compressed.file);
+                        if (result.success) successCount += 1;
+                      } catch (err) {
+                        console.error("Compress/upload failed:", err);
+                      }
+                    }
+                    setPhotoUploading(false);
+                    if (photoFileInputRef.current) photoFileInputRef.current.value = "";
+                    if (successCount > 0) {
+                      toast.success("Photos added", `${successCount} photo${successCount === 1 ? "" : "s"} uploaded.`);
+                    } else if (accepted.length > 0) {
+                      toast.error("Upload failed", "No photos could be uploaded. Check the file format and try again.");
+                    }
+                  }}
+                />
+                <p className="text-xs text-gray-600">
+                  {photoTarget.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos. All rooms of this type share the same gallery — the first photo is the hero image on the public rooms page.
+                </p>
+
+                {photoTarget.imageUrls.length === 0 ? (
+                  <div className="rounded-card border border-dashed border-gray-300 bg-gray-50 p-8 text-center text-xs text-gray-500">
+                    No photos yet. Click <strong>Add photos</strong> to upload up to {MAX_ROOM_TYPE_PHOTOS}.
+                  </div>
+                ) : (
+                  <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {photoTarget.imageUrls.map((url, index) => (
+                      <li
+                        key={url}
+                        className="relative overflow-hidden rounded-card border border-gray-200 bg-white shadow-sm"
+                      >
+                        <div className="aspect-[4/3] bg-section-bg">
+                          <img src={url} alt={`${photoTarget.label} photo ${index + 1}`} className="h-full w-full object-cover" />
+                        </div>
+                        <div className="flex items-center justify-between gap-1 border-t border-gray-100 px-2 py-1.5 text-[10px]">
+                          <span className="font-semibold text-gray-500">
+                            {index === 0 ? "Hero" : `#${index + 1}`}
+                          </span>
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (index === 0) return;
+                                const next = [...photoTarget.imageUrls];
+                                const [moved] = next.splice(index, 1);
+                                next.unshift(moved);
+                                void reorderRoomTypePhotos(photoTarget.value, next);
+                              }}
+                              disabled={index === 0}
+                              aria-label="Move to first"
+                              className="min-h-[32px] min-w-[32px] inline-flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronLeft size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (index === photoTarget.imageUrls.length - 1) return;
+                                const next = [...photoTarget.imageUrls];
+                                const [moved] = next.splice(index, 1);
+                                next.splice(index + 1, 0, moved);
+                                void reorderRoomTypePhotos(photoTarget.value, next);
+                              }}
+                              disabled={index === photoTarget.imageUrls.length - 1}
+                              aria-label="Move to next"
+                              className="min-h-[32px] min-w-[32px] inline-flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronRight size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void removeRoomTypePhoto(photoTarget.value, url).then((res) => {
+                                  if (res.success) {
+                                    toast.success("Photo removed", `Photo #${index + 1} deleted.`);
+                                  }
+                                });
+                              }}
+                              aria-label="Delete photo"
+                              className="min-h-[32px] min-w-[32px] inline-flex items-center justify-center rounded text-red-500 hover:bg-red-50"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </Modal>
 
           {/* TAB 7: EMAIL CONFIG */}
           {activeTab === "email" && (

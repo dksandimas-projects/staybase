@@ -26,6 +26,12 @@ RoomType = string   // matches AdminContext roomTypes value
 RoomStatus = "available" | "occupied" | "blocked"
 HousekeepingStatus = "clean" | "dirty" | "in-progress"
 
+// Room images live on the type, NOT on the individual room document.
+// Consumers (admin cards, guest cards, homepage featured rooms) look up
+// the type via the `type` field and read `imageUrls[]` from there.
+// This avoids duplicate uploads across rooms of the same type and keeps
+// the guest gallery visually consistent.
+
 Room {
   id: string
   name: string
@@ -38,7 +44,6 @@ Room {
   weekendRate: number
   corporateRate: number
   amenities: string[]
-  imageUrls: string[]
   isActive: boolean
   status: RoomStatus
   housekeepingStatus: HousekeepingStatus
@@ -47,6 +52,13 @@ Room {
   qrToken?: string             // regenerated QR route token; fallback is room id
   createdAt: Date
   updatedAt: Date
+}
+
+RoomType {
+  value: string                 // unique key, lowercase, kebab-case
+  label: string                 // human-readable display name
+  shortLabel: string            // compact abbreviation for badges
+  imageUrls: string[]           // Firebase Storage URLs, max 10
 }
 ```
 

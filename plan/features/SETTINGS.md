@@ -107,6 +107,16 @@ Editable copy and photos for public pages. Changes reflect on the guest site in 
 - [ ] Amenities section — list of items (title, description, icon name); add/remove/reorder
 - [ ] Featured rooms selector — pick 3 rooms from a dropdown of active rooms
 
+**Room Type Photos** *(per W3.5 — type-driven gallery)*:
+- [ ] Each row in the **Room Layout Classifications** table shows a **Photos** column with `{count} / {MAX_ROOM_TYPE_PHOTOS}` and a **Photos** button
+- [ ] Clicking **Photos** opens a Modal with a thumbnail grid of the type's current images
+- [ ] Modal footer has an **Add photos** button (multiple file input, image-only, compressed client-side) and a **Close** button
+- [ ] Each photo card shows the image preview, a "Hero" badge on the first photo, and three actions: **move to first** (set as hero), **move to next** (reorder right), and **Delete**
+- [ ] Photos are stored at `room-types/{typeValue}/{filename}` in Storage (public read, staff write)
+- [ ] The hero image is the first element of the array; reorder is persisted via `updateRoomType({ imageUrls })`
+- [ ] Maximum `MAX_ROOM_TYPE_PHOTOS` (currently 10) per type — enforced in the upload UI with a friendly warning
+- [ ] Source: `settings/hotelConfig.roomTypes[].imageUrls` — read at `useRoomTypes` and joined on the `Room.type` field by the guest app
+
 **About Us:**
 - [ ] Hero / banner photo (upload)
 - [ ] Mission, vision, hotel story fields (also in Hotel Info tab — link or sync)

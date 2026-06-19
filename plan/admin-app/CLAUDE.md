@@ -96,7 +96,7 @@ The mobile responsive layout is built on the following hooks + components. **Do 
 
 | Collection | Operation | Notes |
 |---|---|---|
-| `rooms` | `onSnapshot` + `updateDoc` | Room management, status grid |
+| `rooms` | `onSnapshot` + `addDoc` + `updateDoc` + `deleteDoc` | Room management, status grid, create + delete (admin-gated, Phase 11.8) |
 | `bookings` | `onSnapshot` + `updateDoc` | Bookings table, status transitions |
 | `bookings/{id}/payments` | `onSnapshot` + `addDoc` | Onsite payment log in booking drawer |
 | `guests` | `getDoc` | Staff profile lookup |
