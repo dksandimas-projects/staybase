@@ -108,6 +108,8 @@ Editable copy and photos for public pages. Changes reflect on the guest site in 
 - [ ] Featured rooms selector — pick 3 rooms from a dropdown of active rooms
 
 **Room Type Photos** *(per W3.5 — type-driven gallery)*:
+
+> **W3.6 update:** The room type entry also owns `maxCapacity`, `pricePerNight`, `weekendRate`, and `corporateRate` (the rate matrix). The create form below captures these so a new type ships with sensible defaults. The **Rates** tab is the canonical edit surface for the rate matrix. Rooms created against this type inherit all of these properties.
 - [ ] Each row in the **Room Layout Classifications** table shows a **Photos** column with `{count} / {MAX_ROOM_TYPE_PHOTOS}` and a **Photos** button
 - [ ] Clicking **Photos** opens a Modal with a thumbnail grid of the type's current images
 - [ ] Modal footer has an **Add photos** button (multiple file input, image-only, compressed client-side) and a **Close** button

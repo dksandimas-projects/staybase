@@ -26,8 +26,10 @@ export const ROOM_TYPE_IMAGES: Record<string, string[]> = {
 };
 
 // Static fallback rooms for the period before Firestore data loads.
-// `imageUrls` is intentionally omitted — photos live on the room type
-// (`useRoomTypes` / `ROOM_TYPE_IMAGES`).
+// Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`: photos, rates,
+// and max capacity live on the room TYPE. Each entry below only carries
+// identity + display fields; the consumer joins `DEFAULT_ROOM_TYPES`
+// (or the live `useRoomTypes` hook) for everything else.
 type RoomFields = Omit<Room, "createdAt" | "updatedAt">;
 
 function room(fields: RoomFields): Room {
@@ -45,11 +47,7 @@ export const featuredRooms = [
     roomNumber: "201",
     type: "executive",
     description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",
-    maxCapacity: 2,
     bedDefinition: "1 queen size bed",
-    pricePerNight: 3200,
-    weekendRate: 3600,
-    corporateRate: 2800,
     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"],
     isActive: true,
     status: "available",
@@ -63,11 +61,7 @@ export const featuredRooms = [
     roomNumber: "204",
     type: "standard-double",
     description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.",
-    maxCapacity: 2,
     bedDefinition: "1 double bed",
-    pricePerNight: 2400,
-    weekendRate: 2700,
-    corporateRate: 2200,
     amenities: ["WiFi", "AC", "Work Desk", "Private Bath"],
     isActive: true,
     status: "available",
@@ -81,11 +75,7 @@ export const featuredRooms = [
     roomNumber: "301",
     type: "family",
     description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",
-    maxCapacity: 4,
     bedDefinition: "2 double beds",
-    pricePerNight: 4200,
-    weekendRate: 4600,
-    corporateRate: 3900,
     amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"],
     isActive: true,
     status: "available",
@@ -107,10 +97,6 @@ export const amenities = [
   {
     title: "Warm front desk care",
     description: "Helpful support for arrivals, local questions, and small travel details."
-  },
-  {
-    title: "Simple online booking",
-    description: "Choose dates, pick a room, and review your stay in a few clear steps."
   }
 ];
 

@@ -14,7 +14,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useRooms } from "../hooks/useRooms";
-import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
@@ -34,11 +34,13 @@ export function RoomsPage() {
     () =>
       rooms.filter((room) => {
         const typeMatches = selectedType === "all" || room.type === selectedType;
-        return room.isActive && typeMatches && room.maxCapacity >= guests;
+        const typeRates = getRoomTypeRates(roomTypes, room.type);
+        return room.isActive && typeMatches && (typeRates?.maxCapacity ?? 0) >= guests;
       }),
-    [rooms, guests, selectedType]
+    [rooms, roomTypes, guests, selectedType]
   );
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
+  const selectedRoomType = selectedRoom ? roomTypes.find((t) => t.value === selectedRoom.type) : undefined;
   const bookingQuery = `&checkIn=${checkIn}&checkOut=${checkOut}`;
   const entranceProps = shouldReduceMotion
     ? {}
@@ -217,15 +219,20 @@ export function RoomsPage() {
             </div>
           ) : filteredRooms.length > 0 ? (
             <motion.div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" variants={staggerContainer} {...entranceProps}>
-              {filteredRooms.map((room) => (
-                <RoomCard
-                  key={room.id}
-                  room={room}
-                  typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
-                  bookingQuery={bookingQuery}
-                  onDetails={() => setSelectedRoomId(room.id)}
-                />
-              ))}
+              {filteredRooms.map((room) => {
+                const rates = getRoomTypeRates(roomTypes, room.type);
+                return (
+                  <RoomCard
+                    key={room.id}
+                    room={room}
+                    typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
+                    typeMaxCapacity={rates?.maxCapacity}
+                    typePricePerNight={rates?.pricePerNight}
+                    bookingQuery={bookingQuery}
+                    onDetails={() => setSelectedRoomId(room.id)}
+                  />
+                );
+              })}
             </motion.div>
           ) : (
             <motion.div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200" variants={fadeUp} {...entranceProps}>
@@ -275,11 +282,11 @@ export function RoomsPage() {
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Capacity</p>
-                <p className="mt-1 font-semibold text-gray-950">Up to {selectedRoom.maxCapacity}</p>
+                <p className="mt-1 font-semibold text-gray-950">Up to {selectedRoomType?.maxCapacity ?? "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Weekend</p>
-                <p className="mt-1 font-semibold text-gray-950">{formatPrice(selectedRoom.weekendRate)}</p>
+                <p className="mt-1 font-semibold text-gray-950">{formatPrice(selectedRoomType?.weekendRate ?? 0)}</p>
               </div>
             </div>
             <div>
@@ -295,7 +302,7 @@ export function RoomsPage() {
             <div className="flex items-end justify-between gap-4 border-t border-gray-200 pt-5">
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-                <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedRoom.pricePerNight)}</p>
+                <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedRoomType?.pricePerNight ?? 0)}</p>
               </div>
               <PrimaryButton to={`/book?roomId=${selectedRoom.id}${bookingQuery}`}>Book this room</PrimaryButton>
             </div>

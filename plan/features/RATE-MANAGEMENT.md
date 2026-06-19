@@ -1,12 +1,12 @@
 # Rate Management
 > App: admin-app
-> Phase: Phase 3 — Room System
+> Phase: Phase 3 — Room System (W3.6: type-driven rate matrix)
 > Requires: CLAUDE.md, docs/FRONTEND.md, docs/BACKEND.md, plan/admin-app/CLAUDE.md
 > Design ref: spark-inn-design-spec.md §Rate Management
 
 ## Overview
 
-Admin-only page at `/rates` for managing all pricing and payment configuration. Sets base rates and weekend rates per room type, the public flat corporate rate, discount rules, and payment method setup. Rate changes take effect for new bookings — existing bookings retain their locked rate.
+Admin-only page at `/rates` for managing all pricing and payment configuration. As of W3.6, the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) and `maxCapacity` are owned by the **room type** (not the individual room) — see `settings/hotelConfig.roomTypes[]`. The Rates tab is the single edit surface for the rate matrix. Rate changes take effect for new bookings — existing bookings retain their locked rate.
 
 ---
 
@@ -28,6 +28,8 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] Weekend rates section — one row per room type (same dynamic list)
 - [ ] Flat corporate rate section — one row per room type; note: "This is the public rate at `/corporate/book`. Custom rates are set per inquiry via access codes."
 - [ ] All price inputs display `config.currencySymbol` prefix
+- [ ] Each row also shows the type's `maxCapacity` (read-only here — edited in Settings → Room Types when creating the type)
+- [ ] Save button writes one `updateRoomType(t.value, { pricePerNight, weekendRate, corporateRate })` per type; toast on save: "Rates saved — Rate matrix updated for all room types"
 - [ ] Breakfast rate section — single rate per person per night input; note: "Rate applies to all room types. Guests × nights × rate = breakfast total."
 - [ ] Discount rules section — Senior Citizen (20%) and PWD (20%) displayed as read-only (OSCA-mandated, not editable) with explanatory note. Also cross-reference: **Spark Rewards member discount** is configured separately in `settings/rewardsConfig.memberDiscountEnabled` + `memberDiscountPct` (see `plan/features/SETTINGS.md §11. Spark Rewards`); admins should treat the Rate Management page as the single source of truth for *all* stacking discount sources in use at the property.
 - [ ] Payment methods section — list of payment methods with enable/disable toggle, QR code upload, account info text field per method
@@ -38,15 +40,23 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 
 ## Data & Logic Checklist
 
-- [ ] Rates stored on `rooms/{roomId}` documents — `pricePerNight`, `weekendRate`, `corporateRate`
-- [ ] Rate update: `updateDoc` on each room of the selected type — batch update across all rooms of that type
-- [ ] Weekend rate logic: applied automatically in booking flow when stay includes Saturday or Sunday nights
-- [ ] Discount rules: hardcoded 20% for Senior and PWD — stored in `settings/hotelConfig` for reference but not user-editable
-- [ ] Payment methods: stored in `settings/hotelConfig.paymentMethods[]` — `updateDoc` on `settings/hotelConfig`
-- [ ] QR code image: `uploadBytes` to Firebase Storage, `getDownloadURL`, stored in payment method `qrUrl`
-- [ ] Rate changes do NOT retroactively update existing bookings — `ratePerNight` and `breakfastRate` both locked on booking creation
-- [ ] Breakfast rate saved to `settings/breakfastConfig.ratePerPersonPerNight`
+- [ ] All settings tabs fetch from `settings/hotelConfig` or `settings/websiteContent` on mount
+- [ ] Photo uploads: Firebase Storage → `getDownloadURL` → store URL in Firestore
+- [ ] Staff account creation: POST to `/api/admin/create-staff` (Vercel API route using Firebase Admin SDK)
+- [ ] Staff account disable: POST to `/api/admin/disable-staff`
+- [ ] Website content changes: `setDoc` (merge) on `settings/websiteContent`
+- [ ] Hotel info changes: `updateDoc` on `settings/hotelConfig`
+- [ ] **Rates stored on `settings/hotelConfig.roomTypes[].pricePerNight / weekendRate / corporateRate`** — read at the type level, not per room
+- [ ] **Rate update: `updateRoomType(t.value, { pricePerNight, weekendRate, corporateRate })` — one update per type, no batch across rooms**
+- [ ] **Max occupancy stored on `settings/hotelConfig.roomTypes[].maxCapacity`** — edited in Settings → Room Types when creating the type
+- [ ] **Weekend rate logic: applied automatically in booking flow when stay includes Saturday or Sunday nights**
+- [ ] **Discount rules: hardcoded 20% for Senior and PWD — stored in `settings/hotelConfig` for reference but not user-editable**
+- [ ] **Payment methods: stored in `settings/hotelConfig.paymentMethods[]` — `updateDoc` on `settings/hotelConfig`**
+- [ ] **QR code image: `uploadBytes` to Firebase Storage, `getDownloadURL`, stored in payment method `qrUrl`**
+- [ ] **Rate changes do NOT retroactively update existing bookings — `ratePerNight` and `breakfastRate` both locked on booking creation**
+- [ ] **Breakfast rate saved to `settings/breakfastConfig.ratePerPersonPerNight`**
 - [ ] **Breakfast pricing model: add-on only** (per `DECISIONS-FEATURES.md #75`). Booking flow Step 1 toggles "Room Only" vs "Room + Breakfast"; the latter adds `breakfastRate × guests × nights` to the room total. No `includedInRoomRate` field on `breakfastConfig` — if a future client needs "breakfast always included" as a differentiator, add it then.
+- [ ] **W3.6 migration (one-off backfill required for legacy data):** existing `rooms/{roomId}` docs may still carry `pricePerNight` / `weekendRate` / `corporateRate` / `maxCapacity`. These fields are no longer read by the app — the canonical values now live on each `roomTypes[].{pricePerNight, …, maxCapacity}`. To backfill: read the per-room values for a representative room of each type, then write a single `updateDoc` on `settings/hotelConfig` setting the matching `roomTypes[]` entry. After backfill, the per-room fields can be ignored (they are not deleted from existing docs to keep this PR a no-op migration).
 
 ## Edge Cases & States
 
@@ -62,6 +72,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] Update Standard Twin base rate — new rate appears on guest-facing room cards
 - [ ] Update weekend rate — booking total reflects weekend rate for stays including Saturday/Sunday
 - [ ] Update corporate rate — new rate appears on `/corporate/book` for flat-rate bookings
+- [ ] Update rates — reflected in RoomsPage card "Base Rate" line and in the room detail modal
 - [ ] Disable a payment method — method no longer appears in guest booking flow Step 3
 - [ ] Upload QR code for GCash — QR displays correctly in guest booking flow
 - [ ] Existing confirmed bookings unaffected by rate change (check `ratePerNight` field)
@@ -69,8 +80,10 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 
 ## References
 
-- Room schema (rate fields): `plan/docs/BACKEND.md §rooms`
-- Settings schema (payment methods): `plan/docs/BACKEND.md §settings/hotelConfig`
+- Room schema: `plan/docs/BACKEND.md §rooms` (note: `maxCapacity` and rates are no longer room fields)
+- Room type schema: `plan/docs/BACKEND.md §settings/hotelConfig.roomTypes` (now owns photos + maxCapacity + rate matrix)
+- TypeScript shape: `plan/docs/TYPES.md §RoomType` and `RoomTypeEntry` in `shared/constants`
+- Room management: `plan/features/ROOM-MANAGEMENT.md` (creates/edits/deletes rooms; type is referenced by `value`)
 - Weekend rate calculation: `plan/features/BOOKING-FLOW.md §Step 1`
 - Corporate flat rate usage: `plan/features/CORPORATE-BOOKING.md`
 - Auth guard: `plan/features/AUTH-ROLES.md`

@@ -75,25 +75,30 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
       expect(body).not.toMatch(/["']cancelled["']/);
     });
 
-    it("requires the documented fields: name, roomNumber, type, maxCapacity, bedDefinition, pricePerNight, status", () => {
+    it("requires the documented fields: name, roomNumber, type, bedDefinition, status", () => {
+      // Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`:
+      // `maxCapacity` and rates moved to the room type. The create
+      // form only captures identity + display fields.
       const schemaMatch = createRoomSchemaSrc.match(
         /CreateRoomSchema\s*=\s*z\.object\(\{[\s\S]*?^\}\)/m
       );
       expect(schemaMatch, "expected to find CreateRoomSchema body").toBeTruthy();
       const body = schemaMatch![0];
-      for (const field of ["name", "roomNumber", "type", "maxCapacity", "bedDefinition", "pricePerNight", "status"]) {
+      for (const field of ["name", "roomNumber", "type", "bedDefinition", "status"]) {
         const fieldMatch = body.match(new RegExp(`${field}\\s*:`));
         expect(fieldMatch, `expected ${field} in CreateRoomSchema`).toBeTruthy();
       }
     });
 
-    it("enforces positive maxCapacity and non-negative pricePerNight", () => {
+    it("does not capture maxCapacity or rates — they live on the room type", () => {
       const schemaMatch = createRoomSchemaSrc.match(
         /CreateRoomSchema\s*=\s*z\.object\(\{[\s\S]*?^\}\)/m
       );
       const body = schemaMatch![0];
-      expect(body).toMatch(/maxCapacity[\s\S]*?\.min\(1,\s*["']Capacity must be at least 1/);
-      expect(body).toMatch(/pricePerNight[\s\S]*?\.min\(0,\s*["']Price cannot be negative/);
+      expect(body).not.toMatch(/maxCapacity\s*:/);
+      expect(body).not.toMatch(/pricePerNight\s*:/);
+      expect(body).not.toMatch(/weekendRate\s*:/);
+      expect(body).not.toMatch(/corporateRate\s*:/);
     });
 
     it("re-exports the schema from the shared package barrel", () => {
@@ -129,9 +134,18 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
       expect(adminContextSrc).toMatch(/updatedAt:\s*serverTimestamp\(\)/);
     });
 
-    it("createRoom defaults weekendRate and corporateRate to pricePerNight", () => {
-      expect(adminContextSrc).toMatch(/weekendRate:\s*input\.weekendRate\s*\?\?\s*baseRate/);
-      expect(adminContextSrc).toMatch(/corporateRate:\s*input\.corporateRate\s*\?\?\s*baseRate/);
+    it("createRoom no longer writes pricePerNight, weekendRate, or corporateRate", () => {
+      // Per W3.6 — pricing lives on the type; createRoom writes identity
+      // + display fields only. The body should not contain any of the
+      // three rate field writes.
+      const fnMatch = adminContextSrc.match(
+        /const\s+createRoom\s*=\s*async[\s\S]*?return\s*\{\s*success:\s*true/
+      );
+      expect(fnMatch, "expected to find createRoom body").toBeTruthy();
+      const body = fnMatch![0];
+      expect(body).not.toMatch(/pricePerNight\s*:/);
+      expect(body).not.toMatch(/weekendRate\s*:/);
+      expect(body).not.toMatch(/corporateRate\s*:/);
     });
 
     it("createRoom, deleteRoom, hasActiveBookings are all wired into the provider value", () => {

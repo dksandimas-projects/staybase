@@ -28,7 +28,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 
 - [ ] Hero section — full-viewport, background photo, Apollo heading, tagline in Apollo Italic, single CTA button (Spark Orange)
 - [ ] Availability checker — check-in / check-out date pickers + guest count + Search button, rendered above the fold within or directly below the hero
-- [ ] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredRoomIds` — image, name, key amenities, price per night, Book Now CTA. Photos come from the room's **type** via `useRoomTypes` (per `plan/features/SETTINGS.md §Room Type Photos`) — `roomType.imageUrls[0]` is the hero image.
+- [ ] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredRoomIds` — image, name, key amenities, price per night, Book Now CTA. Photos come from the room's **type** via `useRoomTypes` (per `plan/features/SETTINGS.md §Room Type Photos`) — `roomType.imageUrls[0]` is the hero image. Pricing + max guests also come from the type via `getRoomTypeRates(roomTypes, room.type)` (per W3.6).
 - [ ] Amenities grid — icon + title + description per item, content from `settings/websiteContent.homepage.amenities`
 - [ ] Services section — displays Tour Packages and Car Rentals as two service cards
   - [ ] Each card: icon, service name, short description, "Contact Us" CTA button → links to `/contact`

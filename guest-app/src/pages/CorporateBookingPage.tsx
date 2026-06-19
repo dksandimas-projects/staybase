@@ -44,7 +44,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
-import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
@@ -185,23 +185,27 @@ export function CorporateBookingPage() {
     () =>
       rooms.filter((room) => {
         const typeMatches = selectedType === "all" || room.type === selectedType;
-        return room.isActive && room.maxCapacity >= guests && typeMatches;
+        const cap = getRoomTypeRates(roomTypes, room.type)?.maxCapacity ?? 0;
+        return room.isActive && cap >= guests && typeMatches;
       }),
     [guests, selectedType]
   );
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
+  // Per W3.6 — pricing + max occupancy live on the room's type.
+  const selectedRoomRates = selectedRoom ? getRoomTypeRates(roomTypes, selectedRoom.type) : null;
+  const selectedMaxCapacity = selectedRoomRates?.maxCapacity ?? 0;
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRatePerPerson = breakfastConfig.ratePerPersonPerNight;
 
   // Calculate pricing
   // Per audit S4.1 / decision #101: prefer the negotiated rate for
   // the chosen room type from the corporateCodes/{code} doc. Fall
-  // back to the room's flat corporateRate only when the negotiated
+  // back to the type's flat corporateRate only when the negotiated
   // map has no entry for this room type.
   const negotiatedRate = selectedRoom && ratePerRoomType && ratePerRoomType[selectedRoom.type] !== undefined
     ? ratePerRoomType[selectedRoom.type]
-    : (selectedRoom ? selectedRoom.corporateRate : 0);
+    : (selectedRoomRates?.corporateRate ?? 0);
   const baseRate = negotiatedRate;
   // Apply additional code discount if active
   const ratePerNight = Math.round(baseRate * (1 - discountPercent / 100));
@@ -238,9 +242,9 @@ export function CorporateBookingPage() {
     email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestDetails.email) ? "" : "Enter a valid email address.",
     phone: guestDetails.phone.trim().length >= 8 ? "" : "Phone number is required.",
     guestCount:
-      Number(guestDetails.guestCount) >= 1 && selectedRoom && Number(guestDetails.guestCount) <= selectedRoom.maxCapacity
+      Number(guestDetails.guestCount) >= 1 && selectedMaxCapacity > 0 && Number(guestDetails.guestCount) <= selectedMaxCapacity
         ? ""
-        : `Guest count must be between 1 and ${selectedRoom?.maxCapacity ?? guests}.`,
+        : `Guest count must be between 1 and ${selectedMaxCapacity || guests}.`,
     designation: guestDetails.designation.trim() ? "" : "Designation is required.",
     companyAddress: guestDetails.companyAddress.trim() ? "" : "Company address is required."
   };
@@ -771,9 +775,13 @@ export function CorporateBookingPage() {
               {availableRooms.map((room) => {
                 const isSelected = selectedRoomId === room.id;
                 const typeLabel = DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.shortLabel ?? room.type;
-                
+
+                // Per W3.6 — pricing lives on the type.
+                const roomRates = getRoomTypeRates(roomTypes, room.type);
+                const roomMaxCapacity = roomRates?.maxCapacity ?? 0;
+
                 // Price calculations
-                const baseCorp = room.corporateRate;
+                const baseCorp = roomRates?.corporateRate ?? 0;
                 const discountedCorp = Math.round(baseCorp * (1 - discountPercent / 100));
 
                 return (
@@ -803,7 +811,7 @@ export function CorporateBookingPage() {
                       <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
                         <span className="flex items-center gap-1.5">
                           <Users size={14} className="text-primary" />
-                          Capacity: Up to {room.maxCapacity}
+                          Capacity: Up to {roomMaxCapacity}
                         </span>
                         <span>{room.bedDefinition}</span>
                       </div>
