@@ -661,7 +661,7 @@ export function RoomsPage() {
           </label>
 
           <p className="text-[10px] leading-relaxed text-gray-500">
-            Photos can be added after the room is created — open the room from the list and use the edit drawer.
+            Photos for this room are managed on its <strong>room type</strong> in Settings → Room Types. All rooms of the same type share the same gallery.
           </p>
         </form>
       </Modal>

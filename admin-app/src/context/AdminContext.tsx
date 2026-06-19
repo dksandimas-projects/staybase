@@ -8,11 +8,11 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut
 } from "firebase/auth";
-import { ACTIVE_BOOKING_STATUSES, CreateRoomInput, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
+import { ACTIVE_BOOKING_STATUSES, CreateRoomInput, DEFAULT_ROOM_TYPES, MAX_ROOM_TYPE_PHOTOS, type RoomTypeEntry } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
 import { collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
-import { deleteObject, listAll, ref as storageRef } from "firebase/storage";
+import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
 
@@ -55,7 +55,6 @@ export interface Room {
   weekendRate: number;
   corporateRate: number;
   amenities: string[];
-  imageUrls: string[];
   isActive: boolean;
   status: "available" | "occupied" | "blocked";
   housekeepingStatus: "clean" | "dirty" | "in-progress";
@@ -373,10 +372,13 @@ export interface AdminContextType {
   disableStaff: (uid: string) => Promise<{ success: boolean; error?: string }>;
 
   // Room Types Config
-  roomTypes: { value: string; label: string; shortLabel: string }[];
-  addRoomType: (rt: { value: string; label: string; shortLabel: string }) => void;
-  updateRoomType: (value: string, updates: Partial<{ label: string; shortLabel: string }>) => void;
+  roomTypes: RoomTypeEntry[];
+  addRoomType: (rt: { value: string; label: string; shortLabel: string; imageUrls?: string[] }) => void;
+  updateRoomType: (value: string, updates: Partial<Pick<RoomTypeEntry, "label" | "shortLabel" | "imageUrls">>) => void;
   deleteRoomType: (value: string) => void;
+  uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
+  removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
+  reorderRoomTypePhotos: (typeValue: string, imageUrls: string[]) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -480,7 +482,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           weekendRate: data.weekendRate || 0,
           corporateRate: data.corporateRate || 0,
           amenities: data.amenities || [],
-          imageUrls: data.imageUrls || [],
           isActive: data.isActive !== false,
           status: data.status || "available",
           housekeepingStatus: data.housekeepingStatus || "clean",
@@ -590,7 +591,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         weekendRate: input.weekendRate ?? baseRate,
         corporateRate: input.corporateRate ?? baseRate,
         amenities: [],
-        imageUrls: [],
         isActive: input.isActive,
         status: input.status,
         housekeepingStatus: input.housekeepingStatus,
@@ -1964,18 +1964,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // Room Types State — sourced from settings/hotelConfig.roomTypes
   // (per W3.3). The hotelConfig onSnapshot writes to the local
   // state when the field is present; the admin save handler below
-  // persists back to Firestore.
-  const [roomTypes, setRoomTypes] = useState<{ value: string; label: string; shortLabel: string }[]>(() => {
-    return [...DEFAULT_ROOM_TYPES];
+  // persists back to Firestore. Each entry carries its own
+  // `imageUrls[]` (per W3.5 / `plan/features/SETTINGS.md §Room Types`)
+  // so all rooms of a type share the same gallery.
+  const [roomTypes, setRoomTypes] = useState<RoomTypeEntry[]>(() => {
+    return DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] }));
   });
 
   useEffect(() => {
     if (Array.isArray(hotelConfig.roomTypes) && hotelConfig.roomTypes.length > 0) {
-      setRoomTypes(hotelConfig.roomTypes);
+      setRoomTypes(
+        hotelConfig.roomTypes.map((t: any) => ({
+          value: t.value,
+          label: t.label || t.value,
+          shortLabel: t.shortLabel || t.label || t.value,
+          imageUrls: Array.isArray(t.imageUrls) ? t.imageUrls : []
+        }))
+      );
     }
   }, [hotelConfig.roomTypes]);
 
-  const saveRoomTypes = async (newTypes: typeof roomTypes) => {
+  const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
     setRoomTypes(newTypes);
     try {
       await updateDoc(doc(db, "settings", "hotelConfig"), {
@@ -1987,19 +1996,103 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addRoomType = async (rt: { value: string; label: string; shortLabel: string }) => {
-    const updated = [...roomTypes, rt];
+  const addRoomType = async (rt: { value: string; label: string; shortLabel: string; imageUrls?: string[] }) => {
+    const newType: RoomTypeEntry = {
+      value: rt.value,
+      label: rt.label,
+      shortLabel: rt.shortLabel,
+      imageUrls: Array.isArray(rt.imageUrls) ? rt.imageUrls : []
+    };
+    const updated = [...roomTypes, newType];
     await saveRoomTypes(updated);
   };
 
-  const updateRoomType = async (value: string, updates: Partial<{ label: string; shortLabel: string }>) => {
-    const updated = roomTypes.map(t => t.value === value ? { ...t, ...updates } : t);
+  const updateRoomType = async (value: string, updates: Partial<Pick<RoomTypeEntry, "label" | "shortLabel" | "imageUrls">>) => {
+    const updated = roomTypes.map((t) => (t.value === value ? { ...t, ...updates } : t));
     await saveRoomTypes(updated);
   };
 
   const deleteRoomType = async (value: string) => {
-    const updated = roomTypes.filter(t => t.value !== value);
+    // Best-effort cleanup of the type's photos in Storage. The room
+    // type may already be detached from any room; orphaned files
+    // do not block the type deletion.
+    try {
+      const folderRef = storageRef(storage, `room-types/${value}`);
+      const listed = await listAll(folderRef);
+      await Promise.all(listed.items.map((item) => deleteObject(item).catch(() => undefined)));
+    } catch (storageErr) {
+      console.warn(`Storage cleanup for room type ${value} skipped:`, storageErr);
+    }
+    const updated = roomTypes.filter((t) => t.value !== value);
     await saveRoomTypes(updated);
+  };
+
+  // Per `plan/features/SETTINGS.md §Room Types` — upload a single
+  // photo for a room type, append its download URL to the type's
+  // `imageUrls[]`, and persist. Enforces `MAX_ROOM_TYPE_PHOTOS`.
+  const uploadRoomTypePhoto = async (typeValue: string, file: File): Promise<{ success: boolean; error?: string; url?: string }> => {
+    const type = roomTypes.find((t) => t.value === typeValue);
+    if (!type) return { success: false, error: "Room type not found." };
+    if (type.imageUrls.length >= MAX_ROOM_TYPE_PHOTOS) {
+      const error = `Maximum ${MAX_ROOM_TYPE_PHOTOS} photos per room type.`;
+      notify.warning("Photo limit reached", error);
+      return { success: false, error };
+    }
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `room-types/${typeValue}/${Date.now()}-${safeName}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      const next = [...type.imageUrls, url];
+      await updateRoomType(typeValue, { imageUrls: next });
+      return { success: true, url };
+    } catch (error) {
+      console.error("Error uploading room type photo:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to upload photo", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Remove a single photo: drop the URL from the type's array and
+  // best-effort delete the underlying Storage object. The list
+  // update always runs even if the Storage delete fails (the file
+  // becomes orphaned but the type stays consistent).
+  const removeRoomTypePhoto = async (typeValue: string, url: string): Promise<{ success: boolean; error?: string }> => {
+    const type = roomTypes.find((t) => t.value === typeValue);
+    if (!type) return { success: false, error: "Room type not found." };
+    try {
+      const next = type.imageUrls.filter((u) => u !== url);
+      await updateRoomType(typeValue, { imageUrls: next });
+      try {
+        const fileRef = storageRef(storage, url);
+        await deleteObject(fileRef);
+      } catch (storageErr) {
+        console.warn(`Storage delete for ${url} skipped:`, storageErr);
+      }
+      return { success: true };
+    } catch (error) {
+      console.error("Error removing room type photo:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to remove photo", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Persist a new ordering of `imageUrls[]` for a room type.
+  const reorderRoomTypePhotos = async (typeValue: string, imageUrls: string[]): Promise<{ success: boolean; error?: string }> => {
+    const type = roomTypes.find((t) => t.value === typeValue);
+    if (!type) return { success: false, error: "Room type not found." };
+    try {
+      await updateRoomType(typeValue, { imageUrls });
+      return { success: true };
+    } catch (error) {
+      console.error("Error reordering room type photos:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to save photo order", message);
+      return { success: false, error: message };
+    }
   };
 
   // Staff Accounts — live from `guests/{uid}` where role is staff (front-desk | admin).
@@ -2184,6 +2277,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         addRoomType,
         updateRoomType,
         deleteRoomType,
+        uploadRoomTypePhoto,
+        removeRoomTypePhoto,
+        reorderRoomTypePhotos,
         staff,
         createStaff,
         disableStaff

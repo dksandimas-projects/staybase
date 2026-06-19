@@ -44,6 +44,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
@@ -110,6 +111,7 @@ export function CorporateBookingPage() {
 
   // Live rooms from Firestore
   const { rooms, loading: roomsLoading } = useRooms();
+  const { roomTypes } = useRoomTypes();
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -784,7 +786,7 @@ export function CorporateBookingPage() {
                     variants={staggerChild}
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-section-bg relative">
-                      <img src={room.imageUrls[0]} alt={room.name} className="h-full w-full object-cover" />
+                      <img src={getRoomTypeImages(roomTypes, room.type)[0]} alt={room.name} className="h-full w-full object-cover" />
                       <div className="absolute top-3 left-3 flex gap-2">
                         <span className="rounded bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary">
                           {typeLabel}
@@ -1115,6 +1117,7 @@ export function CorporateBookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             total={total}
             ratePerNight={ratePerNight}
             breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
@@ -1327,6 +1330,7 @@ export function CorporateBookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             total={total}
             ratePerNight={ratePerNight}
             breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
@@ -1514,6 +1518,7 @@ interface BookingReviewAsideProps {
   hasBreakfast: boolean;
   nights: number;
   room: Room | undefined;
+  typeImageUrls?: string[];
   total: number;
   ratePerNight: number;
   breakfastRatePerPerson?: number;
@@ -1526,6 +1531,7 @@ function BookingReviewAside({
   hasBreakfast,
   nights,
   room,
+  typeImageUrls = [],
   total,
   ratePerNight,
   breakfastRatePerPerson = 250
@@ -1538,7 +1544,7 @@ function BookingReviewAside({
   return (
     <aside className="lg:sticky lg:top-36 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-        <img src={room.imageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
+        <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
         <div className="p-5">
           <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">

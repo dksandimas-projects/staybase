@@ -31,11 +31,9 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 - [ ] Room edit form fields: name, type (dropdown), description, max capacity, bed definition, status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes)
 - [ ] Block reason selector — shown only when status = Blocked: Maintenance / Hold / Other
 - [ ] Active/inactive toggle — inactive = hidden from guest site
-- [ ] Photo management — upload multiple photos, reorder (drag or up/down arrows), delete individual photos
-- [ ] Photo upload: drag-and-drop or file picker, accepts image files only, max 5MB per image
-- [ ] Upload progress indicator per image
 - [ ] Save button — explicit save, not auto-save
 - [ ] Housekeeping status shown per room (read-only here — toggled from dashboard)
+- [ ] **Photo management** — **not** on this screen. Per `plan/features/SETTINGS.md §Room Type Photos`, all rooms of a type share the same gallery managed in Settings → Room Types. The create modal links to that section.
 - [ ] **Delete Room** — destructive action in the edit drawer footer (red outlined button). Disabled when active bookings > 0. Opens a confirmation Modal with a required reason field and clear "cannot be undone" copy.
 - [ ] **Delete blocked** state — when the room has active bookings, the confirmation Modal swaps to an informational ConfirmForm that explains how many bookings need to be resolved first.
 

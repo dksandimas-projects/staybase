@@ -182,6 +182,79 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
     });
   });
 
+  describe("AdminContext — Room type photos (W3.5 / type-driven gallery)", () => {
+    it("roomTypes state is typed as RoomTypeEntry[] (no longer the legacy bare object)", () => {
+      expect(adminContextSrc).toMatch(/useState<RoomTypeEntry\[\]>/);
+    });
+
+    it("imports RoomTypeEntry, MAX_ROOM_TYPE_PHOTOS, uploadBytes, and getDownloadURL from shared + storage SDKs", () => {
+      expect(adminContextSrc).toMatch(/import\s*\{[^}]*RoomTypeEntry[^}]*\}\s*from\s*["']@spark-inn\/shared["']/);
+      expect(adminContextSrc).toMatch(/import\s*\{[^}]*MAX_ROOM_TYPE_PHOTOS[^}]*\}\s*from\s*["']@spark-inn\/shared["']/);
+      expect(adminContextSrc).toMatch(/import\s*\{[^}]*uploadBytes[^}]*\}\s*from\s*["']firebase\/storage["']/);
+      expect(adminContextSrc).toMatch(/import\s*\{[^}]*getDownloadURL[^}]*\}\s*from\s*["']firebase\/storage["']/);
+    });
+
+    it("declares the photo CRUD methods on the AdminContextType", () => {
+      const iface = adminContextSrc.match(/AdminContextType[\s\S]*?\n\}/);
+      expect(iface, "expected AdminContextType interface").toBeTruthy();
+      const body = iface![0];
+      expect(body).toMatch(/uploadRoomTypePhoto:\s*\(typeValue:\s*string,\s*file:\s*File\)/);
+      expect(body).toMatch(/removeRoomTypePhoto:\s*\(typeValue:\s*string,\s*url:\s*string\)/);
+      expect(body).toMatch(/reorderRoomTypePhotos:\s*\(typeValue:\s*string,\s*imageUrls:\s*string\[\]\)/);
+    });
+
+    it("uploadRoomTypePhoto enforces the MAX_ROOM_TYPE_PHOTOS cap", () => {
+      expect(adminContextSrc).toMatch(/type\.imageUrls\.length\s*>=\s*MAX_ROOM_TYPE_PHOTOS/);
+      expect(adminContextSrc).toMatch(/Maximum \$\{MAX_ROOM_TYPE_PHOTOS\} photos per room type\./);
+    });
+
+    it("uploadRoomTypePhoto uploads to room-types/{typeValue}/ and appends the URL", () => {
+      expect(adminContextSrc).toMatch(/`room-types\/\$\{typeValue\}\/\$\{Date\.now\(\)\}-\$\{safeName\}`/);
+      expect(adminContextSrc).toMatch(/uploadBytes\(fileRef,\s*file\)/);
+      expect(adminContextSrc).toMatch(/getDownloadURL\(fileRef\)/);
+      expect(adminContextSrc).toMatch(/updateRoomType\(typeValue,\s*\{\s*imageUrls:\s*next\s*\}\)/);
+    });
+
+    it("removeRoomTypePhoto filters the URL out of the type's imageUrls and best-effort deletes from Storage", () => {
+      expect(adminContextSrc).toMatch(/type\.imageUrls\.filter\(\s*\(u\)\s*=>\s*u\s*!==\s*url\s*\)/);
+      expect(adminContextSrc).toMatch(/deleteObject\(fileRef\)/);
+    });
+
+    it("reorderRoomTypePhotos writes the new ordering via updateRoomType", () => {
+      expect(adminContextSrc).toMatch(/updateRoomType\(typeValue,\s*\{\s*imageUrls\s*\}\)/);
+    });
+
+    it("addRoomType initializes an empty imageUrls array on new types", () => {
+      expect(adminContextSrc).toMatch(/imageUrls:\s*Array\.isArray\(rt\.imageUrls\)\s*\?\s*rt\.imageUrls\s*:\s*\[\]/);
+    });
+
+    it("deleteRoomType cleans up the type's photos in Storage", () => {
+      expect(adminContextSrc).toMatch(/storageRef\(storage,\s*`room-types\/\$\{value\}`\)/);
+    });
+
+    it("createRoom no longer writes imageUrls on the room document", () => {
+      expect(adminContextSrc).not.toMatch(/imageUrls:\s*\[\]/);
+    });
+
+    it("Room mapper no longer reads imageUrls off the Firestore doc", () => {
+      const roomTypeMatch = adminContextSrc.match(/export\s+interface\s+Room\s*\{[\s\S]*?\n\}/);
+      expect(roomTypeMatch, "expected to find Room interface").toBeTruthy();
+      const body = roomTypeMatch![0];
+      expect(body).not.toMatch(/imageUrls/);
+    });
+
+    it("photo methods are wired into the provider value", () => {
+      const valueBlock = adminContextSrc.match(
+        /AdminContext\.Provider[\s\S]*?value=\{\{([\s\S]*?)\}\}/
+      );
+      expect(valueBlock, "expected provider value object").toBeTruthy();
+      const body = valueBlock![1];
+      expect(body).toMatch(/uploadRoomTypePhoto,/);
+      expect(body).toMatch(/removeRoomTypePhoto,/);
+      expect(body).toMatch(/reorderRoomTypePhotos,/);
+    });
+  });
+
   describe("RoomsPage — UI", () => {
     it("imports CreateRoomSchema, CreateRoomInput, useAdmin, Drawer, Modal, ConfirmForm", () => {
       expect(roomsPageSrc).toMatch(/import\s*\{[^}]*CreateRoomSchema[^}]*CreateRoomInput[^}]*\}\s*from\s*["']@spark-inn\/shared["']/);

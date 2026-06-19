@@ -16,19 +16,24 @@ interface RoomCardProps {
     | "type"
     | "description"
     | "amenities"
-    | "imageUrls"
     | "maxCapacity"
     | "bedDefinition"
     | "pricePerNight"
     | "status"
   >;
+  // Per `plan/features/SETTINGS.md §Room Types` and `plan/features/ROOMS-PAGE.md`:
+  // the gallery is owned by the room type, not the individual room. The caller
+  // resolves the type's photos (live from `useRoomTypes()` or the static
+  // `ROOM_TYPE_IMAGES` fallback) and passes the first image here.
+  typeImageUrls?: string[];
   onDetails?: () => void;
   bookingQuery?: string;
 }
 
-export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) {
+export function RoomCard({ room, typeImageUrls = [], onDetails, bookingQuery = "" }: RoomCardProps) {
   const shouldReduceMotion = useReducedMotion();
   const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.shortLabel ?? room.type;
+  const heroImage = typeImageUrls[0];
 
   return (
     <motion.article
@@ -38,13 +43,22 @@ export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) 
       whileHover={shouldReduceMotion ? undefined : { y: -4 }}
     >
       <div className="aspect-[4/3] overflow-hidden bg-section-bg">
-        <motion.img
-          src={room.imageUrls[0]}
-          alt={room.name}
-          className="h-full w-full object-cover"
-          transition={{ duration: 0.4, ease: "easeOut" }}
-          whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
-        />
+        {heroImage ? (
+          <motion.img
+            src={heroImage}
+            alt={room.name}
+            className="h-full w-full object-cover"
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
+          />
+        ) : (
+          <div
+            className="flex h-full w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400"
+            aria-label={`No photo for ${room.name}`}
+          >
+            Photo coming soon
+          </div>
+        )}
       </div>
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
