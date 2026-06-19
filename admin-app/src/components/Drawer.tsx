@@ -143,31 +143,47 @@ function DesktopDrawerPanel({
 }) {
   const trapRef = useFocusTrap<HTMLElement>(true, onClose);
   return (
-    <motion.aside
-      ref={trapRef}
-      variants={prefersReducedMotion ? undefined : slideInRight}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      className={cn("ml-auto flex h-full w-full flex-col bg-white shadow-xl", className || "max-w-[480px]")}
+    // Per `plan/admin-app/CLAUDE.md §Layout` + `plan/docs/FRONTEND.md
+    // §Spacing & Sizing`: the desktop drawer is a right-side slide-in,
+    // 240–480px wide, pinned to the right edge of the viewport. The
+    // positioning MUST live on a static wrapper — before the Phase 11.7
+    // refactor the aside was a child of the fixed-positioned backdrop
+    // and inherited its positioning context. The refactor made the
+    // aside a sibling, so the positioning context is gone and the
+    // panel falls into the document flow at the bottom of the page
+    // (lower-right of the page content).
+    <div
+      className={cn(
+        "fixed inset-y-0 right-0 z-50 ml-auto flex h-full w-full flex-col bg-white shadow-xl",
+        className || "max-w-[480px]"
+      )}
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
-        <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
-        <button
-          type="button"
-          aria-label="Close"
-          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
-          onClick={onClose}
-        >
-          <X size={20} aria-hidden="true" />
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-5">{children}</div>
-      {footer ? <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div> : null}
-    </motion.aside>
+      <motion.aside
+        ref={trapRef}
+        variants={prefersReducedMotion ? undefined : slideInRight}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex h-full w-full flex-col"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
+          <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+            onClick={onClose}
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        {footer ? <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div> : null}
+      </motion.aside>
+    </div>
   );
 }
 
