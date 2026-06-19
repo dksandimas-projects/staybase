@@ -48,9 +48,6 @@ export interface Room {
   name: string;
   roomNumber: string;
   type: string;
-  description: string;
-  bedDefinition: string;
-  amenities: string[];
   isActive: boolean;
   status: "available" | "occupied" | "blocked";
   housekeepingStatus: "clean" | "dirty" | "in-progress";
@@ -59,8 +56,11 @@ export interface Room {
   blockedTo: string | null;
   remarks: string;
   qrToken: string;
-  // `maxCapacity` + rate fields are intentionally absent — they now live
-  // on the RoomType entry. See `plan/features/RATE-MANAGEMENT.md §W3.6`.
+  // `bedDefinition`, `description`, `amenities`, `maxCapacity`, and the
+  // rate fields (`pricePerNight` / `weekendRate` / `corporateRate`) are
+  // intentionally absent — they now live on the RoomType entry. See
+  // `plan/features/RATE-MANAGEMENT.md §W3.6` and the W3.7 notes in
+  // `plan/features/SETTINGS.md §Room Types`.
 }
 
 export interface OnsitePayment {
@@ -377,6 +377,9 @@ export interface AdminContextType {
       label: string;
       shortLabel: string;
       imageUrls?: string[];
+      bedDefinition: string;
+      description: string;
+      amenities: string[];
       maxCapacity: number;
       pricePerNight: number;
       weekendRate: number;
@@ -388,7 +391,16 @@ export interface AdminContextType {
     updates: Partial<
       Pick<
         RoomTypeEntry,
-        "label" | "shortLabel" | "imageUrls" | "maxCapacity" | "pricePerNight" | "weekendRate" | "corporateRate"
+        | "label"
+        | "shortLabel"
+        | "imageUrls"
+        | "bedDefinition"
+        | "description"
+        | "amenities"
+        | "maxCapacity"
+        | "pricePerNight"
+        | "weekendRate"
+        | "corporateRate"
       >
     >
   ) => void;
@@ -492,9 +504,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           name: data.name || "",
           roomNumber: data.roomNumber || "",
           type: data.type || "",
-          description: data.description || "",
-          bedDefinition: data.bedDefinition || "",
-          amenities: data.amenities || [],
           isActive: data.isActive !== false,
           status: data.status || "available",
           housekeepingStatus: data.housekeepingStatus || "clean",
@@ -596,9 +605,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         name: input.name.trim(),
         roomNumber: normalizedNumber,
         type: input.type,
-        description: input.description || "",
-        bedDefinition: input.bedDefinition.trim(),
-        amenities: [],
         isActive: input.isActive,
         status: input.status,
         housekeepingStatus: input.housekeepingStatus,
@@ -1988,6 +1994,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           label: t.label || t.value,
           shortLabel: t.shortLabel || t.label || t.value,
           imageUrls: Array.isArray(t.imageUrls) ? t.imageUrls : [],
+          bedDefinition: t.bedDefinition || "",
+          description: t.description || "",
+          amenities: Array.isArray(t.amenities) ? t.amenities : [],
           maxCapacity: Number(t.maxCapacity) || 1,
           pricePerNight: Number(t.pricePerNight) || 0,
           weekendRate: Number(t.weekendRate) || 0,
@@ -2015,6 +2024,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       label: string;
       shortLabel: string;
       imageUrls?: string[];
+      bedDefinition: string;
+      description: string;
+      amenities: string[];
       maxCapacity: number;
       pricePerNight: number;
       weekendRate: number;
@@ -2026,6 +2038,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       label: rt.label,
       shortLabel: rt.shortLabel,
       imageUrls: Array.isArray(rt.imageUrls) ? rt.imageUrls : [],
+      bedDefinition: rt.bedDefinition.trim(),
+      description: rt.description || "",
+      amenities: Array.isArray(rt.amenities) ? rt.amenities.filter((a) => a && a.trim()) : [],
       maxCapacity: Math.max(1, Math.floor(rt.maxCapacity)),
       pricePerNight: Math.max(0, rt.pricePerNight),
       weekendRate: Math.max(0, rt.weekendRate),
@@ -2040,7 +2055,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     updates: Partial<
       Pick<
         RoomTypeEntry,
-        "label" | "shortLabel" | "imageUrls" | "maxCapacity" | "pricePerNight" | "weekendRate" | "corporateRate"
+        | "label"
+        | "shortLabel"
+        | "imageUrls"
+        | "bedDefinition"
+        | "description"
+        | "amenities"
+        | "maxCapacity"
+        | "pricePerNight"
+        | "weekendRate"
+        | "corporateRate"
       >
     >
   ) => {

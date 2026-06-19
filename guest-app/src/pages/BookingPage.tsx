@@ -740,6 +740,7 @@ export function BookingPage() {
             room={selectedRoom}
             typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             typeRates={selectedRoomRates}
+            typeDescription={selectedRoomRates ? roomTypes.find((t) => t.value === selectedRoom?.type)?.description : ""}
             total={total}
             breakfastRate={breakfastRate}
             discountPct={discountPct}
@@ -1171,6 +1172,7 @@ export function BookingPage() {
             room={selectedRoom}
             typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             typeRates={selectedRoomRates}
+            typeDescription={selectedRoomRates ? roomTypes.find((t) => t.value === selectedRoom?.type)?.description : ""}
             total={total}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
@@ -1366,7 +1368,7 @@ export function BookingPage() {
                               {typeLabel}
                             </span>
                             <h2 className="mt-3 text-2xl font-semibold text-gray-950">{room.name}</h2>
-                            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{room.description}</p>
+                            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{roomTypes.find((t) => t.value === room.type)?.description || ""}</p>
                           </div>
                           <div className="sm:text-right">
                             <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
@@ -1378,7 +1380,7 @@ export function BookingPage() {
                         <div className="mt-5 flex flex-wrap gap-4 text-sm text-gray-600">
                           <span className="flex items-center gap-2">
                             <BedDouble size={16} className="text-primary" />
-                            {room.bedDefinition}
+                            {roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}
                           </span>
                           <span className="flex items-center gap-2">
                             <Users size={16} className="text-primary" />
@@ -1512,6 +1514,8 @@ interface BookingReviewAsideProps {
   typeImageUrls?: string[];
   // Per W3.6 — pricing lives on the type.
   typeRates?: { maxCapacity: number; pricePerNight: number; weekendRate: number; corporateRate: number } | null;
+  // Per W3.7 — description lives on the type.
+  typeDescription?: string;
   total: number;
   discountPct?: number;
   voucherDiscount?: number;
@@ -1531,6 +1535,7 @@ function BookingReviewAside({
   room,
   typeImageUrls = [],
   typeRates,
+  typeDescription = "",
   total,
   discountPct = 0,
   voucherDiscount = 0,
@@ -1574,7 +1579,7 @@ function BookingReviewAside({
         <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
         <div className="p-5">
           <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
-          <p className="mt-2 text-sm leading-6 text-gray-600">{room.description}</p>
+          <p className="mt-2 text-sm leading-6 text-gray-600">{typeDescription}</p>
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">
             <SummaryCell label="Check-in" value={formatStayDate(checkIn)} />
             <SummaryCell alignEnd label="Check-out" value={formatStayDate(checkOut)} />

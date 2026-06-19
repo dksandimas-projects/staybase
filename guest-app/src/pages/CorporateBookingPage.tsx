@@ -805,7 +805,7 @@ export function CorporateBookingPage() {
                     <div className="p-5 flex flex-col flex-1">
                       <h3 className="text-lg font-semibold text-gray-950">{room.name}</h3>
                       <p className="mt-2 text-xs text-gray-500 leading-normal flex-1 line-clamp-2">
-                        {room.description}
+                        {roomTypes.find((t) => t.value === room.type)?.description || ""}
                       </p>
 
                       <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
@@ -813,7 +813,7 @@ export function CorporateBookingPage() {
                           <Users size={14} className="text-primary" />
                           Capacity: Up to {roomMaxCapacity}
                         </span>
-                        <span>{room.bedDefinition}</span>
+                        <span>{roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}</span>
                       </div>
 
                       {/* Corporate Rate Display */}

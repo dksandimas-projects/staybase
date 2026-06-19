@@ -28,16 +28,6 @@ export const CreateRoomSchema = z.object({
     .trim()
     .min(1, "Room type is required")
     .max(40, "Room type is too long"),
-  description: z
-    .string()
-    .trim()
-    .max(1000, "Description is too long")
-    .default(""),
-  bedDefinition: z
-    .string()
-    .trim()
-    .min(1, "Bed definition is required")
-    .max(120, "Bed definition is too long"),
   status: RoomStatusEnum.default("available"),
   housekeepingStatus: HousekeepingStatusEnum.default("clean"),
   isActive: z.boolean().default(true),

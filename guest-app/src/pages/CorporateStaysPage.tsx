@@ -426,7 +426,7 @@ export function CorporateStaysPage() {
                   <div className="p-6 flex flex-col flex-1">
                     <h3 className="text-lg font-semibold text-gray-950">{room.name}</h3>
                     <p className="mt-3 text-sm leading-6 text-gray-600 flex-1 line-clamp-3">
-                      {room.description}
+                      {roomTypes.find((t) => t.value === room.type)?.description || ""}
                     </p>
 
                     <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between gap-3 text-xs text-gray-500">
@@ -437,18 +437,18 @@ export function CorporateStaysPage() {
                           return <>Up to {cap} {cap === 1 ? "guest" : "guests"}</>;
                         })()}
                       </span>
-                      <span>{room.bedDefinition}</span>
+                      <span>{roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}</span>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-1.5">
-                      {room.amenities.slice(0, 3).map((amenity) => (
+                      {(roomTypes.find((t) => t.value === room.type)?.amenities ?? []).slice(0, 3).map((amenity) => (
                         <span key={amenity} className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-600">
                           {amenity}
                         </span>
                       ))}
-                      {room.amenities.length > 3 && (
+                      {(roomTypes.find((t) => t.value === room.type)?.amenities ?? []).length > 3 && (
                         <span className="rounded-full bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-500">
-                          +{room.amenities.length - 3} more
+                          +{(roomTypes.find((t) => t.value === room.type)?.amenities ?? []).length - 3} more
                         </span>
                       )}
                     </div>
@@ -721,12 +721,12 @@ export function CorporateStaysPage() {
               </span>
             </div>
 
-            <p className="leading-7 text-gray-600">{selectedRoom.description}</p>
-            
+            <p className="leading-7 text-gray-600">{roomTypes.find((t) => t.value === selectedRoom.type)?.description || ""}</p>
+
             <div className="grid gap-3 grid-cols-2">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Beds</p>
-                <p className="mt-1 font-semibold text-gray-950">{selectedRoom.bedDefinition}</p>
+                <p className="mt-1 font-semibold text-gray-950">{roomTypes.find((t) => t.value === selectedRoom.type)?.bedDefinition || "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Max Occupancy</p>
@@ -737,7 +737,7 @@ export function CorporateStaysPage() {
             <div>
               <h3 className="font-semibold text-gray-950">Included Amenities</h3>
               <div className="mt-3 flex flex-wrap gap-2">
-                {selectedRoom.amenities.map((amenity) => (
+                {(roomTypes.find((t) => t.value === selectedRoom.type)?.amenities ?? []).map((amenity) => (
                   <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
                     {amenity}
                   </span>
