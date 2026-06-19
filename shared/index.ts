@@ -2,6 +2,7 @@ export * from "./VERSION";
 export * from "./animations";
 export * from "./constants";
 export * from "./schemas/booking";
+export * from "./schemas/room";
 export * from "./types";
 export * from "./utils/bookingDates";
 export * from "./utils/calendar";

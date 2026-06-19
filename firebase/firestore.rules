@@ -16,7 +16,11 @@ service cloud.firestore {
 
     match /rooms/{roomId} {
       allow read: if true;
-      allow write: if isStaff();
+      // Per W3.4 / `plan/features/ROOM-MANAGEMENT.md §Delete`: only
+      // admins can hard-delete a room document. Front-desk can still
+      // create, edit, and toggle active/blocked status.
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
     }
 
     match /bookings/{bookingId} {

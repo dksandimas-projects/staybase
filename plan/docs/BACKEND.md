@@ -18,7 +18,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | e.g. "Room 202 — Executive" |
-| `roomNumber` | string | e.g. "202" |
+| `roomNumber` | string | e.g. "202" — must be unique across the collection (case-insensitive trim compare, enforced in `AdminContext.createRoom`) |
 | `type` | string | Free-form string matching a dynamic room type `value` (defaults defined in `@spark-inn/shared → DEFAULT_ROOM_TYPES`, managed at runtime via Admin UI) e.g. `"single"`, `"deluxe-sea-view"` |
 | `description` | string | |
 | `maxCapacity` | number | |
@@ -32,10 +32,14 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `status` | string | `"available"` \| `"occupied"` \| `"blocked"` |
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
 | `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| `""` |
+| `blockedFrom` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
+| `blockedTo` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
 | `remarks` | string | Internal staff notes |
 | `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+**Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
 ---
 
@@ -429,7 +433,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 
 | Collection | Read | Write |
 |---|---|---|
-| `rooms` | Public | Staff or Admin |
+| `rooms` | Public | Create/Update = Staff; Delete = Admin |
 | `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
 | `guests` | Owner or Staff/Admin | Create/disable via Admin SDK routes; profile update = Owner or Admin |
 | `settings` | Public | Admin only |
