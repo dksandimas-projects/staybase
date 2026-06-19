@@ -27,8 +27,8 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 - [ ] **Add Room** button — full-width orange on mobile (below the subtitle), inline right-aligned on tablet+. Opens a Modal with the create form.
 - [ ] Room list — card grid of all rooms with name, type, status badge, housekeeping badge, active/inactive toggle, and an "active bookings" count
 - [ ] Edit room — click/tap opens edit drawer
-- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), max capacity, bed definition, base rate, weekend rate, corporate rate, initial status, initial housekeeping status, description, internal remarks, visible-on-guest-site checkbox. Photos are added later via the edit drawer.
-- [ ] Room edit form fields: name, type (dropdown), description, max capacity, bed definition, status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes)
+- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), bed definition, initial status, initial housekeeping status, description, internal remarks, visible-on-guest-site checkbox. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type — they are managed in the **Rates** tab and inherited automatically. Photos are added later via the edit drawer.
+- [ ] Room edit form fields: name, type (dropdown), description, bed definition, status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). `maxCapacity` + the rate matrix live on the room type (see W3.6) and are edited in the **Rates** tab.
 - [ ] Block reason selector — shown only when status = Blocked: Maintenance / Hold / Other
 - [ ] Active/inactive toggle — inactive = hidden from guest site
 - [ ] Save button — explicit save, not auto-save

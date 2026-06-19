@@ -49,11 +49,7 @@ export interface Room {
   roomNumber: string;
   type: string;
   description: string;
-  maxCapacity: number;
   bedDefinition: string;
-  pricePerNight: number;
-  weekendRate: number;
-  corporateRate: number;
   amenities: string[];
   isActive: boolean;
   status: "available" | "occupied" | "blocked";
@@ -63,6 +59,8 @@ export interface Room {
   blockedTo: string | null;
   remarks: string;
   qrToken: string;
+  // `maxCapacity` + rate fields are intentionally absent — they now live
+  // on the RoomType entry. See `plan/features/RATE-MANAGEMENT.md §W3.6`.
 }
 
 export interface OnsitePayment {
@@ -373,8 +371,27 @@ export interface AdminContextType {
 
   // Room Types Config
   roomTypes: RoomTypeEntry[];
-  addRoomType: (rt: { value: string; label: string; shortLabel: string; imageUrls?: string[] }) => void;
-  updateRoomType: (value: string, updates: Partial<Pick<RoomTypeEntry, "label" | "shortLabel" | "imageUrls">>) => void;
+  addRoomType: (
+    rt: {
+      value: string;
+      label: string;
+      shortLabel: string;
+      imageUrls?: string[];
+      maxCapacity: number;
+      pricePerNight: number;
+      weekendRate: number;
+      corporateRate: number;
+    }
+  ) => void;
+  updateRoomType: (
+    value: string,
+    updates: Partial<
+      Pick<
+        RoomTypeEntry,
+        "label" | "shortLabel" | "imageUrls" | "maxCapacity" | "pricePerNight" | "weekendRate" | "corporateRate"
+      >
+    >
+  ) => void;
   deleteRoomType: (value: string) => void;
   uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
   removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
@@ -476,11 +493,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           roomNumber: data.roomNumber || "",
           type: data.type || "",
           description: data.description || "",
-          maxCapacity: data.maxCapacity || 0,
           bedDefinition: data.bedDefinition || "",
-          pricePerNight: data.pricePerNight || 0,
-          weekendRate: data.weekendRate || 0,
-          corporateRate: data.corporateRate || 0,
           amenities: data.amenities || [],
           isActive: data.isActive !== false,
           status: data.status || "available",
@@ -579,17 +592,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         return { success: false, error };
       }
 
-      const baseRate = input.pricePerNight;
       const docRef = await addDoc(collection(db, "rooms"), {
         name: input.name.trim(),
         roomNumber: normalizedNumber,
         type: input.type,
         description: input.description || "",
-        maxCapacity: input.maxCapacity,
         bedDefinition: input.bedDefinition.trim(),
-        pricePerNight: baseRate,
-        weekendRate: input.weekendRate ?? baseRate,
-        corporateRate: input.corporateRate ?? baseRate,
         amenities: [],
         isActive: input.isActive,
         status: input.status,
@@ -1965,8 +1973,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // (per W3.3). The hotelConfig onSnapshot writes to the local
   // state when the field is present; the admin save handler below
   // persists back to Firestore. Each entry carries its own
-  // `imageUrls[]` (per W3.5 / `plan/features/SETTINGS.md §Room Types`)
-  // so all rooms of a type share the same gallery.
+  // `imageUrls[]` (per W3.5) AND the type-level pricing + capacity
+  // model (per W3.6) so all rooms of a type share the same gallery,
+  // occupancy cap, and rate matrix.
   const [roomTypes, setRoomTypes] = useState<RoomTypeEntry[]>(() => {
     return DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] }));
   });
@@ -1978,7 +1987,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           value: t.value,
           label: t.label || t.value,
           shortLabel: t.shortLabel || t.label || t.value,
-          imageUrls: Array.isArray(t.imageUrls) ? t.imageUrls : []
+          imageUrls: Array.isArray(t.imageUrls) ? t.imageUrls : [],
+          maxCapacity: Number(t.maxCapacity) || 1,
+          pricePerNight: Number(t.pricePerNight) || 0,
+          weekendRate: Number(t.weekendRate) || 0,
+          corporateRate: Number(t.corporateRate) || 0
         }))
       );
     }
@@ -1996,18 +2009,41 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addRoomType = async (rt: { value: string; label: string; shortLabel: string; imageUrls?: string[] }) => {
+  const addRoomType = async (
+    rt: {
+      value: string;
+      label: string;
+      shortLabel: string;
+      imageUrls?: string[];
+      maxCapacity: number;
+      pricePerNight: number;
+      weekendRate: number;
+      corporateRate: number;
+    }
+  ) => {
     const newType: RoomTypeEntry = {
       value: rt.value,
       label: rt.label,
       shortLabel: rt.shortLabel,
-      imageUrls: Array.isArray(rt.imageUrls) ? rt.imageUrls : []
+      imageUrls: Array.isArray(rt.imageUrls) ? rt.imageUrls : [],
+      maxCapacity: Math.max(1, Math.floor(rt.maxCapacity)),
+      pricePerNight: Math.max(0, rt.pricePerNight),
+      weekendRate: Math.max(0, rt.weekendRate),
+      corporateRate: Math.max(0, rt.corporateRate)
     };
     const updated = [...roomTypes, newType];
     await saveRoomTypes(updated);
   };
 
-  const updateRoomType = async (value: string, updates: Partial<Pick<RoomTypeEntry, "label" | "shortLabel" | "imageUrls">>) => {
+  const updateRoomType = async (
+    value: string,
+    updates: Partial<
+      Pick<
+        RoomTypeEntry,
+        "label" | "shortLabel" | "imageUrls" | "maxCapacity" | "pricePerNight" | "weekendRate" | "corporateRate"
+      >
+    >
+  ) => {
     const updated = roomTypes.map((t) => (t.value === value ? { ...t, ...updates } : t));
     await saveRoomTypes(updated);
   };

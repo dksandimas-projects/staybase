@@ -26,11 +26,9 @@ RoomType = string   // matches AdminContext roomTypes value
 RoomStatus = "available" | "occupied" | "blocked"
 HousekeepingStatus = "clean" | "dirty" | "in-progress"
 
-// Room images live on the type, NOT on the individual room document.
-// Consumers (admin cards, guest cards, homepage featured rooms) look up
-// the type via the `type` field and read `imageUrls[]` from there.
-// This avoids duplicate uploads across rooms of the same type and keeps
-// the guest gallery visually consistent.
+// Room-level fields are intentionally narrow: a room is just a
+// bookable unit of a type. Pricing, capacity, and photos all live on
+// the RoomType entry (see below). Consumers join the type at read time.
 
 Room {
   id: string
@@ -38,11 +36,7 @@ Room {
   roomNumber: string
   type: RoomType
   description: string
-  maxCapacity: number
   bedDefinition: string
-  pricePerNight: number
-  weekendRate: number
-  corporateRate: number
   amenities: string[]
   isActive: boolean
   status: RoomStatus
@@ -54,11 +48,22 @@ Room {
   updatedAt: Date
 }
 
+// `maxCapacity`, `pricePerNight`, `weekendRate`, and `corporateRate` were
+// moved off the Room document and onto the RoomType entry as part of
+// W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`. The Rates tab is the
+// single edit surface for the rate matrix; the room type's
+// `maxCapacity` is the canonical occupancy for every room of that type.
+// Consumers join the type by `Room.type` at read time.
+
 RoomType {
   value: string                 // unique key, lowercase, kebab-case
   label: string                 // human-readable display name
   shortLabel: string            // compact abbreviation for badges
   imageUrls: string[]           // Firebase Storage URLs, max 10
+  maxCapacity: number           // canonical occupancy for every room of this type
+  pricePerNight: number         // base rate per night
+  weekendRate: number           // applied for stays including Sat/Sun nights
+  corporateRate: number         // flat public rate used at /corporate/book
 }
 ```
 

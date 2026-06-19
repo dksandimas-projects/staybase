@@ -21,11 +21,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `roomNumber` | string | e.g. "202" — must be unique across the collection (case-insensitive trim compare, enforced in `AdminContext.createRoom`) |
 | `type` | string | Free-form string matching a dynamic room type `value` (defaults defined in `@spark-inn/shared → DEFAULT_ROOM_TYPES`, managed at runtime via Admin UI) e.g. `"single"`, `"deluxe-sea-view"` |
 | `description` | string | |
-| `maxCapacity` | number | |
 | `bedDefinition` | string | e.g. "1 queen size bed" |
-| `pricePerNight` | number | Standard rate |
-| `weekendRate` | number | |
-| `corporateRate` | number | Flat public corporate rate (no code required) |
 | `amenities` | string[] | e.g. `["WiFi", "AC", "Hot Shower", "Cable TV"]` |
 | `isActive` | boolean | `false` = hidden from guest site |
 | `status` | string | `"available"` \| `"occupied"` \| `"blocked"` |
@@ -38,7 +34,9 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 
-> **Photos are NOT stored on individual rooms.** Room images live on the **room type** — see `settings/hotelConfig.roomTypes[].imageUrls` below. The guest site (room cards, room detail, homepage featured rooms) and admin app read `roomType.imageUrls` joined at query time. This keeps the gallery consistent across rooms of the same type and avoids re-uploading the same photos per room. Upload path: Firebase Storage `room-types/{typeValue}/{filename}` (public read, staff write — see `firebase/storage.rules`).
+> **Photos, pricing, and capacity are NOT stored on individual rooms.** They live on the **room type** — see `settings/hotelConfig.roomTypes[]` below. The guest site (room cards, room detail, booking flow, homepage featured rooms) and admin app join `roomType` on `Room.type` at query time. The Rates tab is the single edit surface for the rate matrix; the room type's `maxCapacity` is the canonical occupancy for every room of that type. Upload path for type photos: Firebase Storage `room-types/{typeValue}/{filename}` (public read, staff write — see `firebase/storage.rules`).
+
+> **Migration note (W3.6):** prior to Phase 11.9 each room also carried its own `maxCapacity`, `pricePerNight`, `weekendRate`, and `corporateRate`. Those fields are no longer read by the app. If the Firestore docs still contain them they are inert — the canonical values now live on the type. A one-off backfill to seed each `settings/hotelConfig.roomTypes[].maxCapacity / pricePerNight / …` from a representative room of the same type is required if the property was running on the prior schema. See `plan/features/RATE-MANAGEMENT.md §W3.6` for the procedure.
 
 **Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
@@ -183,7 +181,7 @@ Single document. See `plan/docs/TYPES.md` for full type.
 
 Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `payAtHotelEnabled`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
 
-> **`roomTypes[]`** — array of `{ value, label, shortLabel, imageUrls[] }`. Each entry's `imageUrls[]` is the source of truth for that room type's photos; rooms reference the type via the `type` field and the public site resolves images by joining on `value`. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`).
+> **`roomTypes[]`** — array of `RoomTypeEntry` records. Each entry owns its photos, occupancy cap, and rate matrix; rooms reference the type via the `type` field and inherit these properties. See `plan/docs/TYPES.md §RoomType` for the full shape. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`).
 
 ---
 

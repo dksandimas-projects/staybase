@@ -16,24 +16,38 @@ interface RoomCardProps {
     | "type"
     | "description"
     | "amenities"
-    | "maxCapacity"
     | "bedDefinition"
-    | "pricePerNight"
     | "status"
   >;
   // Per `plan/features/SETTINGS.md §Room Types` and `plan/features/ROOMS-PAGE.md`:
-  // the gallery is owned by the room type, not the individual room. The caller
-  // resolves the type's photos (live from `useRoomTypes()` or the static
-  // `ROOM_TYPE_IMAGES` fallback) and passes the first image here.
+  // the gallery and rate matrix are owned by the room type, not the
+  // individual room. The caller resolves both (live from `useRoomTypes()`
+  // or the static `ROOM_TYPE_IMAGES` / `ROOM_TYPE_RATES` fallbacks)
+  // and passes the data here.
   typeImageUrls?: string[];
+  // Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`: pricing +
+  // max occupancy are sourced from the type. The card uses the type's
+  // `maxCapacity` for the "Up to N" label and `pricePerNight` for the
+  // "From" price.
+  typeMaxCapacity?: number;
+  typePricePerNight?: number;
   onDetails?: () => void;
   bookingQuery?: string;
 }
 
-export function RoomCard({ room, typeImageUrls = [], onDetails, bookingQuery = "" }: RoomCardProps) {
+export function RoomCard({
+  room,
+  typeImageUrls = [],
+  typeMaxCapacity,
+  typePricePerNight,
+  onDetails,
+  bookingQuery = ""
+}: RoomCardProps) {
   const shouldReduceMotion = useReducedMotion();
   const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.shortLabel ?? room.type;
   const heroImage = typeImageUrls[0];
+  const maxCapacity = typeMaxCapacity ?? DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.maxCapacity ?? 0;
+  const pricePerNight = typePricePerNight ?? DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.pricePerNight ?? 0;
 
   return (
     <motion.article
@@ -72,7 +86,7 @@ export function RoomCard({ room, typeImageUrls = [], onDetails, bookingQuery = "
         <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
           <span className="flex items-center gap-2">
             <Users size={16} className="text-primary" />
-            Up to {room.maxCapacity}
+            Up to {maxCapacity}
           </span>
           <span className="truncate">{room.bedDefinition}</span>
         </div>
@@ -86,7 +100,7 @@ export function RoomCard({ room, typeImageUrls = [], onDetails, bookingQuery = "
         <div className="mt-5 flex items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-            <p className="text-xl font-semibold text-gray-950">{formatPrice(room.pricePerNight)}</p>
+            <p className="text-xl font-semibold text-gray-950">{formatPrice(pricePerNight)}</p>
           </div>
           <div className="flex gap-2">
             {onDetails ? (

@@ -39,7 +39,15 @@ export function useRoomTypes(): UseRoomTypesResult {
               shortLabel: String(entry.shortLabel ?? entry.label ?? entry.value ?? ""),
               imageUrls: Array.isArray(entry.imageUrls)
                 ? (entry.imageUrls as unknown[]).filter((u): u is string => typeof u === "string")
-                : []
+                : [],
+              // Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`:
+              // pricing + max occupancy live on the type. Fall back
+              // to DEFAULT_ROOM_TYPES values for legacy entries that
+              // may not yet have the new fields.
+              maxCapacity: Number(entry.maxCapacity) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.maxCapacity || 1,
+              pricePerNight: Number(entry.pricePerNight) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.pricePerNight || 0,
+              weekendRate: Number(entry.weekendRate) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.weekendRate || 0,
+              corporateRate: Number(entry.corporateRate) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.corporateRate || 0
             }))
             .filter((t) => t.value.length > 0);
           setRoomTypes(normalized);
@@ -60,4 +68,23 @@ export function useRoomTypes(): UseRoomTypesResult {
 
 export function getRoomTypeImages(types: RoomTypeEntry[], typeValue: string): string[] {
   return types.find((t) => t.value === typeValue)?.imageUrls ?? [];
+}
+
+// Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`: pricing + max
+// occupancy live on the room type. This helper is the canonical lookup
+// for the booking flow and the public room cards.
+export function getRoomTypeRates(types: RoomTypeEntry[], typeValue: string): {
+  maxCapacity: number;
+  pricePerNight: number;
+  weekendRate: number;
+  corporateRate: number;
+} | null {
+  const t = types.find((entry) => entry.value === typeValue);
+  if (!t) return null;
+  return {
+    maxCapacity: t.maxCapacity,
+    pricePerNight: t.pricePerNight,
+    weekendRate: t.weekendRate,
+    corporateRate: t.corporateRate
+  };
 }

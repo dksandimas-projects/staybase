@@ -27,7 +27,7 @@ import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
 import { rooms } from "../data/rooms";
 import { ROOM_TYPE_IMAGES } from "../data/homepage";
-import { useRoomTypes, getRoomTypeImages } from "../hooks/useRoomTypes";
+import { useRoomTypes, getRoomTypeImages, getRoomTypeRates } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
@@ -108,6 +108,10 @@ export function CorporateStaysPage() {
     const live = getRoomTypeImages(roomTypes, typeValue);
     if (live.length > 0) return live;
     return ROOM_TYPE_IMAGES[typeValue] ?? [];
+  };
+
+  const resolveTypeMaxCapacity = (typeValue: string): number => {
+    return getRoomTypeRates(roomTypes, typeValue)?.maxCapacity ?? 0;
   };
   const corpHeading = corporate.heroHeading;
   const corpSubtext = corporate.heroSubtext;
@@ -428,7 +432,10 @@ export function CorporateStaysPage() {
                     <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between gap-3 text-xs text-gray-500">
                       <span className="flex items-center gap-1.5">
                         <Users size={14} className="text-primary" />
-                        Up to {room.maxCapacity} {room.maxCapacity === 1 ? "guest" : "guests"}
+                        {(() => {
+                          const cap = resolveTypeMaxCapacity(room.type);
+                          return <>Up to {cap} {cap === 1 ? "guest" : "guests"}</>;
+                        })()}
                       </span>
                       <span>{room.bedDefinition}</span>
                     </div>
@@ -723,7 +730,7 @@ export function CorporateStaysPage() {
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Max Occupancy</p>
-                <p className="mt-1 font-semibold text-gray-950">Up to {selectedRoom.maxCapacity} Guests</p>
+                <p className="mt-1 font-semibold text-gray-950">Up to {resolveTypeMaxCapacity(selectedRoom.type)} Guests</p>
               </div>
             </div>
 

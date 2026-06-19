@@ -18,7 +18,8 @@ export function CorporateInquiriesPage() {
     corporateCodes,
     addCorporateCode,
     convertInquiryToBooking,
-    rooms
+    rooms,
+    roomTypes
   } = useAdmin();
   const toast = useToast();
 
@@ -525,11 +526,14 @@ export function CorporateInquiriesPage() {
                   className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-2 text-xs"
                 >
                   <option value="">Select a room</option>
-                  {eligibleConvertRooms.map(r => (
-                    <option key={r.id} value={r.id}>
-                      Room {r.roomNumber} — {r.type} (max {r.maxCapacity})
-                    </option>
-                  ))}
+                  {eligibleConvertRooms.map(r => {
+                    const type = roomTypes.find(t => t.value === r.type);
+                    return (
+                      <option key={r.id} value={r.id}>
+                        Room {r.roomNumber} — {type?.label || r.type} (max {type?.maxCapacity ?? "—"})
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
 
