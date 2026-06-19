@@ -1493,6 +1493,10 @@ export function SettingsPage() {
                     const value = (form.elements.namedItem("val") as HTMLInputElement).value.trim().toLowerCase().replace(/\s+/g, "-");
                     const label = (form.elements.namedItem("lbl") as HTMLInputElement).value.trim();
                     const shortLabel = (form.elements.namedItem("shortLbl") as HTMLInputElement).value.trim();
+                    const maxCapacity = parseInt((form.elements.namedItem("cap") as HTMLInputElement).value, 10) || 1;
+                    const pricePerNight = parseFloat((form.elements.namedItem("baseRate") as HTMLInputElement).value) || 0;
+                    const weekendRate = parseFloat((form.elements.namedItem("weekendRate") as HTMLInputElement).value) || pricePerNight;
+                    const corporateRate = parseFloat((form.elements.namedItem("corpRate") as HTMLInputElement).value) || pricePerNight;
 
                     if (!value || !label || !shortLabel) return;
                     if (roomTypes.some(t => t.value === value)) {
@@ -1500,9 +1504,20 @@ export function SettingsPage() {
                       return;
                     }
 
-                    addRoomType({ value, label, shortLabel });
+                    addRoomType({
+                      value,
+                      label,
+                      shortLabel,
+                      maxCapacity,
+                      pricePerNight,
+                      weekendRate,
+                      corporateRate
+                    });
                     form.reset();
-                    toast.success("Room type added", `${label} (${shortLabel})`);
+                    toast.success(
+                      "Room type added",
+                      `${label} (${shortLabel}) — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night.`
+                    );
                   }}
                   className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
                 >
@@ -1540,6 +1555,56 @@ export function SettingsPage() {
                       />
                     </label>
                   </div>
+
+                  <div className="grid gap-4 sm:grid-cols-4">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Max guests
+                      <input
+                        name="cap"
+                        type="number"
+                        min={1}
+                        defaultValue={2}
+                        required
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Base rate / night ({config.currencySymbol})
+                      <input
+                        name="baseRate"
+                        type="number"
+                        min={0}
+                        defaultValue={0}
+                        required
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Weekend rate ({config.currencySymbol})
+                      <input
+                        name="weekendRate"
+                        type="number"
+                        min={0}
+                        defaultValue={0}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Corporate rate ({config.currencySymbol})
+                      <input
+                        name="corpRate"
+                        type="number"
+                        min={0}
+                        defaultValue={0}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                  </div>
+
+                  <p className="text-[10px] leading-relaxed text-gray-500">
+                    Per W3.6 the rate matrix and max occupancy live on the
+                    type. You can update them later in the <strong>Rates</strong> tab.
+                  </p>
 
                   <div className="flex justify-end">
                     <button

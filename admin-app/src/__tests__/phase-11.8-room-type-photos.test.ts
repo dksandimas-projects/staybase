@@ -210,8 +210,9 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
   });
 
   describe("Documentation sync", () => {
-    it("BACKEND.md notes that room images live on the type, not the room", () => {
-      expect(backendDocSrc).toMatch(/Photos are NOT stored on individual rooms/i);
+    it("BACKEND.md notes that room images, pricing, and capacity live on the type", () => {
+      // Per W3.6 the type now owns images + pricing + maxCapacity.
+      expect(backendDocSrc).toMatch(/Photos.*NOT stored on individual rooms/i);
       expect(backendDocSrc).toMatch(/room-types\/\{typeValue\}\/\{filename\}/);
     });
 
@@ -220,10 +221,11 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
       expect(backendDocSrc).toMatch(/Maximum 10 photos per type/);
     });
 
-    it("TYPES.md adds a RoomType shape and notes the type-driven gallery", () => {
-      expect(typesDocSrc).toMatch(/Room images live on the type/);
+    it("TYPES.md adds a RoomType shape and notes the type-driven pricing + gallery", () => {
       expect(typesDocSrc).toMatch(/RoomType\s*\{/);
       expect(typesDocSrc).toMatch(/imageUrls:\s*string\[\]/);
+      expect(typesDocSrc).toMatch(/maxCapacity:\s*number/);
+      expect(typesDocSrc).toMatch(/pricePerNight:\s*number/);
     });
 
     it("SETTINGS.md documents the Room Types photo manager", () => {

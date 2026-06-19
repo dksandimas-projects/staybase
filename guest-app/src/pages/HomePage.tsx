@@ -11,7 +11,7 @@ import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
-import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { homepageHeroImage } from "../data/homepage";
 
@@ -192,7 +192,13 @@ export function HomePage() {
             {...entranceProps}
           >
             {featured.map((room) => (
-              <RoomCard key={room.id} room={room} typeImageUrls={getRoomTypeImages(roomTypes, room.type)} />
+              <RoomCard
+                key={room.id}
+                room={room}
+                typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
+                typeMaxCapacity={getRoomTypeRates(roomTypes, room.type)?.maxCapacity}
+                typePricePerNight={getRoomTypeRates(roomTypes, room.type)?.pricePerNight}
+              />
             ))}
           </motion.div>
         )}

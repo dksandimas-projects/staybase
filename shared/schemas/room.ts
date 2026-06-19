@@ -33,27 +33,11 @@ export const CreateRoomSchema = z.object({
     .trim()
     .max(1000, "Description is too long")
     .default(""),
-  maxCapacity: z.coerce
-    .number({ invalid_type_error: "Enter a number" })
-    .int("Capacity must be a whole number")
-    .min(1, "Capacity must be at least 1")
-    .max(20, "Capacity is too high"),
   bedDefinition: z
     .string()
     .trim()
     .min(1, "Bed definition is required")
     .max(120, "Bed definition is too long"),
-  pricePerNight: z.coerce
-    .number({ invalid_type_error: "Enter a number" })
-    .min(0, "Price cannot be negative"),
-  weekendRate: z.coerce
-    .number({ invalid_type_error: "Enter a number" })
-    .min(0, "Weekend rate cannot be negative")
-    .optional(),
-  corporateRate: z.coerce
-    .number({ invalid_type_error: "Enter a number" })
-    .min(0, "Corporate rate cannot be negative")
-    .optional(),
   status: RoomStatusEnum.default("available"),
   housekeepingStatus: HousekeepingStatusEnum.default("clean"),
   isActive: z.boolean().default(true),
