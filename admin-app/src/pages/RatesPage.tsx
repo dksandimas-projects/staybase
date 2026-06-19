@@ -5,6 +5,7 @@ import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { formatPrice } from "../utils/format";
+import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   Plus, Tag, Gift, Trash2, Calendar, ShieldCheck,
   Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone
@@ -27,6 +28,7 @@ export function RatesPage() {
     updateRoomConfig,
     roomTypes
   } = useAdmin();
+  const { isMobile } = useBreakpoint();
 
   // Modal State
   const [isVchModalOpen, setIsVchModalOpen] = useState(false);
@@ -385,82 +387,155 @@ export function RatesPage() {
           </h2>
 
           <form onSubmit={handleSaveRates} className="space-y-5">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-150 text-xs">
-                <thead>
-                  <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
-                    <th className="py-2.5">Room Type</th>
-                    <th className="py-2.5">Standard Rate (Base)</th>
-                    <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
-                    <th className="py-2.5">Corporate Rate (Flat)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {roomTypes.map((type) => (
-                    <tr key={type.value} className="text-xs">
-                      <td className="py-3 font-semibold text-gray-800">{type.label}</td>
-                      <td className="py-2 pr-4">
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            value={prices[type.value]?.base || 0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrices(prev => ({
-                                ...prev,
-                                [type.value]: { ...prev[type.value], base: val }
-                              }));
-                            }}
-                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
-                          />
-                        </div>
-                      </td>
-                      <td className="py-2 pr-4">
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            value={prices[type.value]?.weekend || 0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrices(prev => ({
-                                ...prev,
-                                [type.value]: { ...prev[type.value], weekend: val }
-                              }));
-                            }}
-                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
-                          />
-                        </div>
-                      </td>
-                      <td className="py-2">
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            value={prices[type.value]?.corporate || 0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrices(prev => ({
-                                ...prev,
-                                [type.value]: { ...prev[type.value], corporate: val }
-                              }));
-                            }}
-                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
-                          />
-                        </div>
-                      </td>
+            {isMobile ? (
+              <div className="space-y-3">
+                {roomTypes.map((type) => (
+                  <div key={type.value} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-gray-800">{type.label}</p>
+                      <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">{type.value}</span>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Standard Rate (Base)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={prices[type.value]?.base || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setPrices(prev => ({
+                              ...prev,
+                              [type.value]: { ...prev[type.value], base: val }
+                            }));
+                          }}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Weekend Rate (Fri/Sat)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={prices[type.value]?.weekend || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setPrices(prev => ({
+                              ...prev,
+                              [type.value]: { ...prev[type.value], weekend: val }
+                            }));
+                          }}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Corporate Rate (Flat)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={prices[type.value]?.corporate || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setPrices(prev => ({
+                              ...prev,
+                              [type.value]: { ...prev[type.value], corporate: val }
+                            }));
+                          }}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-150 text-xs">
+                  <thead>
+                    <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                      <th className="py-2.5">Room Type</th>
+                      <th className="py-2.5">Standard Rate (Base)</th>
+                      <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
+                      <th className="py-2.5">Corporate Rate (Flat)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {roomTypes.map((type) => (
+                      <tr key={type.value} className="text-xs">
+                        <td className="py-3 font-semibold text-gray-800">{type.label}</td>
+                        <td className="py-2 pr-4">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              value={prices[type.value]?.base || 0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrices(prev => ({
+                                  ...prev,
+                                  [type.value]: { ...prev[type.value], base: val }
+                                }));
+                              }}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2 pr-4">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              value={prices[type.value]?.weekend || 0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrices(prev => ({
+                                  ...prev,
+                                  [type.value]: { ...prev[type.value], weekend: val }
+                                }));
+                              }}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              value={prices[type.value]?.corporate || 0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrices(prev => ({
+                                  ...prev,
+                                  [type.value]: { ...prev[type.value], corporate: val }
+                                }));
+                              }}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div className="pt-2 border-t border-gray-100 flex justify-between items-center">
               <span className="text-[10px] text-gray-400 font-semibold leading-relaxed">

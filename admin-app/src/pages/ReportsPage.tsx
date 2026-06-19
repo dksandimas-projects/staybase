@@ -11,6 +11,7 @@ import {
   LineChart, Line
 } from "recharts";
 import { formatPrice } from "../utils/format";
+import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
   TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet
@@ -54,6 +55,7 @@ const STORE_STATUS_LABELS: Record<string, string> = {
 
 export function ReportsPage() {
   const { bookings, rooms, roomTypes, breakfastConfig, storeOrders, storeItems, currentUser } = useAdmin();
+  const { isMobile } = useBreakpoint();
   const [activeTab, setActiveTab] = useState<ReportTab>("performance");
   const [dateRange, setDateRange] = useState("30");
   const [salesSubTab, setSalesSubTab] = useState<SalesSubTab>("bookings");
@@ -594,6 +596,7 @@ export function ReportsPage() {
           breakfastBookingsInRange={breakfastBookingsInRange}
           toDate={toDate}
           chartColors={chartColors}
+          isMobile={isMobile}
         />
       )}
     </div>
@@ -815,6 +818,7 @@ function SalesTab(props: {
   breakfastBookingsInRange: Array<any>;
   toDate: (v: any) => Date | null;
   chartColors: string[];
+  isMobile: boolean;
 }) {
   const {
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, totalTransactions,
@@ -822,7 +826,7 @@ function SalesTab(props: {
     deliveredStoreOrders, breakfastConfig, dailyKitchenPrep,
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, breakfastBookingsInRange,
-    toDate, chartColors
+    toDate, chartColors, isMobile
   } = props;
 
   const breakfastEnabled = breakfastConfig?.isEnabled;
@@ -1037,15 +1041,15 @@ function SalesTab(props: {
         </div>
 
         {salesSubTab === "bookings" && (
-          <SalesBookingsTable bookings={filteredBookings} toDate={toDate} />
+          <SalesBookingsTable bookings={filteredBookings} toDate={toDate} isMobile={isMobile} />
         )}
 
         {salesSubTab === "breakfast" && (
-          <SalesBreakfastTable bookings={filteredBreakfastBookings} toDate={toDate} />
+          <SalesBreakfastTable bookings={filteredBreakfastBookings} toDate={toDate} isMobile={isMobile} />
         )}
 
         {salesSubTab === "store" && (
-          <SalesStoreOrdersTable orders={filteredStoreOrders} toDate={toDate} />
+          <SalesStoreOrdersTable orders={filteredStoreOrders} toDate={toDate} isMobile={isMobile} />
         )}
       </div>
 
@@ -1061,6 +1065,33 @@ function SalesTab(props: {
               <Utensils size={32} className="mx-auto mb-3 opacity-40" />
               <p className="text-xs font-semibold">No breakfast selections recorded yet.</p>
               <p className="text-[10px] mt-1">Selections are entered at check-in from the booking detail drawer.</p>
+            </div>
+          ) : isMobile ? (
+            <div className="space-y-3">
+              {dailyKitchenPrep.dates.map(date => {
+                const dayCounts = dailyKitchenPrep.counts[date] || {};
+                const dayTotal = Object.values(dayCounts).reduce((s: number, c: number) => s + c, 0);
+                return (
+                  <div key={date} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-800">
+                        {new Date(date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                      </p>
+                      <span className="rounded-full bg-primary-light px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-dark">
+                        Total {dayTotal}
+                      </span>
+                    </div>
+                    <ul className="mt-2 space-y-1">
+                      {dailyKitchenPrep.items.map(item => (
+                        <li key={item} className="flex items-center justify-between text-[11px]">
+                          <span className="text-gray-600">{item}</span>
+                          <span className="font-mono text-gray-800">{dayCounts[item] || "—"}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1163,9 +1194,35 @@ function SalesTab(props: {
 
 // ───────────────────── Sales Sub-tables ─────────────────────
 
-function SalesBookingsTable({ bookings, toDate }: { bookings: any[]; toDate: (v: any) => Date | null }) {
+function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; toDate: (v: any) => Date | null; isMobile?: boolean }) {
   if (bookings.length === 0) {
     return <p className="text-xs text-gray-400 py-8 text-center">No bookings in this range.</p>;
+  }
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {bookings.slice(0, 50).map(b => (
+          <div key={b.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ref</span>
+              <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 capitalize">
+                {b.status.replace(/-/g, " ")}
+              </span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">{b.bookingRef}</p>
+            <p className="mt-0.5 text-sm text-gray-700">{b.guestName}</p>
+            <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
+              <span>Room {b.roomNumber} · {b.numNights} nt</span>
+              <span>{toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}</span>
+            </div>
+            <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(b.totalPrice)}</p>
+          </div>
+        ))}
+        {bookings.length > 50 && (
+          <p className="text-[10px] text-gray-500 text-center">Showing 50 of {bookings.length} — export XLSX for the full set.</p>
+        )}
+      </div>
+    );
   }
   return (
     <div className="overflow-x-auto">
@@ -1206,9 +1263,33 @@ function SalesBookingsTable({ bookings, toDate }: { bookings: any[]; toDate: (v:
   );
 }
 
-function SalesBreakfastTable({ bookings, toDate }: { bookings: any[]; toDate: (v: any) => Date | null }) {
+function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; toDate: (v: any) => Date | null; isMobile?: boolean }) {
   if (bookings.length === 0) {
     return <p className="text-xs text-gray-400 py-8 text-center">No breakfast bookings in this range.</p>;
+  }
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {bookings.slice(0, 50).map(b => {
+          const total = (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
+          return (
+            <div key={b.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ref</span>
+                <span className="text-[10px] text-gray-500">{toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}</span>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-gray-900">{b.bookingRef}</p>
+              <p className="mt-0.5 text-sm text-gray-700">{b.guestName} · Room {b.roomNumber}</p>
+              <div className="mt-2 flex items-center justify-between text-[11px] text-gray-600">
+                <span>{b.numNights} nt × {b.numGuests} guests</span>
+                <span>Rate {formatPrice(b.breakfastRate)}</span>
+              </div>
+              <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>
+            </div>
+          );
+        })}
+      </div>
+    );
   }
   return (
     <div className="overflow-x-auto">
@@ -1247,9 +1328,40 @@ function SalesBreakfastTable({ bookings, toDate }: { bookings: any[]; toDate: (v
   );
 }
 
-function SalesStoreOrdersTable({ orders, toDate }: { orders: any[]; toDate: (v: any) => Date | null }) {
+function SalesStoreOrdersTable({ orders, toDate, isMobile }: { orders: any[]; toDate: (v: any) => Date | null; isMobile?: boolean }) {
   if (orders.length === 0) {
     return <p className="text-xs text-gray-400 py-8 text-center">No store orders in this range.</p>;
+  }
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {orders.slice(0, 50).map(o => (
+          <div key={o.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Order</span>
+              <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 capitalize">
+                {STORE_STATUS_LABELS[o.status] || o.status}
+              </span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">{o.orderRef}</p>
+            <p className="mt-0.5 text-sm text-gray-700">Room {o.roomNumber}</p>
+            <p className="mt-1 text-[11px] text-gray-600 line-clamp-2">
+              {o.items.map((i: any) => `${i.quantity}x ${i.name}`).join(", ")}
+            </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-gray-600">
+                {o.paymentMethod === "add-to-bill" && (
+                  <span className="mr-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">Uncollected</span>
+                )}
+                {PAYMENT_LABELS[o.paymentMethod] || o.paymentMethod}
+              </span>
+              <span className="text-[11px] text-gray-500">{toDate(o.createdAt)?.toISOString().slice(0, 10) || "—"}</span>
+            </div>
+            <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(o.totalAmount)}</p>
+          </div>
+        ))}
+      </div>
+    );
   }
   return (
     <div className="overflow-x-auto">
