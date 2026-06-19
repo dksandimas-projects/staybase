@@ -18,7 +18,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | e.g. "Room 202 — Executive" |
-| `roomNumber` | string | e.g. "202" |
+| `roomNumber` | string | e.g. "202" — must be unique across the collection (case-insensitive trim compare, enforced in `AdminContext.createRoom`) |
 | `type` | string | Free-form string matching a dynamic room type `value` (defaults defined in `@spark-inn/shared → DEFAULT_ROOM_TYPES`, managed at runtime via Admin UI) e.g. `"single"`, `"deluxe-sea-view"` |
 | `description` | string | |
 | `maxCapacity` | number | |
@@ -27,15 +27,20 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `weekendRate` | number | |
 | `corporateRate` | number | Flat public corporate rate (no code required) |
 | `amenities` | string[] | e.g. `["WiFi", "AC", "Hot Shower", "Cable TV"]` |
-| `imageUrls` | string[] | Firebase Storage URLs |
 | `isActive` | boolean | `false` = hidden from guest site |
 | `status` | string | `"available"` \| `"occupied"` \| `"blocked"` |
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
 | `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| `""` |
+| `blockedFrom` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
+| `blockedTo` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
 | `remarks` | string | Internal staff notes |
 | `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+> **Photos are NOT stored on individual rooms.** Room images live on the **room type** — see `settings/hotelConfig.roomTypes[].imageUrls` below. The guest site (room cards, room detail, homepage featured rooms) and admin app read `roomType.imageUrls` joined at query time. This keeps the gallery consistent across rooms of the same type and avoids re-uploading the same photos per room. Upload path: Firebase Storage `room-types/{typeValue}/{filename}` (public read, staff write — see `firebase/storage.rules`).
+
+**Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
 ---
 
@@ -176,7 +181,9 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `payAtHotelEnabled`, `intercomQuickRequests[]`, `notificationSoundUrl`
+Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `payAtHotelEnabled`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
+
+> **`roomTypes[]`** — array of `{ value, label, shortLabel, imageUrls[] }`. Each entry's `imageUrls[]` is the source of truth for that room type's photos; rooms reference the type via the `type` field and the public site resolves images by joining on `value`. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`).
 
 ---
 
@@ -429,7 +436,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 
 | Collection | Read | Write |
 |---|---|---|
-| `rooms` | Public | Staff or Admin |
+| `rooms` | Public | Create/Update = Staff; Delete = Admin |
 | `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
 | `guests` | Owner or Staff/Admin | Create/disable via Admin SDK routes; profile update = Owner or Admin |
 | `settings` | Public | Admin only |

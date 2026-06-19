@@ -11,6 +11,7 @@ import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { homepageHeroImage } from "../data/homepage";
 
@@ -49,6 +50,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading } = useRooms();
+  const { roomTypes } = useRoomTypes();
   const { homepage } = usePublicSiteContent();
   const [checkIn, setCheckIn] = useState("2026-06-12");
   const [checkOut, setCheckOut] = useState("2026-06-14");
@@ -190,7 +192,7 @@ export function HomePage() {
             {...entranceProps}
           >
             {featured.map((room) => (
-              <RoomCard key={room.id} room={room} />
+              <RoomCard key={room.id} room={room} typeImageUrls={getRoomTypeImages(roomTypes, room.type)} />
             ))}
           </motion.div>
         )}

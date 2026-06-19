@@ -39,6 +39,7 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
@@ -87,6 +88,7 @@ export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading: roomsLoading } = useRooms();
+  const { roomTypes } = useRoomTypes();
   const { memberProfile } = useGuestAuth();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
@@ -729,6 +731,7 @@ export function BookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             total={total}
             breakfastRate={breakfastRate}
             discountPct={discountPct}
@@ -1158,6 +1161,7 @@ export function BookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             total={total}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
@@ -1335,7 +1339,7 @@ export function BookingPage() {
                   >
                     <div className="grid md:grid-cols-[280px_1fr]">
                       <div className="relative min-h-64 overflow-hidden bg-section-bg">
-                        <img src={room.imageUrls[0]} alt={room.name} className="h-full w-full object-cover" />
+                        <img src={getRoomTypeImages(roomTypes, room.type)[0]} alt={room.name} className="h-full w-full object-cover" />
                         {index === 0 ? (
                           <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
                             Recommended
@@ -1492,6 +1496,7 @@ interface BookingReviewAsideProps {
   hasBreakfast: boolean;
   nights: number;
   room: Room | undefined;
+  typeImageUrls?: string[];
   total: number;
   discountPct?: number;
   voucherDiscount?: number;
@@ -1509,6 +1514,7 @@ function BookingReviewAside({
   hasBreakfast,
   nights,
   room,
+  typeImageUrls = [],
   total,
   discountPct = 0,
   voucherDiscount = 0,
@@ -1548,7 +1554,7 @@ function BookingReviewAside({
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-        <img src={room.imageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
+        <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
         <div className="p-5">
           <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
           <p className="mt-2 text-sm leading-6 text-gray-600">{room.description}</p>

@@ -29,7 +29,6 @@ export function useRooms() {
             weekendRate: data.weekendRate || 0,
             corporateRate: data.corporateRate || 0,
             amenities: data.amenities || [],
-            imageUrls: data.imageUrls || [],
             isActive: data.isActive !== false,
             status: data.status || "available",
             housekeepingStatus: data.housekeepingStatus || "clean",

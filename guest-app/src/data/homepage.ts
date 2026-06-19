@@ -6,17 +6,37 @@ const roomImageTwo =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuBROWAtzx3r6P2DrCtCX6SlsOosqCQrjeEnzSElnjhzuzCFZkhFxYs2aDDbgsitFYQ79O_inFjWy49NEiOh3WVn5gfEvc0cH7W-lZbhVQRHMhB-BpDLxRlyxpfXX-fkhQa5Km4MOwELC8yhDzupzv0poZDqF_LBRnPfQqIrgWizPT-POlT-6jm8IH56VF-gjzY5NwJLXvmjUiFtGG-XXzuBMq0ocxQrFatxJQFXvYCtWV0HTsc0qO5vsANuSxNV5Hpc8JYN5cEye1sX";
 const roomImageThree =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuA5OiUvWH_yNqmhSq4snEK7_e2x3VF_G_r88oWbUucSXveqcV96z6I3ZBt8MCotHH1A9xNFDGSpuYTQznp3-7Y-GbVUIFWhjcNMdKKWdJP67K_WSC_TYR4XEtnl2FqAlmxu8_XCz9_LoaiLHVx8eb1M23MAKWeDPCzQAdR1HeuwsvYoyPUaApOZBttpnVWIStzheAD14spp3xMEuKO_RCqJ0uN4EntkEaBC736Vr0BbEvlPOMToZQT61JNzOe4WWpAHNhztoFmrpRGa";
+const twinImage =
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuBKLC9-qqoTLxtDsE0uClSV9QqlUUDoOtwBAoqUy2fD4cXzD13BM7pL_5rX1Ek9FfIpYkzlkp_AuNM1nx5sfRGFZHhWlTnrVPYenQomt2mF259WmRinpIHzjCyN9Y1VS5jThZ8G15eb68PIROugPebuJ-CuOAGhw_PE1-tRmAKJG4S-TIVpUNRcaloPwPbyvUtCIe4dy_VuBcrMI5tqOwUNiQD7ic7FUi08SvriGlU9Aqy5HwfzGb2CL9JZM7vd_htN5vA0BRNsqUQB";
+const singleImage =
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuDtB2pY9pyA-nHcs0ODXwxWP--b1nfhZFJaBTYHwKm47pIe2HKLRd1EkTeXVpU_fbatxxxec-JWZ-9GahSvI5ISEbIVbFOQG2_3Qi1KWbATiZ6DCFV05FFNBm1KrQi2r6Us3EVHSFfRL4_kF3PR4-IgafYvrt0wMIN08MONiOJOia2LmghUtGRPxkTdTmk4ESSA_m3pHCsfQQ6mCuhhsoMoGtg-9NOzq41lb9fl3aqxjRzwQMgS74Vu9LL5KefrHaUmmjHzAuFDiWXQ";
 
-function room(fields: Omit<Room, "createdAt" | "updatedAt">): Room {
+export const homepageHeroImage =
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuCTef7Kgv1QtQkGMUF3IjkJC-VCn1qzPu4wpvFbsZfXP9IJv_dhrx4JJo34Kuxb5ka-hagWW7LvX18wbAck93GBqVBjEn24s5FzC7mAt28gar-1qQn34heG8ehz4jsBY1iBDf5G9vmLwEbivs1ATFikNbWpY6Gjd7_RerEeeiF0pEo1vNo_X_ZFlRPCy9mO_AMQf01x7s0a-pMAG15CWDWwHA_AFNAFp3UqpV-rcx8B6AZY0-2II8F4vAwYUzvd-52h1OJ_fKdE96h2";
+
+// Per-room-type static fallback images. Consumed by
+// `getRoomTypeImages(roomTypes, room.type)` when the live `useRoomTypes`
+// hook has not yet returned a non-empty `imageUrls[]` for the type.
+export const ROOM_TYPE_IMAGES: Record<string, string[]> = {
+  executive: [roomImageTwo],
+  "standard-double": [roomImageOne],
+  family: [roomImageThree],
+  "standard-twin": [twinImage],
+  single: [singleImage]
+};
+
+// Static fallback rooms for the period before Firestore data loads.
+// `imageUrls` is intentionally omitted — photos live on the room type
+// (`useRoomTypes` / `ROOM_TYPE_IMAGES`).
+type RoomFields = Omit<Room, "createdAt" | "updatedAt">;
+
+function room(fields: RoomFields): Room {
   return {
     ...fields,
     createdAt: new Date("2026-06-01T00:00:00Z"),
     updatedAt: new Date("2026-06-01T00:00:00Z")
   };
 }
-
-export const homepageHeroImage =
-  "https://lh3.googleusercontent.com/aida-public/AB6AXuCTef7Kgv1QtQkGMUF3IjkJC-VCn1qzPu4wpvFbsZfXP9IJv_dhrx4JJo34Kuxb5ka-hagWW7LvX18wbAck93GBqVBjEn24s5FzC7mAt28gar-1qQn34heG8ehz4jsBY1iBDf5G9vmLwEbivs1ATFikNbWpY6Gjd7_RerEeeiF0pEo1vNo_X_ZFlRPCy9mO_AMQf01x7s0a-pMAG15CWDWwHA_AFNAFp3UqpV-rcx8B6AZY0-2II8F4vAwYUzvd-52h1OJ_fKdE96h2";
 
 export const featuredRooms = [
   room({
@@ -31,7 +51,6 @@ export const featuredRooms = [
     weekendRate: 3600,
     corporateRate: 2800,
     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"],
-    imageUrls: [roomImageTwo],
     isActive: true,
     status: "available",
     housekeepingStatus: "clean",
@@ -50,7 +69,6 @@ export const featuredRooms = [
     weekendRate: 2700,
     corporateRate: 2200,
     amenities: ["WiFi", "AC", "Work Desk", "Private Bath"],
-    imageUrls: [roomImageOne],
     isActive: true,
     status: "available",
     housekeepingStatus: "clean",
@@ -69,7 +87,6 @@ export const featuredRooms = [
     weekendRate: 4600,
     corporateRate: 3900,
     amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"],
-    imageUrls: [roomImageThree],
     isActive: true,
     status: "available",
     housekeepingStatus: "clean",

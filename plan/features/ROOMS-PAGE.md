@@ -47,8 +47,10 @@ The `/rooms` page displays all active rooms in a grid. Guests can filter by room
 - [ ] Loading state — skeleton cards in grid layout
 - [ ] Empty state after filter — "No rooms match your filters" with reset option
 - [ ] All rooms occupied — show all cards with Occupied badges, no hidden rooms
-- [ ] Single image room — no carousel, just single photo
-- [ ] Missing room photo — show brand placeholder with spark inn logo
+- [ ] Single image type — no carousel, just single hero photo
+- [ ] Missing type photo — show brand placeholder with spark inn logo
+
+> **Photos are resolved per room TYPE, not per room** *(per `plan/features/SETTINGS.md §Room Type Photos`)*. The hero image is the first entry of the joined `roomType.imageUrls[]` from `useRoomTypes`. The "Missing room photo" branch fires when the type's `imageUrls[]` is empty AND the static `ROOM_TYPE_IMAGES` fallback (in `guest-app/src/data/homepage.ts`) has no entry for that type.
 
 ## Manual QA
 
