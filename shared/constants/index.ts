@@ -15,11 +15,11 @@ export const ROOM_STATUSES = ["available", "occupied", "blocked"] as const;
 export const HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"] as const;
 
 export const DEFAULT_ROOM_TYPES: readonly RoomTypeEntry[] = [
-  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], maxCapacity: 1, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
-  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], maxCapacity: 2, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
-  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], maxCapacity: 2, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
-  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], maxCapacity: 2, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
-  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], maxCapacity: 4, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
+  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600 },
+  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200 },
+  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300 },
+  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800 },
+  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900 }
 ];
 
 export type RoomTypeEntry = {
@@ -27,11 +27,21 @@ export type RoomTypeEntry = {
   label: string;
   shortLabel: string;
   imageUrls: string[];
-  // Per W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`:
-  // the room type owns the pricing + capacity model. All rooms of a
-  // type share the same max occupancy and the same rate matrix
-  // (base / weekend / corporate). The Rates tab is the canonical
-  // edit surface; the Rooms tab no longer carries these fields.
+  // Per W3.6 + W3.7 — the room type owns the full room-level model
+  // except for identity / operational fields. All rooms of a type
+  // share the same:
+  //   - bedDefinition: "1 queen + 1 single", "2 single beds", etc.
+  //   - description: short marketing copy shown on the public rooms page
+  //   - amenities: array of amenity labels
+  //   - maxCapacity: max occupancy (canonical, used for guest filter)
+  //   - pricePerNight / weekendRate / corporateRate: rate matrix
+  //     edited in the Rates tab.
+  // See `plan/features/SETTINGS.md §Room Types` for the full list of
+  // editable fields and `plan/features/ROOM-MANAGEMENT.md` for the
+  // per-room fields that remain.
+  bedDefinition: string;
+  description: string;
+  amenities: string[];
   maxCapacity: number;
   pricePerNight: number;
   weekendRate: number;

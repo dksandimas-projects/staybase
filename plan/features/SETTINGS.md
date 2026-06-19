@@ -109,8 +109,10 @@ Editable copy and photos for public pages. Changes reflect on the guest site in 
 
 **Room Type Photos** *(per W3.5 — type-driven gallery)*:
 
-> **W3.6 update:** The room type entry also owns `maxCapacity`, `pricePerNight`, `weekendRate`, and `corporateRate` (the rate matrix). The create form below captures these so a new type ships with sensible defaults. The **Rates** tab is the canonical edit surface for the rate matrix. Rooms created against this type inherit all of these properties.
-- [ ] Each row in the **Room Layout Classifications** table shows a **Photos** column with `{count} / {MAX_ROOM_TYPE_PHOTOS}` and a **Photos** button
+> **W3.6 + W3.7 update:** The room type entry owns the rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. The **Rates** tab still exists for bulk rate review but rates can also be edited per-type from Settings. Rooms created against a type inherit all of these properties by joining `Room.type` at read time.
+- [ ] Each row in the **Room Layout Classifications** table shows a **Photos** column with `{count} / {MAX_ROOM_TYPE_PHOTOS}` and three actions: **Edit**, **Photos**, **Delete**
+- [ ] **Edit modal** — exposes all 9 type-level fields: label, shortLabel, bedDefinition (required), description (textarea), amenities (comma-separated, parsed to a string array on save), maxCapacity, pricePerNight, weekendRate, corporateRate. The identifier key (`value`) is shown read-only at the top — to rename a type, delete and re-add. Save calls `updateRoomType` with the diff.
+- [ ] **Add modal** — same 9 fields, plus `value` (kebab-case unique key) + `imageUrls: []` (the type's gallery starts empty; photos are added via the Photos modal). `bedDefinition` is required and validated.
 - [ ] Clicking **Photos** opens a Modal with a thumbnail grid of the type's current images
 - [ ] Modal footer has an **Add photos** button (multiple file input, image-only, compressed client-side) and a **Close** button
 - [ ] Each photo card shows the image preview, a "Hero" badge on the first photo, and three actions: **move to first** (set as hero), **move to next** (reorder right), and **Delete**

@@ -221,6 +221,7 @@ export function RoomsPage() {
             <motion.div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" variants={staggerContainer} {...entranceProps}>
               {filteredRooms.map((room) => {
                 const rates = getRoomTypeRates(roomTypes, room.type);
+                const typeDetails = roomTypes.find((t) => t.value === room.type);
                 return (
                   <RoomCard
                     key={room.id}
@@ -228,6 +229,9 @@ export function RoomsPage() {
                     typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
                     typeMaxCapacity={rates?.maxCapacity}
                     typePricePerNight={rates?.pricePerNight}
+                    typeBedDefinition={typeDetails?.bedDefinition}
+                    typeDescription={typeDetails?.description}
+                    typeAmenities={typeDetails?.amenities}
                     bookingQuery={bookingQuery}
                     onDetails={() => setSelectedRoomId(room.id)}
                   />
@@ -274,11 +278,11 @@ export function RoomsPage() {
                 {DEFAULT_ROOM_TYPES.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
               </span>
             </div>
-            <p className="leading-7 text-gray-600">{selectedRoom.description}</p>
+            <p className="leading-7 text-gray-600">{selectedRoomType?.description || "—"}</p>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Beds</p>
-                <p className="mt-1 font-semibold text-gray-950">{selectedRoom.bedDefinition}</p>
+                <p className="mt-1 font-semibold text-gray-950">{selectedRoomType?.bedDefinition || "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Capacity</p>
@@ -292,7 +296,7 @@ export function RoomsPage() {
             <div>
               <h3 className="font-semibold text-gray-950">Amenities</h3>
               <div className="mt-3 flex flex-wrap gap-2">
-                {selectedRoom.amenities.map((amenity) => (
+                {(selectedRoomType?.amenities ?? []).map((amenity) => (
                   <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
                     {amenity}
                   </span>

@@ -27,17 +27,15 @@ RoomStatus = "available" | "occupied" | "blocked"
 HousekeepingStatus = "clean" | "dirty" | "in-progress"
 
 // Room-level fields are intentionally narrow: a room is just a
-// bookable unit of a type. Pricing, capacity, and photos all live on
-// the RoomType entry (see below). Consumers join the type at read time.
+// bookable unit of a type. Pricing, capacity, photos, bed
+// description, description, and amenities all live on the RoomType
+// entry (see below). Consumers join the type at read time.
 
 Room {
   id: string
-  name: string
+  name: string                  // may vary per room (e.g. "Deluxe — Sea View"); defaults to type label on create
   roomNumber: string
   type: RoomType
-  description: string
-  bedDefinition: string
-  amenities: string[]
   isActive: boolean
   status: RoomStatus
   housekeepingStatus: HousekeepingStatus
@@ -48,18 +46,24 @@ Room {
   updatedAt: Date
 }
 
-// `maxCapacity`, `pricePerNight`, `weekendRate`, and `corporateRate` were
-// moved off the Room document and onto the RoomType entry as part of
-// W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`. The Rates tab is the
-// single edit surface for the rate matrix; the room type's
-// `maxCapacity` is the canonical occupancy for every room of that type.
-// Consumers join the type by `Room.type` at read time.
+// `maxCapacity`, `pricePerNight`, `weekendRate`, `corporateRate` (W3.6),
+// and `bedDefinition`, `description`, `amenities` (W3.7) all moved off
+// the Room document and onto the RoomType entry. The Settings →
+// Room Types table is the single edit surface for every type field
+// (Add / Edit / Photos / Delete). The room type's `maxCapacity`,
+// `bedDefinition`, `description`, and `amenities` are inherited by
+// every room of that type; consumers join by `Room.type` at read
+// time. See `plan/features/RATE-MANAGEMENT.md §W3.6` and
+// `plan/features/ROOM-MANAGEMENT.md §W3.7` for the migration notes.
 
 RoomType {
   value: string                 // unique key, lowercase, kebab-case
   label: string                 // human-readable display name
   shortLabel: string            // compact abbreviation for badges
   imageUrls: string[]           // Firebase Storage URLs, max 10
+  bedDefinition: string         // e.g. "1 queen size bed"
+  description: string           // one-paragraph marketing copy
+  amenities: string[]           // e.g. ["WiFi", "AC", "Hot Shower", "Cable TV"]
   maxCapacity: number           // canonical occupancy for every room of this type
   pricePerNight: number         // base rate per night
   weekendRate: number           // applied for stays including Sat/Sun nights

@@ -2,9 +2,10 @@ import type { Room } from "@spark-inn/shared";
 import { featuredRooms } from "./homepage";
 
 // Static fallback rooms for the period before Firestore data loads.
-// Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`: photos, rates,
-// and max capacity live on the room TYPE. Each entry below only carries
-// identity + display fields; the static consumer joins `DEFAULT_ROOM_TYPES`
+// Per W3.6 + W3.7 — `plan/features/ROOM-MANAGEMENT.md §W3.6+W3.7`:
+// photos, rates, max capacity, bed description, description, and
+// amenities all live on the room TYPE. Each entry below only carries
+// identity + display fields; the consumer joins `DEFAULT_ROOM_TYPES`
 // (or the live `useRoomTypes` hook) for everything else.
 type RoomFields = Omit<Room, "createdAt" | "updatedAt">;
 
@@ -23,9 +24,6 @@ export const rooms = [
     name: "Standard Twin",
     roomNumber: "105",
     type: "standard-twin",
-    description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",
-    bedDefinition: "2 single beds",
-    amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"],
     isActive: true,
     status: "available",
     housekeepingStatus: "clean",
@@ -37,9 +35,6 @@ export const rooms = [
     name: "Single Room",
     roomNumber: "102",
     type: "single",
-    description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.",
-    bedDefinition: "1 single bed",
-    amenities: ["WiFi", "AC", "Work Desk", "Private Bath"],
     isActive: true,
     status: "blocked",
     housekeepingStatus: "in-progress",
