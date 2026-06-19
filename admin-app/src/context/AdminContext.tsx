@@ -8,11 +8,12 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut
 } from "firebase/auth";
-import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
+import { ACTIVE_BOOKING_STATUSES, CreateRoomInput, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { deleteObject, listAll, ref as storageRef } from "firebase/storage";
+import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
 
 type StaffRole = "front-desk" | "admin";
@@ -299,6 +300,9 @@ export interface AdminContextType {
   toggleHousekeepingStatus: (roomId: string) => void | Promise<void>;
   updateRoomConfig: (roomId: string, updates: Partial<Room>) => void | Promise<void>;
   addRoomBlock: (roomId: string, dates: { from: string; to: string }, reason: string) => void | Promise<void>;
+  createRoom: (input: CreateRoomInput) => Promise<{ success: boolean; error?: string; roomId?: string }>;
+  deleteRoom: (roomId: string) => Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }>;
+  hasActiveBookings: (roomId: string) => number;
 
   // Bookings
   bookings: Booking[];
@@ -556,6 +560,139 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       console.error("Error adding room block in Firestore:", error);
+    }
+  };
+
+  // Per `plan/features/ROOM-MANAGEMENT.md §Create`. The room id is the
+  // auto-generated Firestore document id; the modal is responsible for
+  // surfacing the success/failure result to the staff member.
+  const createRoom = async (input: CreateRoomInput): Promise<{ success: boolean; error?: string; roomId?: string }> => {
+    try {
+      const normalizedNumber = input.roomNumber.trim();
+      const existing = rooms.find(
+        (r) => r.roomNumber.trim().toLowerCase() === normalizedNumber.toLowerCase()
+      );
+      if (existing) {
+        const error = `Room number ${normalizedNumber} is already in use.`;
+        notify.error("Cannot create room", error);
+        return { success: false, error };
+      }
+
+      const baseRate = input.pricePerNight;
+      const docRef = await addDoc(collection(db, "rooms"), {
+        name: input.name.trim(),
+        roomNumber: normalizedNumber,
+        type: input.type,
+        description: input.description || "",
+        maxCapacity: input.maxCapacity,
+        bedDefinition: input.bedDefinition.trim(),
+        pricePerNight: baseRate,
+        weekendRate: input.weekendRate ?? baseRate,
+        corporateRate: input.corporateRate ?? baseRate,
+        amenities: [],
+        imageUrls: [],
+        isActive: input.isActive,
+        status: input.status,
+        housekeepingStatus: input.housekeepingStatus,
+        blockReason: input.status === "blocked" ? (input.blockReason || "") : "",
+        blockedFrom: null,
+        blockedTo: null,
+        remarks: input.remarks || "",
+        qrToken: "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      return { success: true, roomId: docRef.id };
+    } catch (error) {
+      console.error("Error creating room in Firestore:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to create room", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Per `plan/features/ROOM-MANAGEMENT.md §Delete`. Hard delete with
+  // cascade cleanup of: room photos in Storage (`rooms/{roomId}/*`),
+  // intercom thread + messages (`intercoms/{roomNumber}/{document=**}`),
+  // and call signaling doc + ICE candidates (`calls/{roomNumber}/{document=**}`).
+  // The function is gated by `hasActiveBookings` — staff must first
+  // cancel or check out any pending/confirmed/checked-in bookings
+  // before a room can be removed. Historical bookings keep their
+  // denormalized roomNumber/roomType so receipts and audit logs
+  // remain readable; only the live `roomId` pointer is removed.
+  const hasActiveBookings = (roomId: string): number => {
+    return bookings.filter(
+      (b) => b.roomId === roomId && (ACTIVE_BOOKING_STATUSES as readonly string[]).includes(b.status)
+    ).length;
+  };
+
+  async function deleteSubcollection(parentPath: string) {
+    const snap = await getDocs(collection(db, parentPath));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  }
+
+  const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) {
+      const error = "Room not found.";
+      notify.error("Cannot delete room", error);
+      return { success: false, error };
+    }
+
+    const activeCount = hasActiveBookings(roomId);
+    if (activeCount > 0) {
+      const error = `Room ${room.roomNumber} has ${activeCount} active booking${activeCount === 1 ? "" : "s"}. Cancel or check them out first.`;
+      notify.warning("Cannot delete room", error);
+      return { success: false, error, blockedByActiveBookings: activeCount };
+    }
+
+    try {
+      // 1) Room photos in Storage — best-effort (don't fail the whole
+      //    delete on Storage errors; the room is being removed anyway).
+      try {
+        const folderRef = storageRef(storage, `rooms/${roomId}`);
+        const listed = await listAll(folderRef);
+        await Promise.all(listed.items.map((item) => deleteObject(item).catch(() => undefined)));
+      } catch (storageErr) {
+        console.warn(`Storage cleanup for room ${roomId} skipped:`, storageErr);
+      }
+
+      // 2) Intercom thread + messages (keyed by roomNumber).
+      if (room.roomNumber) {
+        try {
+          await deleteSubcollection(`intercoms/${room.roomNumber}/messages`);
+        } catch (intercomErr) {
+          console.warn(`Intercom messages cleanup for room ${room.roomNumber} skipped:`, intercomErr);
+        }
+        try {
+          await deleteDoc(doc(db, "intercoms", room.roomNumber));
+        } catch (intercomDocErr) {
+          console.warn(`Intercom thread doc cleanup for room ${room.roomNumber} skipped:`, intercomDocErr);
+        }
+
+        // 3) Call signaling doc + ICE candidates.
+        try {
+          await deleteSubcollection(`calls/${room.roomNumber}/iceCandidates`);
+        } catch (callErr) {
+          console.warn(`Call ICE cleanup for room ${room.roomNumber} skipped:`, callErr);
+        }
+        try {
+          await deleteDoc(doc(db, "calls", room.roomNumber));
+        } catch (callDocErr) {
+          console.warn(`Call doc cleanup for room ${room.roomNumber} skipped:`, callDocErr);
+        }
+      }
+
+      // 4) Finally, the room document itself.
+      await deleteDoc(doc(db, "rooms", roomId));
+
+      return { success: true };
+    } catch (error) {
+      console.error("Error deleting room in Firestore:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to delete room", message);
+      return { success: false, error: message };
     }
   };
 
@@ -2000,6 +2137,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         toggleHousekeepingStatus,
         updateRoomConfig,
         addRoomBlock,
+        createRoom,
+        deleteRoom,
+        hasActiveBookings,
         bookings,
         updateBookingStatus,
         addOnsitePayment,
