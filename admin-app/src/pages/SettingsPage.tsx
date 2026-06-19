@@ -132,6 +132,13 @@ export function SettingsPage() {
   const [photoTarget, setPhotoTarget] = useState<RoomTypeEntry | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const photoFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Room type edit modal state (per W3.7). The modal carries a working
+  // copy of the type and flushes it to `settings/hotelConfig.roomTypes[]`
+  // via `updateRoomType` on save.
+  const [editType, setEditType] = useState<RoomTypeEntry | null>(null);
+  const [isEditSaving, setIsEditSaving] = useState(false);
+  const editTypeFormRef = useRef<HTMLFormElement | null>(null);
   // The room types stream can replace `photoTarget` while the modal is open;
   // re-sync whenever the underlying type changes.
   useEffect(() => {
@@ -1393,6 +1400,14 @@ export function SettingsPage() {
                         <div className="flex flex-col items-end gap-2">
                           <button
                             type="button"
+                            onClick={() => setEditType(type)}
+                            className="min-h-[44px] inline-flex items-center gap-1 rounded border border-gray-200 px-2 text-[11px] font-bold text-gray-700 hover:border-primary hover:text-primary"
+                          >
+                            <Pencil size={12} />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setPhotoTarget(type)}
                             className="min-h-[44px] inline-flex items-center gap-1 rounded border border-primary px-2 text-[11px] font-bold text-primary hover:bg-primary-light"
                           >
@@ -1453,24 +1468,34 @@ export function SettingsPage() {
                             </button>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (pendingDeleteRoomType === type.value) {
-                                  deleteRoomType(type.value);
-                                  setPendingDeleteRoomType(null);
-                                } else {
-                                  setPendingDeleteRoomType(type.value);
-                                }
-                              }}
-                              className={`font-bold hover:underline ${
-                                pendingDeleteRoomType === type.value
-                                  ? "text-red-700"
-                                  : "text-red-650 hover:text-red-700"
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setEditType(type)}
+                                className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-700 hover:border-primary hover:text-primary"
+                              >
+                                <Pencil size={12} />
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (pendingDeleteRoomType === type.value) {
+                                    deleteRoomType(type.value);
+                                    setPendingDeleteRoomType(null);
+                                  } else {
+                                    setPendingDeleteRoomType(type.value);
+                                  }
+                                }}
+                                className={`font-bold hover:underline ${
+                                  pendingDeleteRoomType === type.value
+                                    ? "text-red-700"
+                                    : "text-red-650 hover:text-red-700"
                               }`}
                             >
                               {pendingDeleteRoomType === type.value ? "Click to confirm" : "Delete"}
                             </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1493,12 +1518,22 @@ export function SettingsPage() {
                     const value = (form.elements.namedItem("val") as HTMLInputElement).value.trim().toLowerCase().replace(/\s+/g, "-");
                     const label = (form.elements.namedItem("lbl") as HTMLInputElement).value.trim();
                     const shortLabel = (form.elements.namedItem("shortLbl") as HTMLInputElement).value.trim();
+                    const bedDefinition = (form.elements.namedItem("bed") as HTMLInputElement).value.trim();
+                    const description = (form.elements.namedItem("desc") as HTMLTextAreaElement).value.trim();
+                    const amenitiesRaw = (form.elements.namedItem("amen") as HTMLInputElement).value.trim();
+                    const amenities = amenitiesRaw
+                      ? amenitiesRaw.split(",").map((a) => a.trim()).filter(Boolean)
+                      : [];
                     const maxCapacity = parseInt((form.elements.namedItem("cap") as HTMLInputElement).value, 10) || 1;
                     const pricePerNight = parseFloat((form.elements.namedItem("baseRate") as HTMLInputElement).value) || 0;
                     const weekendRate = parseFloat((form.elements.namedItem("weekendRate") as HTMLInputElement).value) || pricePerNight;
                     const corporateRate = parseFloat((form.elements.namedItem("corpRate") as HTMLInputElement).value) || pricePerNight;
 
                     if (!value || !label || !shortLabel) return;
+                    if (!bedDefinition) {
+                      toast.error("Bed description is required", "Add a short bed description like \"1 queen + 1 single bed\".");
+                      return;
+                    }
                     if (roomTypes.some(t => t.value === value)) {
                       toast.error("Duplicate room type", `A room type with key "${value}" already exists.`);
                       return;
@@ -1508,6 +1543,9 @@ export function SettingsPage() {
                       value,
                       label,
                       shortLabel,
+                      bedDefinition,
+                      description,
+                      amenities,
                       maxCapacity,
                       pricePerNight,
                       weekendRate,
@@ -1556,6 +1594,38 @@ export function SettingsPage() {
                     </label>
                   </div>
 
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Bed description
+                      <input
+                        name="bed"
+                        type="text"
+                        required
+                        placeholder="e.g. 1 queen + 1 single bed"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Amenities (comma-separated)
+                      <input
+                        name="amen"
+                        type="text"
+                        placeholder="WiFi, AC, Work Desk, Private Bath"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Public description (shown on the guest rooms page)
+                    <textarea
+                      name="desc"
+                      rows={2}
+                      placeholder="Short marketing copy for the public rooms page."
+                      className="min-h-[64px] w-full rounded border border-gray-250 bg-white px-3 py-2 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+
                   <div className="grid gap-4 sm:grid-cols-4">
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                       Max guests
@@ -1602,8 +1672,9 @@ export function SettingsPage() {
                   </div>
 
                   <p className="text-[10px] leading-relaxed text-gray-500">
-                    Per W3.6 the rate matrix and max occupancy live on the
-                    type. You can update them later in the <strong>Rates</strong> tab.
+                    Per W3.6 + W3.7, all type fields live on the entry. You can edit them later via the
+                    <strong> Edit</strong> button in the table above, and the rate matrix can also be updated in bulk from the
+                    <strong> Rates</strong> tab.
                   </p>
 
                   <div className="flex justify-end">
@@ -1619,6 +1690,202 @@ export function SettingsPage() {
               </div>
             </div>
           )}
+
+          {/* ROOM TYPE EDIT MODAL (per W3.7 / `plan/features/SETTINGS.md §Room Types`) */}
+          <Modal
+            title={editType ? `Edit · ${editType.label}` : "Edit room type"}
+            open={!!editType}
+            onClose={() => {
+              if (isEditSaving) return;
+              setEditType(null);
+            }}
+            footer={
+              editType ? (
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setEditType(null)}
+                    disabled={isEditSaving}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60 sm:min-h-[40px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="edit-room-type-form"
+                    disabled={isEditSaving}
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[40px]"
+                  >
+                    <Save size={14} />
+                    {isEditSaving ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              ) : null
+            }
+          >
+            {editType ? (
+              <form
+                id="edit-room-type-form"
+                ref={editTypeFormRef}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  const get = (name: string) =>
+                    (form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement).value;
+                  const label = get("lbl").trim();
+                  const shortLabel = get("shortLbl").trim();
+                  const bedDefinition = get("bed").trim();
+                  const description = get("desc").trim();
+                  const amenities = get("amen")
+                    .split(",")
+                    .map((a) => a.trim())
+                    .filter(Boolean);
+                  const maxCapacity = parseInt(get("cap"), 10) || 1;
+                  const pricePerNight = parseFloat(get("baseRate")) || 0;
+                  const weekendRate = parseFloat(get("weekendRate")) || pricePerNight;
+                  const corporateRate = parseFloat(get("corpRate")) || pricePerNight;
+
+                  if (!label || !shortLabel || !bedDefinition) {
+                    toast.error("Missing required fields", "Label, short label, and bed description are required.");
+                    return;
+                  }
+
+                  setIsEditSaving(true);
+                  try {
+                    await updateRoomType(editType.value, {
+                      label,
+                      shortLabel,
+                      bedDefinition,
+                      description,
+                      amenities,
+                      maxCapacity,
+                      pricePerNight,
+                      weekendRate,
+                      corporateRate
+                    });
+                    toast.success(
+                      "Room type updated",
+                      `${label} — ${maxCapacity} guests, base ${formatPrice(pricePerNight)}/night.`
+                    );
+                    setEditType(null);
+                  } catch (err) {
+                    console.error("Error updating room type:", err);
+                    toast.error("Failed to save changes", err instanceof Error ? err.message : "Unknown error");
+                  } finally {
+                    setIsEditSaving(false);
+                  }
+                }}
+                className="space-y-4 text-sm"
+              >
+                <p className="text-[11px] text-gray-500">
+                  Editing <span className="font-mono font-semibold">{editType.value}</span>. The identifier
+                  key cannot be changed — delete and re-create the type if you need to rename it.
+                </p>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Full display name
+                    <input
+                      name="lbl"
+                      type="text"
+                      required
+                      defaultValue={editType.label}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Short label (abbreviation)
+                    <input
+                      name="shortLbl"
+                      type="text"
+                      required
+                      defaultValue={editType.shortLabel}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                </div>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Bed description
+                  <input
+                    name="bed"
+                    type="text"
+                    required
+                    defaultValue={editType.bedDefinition}
+                    placeholder="e.g. 1 queen + 1 single bed"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Amenities (comma-separated)
+                  <input
+                    name="amen"
+                    type="text"
+                    defaultValue={editType.amenities.join(", ")}
+                    placeholder="WiFi, AC, Work Desk, Private Bath"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Public description (shown on the guest rooms page)
+                  <textarea
+                    name="desc"
+                    rows={3}
+                    defaultValue={editType.description}
+                    placeholder="Short marketing copy for the public rooms page."
+                    className="min-h-[80px] w-full rounded border border-gray-250 bg-white px-3 py-2 text-sm font-medium focus:bg-white"
+                  />
+                </label>
+
+                <div className="grid gap-4 sm:grid-cols-4">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Max guests
+                    <input
+                      name="cap"
+                      type="number"
+                      min={1}
+                      required
+                      defaultValue={editType.maxCapacity}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Base rate / night ({config.currencySymbol})
+                    <input
+                      name="baseRate"
+                      type="number"
+                      min={0}
+                      required
+                      defaultValue={editType.pricePerNight}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Weekend rate ({config.currencySymbol})
+                    <input
+                      name="weekendRate"
+                      type="number"
+                      min={0}
+                      defaultValue={editType.weekendRate}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Corporate rate ({config.currencySymbol})
+                    <input
+                      name="corpRate"
+                      type="number"
+                      min={0}
+                      defaultValue={editType.corporateRate}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                </div>
+              </form>
+            ) : null}
+          </Modal>
 
           {/* ROOM TYPE PHOTOS MANAGER (per `plan/features/SETTINGS.md §Room Types`) */}
           <Modal

@@ -14,8 +14,6 @@ const EMPTY_FORM: CreateRoomInput = {
   name: "",
   roomNumber: "",
   type: "",
-  description: "",
-  bedDefinition: "",
   status: "available",
   housekeepingStatus: "clean",
   isActive: true,
@@ -41,7 +39,6 @@ export function RoomsPage() {
 
   // Edit drawer form fields — capacity + rate are on the type now
   // (per W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`).
-  const [bedDefinition, setBedDefinition] = useState("");
   const [status, setStatus] = useState<Room["status"]>("available");
 
   // Block schedule form fields
@@ -71,7 +68,6 @@ export function RoomsPage() {
 
   const handleEditClick = (room: Room) => {
     setSelectedRoom(room);
-    setBedDefinition(room.bedDefinition);
     setStatus(room.status);
     setBlockFromDate("");
     setBlockToDate("");
@@ -83,7 +79,6 @@ export function RoomsPage() {
     e.preventDefault();
     if (selectedRoom) {
       updateRoomConfig(selectedRoom.id, {
-        bedDefinition,
         status
       });
       toast.success("Room updated", `Room ${selectedRoom.roomNumber} configuration saved`);
@@ -235,7 +230,7 @@ export function RoomsPage() {
                 </div>
 
                 <div className="text-xs text-gray-650 space-y-1.5 pt-2 border-t border-gray-150">
-                  <p>Bed Setup: <strong>{room.bedDefinition}</strong></p>
+                  <p>Bed Setup: <strong>{roomTypes.find((t) => t.value === room.type)?.bedDefinition || "—"}</strong></p>
                   <p>Limit: <strong>{roomTypes.find((t) => t.value === room.type)?.maxCapacity ?? "—"} Guests</strong></p>
                   <p>Base Rate: <strong className="text-gray-900">{formatPrice(roomTypes.find((t) => t.value === room.type)?.pricePerNight ?? 0)}</strong></p>
                   {isBlocked && room.blockReason && (
@@ -303,16 +298,12 @@ export function RoomsPage() {
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Room Specifications</h3>
 
               <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Bed Description
-                  <input
-                    type="text"
-                    required
-                    value={bedDefinition}
-                    onChange={(e) => setBedDefinition(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                  />
-                </label>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Bed Setup (inherited)</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {roomTypes.find((t) => t.value === selectedRoom?.type)?.bedDefinition || "—"}
+                  </p>
+                </div>
 
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Inventory Status
@@ -500,26 +491,6 @@ export function RoomsPage() {
             {createErrors.type && <span className="text-[10px] font-normal text-red-600">{createErrors.type}</span>}
           </div>
 
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Bed definition
-            <input
-              type="text"
-              required
-              value={createForm.bedDefinition}
-              onChange={(e) => setCreateForm((f) => ({ ...f, bedDefinition: e.target.value }))}
-              placeholder="e.g. 1 queen + 1 single bed"
-              aria-invalid={!!createErrors.bedDefinition}
-              className="min-h-[44px] w-full rounded border border-gray-200 px-3 text-xs"
-            />
-            {createErrors.bedDefinition && <span className="text-[10px] font-normal text-red-600">{createErrors.bedDefinition}</span>}
-          </label>
-
-          <p className="text-[10px] leading-relaxed text-gray-500">
-            Max occupancy, base rate, weekend rate, and corporate rate are
-            managed per room type in <strong>Settings → Room Types</strong> and the
-            <strong> Rates</strong> tab. The room inherits these from its type.
-          </p>
-
           <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
             <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
               Initial status
@@ -547,16 +518,12 @@ export function RoomsPage() {
             </label>
           </div>
 
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Description (optional)
-            <textarea
-              rows={3}
-              value={createForm.description}
-              onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
-              placeholder="Shown on the public rooms page."
-              className="min-h-[80px] w-full rounded border border-gray-200 px-3 py-2 text-xs"
-            />
-          </label>
+          <p className="text-[10px] leading-relaxed text-gray-500">
+            Bed description, description, amenities, max occupancy, base
+            rate, weekend rate, and corporate rate are all managed per
+            room type in <strong>Settings → Room Types</strong> and the
+            <strong> Rates</strong> tab. The room inherits these from its type.
+          </p>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Internal remarks (optional)

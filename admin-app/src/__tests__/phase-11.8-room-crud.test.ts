@@ -75,22 +75,24 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
       expect(body).not.toMatch(/["']cancelled["']/);
     });
 
-    it("requires the documented fields: name, roomNumber, type, bedDefinition, status", () => {
-      // Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`:
-      // `maxCapacity` and rates moved to the room type. The create
-      // form only captures identity + display fields.
+    it("requires the documented fields: name, roomNumber, type, status", () => {
+      // Per W3.6 + W3.7 — `plan/features/ROOM-MANAGEMENT.md §W3.6+W3.7`:
+      // `bedDefinition`, `description`, `amenities`, `maxCapacity`, and
+      // rates all moved to the room type. The create form only
+      // captures identity + operational fields.
       const schemaMatch = createRoomSchemaSrc.match(
         /CreateRoomSchema\s*=\s*z\.object\(\{[\s\S]*?^\}\)/m
       );
       expect(schemaMatch, "expected to find CreateRoomSchema body").toBeTruthy();
       const body = schemaMatch![0];
-      for (const field of ["name", "roomNumber", "type", "bedDefinition", "status"]) {
+      for (const field of ["name", "roomNumber", "type", "status"]) {
         const fieldMatch = body.match(new RegExp(`${field}\\s*:`));
         expect(fieldMatch, `expected ${field} in CreateRoomSchema`).toBeTruthy();
       }
     });
 
-    it("does not capture maxCapacity or rates — they live on the room type", () => {
+    it("does not capture maxCapacity, rates, bed, description, or amenities — all on the room type", () => {
+      // Per W3.6 + W3.7, all of these moved to the room type.
       const schemaMatch = createRoomSchemaSrc.match(
         /CreateRoomSchema\s*=\s*z\.object\(\{[\s\S]*?^\}\)/m
       );
@@ -99,6 +101,9 @@ describe("Phase 11.8 — Room CRUD (create + delete)", () => {
       expect(body).not.toMatch(/pricePerNight\s*:/);
       expect(body).not.toMatch(/weekendRate\s*:/);
       expect(body).not.toMatch(/corporateRate\s*:/);
+      expect(body).not.toMatch(/bedDefinition\s*:/);
+      expect(body).not.toMatch(/description\s*:/);
+      expect(body).not.toMatch(/amenities\s*:/);
     });
 
     it("re-exports the schema from the shared package barrel", () => {

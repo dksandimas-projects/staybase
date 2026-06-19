@@ -9,28 +9,21 @@ import { PrimaryButton } from "./PrimaryButton";
 import { StatusBadge } from "./StatusBadge";
 
 interface RoomCardProps {
-  room: Pick<
-    Room,
-    | "id"
-    | "name"
-    | "type"
-    | "description"
-    | "amenities"
-    | "bedDefinition"
-    | "status"
-  >;
+  room: Pick<Room, "id" | "name" | "type" | "status">;
   // Per `plan/features/SETTINGS.md §Room Types` and `plan/features/ROOMS-PAGE.md`:
-  // the gallery and rate matrix are owned by the room type, not the
-  // individual room. The caller resolves both (live from `useRoomTypes()`
-  // or the static `ROOM_TYPE_IMAGES` / `ROOM_TYPE_RATES` fallbacks)
-  // and passes the data here.
+  // the gallery, description, bed, amenities, and rate matrix are
+  // owned by the room type, not the individual room. The caller
+  // resolves all of these (live from `useRoomTypes()` or the static
+  // `ROOM_TYPE_IMAGES` / `ROOM_TYPE_RATES` fallbacks) and passes the
+  // data here.
   typeImageUrls?: string[];
-  // Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`: pricing +
-  // max occupancy are sourced from the type. The card uses the type's
-  // `maxCapacity` for the "Up to N" label and `pricePerNight` for the
-  // "From" price.
+  // Per W3.6 + W3.7: pricing, max occupancy, bed, description, and
+  // amenities are sourced from the type.
   typeMaxCapacity?: number;
   typePricePerNight?: number;
+  typeBedDefinition?: string;
+  typeDescription?: string;
+  typeAmenities?: string[];
   onDetails?: () => void;
   bookingQuery?: string;
 }
@@ -40,14 +33,21 @@ export function RoomCard({
   typeImageUrls = [],
   typeMaxCapacity,
   typePricePerNight,
+  typeBedDefinition,
+  typeDescription,
+  typeAmenities,
   onDetails,
   bookingQuery = ""
 }: RoomCardProps) {
   const shouldReduceMotion = useReducedMotion();
-  const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.shortLabel ?? room.type;
+  const fallback = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type);
+  const typeLabel = fallback?.shortLabel ?? room.type;
   const heroImage = typeImageUrls[0];
-  const maxCapacity = typeMaxCapacity ?? DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.maxCapacity ?? 0;
-  const pricePerNight = typePricePerNight ?? DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.pricePerNight ?? 0;
+  const maxCapacity = typeMaxCapacity ?? fallback?.maxCapacity ?? 0;
+  const pricePerNight = typePricePerNight ?? fallback?.pricePerNight ?? 0;
+  const bedDefinition = typeBedDefinition ?? fallback?.bedDefinition ?? "";
+  const description = typeDescription ?? fallback?.description ?? "";
+  const amenities = typeAmenities ?? fallback?.amenities ?? [];
 
   return (
     <motion.article
@@ -82,16 +82,16 @@ export function RoomCard({
           </div>
           <StatusBadge label={room.status === "available" ? "Available" : "Blocked"} status={room.status} />
         </div>
-        <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{room.description}</p>
+        <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{description}</p>
         <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
           <span className="flex items-center gap-2">
             <Users size={16} className="text-primary" />
             Up to {maxCapacity}
           </span>
-          <span className="truncate">{room.bedDefinition}</span>
+          <span className="truncate">{bedDefinition}</span>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {room.amenities.slice(0, 4).map((amenity) => (
+          {amenities.slice(0, 4).map((amenity) => (
             <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
               {amenity}
             </span>

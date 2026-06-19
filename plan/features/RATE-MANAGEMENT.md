@@ -6,7 +6,7 @@
 
 ## Overview
 
-Admin-only page at `/rates` for managing all pricing and payment configuration. As of W3.6, the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) and `maxCapacity` are owned by the **room type** (not the individual room) — see `settings/hotelConfig.roomTypes[]`. The Rates tab is the single edit surface for the rate matrix. Rate changes take effect for new bookings — existing bookings retain their locked rate.
+Admin-only page at `/rates` for managing all pricing and payment configuration. As of W3.6, the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) and `maxCapacity` are owned by the **room type** (not the individual room) — see `settings/hotelConfig.roomTypes[]`. As of W3.7, the same is true for `bedDefinition`, `description`, and `amenities` (see `plan/features/ROOM-MANAGEMENT.md §W3.7`). The Rates tab is one edit surface for the rate matrix; the **Settings → Room Types → Edit** modal is the other (and is more convenient for adjusting a single type's rates together with its bed / description / amenities). Rate changes take effect for new bookings — existing bookings retain their locked rate.
 
 ---
 
@@ -81,7 +81,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 ## References
 
 - Room schema: `plan/docs/BACKEND.md §rooms` (note: `maxCapacity` and rates are no longer room fields)
-- Room type schema: `plan/docs/BACKEND.md §settings/hotelConfig.roomTypes` (now owns photos + maxCapacity + rate matrix)
+- Room type schema: `plan/docs/BACKEND.md §settings/hotelConfig.roomTypes` (now owns photos + maxCapacity + rate matrix + bedDefinition + description + amenities)
 - TypeScript shape: `plan/docs/TYPES.md §RoomType` and `RoomTypeEntry` in `shared/constants`
 - Room management: `plan/features/ROOM-MANAGEMENT.md` (creates/edits/deletes rooms; type is referenced by `value`)
 - Weekend rate calculation: `plan/features/BOOKING-FLOW.md §Step 1`

@@ -198,6 +198,9 @@ export function HomePage() {
                 typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
                 typeMaxCapacity={getRoomTypeRates(roomTypes, room.type)?.maxCapacity}
                 typePricePerNight={getRoomTypeRates(roomTypes, room.type)?.pricePerNight}
+                typeBedDefinition={roomTypes.find((t) => t.value === room.type)?.bedDefinition}
+                typeDescription={roomTypes.find((t) => t.value === room.type)?.description}
+                typeAmenities={roomTypes.find((t) => t.value === room.type)?.amenities}
               />
             ))}
           </motion.div>

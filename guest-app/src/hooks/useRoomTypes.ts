@@ -17,7 +17,11 @@ interface UseRoomTypesResult {
 // this list on the room's `type` field to render the gallery.
 export function useRoomTypes(): UseRoomTypesResult {
   const [roomTypes, setRoomTypes] = useState<RoomTypeEntry[]>(() =>
-    DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] }))
+    DEFAULT_ROOM_TYPES.map((t) => ({
+      ...t,
+      imageUrls: [...t.imageUrls],
+      amenities: [...t.amenities]
+    }))
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -29,26 +33,40 @@ export function useRoomTypes(): UseRoomTypesResult {
         const data = snap.data();
         const raw = Array.isArray(data?.roomTypes) ? (data!.roomTypes as unknown[]) : [];
         if (raw.length === 0) {
-          setRoomTypes(DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] })));
+          setRoomTypes(
+            DEFAULT_ROOM_TYPES.map((t) => ({
+              ...t,
+              imageUrls: [...t.imageUrls],
+              amenities: [...t.amenities]
+            }))
+          );
         } else {
           const normalized: RoomTypeEntry[] = raw
             .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-            .map((entry) => ({
-              value: String(entry.value ?? ""),
-              label: String(entry.label ?? entry.value ?? ""),
-              shortLabel: String(entry.shortLabel ?? entry.label ?? entry.value ?? ""),
-              imageUrls: Array.isArray(entry.imageUrls)
-                ? (entry.imageUrls as unknown[]).filter((u): u is string => typeof u === "string")
-                : [],
-              // Per W3.6 — `plan/features/RATE-MANAGEMENT.md §W3.6`:
-              // pricing + max occupancy live on the type. Fall back
-              // to DEFAULT_ROOM_TYPES values for legacy entries that
-              // may not yet have the new fields.
-              maxCapacity: Number(entry.maxCapacity) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.maxCapacity || 1,
-              pricePerNight: Number(entry.pricePerNight) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.pricePerNight || 0,
-              weekendRate: Number(entry.weekendRate) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.weekendRate || 0,
-              corporateRate: Number(entry.corporateRate) || DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value)?.corporateRate || 0
-            }))
+            .map((entry) => {
+              const fallback = DEFAULT_ROOM_TYPES.find((d) => d.value === entry.value);
+              return {
+                value: String(entry.value ?? ""),
+                label: String(entry.label ?? entry.value ?? ""),
+                shortLabel: String(entry.shortLabel ?? entry.label ?? entry.value ?? ""),
+                imageUrls: Array.isArray(entry.imageUrls)
+                  ? (entry.imageUrls as unknown[]).filter((u): u is string => typeof u === "string")
+                  : [],
+                // Per W3.7 — bed, description, amenities, capacity,
+                // and rates all live on the type. Fall back to the
+                // DEFAULT_ROOM_TYPES seed for legacy entries that
+                // may not yet have the W3.7 fields.
+                bedDefinition: String(entry.bedDefinition ?? fallback?.bedDefinition ?? ""),
+                description: String(entry.description ?? fallback?.description ?? ""),
+                amenities: Array.isArray(entry.amenities)
+                  ? (entry.amenities as unknown[]).filter((a): a is string => typeof a === "string")
+                  : (fallback?.amenities ?? []),
+                maxCapacity: Number(entry.maxCapacity) || fallback?.maxCapacity || 1,
+                pricePerNight: Number(entry.pricePerNight) || fallback?.pricePerNight || 0,
+                weekendRate: Number(entry.weekendRate) || fallback?.weekendRate || 0,
+                corporateRate: Number(entry.corporateRate) || fallback?.corporateRate || 0
+              };
+            })
             .filter((t) => t.value.length > 0);
           setRoomTypes(normalized);
         }

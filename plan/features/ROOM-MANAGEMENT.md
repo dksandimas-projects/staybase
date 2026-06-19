@@ -27,8 +27,8 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 - [ ] **Add Room** button — full-width orange on mobile (below the subtitle), inline right-aligned on tablet+. Opens a Modal with the create form.
 - [ ] Room list — card grid of all rooms with name, type, status badge, housekeeping badge, active/inactive toggle, and an "active bookings" count
 - [ ] Edit room — click/tap opens edit drawer
-- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), bed definition, initial status, initial housekeeping status, description, internal remarks, visible-on-guest-site checkbox. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type — they are managed in the **Rates** tab and inherited automatically. Photos are added later via the edit drawer.
-- [ ] Room edit form fields: name, type (dropdown), description, bed definition, status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). `maxCapacity` + the rate matrix live on the room type (see W3.6) and are edited in the **Rates** tab.
+- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), initial status, initial housekeeping status, internal remarks, visible-on-guest-site checkbox. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type. Per W3.7, `bedDefinition`, `description`, and `amenities` also live on the room type. All of these are managed in **Settings → Room Types** and inherited automatically. A short pointer in the create modal points staff to that section. Photos are added later via the type's Photos modal.
+- [ ] Room edit form fields: name, type (dropdown), status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). Bed description, full description, amenities, `maxCapacity`, and the rate matrix all live on the room type and are edited in **Settings → Room Types** (W3.6 + W3.7). The drawer shows the inherited bed description and amenities in a read-only "Bed Setup (inherited from type)" block, sourced from the joined `roomTypes` entry.
 - [ ] Block reason selector — shown only when status = Blocked: Maintenance / Hold / Other
 - [ ] Active/inactive toggle — inactive = hidden from guest site
 - [ ] Save button — explicit save, not auto-save
@@ -75,7 +75,7 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 - [ ] All rooms appear in the list with active-bookings count
 - [ ] Create a room — appears in the list immediately, configured rates and status save correctly
 - [ ] Create with an existing room number — inline error, no document written
-- [ ] Edit room name, description, capacity — changes save and reflect in room list
+- [ ] Edit room name — changes save and reflect in room list. Description, capacity, and bed setup are now type-level fields (W3.6 + W3.7) and are edited in Settings → Room Types.
 - [ ] Block a room — block reason required, status badge updates
 - [ ] Unblock a room — status returns to Available
 - [ ] Deactivate room — room disappears from guest-app `/rooms` page
@@ -98,3 +98,32 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 - Room status on dashboard grid: `plan/features/DASHBOARD-OVERVIEW.md`
 - Mobile responsive patterns: `plan/features/ADMIN-MOBILE.md §Rooms`
 - Active booking status list: `shared/schemas/room.ts` (`ACTIVE_BOOKING_STATUSES`)
+
+---
+
+## W3.7 — Bed, description, and amenities moved to the room type
+
+W3.7 is the follow-up to W3.6 (`plan/features/RATE-MANAGEMENT.md §W3.6`). Where W3.6 moved pricing + `maxCapacity` off the room and onto the type, W3.7 moves three more type-level fields that are identical for every room of a type:
+
+| Field | Why it's on the type |
+|---|---|
+| `bedDefinition` | Same bedding for every room of a type (e.g. "1 queen size bed" for every Executive room). |
+| `description` | One-paragraph marketing copy is authored once per type, not per room. |
+| `amenities` | The amenity list is the same for every room of a type. |
+
+**What changed in the admin app**
+
+- The create-room modal no longer captures `bedDefinition` or `description` (amenities was never a per-room field in the admin form). A short hint at the bottom of the form points staff to **Settings → Room Types** to edit those fields.
+- The edit-room drawer no longer carries per-room state for the bed description. It now renders a read-only "Bed Setup (inherited from type)" block sourced from the joined `roomTypes` entry.
+- The Settings → Room Types table gains an **Edit** action on every row (mobile + desktop). The Edit modal exposes all 9 type-level fields — label, shortLabel, bedDefinition, description, amenities (comma-separated), maxCapacity, pricePerNight, weekendRate, corporateRate — and saves via `updateRoomType`. The identifier key (`value`) is read-only; rename the type by deleting and re-adding.
+
+**Consumer impact**
+
+- Guest-app `RoomCard` now accepts `typeBedDefinition`, `typeDescription`, `typeAmenities` props and falls back to `DEFAULT_ROOM_TYPES` when the live type is empty. `Room` itself is narrowed to `Pick<Room, "id" \| "name" \| "type" \| "status">`.
+- Guest-app pages that need bed/description/amenities join the type at read time: `roomTypes.find(t => t.value === room.type)?.X`.
+
+**Migration (one-off backfill for legacy data)**
+
+Existing `rooms/{roomId}` docs may still carry `bedDefinition`, `description`, or `amenities`. Those fields are no longer read by the app. The canonical values now live on each `roomTypes[].{bedDefinition, description, amenities}`. To backfill: read the per-room values for a representative room of each type and write a single `updateDoc` on `settings/hotelConfig` setting the matching `roomTypes[]` entry. After backfill the per-room fields can be ignored (they are not deleted from existing docs to keep this a no-op migration).
+
+**Regression test:** `admin-app/src/__tests__/phase-11.9-room-type-details.test.ts`.

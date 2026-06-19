@@ -657,15 +657,17 @@ Injected as `<script type="application/ld+json">` in `<head>` on the relevant pa
   "@context": "https://schema.org",
   "@type": "HotelRoom",
   "name": "{room.name}",
-  "description": "{room.description}",
-  "occupancy": { "@type": "QuantitativeValue", "maxValue": "{room.maxCapacity}" },
-  "bed": { "@type": "BedDetails", "typeOfBed": "{room.bedDefinition}" },
-  "amenityFeature": [ ...room.amenities.map(a => ({ "@type": "LocationFeatureSpecification", "name": a, "value": true })) ]
+  "description": "{roomType.description}",
+  "occupancy": { "@type": "QuantitativeValue", "maxValue": "{roomType.maxCapacity}" },
+  "bed": { "@type": "BedDetails", "typeOfBed": "{roomType.bedDefinition}" },
+  "amenityFeature": [ ...roomType.amenities.map(a => ({ "@type": "LocationFeatureSpecification", "name": a, "value": true })) ]
 }
 ```
 
+> Per W3.6 + W3.7, `description`, `maxCapacity`, `bedDefinition`, and `amenities` are type-level fields joined on `room.type`. The schema is injected from the joined `roomType` entry, not from the room document.
+
 #### Implementation notes
-- All JSON-LD values sourced from `hotel.config.ts` and Firestore `rooms` data — never hardcoded
+- All JSON-LD values sourced from `hotel.config.ts` and Firestore `rooms` / `settings/hotelConfig.roomTypes[]` data — never hardcoded
 - Use a `useStructuredData(type, data)` hook that injects/removes the script tag on mount/unmount
 - `HotelRoom` schema injected only when rooms are loaded from Firestore — not on skeleton state
 - Validate output with Google's Rich Results Test before launch
