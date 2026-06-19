@@ -26,6 +26,8 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
 import { rooms } from "../data/rooms";
+import { ROOM_TYPE_IMAGES } from "../data/homepage";
+import { useRoomTypes, getRoomTypeImages } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
@@ -99,7 +101,14 @@ export function CorporateStaysPage() {
       };
 
   const { corporate } = usePublicSiteContent();
+  const { roomTypes } = useRoomTypes();
   const corpHeroPhoto = corporate.heroPhotoUrl;
+
+  const resolveTypeImages = (typeValue: string): string[] => {
+    const live = getRoomTypeImages(roomTypes, typeValue);
+    if (live.length > 0) return live;
+    return ROOM_TYPE_IMAGES[typeValue] ?? [];
+  };
   const corpHeading = corporate.heroHeading;
   const corpSubtext = corporate.heroSubtext;
   const perkFallbacks: LucideIcon[] = [Coins, Users, Briefcase, Wifi, ShieldCheck, HelpCircle];
@@ -399,7 +408,7 @@ export function CorporateStaysPage() {
                 >
                   <div className="aspect-[4/3] overflow-hidden bg-section-bg relative">
                     <img
-                      src={room.imageUrls[0]}
+                      src={resolveTypeImages(room.type)[0]}
                       alt={room.name}
                       className="h-full w-full object-cover transition duration-300 hover:scale-105"
                     />
@@ -690,7 +699,7 @@ export function CorporateStaysPage() {
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
               <img 
-                src={selectedRoom.imageUrls[0]} 
+                src={resolveTypeImages(selectedRoom.type)[0]}
                 alt={selectedRoom.name} 
                 className="h-72 w-full object-cover" 
               />

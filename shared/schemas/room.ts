@@ -2,10 +2,12 @@ import { z } from "zod";
 
 // Form schema for the Create Room modal in the admin app.
 // Per `plan/docs/FRONTEND.md §Form Validation`, Zod is the source
-// of truth; the TypeScript type is derived via `z.infer`. Photos
-// are intentionally NOT included here — the create modal captures
-// the room identity + base configuration, and photos are added
-// later in the existing edit drawer (per `plan/features/ROOM-MANAGEMENT.md`).
+// of truth; the TypeScript type is derived via `z.infer`.
+//
+// Photos are NOT captured here. Room images live on the room type
+// (per `shared/constants → RoomTypeEntry.imageUrls`) and are managed
+// from Settings → Room Types. The create flow only captures the
+// room identity + base configuration.
 
 export const RoomStatusEnum = z.enum(["available", "occupied", "blocked"]);
 export const HousekeepingStatusEnum = z.enum(["clean", "dirty", "in-progress"]);

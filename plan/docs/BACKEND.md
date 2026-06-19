@@ -27,7 +27,6 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `weekendRate` | number | |
 | `corporateRate` | number | Flat public corporate rate (no code required) |
 | `amenities` | string[] | e.g. `["WiFi", "AC", "Hot Shower", "Cable TV"]` |
-| `imageUrls` | string[] | Firebase Storage URLs |
 | `isActive` | boolean | `false` = hidden from guest site |
 | `status` | string | `"available"` \| `"occupied"` \| `"blocked"` |
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
@@ -38,6 +37,8 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+> **Photos are NOT stored on individual rooms.** Room images live on the **room type** — see `settings/hotelConfig.roomTypes[].imageUrls` below. The guest site (room cards, room detail, homepage featured rooms) and admin app read `roomType.imageUrls` joined at query time. This keeps the gallery consistent across rooms of the same type and avoids re-uploading the same photos per room. Upload path: Firebase Storage `room-types/{typeValue}/{filename}` (public read, staff write — see `firebase/storage.rules`).
 
 **Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
@@ -180,7 +181,9 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `payAtHotelEnabled`, `intercomQuickRequests[]`, `notificationSoundUrl`
+Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `payAtHotelEnabled`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
+
+> **`roomTypes[]`** — array of `{ value, label, shortLabel, imageUrls[] }`. Each entry's `imageUrls[]` is the source of truth for that room type's photos; rooms reference the type via the `type` field and the public site resolves images by joining on `value`. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`).
 
 ---
 

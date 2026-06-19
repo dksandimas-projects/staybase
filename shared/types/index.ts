@@ -25,7 +25,6 @@ export interface Room {
   weekendRate: number;
   corporateRate: number;
   amenities: string[];
-  imageUrls: string[];
   isActive: boolean;
   status: RoomStatus;
   housekeepingStatus: HousekeepingStatus;

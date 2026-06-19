@@ -14,6 +14,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
@@ -21,6 +22,7 @@ export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
   const { rooms, loading } = useRooms();
+  const { roomTypes } = useRoomTypes();
   const [selectedType, setSelectedType] = useState("all");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
@@ -219,6 +221,7 @@ export function RoomsPage() {
                 <RoomCard
                   key={room.id}
                   room={room}
+                  typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
                   bookingQuery={bookingQuery}
                   onDetails={() => setSelectedRoomId(room.id)}
                 />
@@ -252,7 +255,11 @@ export function RoomsPage() {
         {selectedRoom ? (
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
-              <img src={selectedRoom.imageUrls[0]} alt={selectedRoom.name} className="h-72 w-full object-cover" />
+              <img
+                src={getRoomTypeImages(roomTypes, selectedRoom.type)[0]}
+                alt={selectedRoom.name}
+                className="h-72 w-full object-cover"
+              />
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge label={selectedRoom.status === "available" ? "Available" : "Blocked"} status={selectedRoom.status} />
