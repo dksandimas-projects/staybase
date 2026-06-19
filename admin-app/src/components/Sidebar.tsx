@@ -20,6 +20,7 @@ import { brandAsset } from "../utils/brand";
 import { useAdmin } from "../context/AdminContext";
 import { cn } from "../utils/cn";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { useFocusTrap } from "../utils/useFocusTrap";
 
 const navItems = [
   { label: "Dashboard", to: "/", icon: Home },
@@ -109,8 +110,9 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
   const { intercoms } = useAdmin();
   const { isMobile, isTablet } = useBreakpoint();
   const location = useLocation();
-  const prefersReducedMotion = useReducedMotion();
+  const prefersReducedMotion = !!useReducedMotion();
   const prevPathnameRef = useRef(location.pathname);
+  const trapRef = useFocusTrap<HTMLElement>(isOpen, () => onClose?.());
 
   const unreadIntercomCount = useMemo(
     () => Object.values(intercoms)
@@ -119,15 +121,6 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
       .length,
     [intercoms]
   );
-
-  useEffect(() => {
-    if (!isMobile || !isOpen || !onClose) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isMobile, isOpen, onClose]);
 
   useEffect(() => {
     if (!isMobile || !isOpen) return;
@@ -161,6 +154,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
             />
             <motion.aside
               key="sidebar-panel"
+              ref={trapRef}
               variants={prefersReducedMotion ? undefined : slideInLeft}
               initial="hidden"
               animate="visible"

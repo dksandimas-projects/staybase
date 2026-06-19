@@ -94,8 +94,13 @@ describe("Phase 11.7 — Admin Mobile UX (P0 foundations)", () => {
       expect(sidebarSrc).toMatch(/document\.body\.style\.overflow\s*=\s*["']hidden["']/);
     });
 
-    it("closes on ESC while the mobile drawer is open", () => {
-      expect(sidebarSrc).toMatch(/["']Escape["']/);
+    it("closes on ESC while the mobile drawer is open (via useFocusTrap)", () => {
+      // Escape handling now lives in useFocusTrap (useFocusTrap.ts).
+      // Verify the hook is imported and wired to onClose so that pressing
+      // Escape inside the open mobile sidebar closes it.
+      expect(sidebarSrc).toMatch(/import\s*\{\s*useFocusTrap\s*\}\s*from\s*["']\.\.\/utils\/useFocusTrap["']/);
+      expect(sidebarSrc).toMatch(/useFocusTrap<HTMLElement>\(isOpen,\s*\(\)\s*=>\s*onClose\?\.\(\)\)/);
+      expect(sidebarSrc).toMatch(/ref=\{trapRef\}/);
     });
 
     it("auto-closes on route change (pathname) while open on mobile", () => {
