@@ -139,34 +139,46 @@ function DesktopModalPanel({
 }) {
   const trapRef = useFocusTrap<HTMLElement>(true, onClose);
   return (
-    <motion.section
-      ref={trapRef}
-      variants={prefersReducedMotion ? undefined : scaleIn}
-      initial="hidden"
-      animate="visible"
-      exit="hidden"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
+    // Per `plan/docs/FRONTEND.md §Modals`: desktop modals are centered via
+    // `top-1/2 left-1/2` with a -50% / -50% translate. The translate MUST
+    // live on a STATIC wrapper (not on the motion.section) — Framer Motion
+    // composes its own transform property for the `scaleIn` variant, which
+    // would otherwise override any Tailwind translate class on the motion
+    // element and drop the modal into the lower-right quadrant of the
+    // viewport. Putting the translate on the wrapper sidesteps the
+    // conflict entirely.
+    <div
       className={cn(
-        "pointer-events-auto fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 flex w-full max-w-2xl flex-col overflow-hidden rounded-card-lg bg-white shadow-xl",
+        "pointer-events-auto fixed left-1/2 top-1/2 z-50 flex w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card-lg bg-white shadow-xl",
         className
       )}
       style={{ maxHeight: "90vh" }}
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
-        <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
-        <button
-          type="button"
-          aria-label="Close"
-          className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
-          onClick={onClose}
-        >
-          <X size={20} aria-hidden="true" />
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-5">{children}</div>
-      {footer ? <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div> : null}
-    </motion.section>
+      <motion.section
+        ref={trapRef}
+        variants={prefersReducedMotion ? undefined : scaleIn}
+        initial="hidden"
+        animate="visible"
+        exit="hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex h-full w-full flex-col"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
+          <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100"
+            onClick={onClose}
+          >
+            <X size={20} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        {footer ? <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div> : null}
+      </motion.section>
+    </div>
   );
 }
