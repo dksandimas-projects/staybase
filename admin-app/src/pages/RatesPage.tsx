@@ -4,6 +4,7 @@ import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { useToast } from "../components/Toast";
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import {
@@ -14,7 +15,6 @@ import config from "@config";
 
 export function RatesPage() {
   const {
-    rooms,
     vouchers,
     addVoucher,
     toggleVoucherActive,
@@ -25,10 +25,11 @@ export function RatesPage() {
     hotelConfig,
     breakfastConfig,
     updateSettings,
-    updateRoomConfig,
+    updateRoomType,
     roomTypes
   } = useAdmin();
   const { isMobile } = useBreakpoint();
+  const toast = useToast();
 
   // Modal State
   const [isVchModalOpen, setIsVchModalOpen] = useState(false);
@@ -58,16 +59,18 @@ export function RatesPage() {
   // Corporate Code Form States
   const [corpCode, setCorpCode] = useState("");
   const [companyName, setCompanyName] = useState("");
-  
-  // Local pricing states per room type (Standard, Weekend, Flat Corporate)
+
+  // Local pricing state per room type — the source of truth now lives on
+  // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
+  // §W3.6`), so the local state is just the in-flight form buffer that
+  // is flushed via `updateRoomType` on save.
   const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>(() => {
     const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
     roomTypes.forEach(t => {
-      const match = rooms.find(r => r.type === t.value);
       initialPrices[t.value] = {
-        base: match?.pricePerNight ?? 3200,
-        weekend: match?.weekendRate ?? 3700,
-        corporate: match?.corporateRate ?? 2880
+        base: t.pricePerNight,
+        weekend: t.weekendRate,
+        corporate: t.corporateRate
       };
     });
     return initialPrices;
@@ -76,7 +79,7 @@ export function RatesPage() {
   const [roomRates, setRoomRates] = useState<Record<string, string>>(() => {
     const initialRates: Record<string, string> = {};
     roomTypes.forEach(t => {
-      initialRates[t.value] = "2880";
+      initialRates[t.value] = String(t.pricePerNight);
     });
     return initialRates;
   });
@@ -87,11 +90,10 @@ export function RatesPage() {
       const updated = { ...prev };
       roomTypes.forEach(t => {
         if (!updated[t.value]) {
-          const match = rooms.find(r => r.type === t.value);
           updated[t.value] = {
-            base: match?.pricePerNight ?? 3200,
-            weekend: match?.weekendRate ?? 3700,
-            corporate: match?.corporateRate ?? 2880
+            base: t.pricePerNight,
+            weekend: t.weekendRate,
+            corporate: t.corporateRate
           };
         }
       });
@@ -102,12 +104,12 @@ export function RatesPage() {
       const updated = { ...prev };
       roomTypes.forEach(t => {
         if (!updated[t.value]) {
-          updated[t.value] = "2880";
+          updated[t.value] = String(t.pricePerNight);
         }
       });
       return updated;
     });
-  }, [roomTypes, rooms]);
+  }, [roomTypes]);
 
   // Local breakfast rate state
   const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
@@ -181,21 +183,31 @@ export function RatesPage() {
     setIsCorpModalOpen(false);
   };
 
-  // Save room prices changes
+  // Save room prices changes — per W3.6 the rate matrix lives on the
+  // room type, so we flush one `updateRoomType` per type rather than
+  // batching across rooms of that type.
+  const [isSavingRates, setIsSavingRates] = useState(false);
   const handleSaveRates = async (e: React.FormEvent) => {
     e.preventDefault();
-    const updates = rooms.map(room => {
-      const typeRates = prices[room.type];
-      if (typeRates) {
-        return updateRoomConfig(room.id, {
-          pricePerNight: typeRates.base,
-          weekendRate: typeRates.weekend,
-          corporateRate: typeRates.corporate
+    setIsSavingRates(true);
+    try {
+      const updates = roomTypes.map(t => {
+        const next = prices[t.value];
+        if (!next) return Promise.resolve();
+        return updateRoomType(t.value, {
+          pricePerNight: next.base,
+          weekendRate: next.weekend,
+          corporateRate: next.corporate
         });
-      }
-      return Promise.resolve();
-    });
-    await Promise.all(updates);
+      });
+      await Promise.all(updates);
+      toast.success("Rates saved", "Rate matrix updated for all room types.");
+    } catch (err) {
+      console.error("Error saving rates:", err);
+      toast.error("Failed to save rates", err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsSavingRates(false);
+    }
   };
 
   // Save breakfast pricing changes
@@ -543,10 +555,11 @@ export function RatesPage() {
               </span>
               <button
                 type="submit"
-                className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                disabled={isSavingRates}
+                className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save size={14} />
-                Save Rates Matrix
+                {isSavingRates ? "Saving…" : "Save Rates Matrix"}
               </button>
             </div>
           </form>
@@ -878,7 +891,7 @@ export function RatesPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               {roomTypes.map((t) => (
                 <label key={t.value} className="flex flex-col gap-2 font-medium text-gray-600">
-                  {t.label} (Base: ₱{rooms.find(r => r.type === t.value)?.pricePerNight || 3200})
+                  {t.label} (Base: {formatPrice(t.pricePerNight)})
                   <input
                     type="number"
                     value={roomRates[t.value] || ""}

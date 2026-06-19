@@ -165,9 +165,11 @@ export function BookingsPage() {
     r => r.type === roomType && r.status === "available"
   );
 
-  // Calculate rate per night for selected room number
+  // Calculate rate per night for the selected room number — per W3.6
+  // the rate lives on the room's type, not the room itself.
   const selectedRoomDetails = rooms.find(r => r.roomNumber === roomNumber);
-  const ratePerNight = selectedRoomDetails?.pricePerNight || 0;
+  const selectedRoomType = roomTypes.find(t => t.value === selectedRoomDetails?.type);
+  const ratePerNight = selectedRoomType?.pricePerNight || 0;
   
   // Calculate nights
   const getNumNights = () => {
@@ -2386,13 +2388,15 @@ export function BookingsPage() {
               className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs text-gray-900"
               required
             >
-              {availableRoomsOfType.length > 0 ? (
-                availableRoomsOfType.map(r => (
-                  <option key={r.id} value={r.roomNumber}>Room {r.roomNumber} (₱{r.pricePerNight}/night)</option>
-                ))
-              ) : (
-                <option value="" disabled>No vacant rooms available</option>
-              )}
+                {availableRoomsOfType.length > 0 ? (
+                  availableRoomsOfType.map(r => (
+                    <option key={r.id} value={r.roomNumber}>
+                      Room {r.roomNumber} ({roomTypes.find(t => t.value === r.type)?.shortLabel || r.type}, ₱{roomTypes.find(t => t.value === r.type)?.pricePerNight ?? 0}/night)
+                    </option>
+                  ))
+                ) : (
+                  <option value="" disabled>No vacant rooms available</option>
+                )}
             </select>
           </label>
 

@@ -15,11 +15,7 @@ const EMPTY_FORM: CreateRoomInput = {
   roomNumber: "",
   type: "",
   description: "",
-  maxCapacity: 2,
   bedDefinition: "",
-  pricePerNight: 0,
-  weekendRate: 0,
-  corporateRate: 0,
   status: "available",
   housekeepingStatus: "clean",
   isActive: true,
@@ -43,10 +39,9 @@ export function RoomsPage() {
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
 
-  // Edit drawer form fields
+  // Edit drawer form fields — capacity + rate are on the type now
+  // (per W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`).
   const [bedDefinition, setBedDefinition] = useState("");
-  const [maxCapacity, setMaxCapacity] = useState(2);
-  const [pricePerNight, setPricePerNight] = useState(0);
   const [status, setStatus] = useState<Room["status"]>("available");
 
   // Block schedule form fields
@@ -77,8 +72,6 @@ export function RoomsPage() {
   const handleEditClick = (room: Room) => {
     setSelectedRoom(room);
     setBedDefinition(room.bedDefinition);
-    setMaxCapacity(room.maxCapacity);
-    setPricePerNight(room.pricePerNight);
     setStatus(room.status);
     setBlockFromDate("");
     setBlockToDate("");
@@ -91,8 +84,6 @@ export function RoomsPage() {
     if (selectedRoom) {
       updateRoomConfig(selectedRoom.id, {
         bedDefinition,
-        maxCapacity,
-        pricePerNight,
         status
       });
       toast.success("Room updated", `Room ${selectedRoom.roomNumber} configuration saved`);
@@ -245,8 +236,8 @@ export function RoomsPage() {
 
                 <div className="text-xs text-gray-650 space-y-1.5 pt-2 border-t border-gray-150">
                   <p>Bed Setup: <strong>{room.bedDefinition}</strong></p>
-                  <p>Limit: <strong>{room.maxCapacity} Guests</strong></p>
-                  <p>Base Rate: <strong className="text-gray-900">{formatPrice(room.pricePerNight)}</strong></p>
+                  <p>Limit: <strong>{roomTypes.find((t) => t.value === room.type)?.maxCapacity ?? "—"} Guests</strong></p>
+                  <p>Base Rate: <strong className="text-gray-900">{formatPrice(roomTypes.find((t) => t.value === room.type)?.pricePerNight ?? 0)}</strong></p>
                   {isBlocked && room.blockReason && (
                     <div className="mt-2.5 rounded bg-red-50 border border-red-200 p-2 text-[10px] text-red-700 flex gap-1.5 items-start">
                       <AlertCircle size={14} className="shrink-0 text-red-500 mt-0.5" />
@@ -319,32 +310,6 @@ export function RoomsPage() {
                     required
                     value={bedDefinition}
                     onChange={(e) => setBedDefinition(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Max Capacity
-                  <input
-                    type="number"
-                    min={1}
-                    required
-                    value={maxCapacity}
-                    onChange={(e) => setMaxCapacity(parseInt(e.target.value) || 2)}
-                    className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Base Rate ({config.currencySymbol})
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    value={pricePerNight}
-                    onChange={(e) => setPricePerNight(parseInt(e.target.value) || 0)}
                     className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                   />
                 </label>
@@ -494,61 +459,45 @@ export function RoomsPage() {
             </label>
           </div>
 
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-            <div className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              <span>Room type</span>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setCreateRoomTypeOpen((open) => !open)}
-                  aria-haspopup="listbox"
-                  aria-expanded={createRoomTypeOpen}
-                  className="flex min-h-[44px] w-full items-center justify-between rounded border border-gray-200 bg-white px-3 text-xs font-normal text-gray-800"
+          <div className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            <span>Room type</span>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setCreateRoomTypeOpen((open) => !open)}
+                aria-haspopup="listbox"
+                aria-expanded={createRoomTypeOpen}
+                className="flex min-h-[44px] w-full items-center justify-between rounded border border-gray-200 bg-white px-3 text-xs font-normal text-gray-800"
+              >
+                <span>{roomTypesLabels[createForm.type] || "Select a type…"}</span>
+                {createRoomTypeOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+              </button>
+              {createRoomTypeOpen && (
+                <ul
+                  role="listbox"
+                  className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
                 >
-                  <span>{roomTypesLabels[createForm.type] || "Select a type…"}</span>
-                  {createRoomTypeOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
-                </button>
-                {createRoomTypeOpen && (
-                  <ul
-                    role="listbox"
-                    className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-                  >
-                    {roomTypes.map((t) => (
-                      <li key={t.value}>
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={createForm.type === t.value}
-                          onClick={() => {
-                            setCreateForm((f) => ({ ...f, type: t.value }));
-                            setCreateRoomTypeOpen(false);
-                          }}
-                          className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-gray-50 ${createForm.type === t.value ? "text-primary font-semibold" : "text-gray-700"}`}
-                        >
-                          <span>{t.label}</span>
-                          <span className="text-[10px] uppercase tracking-wider text-gray-400">{t.shortLabel}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              {createErrors.type && <span className="text-[10px] font-normal text-red-600">{createErrors.type}</span>}
+                  {roomTypes.map((t) => (
+                    <li key={t.value}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={createForm.type === t.value}
+                        onClick={() => {
+                          setCreateForm((f) => ({ ...f, type: t.value }));
+                          setCreateRoomTypeOpen(false);
+                        }}
+                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-gray-50 ${createForm.type === t.value ? "text-primary font-semibold" : "text-gray-700"}`}
+                      >
+                        <span>{t.label}</span>
+                        <span className="text-[10px] uppercase tracking-wider text-gray-400">{t.shortLabel}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Max capacity (guests)
-              <input
-                type="number"
-                min={1}
-                required
-                value={createForm.maxCapacity}
-                onChange={(e) => setCreateForm((f) => ({ ...f, maxCapacity: parseInt(e.target.value || "0", 10) }))}
-                aria-invalid={!!createErrors.maxCapacity}
-                className="min-h-[44px] w-full rounded border border-gray-200 px-3 text-xs"
-              />
-              {createErrors.maxCapacity && <span className="text-[10px] font-normal text-red-600">{createErrors.maxCapacity}</span>}
-            </label>
+            {createErrors.type && <span className="text-[10px] font-normal text-red-600">{createErrors.type}</span>}
           </div>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
@@ -565,41 +514,11 @@ export function RoomsPage() {
             {createErrors.bedDefinition && <span className="text-[10px] font-normal text-red-600">{createErrors.bedDefinition}</span>}
           </label>
 
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Base rate / night ({config.currencySymbol})
-              <input
-                type="number"
-                min={0}
-                required
-                value={createForm.pricePerNight}
-                onChange={(e) => setCreateForm((f) => ({ ...f, pricePerNight: parseFloat(e.target.value || "0") }))}
-                aria-invalid={!!createErrors.pricePerNight}
-                className="min-h-[44px] w-full rounded border border-gray-200 px-3 text-xs"
-              />
-              {createErrors.pricePerNight && <span className="text-[10px] font-normal text-red-600">{createErrors.pricePerNight}</span>}
-            </label>
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Weekend rate ({config.currencySymbol})
-              <input
-                type="number"
-                min={0}
-                value={createForm.weekendRate ?? 0}
-                onChange={(e) => setCreateForm((f) => ({ ...f, weekendRate: parseFloat(e.target.value || "0") }))}
-                className="min-h-[44px] w-full rounded border border-gray-200 px-3 text-xs"
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-              Corporate rate ({config.currencySymbol})
-              <input
-                type="number"
-                min={0}
-                value={createForm.corporateRate ?? 0}
-                onChange={(e) => setCreateForm((f) => ({ ...f, corporateRate: parseFloat(e.target.value || "0") }))}
-                className="min-h-[44px] w-full rounded border border-gray-200 px-3 text-xs"
-              />
-            </label>
-          </div>
+          <p className="text-[10px] leading-relaxed text-gray-500">
+            Max occupancy, base rate, weekend rate, and corporate rate are
+            managed per room type in <strong>Settings → Room Types</strong> and the
+            <strong> Rates</strong> tab. The room inherits these from its type.
+          </p>
 
           <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
             <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
