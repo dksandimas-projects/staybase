@@ -1,8 +1,8 @@
 import { Filter, SlidersHorizontal, Users } from "lucide-react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fadeUp, staggerContainer, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
+import { fadeUp, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Drawer } from "../components/Drawer";
@@ -218,26 +218,36 @@ export function RoomsPage() {
               ))}
             </div>
           ) : filteredRooms.length > 0 ? (
-            <motion.div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" variants={staggerContainer} {...entranceProps}>
-              {filteredRooms.map((room) => {
-                const rates = getRoomTypeRates(roomTypes, room.type);
-                const typeDetails = roomTypes.find((t) => t.value === room.type);
-                return (
-                  <RoomCard
-                    key={room.id}
-                    room={room}
-                    typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
-                    typeMaxCapacity={rates?.maxCapacity}
-                    typePricePerNight={rates?.pricePerNight}
-                    typeBedDefinition={typeDetails?.bedDefinition}
-                    typeDescription={typeDetails?.description}
-                    typeAmenities={typeDetails?.amenities}
-                    bookingQuery={bookingQuery}
-                    onDetails={() => setSelectedRoomId(room.id)}
-                  />
-                );
-              })}
-            </motion.div>
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {filteredRooms.map((room) => {
+                  const rates = getRoomTypeRates(roomTypes, room.type);
+                  const typeDetails = roomTypes.find((t) => t.value === room.type);
+                  return (
+                    <motion.div
+                      key={room.id}
+                      layout
+                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                      animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+                      transition={{ duration: 0.25, ease: "easeOut" }}
+                    >
+                      <RoomCard
+                        room={room}
+                        typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
+                        typeMaxCapacity={rates?.maxCapacity}
+                        typePricePerNight={rates?.pricePerNight}
+                        typeBedDefinition={typeDetails?.bedDefinition}
+                        typeDescription={typeDetails?.description}
+                        typeAmenities={typeDetails?.amenities}
+                        bookingQuery={bookingQuery}
+                        onDetails={() => setSelectedRoomId(room.id)}
+                      />
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
           ) : (
             <motion.div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200" variants={fadeUp} {...entranceProps}>
               <h2 className="text-xl font-semibold text-gray-950">No rooms match your filters</h2>
