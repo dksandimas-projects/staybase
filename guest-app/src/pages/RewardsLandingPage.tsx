@@ -1,19 +1,17 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { 
-  UserPlus, 
-  Hotel, 
-  Gift, 
-  Clock, 
-  Tag, 
-  Megaphone, 
+import {
+  UserPlus,
+  Hotel,
+  Gift,
+  Clock,
+  Tag,
+  Megaphone,
   CheckCircle,
   ArrowRight,
   Sparkles,
-  Info,
-  LogOut,
-  User
+  AlertCircle
 } from "lucide-react";
 import config from "@config";
 import { Navbar } from "../components/Navbar";
@@ -21,23 +19,27 @@ import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
-import { cn } from "../utils/cn";
-
-type AuthState = "logged-out" | "logged-in-non-member" | "logged-in-member";
+import { useGuestAuth } from "../context/GuestAuthContext";
+import { auth } from "../firebase/auth";
 
 export function RewardsLandingPage() {
   const shouldReduceMotion = useReducedMotion();
+  const navigate = useNavigate();
+  const { user, memberProfile, loading, refreshMemberProfile } = useGuestAuth();
 
-  // Simulated Auth State (synced with sessionStorage to persist on quick navigation/refresh)
-  const [authState, setAuthState] = useState<AuthState>(() => {
-    return (sessionStorage.getItem("sim_auth_state") as AuthState) ?? "logged-out";
-  });
-
+  // Real enroll state — per audit S2.4 / decision #49 this is now
+  // wired to the server-side /api/members/register route. The
+  // previous UI mock (sessionStorage + setTimeout + Wireframe Tester
+  // Panel) has been removed.
   const [enrolling, setEnrolling] = useState(false);
+  const [enrollError, setEnrollError] = useState("");
 
   useEffect(() => {
-    sessionStorage.setItem("sim_auth_state", authState);
-  }, [authState]);
+    if (!loading && user && memberProfile?.isMember) {
+      // Already a member — nothing to do, the UI shows the "Go to
+      // My Rewards" CTA instead.
+    }
+  }, [loading, memberProfile?.isMember, user]);
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -47,20 +49,48 @@ export function RewardsLandingPage() {
         viewport: { once: true, margin: "-80px" }
       };
 
-  const handleEnroll = () => {
+  const handleEnroll = async () => {
+    if (!user) return;
     setEnrolling(true);
-    setTimeout(() => {
+    setEnrollError("");
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        setEnrollError("Please sign in again before joining Spark Rewards.");
+        setEnrolling(false);
+        return;
+      }
+      const res = await fetch("/api/members/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`
+        }
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        setEnrollError(data?.error || "We could not join Spark Rewards right now. Please try again.");
+        setEnrolling(false);
+        return;
+      }
+      // Refresh the local member profile from Firestore so the UI
+      // flips to the "member" state without a hard reload.
+      await refreshMemberProfile();
+      navigate("/account/rewards");
+    } catch (err) {
+      console.error("Member enrollment failed:", err);
+      setEnrollError("We could not join Spark Rewards right now. Please try again.");
       setEnrolling(false);
-      setAuthState("logged-in-member");
-    }, 1000);
+    }
   };
+
+  const isMember = !!user && !!memberProfile?.isMember;
+  const showAuthGatedView = !loading && !!user && !isMember;
 
   return (
     <main className="min-h-screen bg-gray-50 font-body text-gray-900 overflow-x-hidden relative">
-      {/* Sticky transparent-to-solid Navbar */}
       <Navbar overHero />
 
-      {/* Hero Section */}
       <section className="relative -mt-20 flex min-h-[90vh] items-center justify-center overflow-hidden bg-gray-950 pt-20 px-4">
         <div className="absolute inset-0 z-0 opacity-40">
           <img
@@ -78,7 +108,7 @@ export function RewardsLandingPage() {
           variants={fadeUp}
         >
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary-light mb-6 backdrop-blur-sm">
-            <Sparkles size={14} /> Spark Rewards Loyalty Program
+            <Sparkles size={14} /> {config.rewardsName} Loyalty Program
           </div>
           <h1 className="font-heading text-4xl leading-none text-white sm:text-7xl lg:text-8xl tracking-tight">
             Earn Every Stay
@@ -88,7 +118,8 @@ export function RewardsLandingPage() {
           </p>
 
           <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row sm:items-center">
-            {authState === "logged-out" && (
+            {/* Logged-out: standard CTAs */}
+            {!loading && !user && (
               <>
                 <PrimaryButton to="/signup" className="min-w-[220px] shadow-lg">
                   Join Spark Rewards
@@ -102,7 +133,12 @@ export function RewardsLandingPage() {
               </>
             )}
 
-            {authState === "logged-in-non-member" && (
+            {/* Auth still loading: show nothing to avoid a flash */}
+            {loading && null}
+
+            {/* Authenticated but not a member: one-click enroll via
+                server-side /api/members/register */}
+            {showAuthGatedView && (
               <PrimaryButton
                 type="button"
                 onClick={handleEnroll}
@@ -120,19 +156,28 @@ export function RewardsLandingPage() {
               </PrimaryButton>
             )}
 
-            {authState === "logged-in-member" && (
+            {isMember && (
               <PrimaryButton to="/account/rewards" className="min-w-[240px] shadow-lg">
                 Go to My Rewards Dashboard <ArrowRight size={16} />
               </PrimaryButton>
             )}
           </div>
+
+          {enrollError ? (
+            <div
+              role="alert"
+              className="mx-auto mt-4 inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50/95 px-3 py-2 text-xs text-red-700"
+            >
+              <AlertCircle size={14} />
+              {enrollError}
+            </div>
+          ) : null}
         </motion.div>
       </section>
 
-      {/* How It Works Section */}
       <section className="py-24 bg-white relative z-10 border-b border-gray-150">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div 
+          <motion.div
             className="text-center mb-16"
             variants={fadeUp}
             {...entranceProps}
@@ -142,13 +187,12 @@ export function RewardsLandingPage() {
             <div className="mt-4 mx-auto w-12 h-1 bg-primary rounded" />
           </motion.div>
 
-          <motion.div 
-            className="grid gap-12 sm:grid-cols-2 lg:grid-cols-3" 
-            variants={staggerContainer} 
+          <motion.div
+            className="grid gap-12 sm:grid-cols-2 lg:grid-cols-3"
+            variants={staggerContainer}
             {...entranceProps}
           >
-            {/* Step 1 */}
-            <motion.div 
+            <motion.div
               className="flex flex-col items-center text-center p-6 rounded-xl hover:shadow-sm transition group"
               variants={staggerChild}
             >
@@ -161,8 +205,7 @@ export function RewardsLandingPage() {
               </p>
             </motion.div>
 
-            {/* Step 2 */}
-            <motion.div 
+            <motion.div
               className="flex flex-col items-center text-center p-6 rounded-xl hover:shadow-sm transition group"
               variants={staggerChild}
             >
@@ -175,8 +218,7 @@ export function RewardsLandingPage() {
               </p>
             </motion.div>
 
-            {/* Step 3 */}
-            <motion.div 
+            <motion.div
               className="flex flex-col items-center text-center p-6 rounded-xl hover:shadow-sm transition group"
               variants={staggerChild}
             >
@@ -192,10 +234,9 @@ export function RewardsLandingPage() {
         </div>
       </section>
 
-      {/* Member Perks (Bento Style Grid) */}
       <section className="py-24 bg-section-bg">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div 
+          <motion.div
             className="flex flex-col md:flex-row justify-between items-end mb-16 gap-6"
             variants={fadeUp}
             {...entranceProps}
@@ -207,20 +248,24 @@ export function RewardsLandingPage() {
                 Beyond points redemption, Spark Rewards offers a suite of exclusive privileges designed to elevate your stay.
               </p>
             </div>
-            {authState === "logged-out" && (
+            {!loading && !user && (
               <PrimaryButton to="/signup" className="text-xs shrink-0">
                 Register as Member <ArrowRight size={14} className="ml-1.5" />
               </PrimaryButton>
             )}
+            {isMember && (
+              <PrimaryButton to="/account/rewards" className="text-xs shrink-0">
+                My Rewards <ArrowRight size={14} className="ml-1.5" />
+              </PrimaryButton>
+            )}
           </motion.div>
 
-          <motion.div 
+          <motion.div
             className="grid gap-6 sm:grid-cols-2"
             variants={staggerContainer}
             {...entranceProps}
           >
-            {/* Bento Perk 1 */}
-            <motion.div 
+            <motion.div
               className="bg-white p-8 md:p-10 rounded-card border border-gray-200 shadow-sm hover:shadow-md transition relative overflow-hidden group flex flex-col justify-between"
               variants={staggerChild}
               whileHover={shouldReduceMotion ? undefined : { y: -3 }}
@@ -243,8 +288,7 @@ export function RewardsLandingPage() {
               </div>
             </motion.div>
 
-            {/* Bento Perk 2 */}
-            <motion.div 
+            <motion.div
               className="bg-white p-8 md:p-10 rounded-card border border-gray-200 shadow-sm hover:shadow-md transition relative overflow-hidden group flex flex-col justify-between"
               variants={staggerChild}
               whileHover={shouldReduceMotion ? undefined : { y: -3 }}
@@ -268,8 +312,7 @@ export function RewardsLandingPage() {
               </div>
             </motion.div>
 
-            {/* Bento Perk 3 */}
-            <motion.div 
+            <motion.div
               className="bg-white p-8 md:p-10 rounded-card border border-gray-200 shadow-sm hover:shadow-md transition relative overflow-hidden group flex flex-col justify-between"
               variants={staggerChild}
               whileHover={shouldReduceMotion ? undefined : { y: -3 }}
@@ -278,21 +321,20 @@ export function RewardsLandingPage() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary-light text-primary mb-6">
                   <Gift size={24} />
                 </div>
-                <h4 className="font-heading text-xl md:text-2xl text-gray-950">Welcome Gift</h4>
+                <h4 className="font-heading text-xl md:text-2xl text-gray-950">Welcome to the Program</h4>
                 <p className="mt-3 text-sm leading-relaxed text-gray-600 max-w-md">
-                  Feel at home immediately. A little welcome item, from local Bohol snacks to hand-packaged amenities, is placed in your room on arrival.
+                  Earn points on every stay, redeem for complimentary nights and curated local experiences. We're glad to have you.
                 </p>
               </div>
               <div className="mt-6 text-xs italic text-gray-500">
-                Curated by our Bohol organic farm partners
+                No welcome email for Phase 1 — per `DECISIONS-FEATURES.md #93`
               </div>
               <div className="absolute -bottom-6 -right-6 text-gray-100 opacity-20 pointer-events-none group-hover:scale-110 transition duration-300">
                 <Gift size={120} />
               </div>
             </motion.div>
 
-            {/* Bento Perk 4 */}
-            <motion.div 
+            <motion.div
               className="bg-white p-8 md:p-10 rounded-card border border-gray-200 shadow-sm hover:shadow-md transition relative overflow-hidden group flex flex-col justify-between"
               variants={staggerChild}
               whileHover={shouldReduceMotion ? undefined : { y: -3 }}
@@ -322,7 +364,6 @@ export function RewardsLandingPage() {
         </div>
       </section>
 
-      {/* CTA Signup Banner */}
       <section className="py-20 bg-primary relative overflow-hidden shadow-inner">
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
           <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
@@ -336,108 +377,48 @@ export function RewardsLandingPage() {
             Join our community of travelers and experience a more rewarding way to stay in Tagbilaran City, Bohol.
           </p>
 
-          {authState === "logged-out" && (
-            <Link 
-              to="/signup" 
+          {!loading && !user && (
+            <Link
+              to="/signup"
               className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition hover:bg-gray-50 active:scale-95"
             >
               Create Member Account
             </Link>
           )}
 
-          {authState === "logged-in-non-member" && (
-            <button 
+          {showAuthGatedView && (
+            <button
+              type="button"
               onClick={handleEnroll}
-              className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition hover:bg-gray-50 active:scale-95"
+              className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
               disabled={enrolling}
             >
               {enrolling ? "Enrolling..." : "Join Spark Rewards"}
             </button>
           )}
 
-          {authState === "logged-in-member" && (
-            <Link 
-              to="/account/rewards" 
+          {isMember && (
+            <Link
+              to="/account/rewards"
               className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition hover:bg-gray-50 active:scale-95"
             >
               My Rewards Dashboard
             </Link>
           )}
+
+          {enrollError ? (
+            <p
+              role="alert"
+              className="mx-auto mt-4 inline-flex items-center gap-2 rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-xs text-white"
+            >
+              <AlertCircle size={14} />
+              {enrollError}
+            </p>
+          ) : null}
         </div>
       </section>
 
-      {/* Footer */}
       <Footer />
-
-      {/* SIMULATED AUTH CONTROLLER WIDGET FOR INTERACTIVE TESTING */}
-      <div className="fixed bottom-24 right-4 z-50 bg-white border border-gray-200 rounded-card shadow-2xl p-4 max-w-xs font-body text-xs text-gray-800 ring-1 ring-black/5 animate-bounce-short">
-        <div className="flex items-center justify-between border-b border-gray-150 pb-2 mb-3">
-          <span className="font-bold text-gray-900 flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
-            <Sparkles size={12} className="text-primary" /> Wireframe Tester Panel
-          </span>
-          <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-semibold">
-            G-10 Page
-          </span>
-        </div>
-        
-        <p className="text-gray-600 leading-normal mb-3">
-          Toggle the simulated authorization states to test how this landing page adjusts buttons, flows, and enrollment links dynamically:
-        </p>
-
-        <div className="space-y-2">
-          {/* State 1: Logged Out */}
-          <button
-            type="button"
-            className={cn(
-              "w-full px-3 py-2 rounded text-left border font-semibold flex items-center justify-between",
-              authState === "logged-out"
-                ? "bg-primary-light border-primary text-primary"
-                : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"
-            )}
-            onClick={() => setAuthState("logged-out")}
-          >
-            <span>Logged Out (Default)</span>
-            <LogOut size={12} />
-          </button>
-
-          {/* State 2: Logged In Non-Member */}
-          <button
-            type="button"
-            className={cn(
-              "w-full px-3 py-2 rounded text-left border font-semibold flex items-center justify-between",
-              authState === "logged-in-non-member"
-                ? "bg-primary-light border-primary text-primary"
-                : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"
-            )}
-            onClick={() => setAuthState("logged-in-non-member")}
-          >
-            <span>Logged In (Non-Member)</span>
-            <User size={12} />
-          </button>
-
-          {/* State 3: Logged In Member */}
-          <button
-            type="button"
-            className={cn(
-              "w-full px-3 py-2 rounded text-left border font-semibold flex items-center justify-between",
-              authState === "logged-in-member"
-                ? "bg-primary-light border-primary text-primary"
-                : "bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100"
-            )}
-            onClick={() => setAuthState("logged-in-member")}
-          >
-            <span>Logged In (Member)</span>
-            <CheckCircle size={12} />
-          </button>
-        </div>
-
-        <div className="mt-3 pt-2 border-t border-gray-150 text-[10px] text-gray-500 leading-normal flex items-start gap-1">
-          <Info size={12} className="shrink-0 mt-0.5 text-primary" />
-          <span>
-            Upgrading to **Member** simulates a database write to the loyalty collection.
-          </span>
-        </div>
-      </div>
     </main>
   );
 }

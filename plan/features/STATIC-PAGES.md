@@ -6,7 +6,7 @@
 
 ## Overview
 
-Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and 404. About and Corporate hero/content are editable from admin Settings → Website Content. Contact details are shared with `settings/hotelConfig`.
+Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Privacy Policy, Terms of Service, and 404. About and Corporate hero/content are editable from admin Settings → Website Content. Contact details are shared with `settings/hotelConfig`.
 
 ---
 
@@ -51,7 +51,7 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 ### Data & Logic Checklist
 - [ ] Fetch `settings/websiteContent.corporate` for hero content and perks
 - [ ] Fetch all active rooms for the rooms overview section
-- [ ] Inquiry form submission: `addDoc` to `corporateInquiries` with `status: "new"`
+- [ ] Inquiry form submission: POST `/api/corporate/inquiry`; API creates `corporateInquiries/{id}` with `status: "new"`
 - [ ] No corporate rates displayed anywhere on this page
 - [ ] Cloudflare Turnstile widget on inquiry form — invisible, token submitted with form
 - [ ] Honeypot field on inquiry form — hidden via CSS
@@ -74,10 +74,12 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 - [ ] Facebook link
 - [ ] Instagram link
 - [ ] Footer
+- [ ] **Contact form** (right column) — Name, Email, Subject, Message inputs, Submit button, success/error banners, honeypot, accessibility labels. Wired to `POST /api/contact`. Full spec: `plan/features/CONTACT-INQUIRIES.md` *(Per `DECISIONS-FEATURES.md #76`)*
 
 ### Data & Logic Checklist
 - [ ] Fetch `settings/hotelConfig` for address, phone, email, facebookUrl, instagramUrl
 - [ ] All contact info sourced from Settings — never hardcoded
+- [ ] **Form submission** calls `POST /api/contact` — see `CONTACT-INQUIRIES.md` for endpoint spec, schema, bot controls, email template, and Firestore rules
 
 ---
 
@@ -104,7 +106,7 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 
 ### Data & Logic Checklist
 - [ ] If already logged in and already a member — redirect to `/account/rewards`
-- [ ] If logged in but not a member — show enroll button, `updateDoc` on `members/{uid}` sets `isMember: true`
+- [ ] If logged in but not a member — show enroll button, POST `/api/members/register`; API sets `isMember: true` and generates `memberNumber`
 
 ---
 
@@ -129,6 +131,29 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 
 ---
 
+## Terms of Service (`/terms`)
+
+### UI Checklist
+- [ ] Standalone page — no hero, clean readable layout (white background, Inter body text)
+- [ ] Sections: Booking Agreement, Accuracy of Information, Payment and Verification, Cancellation Policy, Senior/PWD Discount Eligibility, Guest Conduct, Personal Property and Liability, Privacy, Governing Law, Contact
+- [ ] Support email — clickable mailto link
+- [ ] Link back to homepage
+- [ ] Footer with version
+
+### Data & Logic Checklist
+- [ ] Static content — no Firestore fetch needed in Phase 1
+- [ ] Hotel legal name, brand name, support email, and applicable law sourced from `hotel.config.ts`
+- [ ] Booking Step 2 consent checkbox links to `/terms` alongside `/privacy`
+- [ ] Footer links to `/terms`
+- [ ] "Last Updated" date updated manually when terms change
+
+### Notes
+- Legal copy must be reviewed and finalized by hotel owner
+- Minimum clauses defined in `plan/docs/LEGAL.md §Guest Terms of Service`
+- Plain language — avoid legalese where possible
+
+---
+
 ## Edge Cases & States (All Static Pages)
 
 - [ ] Loading state — skeleton for hero photo
@@ -141,6 +166,7 @@ Four content-light pages: About Us, Corporate Stays (marketing), Contact Us, and
 - [ ] Corporate page: dark hero, perks grid, rooms overview (no prices), inquiry form all render
 - [ ] Corporate inquiry form submits and appears in admin Corporate Inquiries pipeline
 - [ ] Contact page: all details match `settings/hotelConfig`
+- [ ] Terms page: booking, cancellation, discount eligibility, liability, and governing law sections render correctly
 - [ ] CTA to `/corporate/book` present and working on corporate page
 - [ ] 404 page appears for any unmatched route
 - [ ] All pages load in under 3s on 4G mobile

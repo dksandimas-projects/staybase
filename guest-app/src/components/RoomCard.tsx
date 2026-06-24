@@ -9,26 +9,45 @@ import { PrimaryButton } from "./PrimaryButton";
 import { StatusBadge } from "./StatusBadge";
 
 interface RoomCardProps {
-  room: Pick<
-    Room,
-    | "id"
-    | "name"
-    | "type"
-    | "description"
-    | "amenities"
-    | "imageUrls"
-    | "maxCapacity"
-    | "bedDefinition"
-    | "pricePerNight"
-    | "status"
-  >;
+  room: Pick<Room, "id" | "name" | "type" | "status">;
+  // Per `plan/features/SETTINGS.md §Room Types` and `plan/features/ROOMS-PAGE.md`:
+  // the gallery, description, bed, amenities, and rate matrix are
+  // owned by the room type, not the individual room. The caller
+  // resolves all of these (live from `useRoomTypes()` or the static
+  // `ROOM_TYPE_IMAGES` / `ROOM_TYPE_RATES` fallbacks) and passes the
+  // data here.
+  typeImageUrls?: string[];
+  // Per W3.6 + W3.7: pricing, max occupancy, bed, description, and
+  // amenities are sourced from the type.
+  typeMaxCapacity?: number;
+  typePricePerNight?: number;
+  typeBedDefinition?: string;
+  typeDescription?: string;
+  typeAmenities?: string[];
   onDetails?: () => void;
   bookingQuery?: string;
 }
 
-export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) {
+export function RoomCard({
+  room,
+  typeImageUrls = [],
+  typeMaxCapacity,
+  typePricePerNight,
+  typeBedDefinition,
+  typeDescription,
+  typeAmenities,
+  onDetails,
+  bookingQuery = ""
+}: RoomCardProps) {
   const shouldReduceMotion = useReducedMotion();
-  const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.shortLabel ?? room.type;
+  const fallback = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type);
+  const typeLabel = fallback?.shortLabel ?? room.type;
+  const heroImage = typeImageUrls[0];
+  const maxCapacity = typeMaxCapacity ?? fallback?.maxCapacity ?? 0;
+  const pricePerNight = typePricePerNight ?? fallback?.pricePerNight ?? 0;
+  const bedDefinition = typeBedDefinition ?? fallback?.bedDefinition ?? "";
+  const description = typeDescription ?? fallback?.description ?? "";
+  const amenities = typeAmenities ?? fallback?.amenities ?? [];
 
   return (
     <motion.article
@@ -38,13 +57,22 @@ export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) 
       whileHover={shouldReduceMotion ? undefined : { y: -4 }}
     >
       <div className="aspect-[4/3] overflow-hidden bg-section-bg">
-        <motion.img
-          src={room.imageUrls[0]}
-          alt={room.name}
-          className="h-full w-full object-cover"
-          transition={{ duration: 0.4, ease: "easeOut" }}
-          whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
-        />
+        {heroImage ? (
+          <motion.img
+            src={heroImage}
+            alt={room.name}
+            className="h-full w-full object-cover"
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
+          />
+        ) : (
+          <div
+            className="flex h-full w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400"
+            aria-label={`No photo for ${room.name}`}
+          >
+            Photo coming soon
+          </div>
+        )}
       </div>
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
@@ -54,16 +82,16 @@ export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) 
           </div>
           <StatusBadge label={room.status === "available" ? "Available" : "Blocked"} status={room.status} />
         </div>
-        <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{room.description}</p>
+        <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{description}</p>
         <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
           <span className="flex items-center gap-2">
             <Users size={16} className="text-primary" />
-            Up to {room.maxCapacity}
+            Up to {maxCapacity}
           </span>
-          <span className="truncate">{room.bedDefinition}</span>
+          <span className="truncate">{bedDefinition}</span>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {room.amenities.slice(0, 4).map((amenity) => (
+          {amenities.slice(0, 4).map((amenity) => (
             <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
               {amenity}
             </span>
@@ -72,7 +100,7 @@ export function RoomCard({ room, onDetails, bookingQuery = "" }: RoomCardProps) 
         <div className="mt-5 flex items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-            <p className="text-xl font-semibold text-gray-950">{formatPrice(room.pricePerNight)}</p>
+            <p className="text-xl font-semibold text-gray-950">{formatPrice(pricePerNight)}</p>
           </div>
           <div className="flex gap-2">
             {onDetails ? (

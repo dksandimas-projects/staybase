@@ -28,7 +28,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 
 - [ ] Hero section — full-viewport, background photo, Apollo heading, tagline in Apollo Italic, single CTA button (Spark Orange)
 - [ ] Availability checker — check-in / check-out date pickers + guest count + Search button, rendered above the fold within or directly below the hero
-- [ ] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredRoomIds` — image, name, key amenities, price per night, Book Now CTA
+- [ ] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredRoomIds` — image, name, bed description, key amenities, price per night, Book Now CTA. Photos come from the room's **type** via `useRoomTypes` (per `plan/features/SETTINGS.md §Room Type Photos`) — `roomType.imageUrls[0]` is the hero image. Pricing + max guests come from the type via `getRoomTypeRates(roomTypes, room.type)` (per W3.6). Bed description + amenities come from the type via `roomTypes.find(t => t.value === room.type)?.X` (per W3.7).
 - [ ] Amenities grid — icon + title + description per item, content from `settings/websiteContent.homepage.amenities`
 - [ ] Services section — displays Tour Packages and Car Rentals as two service cards
   - [ ] Each card: icon, service name, short description, "Contact Us" CTA button → links to `/contact`
@@ -36,7 +36,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
   - [ ] No pricing displayed — inquiry-only
 - [ ] Spark Rewards promo section — marketing block promoting the loyalty program
   - [ ] Heading and short description editable from Settings → Website Content
-  - [ ] Perks list — icon + perk name + short description per item (e.g. "Earn Points", "Member Discounts", "Early Check-In"); editable from Settings
+  - [ ] Perks list — icon + perk name + short description per item from `settings/websiteContent.homepage.sparkRewards.perks` (e.g. "Earn Points", "Member Discounts", "Early Check-In"); editable from Settings, with disabled perks hidden
   - [ ] CTA: "Join Spark Rewards" → links to `/rewards`
   - [ ] If guest is already a logged-in member — show "Welcome back, [name]" with link to `/account/rewards` instead; hide perks list
   - [ ] Section hidden entirely if `isEnabled: false`
@@ -82,6 +82,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 ## References
 
 - Room card layout: `plan/features/ROOMS-PAGE.md`
+- Room type fields owned by Settings: `plan/features/ROOM-MANAGEMENT.md §W3.7`
 - Footer and Navbar: `plan/guest-app/CLAUDE.md`
 - Featured room + amenity content editing: `plan/features/SETTINGS.md §Website Content`
 - Design tokens: `plan/docs/FRONTEND.md`

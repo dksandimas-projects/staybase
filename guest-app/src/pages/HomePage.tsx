@@ -1,4 +1,4 @@
-import { BedDouble, Car, Gift, MapPin, Palmtree, Search, Sparkles, Star, Users } from "lucide-react";
+import { BedDouble, Car, Coffee, Gift, MapPin, Palmtree, Search, Sparkles, Star, Users, Wifi } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
@@ -11,7 +11,30 @@ import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
-import { amenities, homepageHeroImage, rewardPerks, services } from "../data/homepage";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { homepageHeroImage } from "../data/homepage";
+
+const amenityIcons = [BedDouble, MapPin, Users, Sparkles, Wifi, Coffee];
+
+function resolveIcon(name: string | undefined, fallbackIndex: number) {
+  const iconMap: Record<string, typeof BedDouble> = {
+    bed: BedDouble,
+    map: MapPin,
+    pin: MapPin,
+    users: Users,
+    people: Users,
+    sparkles: Sparkles,
+    star: Star,
+    wifi: Wifi,
+    coffee: Coffee,
+    car: Car,
+    palmtree: Palmtree,
+    gift: Gift
+  };
+  if (name && iconMap[name]) return iconMap[name];
+  return amenityIcons[fallbackIndex % amenityIcons.length];
+}
 
 function sectionTitle(eyebrow: string, title: string, description: string) {
   return (
@@ -27,16 +50,25 @@ export function HomePage() {
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading } = useRooms();
+  const { roomTypes } = useRoomTypes();
+  const { homepage } = usePublicSiteContent();
   const [checkIn, setCheckIn] = useState("2026-06-12");
   const [checkOut, setCheckOut] = useState("2026-06-14");
   const [guests, setGuests] = useState(2);
 
   const featured = useMemo(() => {
-    const ids = ["room-201", "room-204", "room-301"];
+    const ids = homepage.featuredRoomIds;
     const matched = rooms.filter((r) => ids.includes(r.id));
     if (matched.length > 0) return matched;
     return rooms.slice(0, 3);
-  }, [rooms]);
+  }, [rooms, homepage.featuredRoomIds]);
+
+  const heroPhoto = homepage.heroPhotoUrl || homepageHeroImage;
+  const visibleServices = homepage.services.filter((s) => s.isEnabled !== false);
+  const sparkRewardsVisible = homepage.sparkRewards.isEnabled !== false;
+  const visibleRewards = sparkRewardsVisible
+    ? homepage.sparkRewards.perks.filter((p) => p.isEnabled !== false)
+    : [];
 
   function searchAvailability() {
     const params = new URLSearchParams({
@@ -63,7 +95,7 @@ export function HomePage() {
 
       <section className="relative -mt-20 flex min-h-screen items-center justify-center overflow-hidden px-4 pt-20 text-center">
         <img
-          src={homepageHeroImage}
+          src={heroPhoto}
           alt="Warm boutique hotel pool surrounded by calm tropical greenery"
           className="absolute inset-0 h-full w-full object-cover"
         />
@@ -75,9 +107,9 @@ export function HomePage() {
           variants={fadeUp}
         >
           <p className="font-heading text-lg italic text-white/90 sm:text-2xl">{config.tagline}</p>
-          <h1 className="mt-6 font-heading text-5xl leading-tight text-white sm:text-7xl">Your sanctuary in Bohol</h1>
+          <h1 className="mt-6 font-heading text-5xl leading-tight text-white sm:text-7xl">{homepage.heroHeading}</h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
-            A warm, minimalist stay where comfort feels natural and care is quietly intentional.
+            {homepage.heroSubtext}
           </p>
           <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
             <PrimaryButton to="/book" className="shadow-lg">
@@ -160,7 +192,16 @@ export function HomePage() {
             {...entranceProps}
           >
             {featured.map((room) => (
-              <RoomCard key={room.id} room={room} />
+              <RoomCard
+                key={room.id}
+                room={room}
+                typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
+                typeMaxCapacity={getRoomTypeRates(roomTypes, room.type)?.maxCapacity}
+                typePricePerNight={getRoomTypeRates(roomTypes, room.type)?.pricePerNight}
+                typeBedDefinition={roomTypes.find((t) => t.value === room.type)?.bedDefinition}
+                typeDescription={roomTypes.find((t) => t.value === room.type)?.description}
+                typeAmenities={roomTypes.find((t) => t.value === room.type)?.amenities}
+              />
             ))}
           </motion.div>
         )}
@@ -177,9 +218,8 @@ export function HomePage() {
           variants={staggerContainer}
           {...entranceProps}
         >
-          {amenities.map((amenity, index) => {
-            const icons = [BedDouble, MapPin, Users, Sparkles];
-            const Icon = icons[index] ?? Sparkles;
+          {homepage.amenities.map((amenity, index) => {
+            const Icon = resolveIcon(amenity.icon, index);
 
             return (
               <motion.article
@@ -198,71 +238,81 @@ export function HomePage() {
         </motion.div>
       </section>
 
-      <section className="px-4 py-16 sm:px-6 lg:px-8">
-        {sectionTitle(
-          "Services",
-          "Plans made easier",
-          "For tours and transportation, our team can help coordinate the next step. No pressure, no hidden urgency."
-        )}
-        <motion.div
-          className="mx-auto mt-12 grid max-w-5xl gap-6 md:grid-cols-2"
-          variants={staggerContainer}
-          {...entranceProps}
-        >
-          {services.map((service, index) => {
-            const Icon = index === 0 ? Palmtree : Car;
+      {visibleServices.length > 0 && (
+        <section className="px-4 py-16 sm:px-6 lg:px-8">
+          {sectionTitle(
+            "Services",
+            "Plans made easier",
+            "For tours and transportation, our team can help coordinate the next step. No pressure, no hidden urgency."
+          )}
+          <motion.div
+            className="mx-auto mt-12 grid max-w-5xl gap-6 md:grid-cols-2"
+            variants={staggerContainer}
+            {...entranceProps}
+          >
+            {visibleServices.map((service, index) => {
+              const Icon = resolveIcon(service.icon, index);
 
-            return (
-              <motion.article
-                key={service.title}
-                className="rounded-card-lg bg-white p-6 shadow-sm ring-1 ring-gray-200"
-                variants={staggerChild}
-              >
-                <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary-light text-primary">
-                  <Icon size={22} />
-                </span>
-                <h3 className="mt-5 text-xl font-semibold text-gray-950">{service.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-gray-600">{service.description}</p>
-                <GhostButton to="/contact" className="mt-6">
-                  Contact us
-                </GhostButton>
-              </motion.article>
-            );
-          })}
-        </motion.div>
-      </section>
-
-      <section className="bg-sidebar px-4 py-16 text-white sm:px-6 lg:px-8">
-        <motion.div
-          className="mx-auto grid max-w-6xl gap-10 md:grid-cols-[1fr_1.1fr] md:items-center"
-          variants={fadeUp}
-          {...entranceProps}
-        >
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Spark Rewards</p>
-            <h2 className="mt-3 font-heading text-3xl sm:text-4xl">Stay often, feel known</h2>
-            <p className="mt-4 max-w-xl leading-7 text-gray-300">
-              Join the loyalty program built for repeat guests, corporate travelers, and anyone who wants a smoother next stay.
-            </p>
-            <PrimaryButton to="/rewards" className="mt-8">
-              <Gift size={18} />
-              Join Spark Rewards
-            </PrimaryButton>
-          </div>
-          <motion.div className="grid gap-3" variants={staggerContainer}>
-            {rewardPerks.map((perk) => (
-              <motion.div
-                key={perk}
-                className="flex items-center gap-3 rounded-card bg-white/10 p-4 ring-1 ring-white/10"
-                variants={staggerChild}
-              >
-                <Star size={18} className="text-primary" />
-                <span className="font-medium">{perk}</span>
-              </motion.div>
-            ))}
+              return (
+                <motion.article
+                  key={service.title}
+                  className="rounded-card-lg bg-white p-6 shadow-sm ring-1 ring-gray-200"
+                  variants={staggerChild}
+                >
+                  <span className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary-light text-primary">
+                    <Icon size={22} />
+                  </span>
+                  <h3 className="mt-5 text-xl font-semibold text-gray-950">{service.title}</h3>
+                  <p className="mt-3 text-sm leading-6 text-gray-600">{service.description}</p>
+                  <GhostButton to="/contact" className="mt-6">
+                    Contact us
+                  </GhostButton>
+                </motion.article>
+              );
+            })}
           </motion.div>
-        </motion.div>
-      </section>
+        </section>
+      )}
+
+      {sparkRewardsVisible && visibleRewards.length > 0 && (
+        <section className="bg-sidebar px-4 py-16 text-white sm:px-6 lg:px-8">
+          <motion.div
+            className="mx-auto grid max-w-6xl gap-10 md:grid-cols-[1fr_1.1fr] md:items-center"
+            variants={fadeUp}
+            {...entranceProps}
+          >
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-primary">Spark Rewards</p>
+              <h2 className="mt-3 font-heading text-3xl sm:text-4xl">{homepage.sparkRewards.heading}</h2>
+              <p className="mt-4 max-w-xl leading-7 text-gray-300">{homepage.sparkRewards.description}</p>
+              <PrimaryButton to="/rewards" className="mt-8">
+                <Gift size={18} />
+                Join Spark Rewards
+              </PrimaryButton>
+            </div>
+            <motion.div className="grid gap-3" variants={staggerContainer}>
+              {visibleRewards.map((perk) => {
+                const Icon = resolveIcon(perk.icon, 0);
+                return (
+                  <motion.div
+                    key={perk.title}
+                    className="flex items-center gap-3 rounded-card bg-white/10 p-4 ring-1 ring-white/10"
+                    variants={staggerChild}
+                  >
+                    <Icon size={18} className="text-primary" />
+                    <div>
+                      <p className="font-medium">{perk.title}</p>
+                      {perk.description && (
+                        <p className="text-sm text-gray-300">{perk.description}</p>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          </motion.div>
+        </section>
+      )}
 
       <section className="px-4 py-16 sm:px-6 lg:px-8">
         <motion.div

@@ -1,36 +1,126 @@
-import { useState, useEffect, useRef } from "react";
-import { useAdmin, IntercomMessage } from "../context/AdminContext";
-import { 
-  MessageSquare, Send, PhoneCall, PhoneOff, Phone, 
-  Sparkles, CheckCheck, User, Radio, Volume2, Mic 
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Link } from "react-router-dom";
+import { useAdmin, IntercomMessage, StoreOrder } from "../context/AdminContext";
+import { formatPrice } from "../utils/format";
+import { useBreakpoint } from "../utils/useBreakpoint";
+import { Drawer } from "../components/Drawer";
+import { IntercomChatPanel, type ThreadFilter } from "../components/IntercomChatPanel";
+import { StoreOrderMessageCard } from "../components/StoreOrderMessageCard";
+import { ArrowLeft } from "lucide-react";
+import {
+  MessageSquare, Send, PhoneOff, Phone,
+  ArchiveRestore, CheckCheck, CheckCircle2, User, Radio, RotateCcw, Volume2, Mic, ShoppingBag, ExternalLink,
+  Bell, BellOff
 } from "lucide-react";
 import config from "@config";
+
+const NOTIFICATION_MUTED_KEY = "intercom-notification-muted";
 
 export function IntercomInboxPage() {
   const { 
     intercoms, 
+    intercomThreads,
     sendIntercomMessage, 
     markChatAsRead, 
-    incomingCall, 
-    triggerIncomingCall, 
-    acceptCall, 
+    setIntercomResolved,
+    incomingCall,
+    acceptCall,
     declineCall,
-    rooms
+    rooms,
+    hotelConfig,
+    storeOrders
   } = useAdmin();
+  const { isMobile } = useBreakpoint();
 
   // Active chat selection
-  const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("305");
+  const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("");
+  const [threadFilter, setThreadFilter] = useState<"active" | "resolved">("active");
   const [replyText, setReplyText] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
+  const [isNotificationAudioUnlocked, setIsNotificationAudioUnlocked] = useState(false);
+  // Mobile chat drawer — opens when the user taps a thread on mobile.
+  // On desktop, the chat is always visible inline so this stays false.
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  // Per audit W2.9 / decision #97: per-staff mute preference stored
+  // in localStorage so the inbox stays quiet across reloads. Defaults
+  // to `false` (sounds on). The header exposes a Bell / BellOff
+  // toggle so the user can flip it without leaving the page.
+  const [isNotificationMuted, setIsNotificationMuted] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(NOTIFICATION_MUTED_KEY) === "true";
+  });
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const notificationBufferRef = useRef<AudioBuffer | null>(null);
+  const notificationInitializedRef = useRef(false);
+  const previousUnreadGuestIdsRef = useRef<Set<string>>(new Set());
+  const previousRingingCallKeyRef = useRef("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(NOTIFICATION_MUTED_KEY, isNotificationMuted ? "true" : "false");
+  }, [isNotificationMuted]);
 
   // Call timer simulation state
   const [callDuration, setCallDuration] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto scroll to bottom of chat
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [intercoms, selectedRoomNumber]);
+    const updateFocusState = () => {
+      setIsInboxFocused(!document.hidden && document.hasFocus());
+    };
+
+    window.addEventListener("focus", updateFocusState);
+    window.addEventListener("blur", updateFocusState);
+    document.addEventListener("visibilitychange", updateFocusState);
+
+    return () => {
+      window.removeEventListener("focus", updateFocusState);
+      window.removeEventListener("blur", updateFocusState);
+      document.removeEventListener("visibilitychange", updateFocusState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlockNotificationAudio = () => {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+      void audioContextRef.current.resume().then(() => setIsNotificationAudioUnlocked(true));
+    };
+
+    window.addEventListener("pointerdown", unlockNotificationAudio, { once: true });
+    window.addEventListener("keydown", unlockNotificationAudio, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockNotificationAudio);
+      window.removeEventListener("keydown", unlockNotificationAudio);
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const soundUrl = hotelConfig?.notificationSoundUrl;
+    notificationBufferRef.current = null;
+    if (!soundUrl || !audioContextRef.current || !isNotificationAudioUnlocked) return;
+
+    let isCancelled = false;
+    fetch(soundUrl)
+      .then((response) => response.arrayBuffer())
+      .then((arrayBuffer) => audioContextRef.current?.decodeAudioData(arrayBuffer))
+      .then((audioBuffer) => {
+        if (!isCancelled && audioBuffer) {
+          notificationBufferRef.current = audioBuffer;
+        }
+      })
+      .catch(() => {
+        notificationBufferRef.current = null;
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hotelConfig?.notificationSoundUrl, isNotificationAudioUnlocked]);
 
   // Handle active call duration timer
   useEffect(() => {
@@ -56,7 +146,7 @@ export function IntercomInboxPage() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyText.trim()) return;
+    if (!replyText.trim() || !selectedRoomNumber) return;
 
     sendIntercomMessage(selectedRoomNumber, replyText.trim(), "front-desk");
     setReplyText("");
@@ -65,7 +155,12 @@ export function IntercomInboxPage() {
   const handleSelectRoom = (roomNum: string) => {
     setSelectedRoomNumber(roomNum);
     markChatAsRead(roomNum);
+    if (isMobile) {
+      setIsMobileChatOpen(true);
+    }
   };
+
+  const closeMobileChat = () => setIsMobileChatOpen(false);
 
   // Helper: Format duration seconds to MM:SS
   const formatTime = (secs: number) => {
@@ -74,11 +169,100 @@ export function IntercomInboxPage() {
     return `${m}:${s}`;
   };
 
-  // Get active rooms list that have intercom history or are currently occupied
-  const activeRooms = rooms.filter(r => r.status === "occupied" || intercoms[r.roomNumber]);
+  const playNotificationSound = () => {
+    const audioContext = audioContextRef.current;
+    const notificationBuffer = notificationBufferRef.current;
+    if (!audioContext || !notificationBuffer || audioContext.state !== "running") return;
+
+    const source = audioContext.createBufferSource();
+    source.buffer = notificationBuffer;
+    source.connect(audioContext.destination);
+    source.start();
+  };
+
+  // Get rooms with active occupancy or intercom history, then filter by resolved state
+  const allThreadRooms = useMemo(
+    () => rooms.filter((room) => room.status === "occupied" || intercoms[room.roomNumber]),
+    [intercoms, rooms]
+  );
+  const filteredRooms = useMemo(
+    () => allThreadRooms.filter((room) => {
+      const isResolved = !!intercomThreads[room.roomNumber]?.resolved;
+      return threadFilter === "resolved" ? isResolved : !isResolved;
+    }),
+    [allThreadRooms, intercomThreads, threadFilter]
+  );
 
   // Current chat logs
   const activeChatMessages = intercoms[selectedRoomNumber] || [];
+  const selectedThread = intercomThreads[selectedRoomNumber];
+  const isSelectedThreadResolved = !!selectedThread?.resolved;
+  const unreadGuestMessages = useMemo(
+    () => Object.values(intercoms)
+      .flat()
+      .filter((message) => message.sender === "guest" && !message.isRead),
+    [intercoms]
+  );
+  const unreadGuestCount = unreadGuestMessages.length;
+  const selectedUnreadSignature = activeChatMessages
+    .filter((message) => message.sender === "guest" && !message.isRead)
+    .map((message) => message.id)
+    .join(",");
+  const storeOrdersByRef = useMemo(
+    () => new Map(storeOrders.map((order) => [order.orderRef, order])),
+    [storeOrders]
+  );
+
+  useEffect(() => {
+    // On mobile, the user explicitly taps a thread to open it. Auto-
+    // selecting the first thread would open the chat drawer on every
+    // mount and on every rooms/filter change, which is jarring.
+    if (isMobile) return;
+    if (selectedRoomNumber && filteredRooms.some((room) => room.roomNumber === selectedRoomNumber)) return;
+    setSelectedRoomNumber(filteredRooms[0]?.roomNumber || "");
+  }, [filteredRooms, isMobile, selectedRoomNumber]);
+
+  useEffect(() => {
+    if (!isInboxFocused || !selectedRoomNumber || !selectedUnreadSignature) return;
+    void markChatAsRead(selectedRoomNumber);
+  }, [isInboxFocused, markChatAsRead, selectedRoomNumber, selectedUnreadSignature]);
+
+  useEffect(() => {
+    const baseTitle = "Intercom Inbox";
+    document.title = unreadGuestCount > 0 ? `(${unreadGuestCount}) ${baseTitle}` : baseTitle;
+
+    return () => {
+      document.title = config.brandName;
+    };
+  }, [unreadGuestCount]);
+
+  useEffect(() => {
+    const currentUnreadGuestIds = new Set(unreadGuestMessages.map((message) => message.id));
+    const hasNewUnreadGuestMessage = unreadGuestMessages.some((message) => !previousUnreadGuestIdsRef.current.has(message.id));
+
+    if (notificationInitializedRef.current && hasNewUnreadGuestMessage && !isInboxFocused && !isNotificationMuted) {
+      playNotificationSound();
+    }
+
+    notificationInitializedRef.current = true;
+    previousUnreadGuestIdsRef.current = currentUnreadGuestIds;
+  }, [isInboxFocused, isNotificationMuted, unreadGuestMessages]);
+
+  useEffect(() => {
+    const ringingCallKey = incomingCall?.status === "ringing" ? incomingCall.roomId : "";
+    const hasNewRingingCall = ringingCallKey && ringingCallKey !== previousRingingCallKeyRef.current;
+
+    if (hasNewRingingCall && !isInboxFocused) {
+      playNotificationSound();
+    }
+
+    previousRingingCallKeyRef.current = ringingCallKey;
+  }, [incomingCall?.roomId, incomingCall?.status, isInboxFocused]);
+
+  const handleToggleResolved = async () => {
+    if (!selectedRoomNumber) return;
+    await setIntercomResolved(selectedRoomNumber, !isSelectedThreadResolved);
+  };
 
   return (
     <div className="space-y-8 font-body">
@@ -87,16 +271,23 @@ export function IntercomInboxPage() {
           <h1 className="font-heading text-3xl text-gray-950 lowercase">intercom & reception</h1>
           <p className="text-xs text-gray-500 mt-1">Review active room chat logs, dispatch quick-request orders, and process voice signaling calls.</p>
         </div>
-
-        {/* Demo trigger call controls */}
-        <button
-          onClick={() => triggerIncomingCall(selectedRoomNumber, "Alex Mercer")}
-          className="min-h-[44px] px-5 inline-flex items-center gap-2 rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
-          disabled={!!incomingCall}
-        >
-          <PhoneCall size={14} className="animate-pulse" />
-          Simulate Call from Room {selectedRoomNumber}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsNotificationMuted((prev) => !prev)}
+            className={`inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition ${
+              isNotificationMuted
+                ? "border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
+                : "border-primary/30 bg-primary-light text-primary-dark hover:bg-primary/10"
+            }`}
+            title={isNotificationMuted ? "Notification sound is muted. Click to unmute." : "Notification sound is on. Click to mute."}
+            aria-label={isNotificationMuted ? "Unmute notification sound" : "Mute notification sound"}
+            aria-pressed={isNotificationMuted}
+          >
+            {isNotificationMuted ? <BellOff size={14} /> : <Bell size={14} />}
+            {isNotificationMuted ? "Sound Off" : "Sound On"}
+          </button>
+        </div>
       </header>
 
       {/* WebRTC Signaling Call Banner Overlay */}
@@ -132,13 +323,13 @@ export function IntercomInboxPage() {
             {incomingCall.status === "ringing" ? (
               <>
                 <button
-                  onClick={declineCall}
+                  onClick={() => void declineCall()}
                   className="min-h-[44px] px-5 rounded-lg border border-red-200 text-xs font-bold text-red-600 hover:bg-red-50 transition"
                 >
                   Ignore Call
                 </button>
                 <button
-                  onClick={acceptCall}
+                  onClick={() => void acceptCall()}
                   className="min-h-[44px] px-6 rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
                 >
                   <Volume2 size={14} />
@@ -154,7 +345,7 @@ export function IntercomInboxPage() {
                 </div>
                 
                 <button
-                  onClick={declineCall}
+                  onClick={() => void declineCall()}
                   className="min-h-[44px] px-6 rounded-lg bg-red-650 hover:bg-red-700 text-xs font-bold text-white shadow-sm transition flex items-center gap-1.5"
                 >
                   <PhoneOff size={14} />
@@ -170,13 +361,34 @@ export function IntercomInboxPage() {
       <div className="grid gap-6 lg:grid-cols-[280px_1fr] min-h-[500px]">
         {/* Left: Chat thread list */}
         <div className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 flex flex-col gap-3">
-          <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2">Active Channels</h2>
+          <div className="flex items-center justify-between gap-2 px-2">
+            <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Channels</h2>
+            <span className="text-[10px] font-bold text-gray-400">{filteredRooms.length}</span>
+          </div>
+
+          <div className="grid grid-cols-2 rounded-lg bg-gray-100 p-1">
+            {(["active", "resolved"] as const).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setThreadFilter(filter)}
+                className={`min-h-[36px] rounded-md text-[10px] font-bold capitalize transition ${
+                  threadFilter === filter
+                    ? "bg-white text-primary shadow-sm"
+                    : "text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                {filter}
+              </button>
+            ))}
+          </div>
           
           <div className="space-y-1.5 overflow-y-auto max-h-[440px]">
-            {activeRooms.map((room) => {
+            {filteredRooms.map((room) => {
               const messages = intercoms[room.roomNumber] || [];
               const hasUnread = messages.some(m => !m.isRead && m.sender === "guest");
               const lastMessage = messages[messages.length - 1];
+              const thread = intercomThreads[room.roomNumber];
 
               return (
                 <button
@@ -203,93 +415,70 @@ export function IntercomInboxPage() {
                     <p className="text-[10px] text-gray-500 font-medium truncate mt-0.5">
                       {lastMessage ? lastMessage.text : "No messages yet."}
                     </p>
+                    {thread?.resolved && (
+                      <span className="mt-1 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-green-700">
+                        <CheckCircle2 size={10} />
+                        Resolved
+                      </span>
+                    )}
                   </div>
                 </button>
               );
             })}
-          </div>
-        </div>
 
-        {/* Right: Message dialog box */}
-        <div className="rounded-card bg-white shadow-sm ring-1 ring-gray-200 flex flex-col justify-between overflow-hidden min-h-[460px]">
-          {/* Header */}
-          <div className="bg-gray-50/50 border-b border-gray-200 p-4 flex justify-between items-center">
-            <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">
-                {selectedRoomNumber}
-              </div>
-              <div>
-                <h3 className="font-bold text-xs text-gray-900 leading-none">Intercom Feed Room {selectedRoomNumber}</h3>
-                <span className="text-[9px] text-gray-400 capitalize mt-1 inline-block">Active stay room link</span>
-              </div>
-            </div>
-
-            <span className="inline-flex items-center gap-1 text-[10px] text-green-700 font-bold bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-              <CheckCheck size={10} />
-              Operational feed online
-            </span>
-          </div>
-
-          {/* Message History Viewport */}
-          <div className="flex-1 p-6 space-y-4 overflow-y-auto max-h-[340px] bg-gray-50/20">
-            {activeChatMessages.length > 0 ? (
-              activeChatMessages.map((msg) => {
-                const isFd = msg.sender === "front-desk";
-
-                return (
-                  <div key={msg.id} className={`flex gap-3 max-w-[85%] ${isFd ? "ml-auto flex-row-reverse" : "mr-auto"}`}>
-                    <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                      isFd ? "bg-primary/10 text-primary" : "bg-gray-150 text-gray-650"
-                    }`}>
-                      {isFd ? "FD" : <User size={12} />}
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className={`rounded-xl p-3 text-xs leading-relaxed ${
-                        isFd 
-                          ? "bg-primary text-white font-medium shadow-sm rounded-tr-none" 
-                          : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
-                      }`}>
-                        {msg.text}
-                      </div>
-                      
-                      <p className={`text-[8px] text-gray-400 font-semibold px-1 ${isFd ? "text-right" : "text-left"}`}>
-                        {msg.timestamp}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center text-gray-400 space-y-2">
-                <MessageSquare size={32} className="text-gray-300" />
-                <p className="text-xs italic">No message feeds recorded for Room {selectedRoomNumber}. Send a greeting below.</p>
+            {filteredRooms.length === 0 && (
+              <div className="rounded-lg border border-dashed border-gray-200 px-3 py-8 text-center">
+                <MessageSquare size={22} className="mx-auto text-gray-300" />
+                <p className="mt-2 text-xs font-semibold text-gray-500">
+                  No {threadFilter} conversations.
+                </p>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
-
-          {/* Reply Form */}
-          <form onSubmit={handleSendMessage} className="border-t border-gray-200 p-4 flex gap-3 bg-white">
-            <input
-              type="text"
-              required
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              placeholder={`Type reply statement to Room ${selectedRoomNumber}...`}
-              className="min-h-[44px] flex-1 rounded-lg border border-gray-250 bg-white px-3 text-xs outline-none focus:border-primary"
-            />
-            
-            <button
-              type="submit"
-              className="min-h-[44px] px-5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm flex items-center gap-1.5 transition active:scale-95"
-            >
-              <Send size={12} />
-              Send
-            </button>
-          </form>
         </div>
+
+        {/* Right: Message dialog box — desktop only. On mobile, the chat
+            is shown in a full-screen Drawer (see below) so the user
+            sees a single-pane thread list and opens a chat on tap. */}
+        {!isMobile && (
+          <IntercomChatPanel
+            roomNumber={selectedRoomNumber}
+            messages={activeChatMessages}
+            storeOrdersByRef={storeOrdersByRef}
+            threadFilter={threadFilter as ThreadFilter}
+            isResolved={isSelectedThreadResolved}
+            onToggleResolved={() => void handleToggleResolved()}
+            replyText={replyText}
+            onReplyTextChange={setReplyText}
+            onSend={() => handleSendMessage({ preventDefault: () => undefined } as unknown as React.FormEvent)}
+            variant="panel"
+          />
+        )}
       </div>
+
+      {/* Mobile chat drawer — full-screen bottom sheet with a
+          'Back to threads' button. The bottom tab bar still
+          floats over it (per the persistent-inside-drawers rule). */}
+      <Drawer
+        title={selectedRoomNumber ? `Room ${selectedRoomNumber}` : "Chat"}
+        open={isMobile && isMobileChatOpen && Boolean(selectedRoomNumber)}
+        onClose={closeMobileChat}
+      >
+        <IntercomChatPanel
+          roomNumber={selectedRoomNumber}
+          messages={activeChatMessages}
+          storeOrdersByRef={storeOrdersByRef}
+          threadFilter={threadFilter as ThreadFilter}
+          isResolved={isSelectedThreadResolved}
+          onToggleResolved={() => void handleToggleResolved()}
+          replyText={replyText}
+          onReplyTextChange={setReplyText}
+          onSend={() => handleSendMessage({ preventDefault: () => undefined } as unknown as React.FormEvent)}
+          onBack={closeMobileChat}
+          BackIcon={ArrowLeft}
+          variant="drawer"
+        />
+      </Drawer>
     </div>
   );
 }

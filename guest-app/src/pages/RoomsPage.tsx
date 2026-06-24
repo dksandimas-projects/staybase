@@ -1,8 +1,8 @@
 import { Filter, SlidersHorizontal, Users } from "lucide-react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fadeUp, staggerContainer, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
+import { fadeUp, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Drawer } from "../components/Drawer";
@@ -14,6 +14,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
@@ -21,6 +22,7 @@ export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
   const { rooms, loading } = useRooms();
+  const { roomTypes } = useRoomTypes();
   const [selectedType, setSelectedType] = useState("all");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
@@ -32,11 +34,13 @@ export function RoomsPage() {
     () =>
       rooms.filter((room) => {
         const typeMatches = selectedType === "all" || room.type === selectedType;
-        return room.isActive && typeMatches && room.maxCapacity >= guests;
+        const typeRates = getRoomTypeRates(roomTypes, room.type);
+        return room.isActive && typeMatches && (typeRates?.maxCapacity ?? 0) >= guests;
       }),
-    [rooms, guests, selectedType]
+    [rooms, roomTypes, guests, selectedType]
   );
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
+  const selectedRoomType = selectedRoom ? roomTypes.find((t) => t.value === selectedRoom.type) : undefined;
   const bookingQuery = `&checkIn=${checkIn}&checkOut=${checkOut}`;
   const entranceProps = shouldReduceMotion
     ? {}
@@ -214,16 +218,36 @@ export function RoomsPage() {
               ))}
             </div>
           ) : filteredRooms.length > 0 ? (
-            <motion.div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" variants={staggerContainer} {...entranceProps}>
-              {filteredRooms.map((room) => (
-                <RoomCard
-                  key={room.id}
-                  room={room}
-                  bookingQuery={bookingQuery}
-                  onDetails={() => setSelectedRoomId(room.id)}
-                />
-              ))}
-            </motion.div>
+            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {filteredRooms.map((room) => {
+                  const rates = getRoomTypeRates(roomTypes, room.type);
+                  const typeDetails = roomTypes.find((t) => t.value === room.type);
+                  return (
+                    <motion.div
+                      key={room.id}
+                      layout
+                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
+                      animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+                      transition={{ duration: 0.25, ease: "easeOut" }}
+                    >
+                      <RoomCard
+                        room={room}
+                        typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
+                        typeMaxCapacity={rates?.maxCapacity}
+                        typePricePerNight={rates?.pricePerNight}
+                        typeBedDefinition={typeDetails?.bedDefinition}
+                        typeDescription={typeDetails?.description}
+                        typeAmenities={typeDetails?.amenities}
+                        bookingQuery={bookingQuery}
+                        onDetails={() => setSelectedRoomId(room.id)}
+                      />
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
           ) : (
             <motion.div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200" variants={fadeUp} {...entranceProps}>
               <h2 className="text-xl font-semibold text-gray-950">No rooms match your filters</h2>
@@ -252,7 +276,11 @@ export function RoomsPage() {
         {selectedRoom ? (
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
-              <img src={selectedRoom.imageUrls[0]} alt={selectedRoom.name} className="h-72 w-full object-cover" />
+              <img
+                src={getRoomTypeImages(roomTypes, selectedRoom.type)[0]}
+                alt={selectedRoom.name}
+                className="h-72 w-full object-cover"
+              />
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <StatusBadge label={selectedRoom.status === "available" ? "Available" : "Blocked"} status={selectedRoom.status} />
@@ -260,25 +288,25 @@ export function RoomsPage() {
                 {DEFAULT_ROOM_TYPES.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
               </span>
             </div>
-            <p className="leading-7 text-gray-600">{selectedRoom.description}</p>
+            <p className="leading-7 text-gray-600">{selectedRoomType?.description || "—"}</p>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Beds</p>
-                <p className="mt-1 font-semibold text-gray-950">{selectedRoom.bedDefinition}</p>
+                <p className="mt-1 font-semibold text-gray-950">{selectedRoomType?.bedDefinition || "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Capacity</p>
-                <p className="mt-1 font-semibold text-gray-950">Up to {selectedRoom.maxCapacity}</p>
+                <p className="mt-1 font-semibold text-gray-950">Up to {selectedRoomType?.maxCapacity ?? "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Weekend</p>
-                <p className="mt-1 font-semibold text-gray-950">{formatPrice(selectedRoom.weekendRate)}</p>
+                <p className="mt-1 font-semibold text-gray-950">{formatPrice(selectedRoomType?.weekendRate ?? 0)}</p>
               </div>
             </div>
             <div>
               <h3 className="font-semibold text-gray-950">Amenities</h3>
               <div className="mt-3 flex flex-wrap gap-2">
-                {selectedRoom.amenities.map((amenity) => (
+                {(selectedRoomType?.amenities ?? []).map((amenity) => (
                   <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
                     {amenity}
                   </span>
@@ -288,7 +316,7 @@ export function RoomsPage() {
             <div className="flex items-end justify-between gap-4 border-t border-gray-200 pt-5">
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-                <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedRoom.pricePerNight)}</p>
+                <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedRoomType?.pricePerNight ?? 0)}</p>
               </div>
               <PrimaryButton to={`/book?roomId=${selectedRoom.id}${bookingQuery}`}>Book this room</PrimaryButton>
             </div>

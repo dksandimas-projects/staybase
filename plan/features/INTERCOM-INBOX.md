@@ -25,38 +25,39 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 ## UI Checklist
 
 - [ ] Conversation list (left panel) — one row per room with active messages: room number, last message preview, timestamp, unread count badge
-- [ ] Active / Resolved tabs — filter conversations by resolution status
+- [x] Active / Resolved tabs — filter conversations by resolution status
 - [ ] Thread view (right panel) — full message thread for selected room
 - [ ] Messages: guest messages (left-aligned), front desk messages (right-aligned)
 - [ ] Quick request messages render as styled chip/badge — visually distinct from plain text (e.g. pill with icon, different background)
-- [ ] Store order messages render as a distinct order card — shows items, total, payment method, with a "View Order" link to Store Management
+- [x] Store order messages render as a distinct order card — shows items, total, payment method, with a "View Order" link to Store Management
 - [ ] New store order notification sound — same Web Audio API pattern as intercom messages
 - [ ] Reply input + Send button at bottom of thread
-- [ ] Mark as Resolved button — available on active conversations
-- [ ] Notification sound — plays on **every** incoming guest message when inbox tab is not focused (not just the first per conversation)
-- [ ] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
-- [ ] Unread indicator badge on sidebar nav item
+- [x] Mark as Resolved button — available on active conversations
+- [x] Notification sound — plays on **every** incoming guest message when inbox tab is not focused (not just the first per conversation)
+- [x] Tab title unread count — e.g. `(3) Intercom Inbox` when there are unread messages
+- [x] Unread indicator badge on sidebar nav item
 - [ ] Timestamps on all messages
-- [ ] **Incoming call notification** — when `calls/{roomId}.status == "ringing"`, show a persistent banner at the top of the inbox: "📞 Room {X} — {guestName} is calling" with Accept and Decline buttons
-  - [ ] Accept: creates WebRTC answer, writes to `calls/{roomId}.answer`, begins audio connection
-  - [ ] Decline: updates `calls/{roomId}.status = "ended"`
-  - [ ] Active call UI: banner changes to "🔴 On call — Room {X}" with a Hang Up button
-  - [ ] Hang up: closes RTCPeerConnection, updates `calls/{roomId}.status = "ended"`
-  - [ ] Notification sound plays on incoming call (same Web Audio API pattern as messages)
+- [x] **Incoming call notification** — when `calls/{roomId}.status == "ringing"`, show a persistent banner at the top of the inbox with room, guest, Accept, and Decline actions
+  - [x] Accept: creates WebRTC answer, writes to `calls/{roomId}.answer`, begins audio connection
+  - [x] Decline: updates `calls/{roomId}.status = "ended"`
+  - [x] Active call UI: banner changes to connected state with call duration and Hang Up action
+  - [x] Hang up: closes RTCPeerConnection, updates `calls/{roomId}.status = "ended"`
+  - [x] Notification sound plays on incoming call using the same Web Audio API pattern as messages when the inbox is not focused and audio is unlocked
 
 ## Data & Logic Checklist
 
 - [ ] `onSnapshot` on all `intercoms/{roomId}/messages` — or aggregate listener across rooms — real-time
 - [ ] Mark messages as read: `updateDoc` on message documents where `isRead: false` AND `sender: "guest"` when thread is opened/viewed
 - [ ] Reply: `addDoc` to `intercoms/{roomId}/messages` with `sender: "front-desk"`, `isRead: true`
-- [ ] Resolved status: stored as a flag on the room-level intercom document or managed by filtering — conversations with no unread messages and manually resolved
-- [ ] Notification sound implementation:
+- [ ] Preserve early check-in request metadata from guest messages so staff-specific actions can be layered in later
+- [x] Resolved status: stored as a flag on the room-level intercom document or managed by filtering — conversations with no unread messages and manually resolved
+- [x] Notification sound implementation:
   - Audio context unlocked on first user interaction after login (browser autoplay policy)
   - Sound plays on every incoming guest message — not just the first per conversation
   - Sound only plays when inbox route is not the active focused tab
   - Sound file URL from `settings/hotelConfig.notificationSoundUrl` (Firebase Storage)
   - Use Web Audio API — no extra library
-- [ ] Tab title: update `document.title` dynamically with unread count
+- [x] Tab title: update `document.title` dynamically with unread count
 - [ ] Unread count: count of messages where `sender: "guest"` AND `isRead: false` across all rooms
 
 ## Edge Cases & States
@@ -74,13 +75,17 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [ ] Open thread — guest messages marked as read, unread count clears
 - [ ] Reply from inbox — appears in guest's chat view in real-time
 - [ ] Quick request chip from guest renders as badge/chip (not plain text) in thread
+- [x] Store order message renders as a rich order card with items, total, payment method, and Store Management link
 - [ ] Notification sound plays when new message arrives on a different browser tab
 - [ ] Notification sound does NOT play when inbox tab is active and focused
-- [ ] Incoming call banner appears and notification sound plays regardless of which tab is focused
+- [ ] Incoming call banner appears when ringing; notification sound plays when inbox is not focused after audio unlock
 - [ ] Accept call → audio connects within 3 seconds on same network
 - [ ] Tab title shows unread count when messages are unread
 - [ ] Mark as Resolved moves conversation to Resolved tab
-- [ ] Sidebar nav badge shows correct unread count
+- [x] Sidebar nav badge shows correct unread count
+- [ ] **Sound mute toggle** *(Per `DECISIONS-FEATURES.md #97`)* — `Bell` / `BellOff` icon in inbox header. Persists in `localStorage` under `notif_sound_muted`. `playNotificationSound` early-returns when muted.
+- [ ] **Second concurrent call wins** *(Per `DECISIONS-FEATURES.md #94`)* — accepting a new call writes `status: "ended", endedAt: serverTimestamp()` to the old call doc, then accepts the new one. The previous guest's UI sees the call end via snapshot listener.
+- [ ] **Cancellation messages render as greyed-out "Cancelled" cards** *(Per `DECISIONS-FEATURES.md #96`)* — distinct from placed-order cards in both guest chat and admin inbox.
 
 ## References
 

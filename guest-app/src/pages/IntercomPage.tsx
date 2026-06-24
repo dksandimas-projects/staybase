@@ -3,23 +3,46 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { 
   Send, Phone, ShoppingBag, MessageSquare, Plus, Minus, Trash2, X, 
   ChevronRight, PhoneOff, Mic, MicOff, AlertCircle, Sparkles, 
-  Upload, Info, Check, HelpCircle, Loader2
+  Upload, Info, Check, Loader2
 } from "lucide-react";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where
+} from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import config from "@config";
-import { brandAsset } from "../utils/brand";
+import { db, storage } from "../firebase/config";
 import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 
+const rtcConfiguration: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
+
 // Interfaces
 interface Message {
   id: string;
-  sender: "guest" | "staff";
+  sender: "guest" | "front-desk";
   text: string;
   timestamp: string;
+  isRead?: boolean;
   isQuickRequest?: boolean;
   isStoreOrder?: boolean;
   orderRef?: string;
+  isEarlyCheckInRequest?: boolean;
   isCancelledOrder?: boolean;
 }
 
@@ -37,7 +60,18 @@ interface CartItem {
   quantity: number;
 }
 
+type StorePaymentMethod = "cod" | "add-to-bill" | "gcash";
+
+interface StorePaymentMethodConfig {
+  method: StorePaymentMethod;
+  label: string;
+  qrUrl?: string;
+  accountInfo?: string;
+  isEnabled: boolean;
+}
+
 interface ActiveOrder {
+  orderId: string;
   orderRef: string;
   items: CartItem[];
   totalAmount: number;
@@ -45,41 +79,6 @@ interface ActiveOrder {
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
   estimatedDelivery: string;
 }
-
-const mockStoreItems: StoreItem[] = [
-  {
-    id: "item-1",
-    name: "San Miguel Pale Pilsen (Can)",
-    description: "Ice-cold local Filipino pilsner beer, 330ml.",
-    price: 120,
-    stock: 15,
-    imageUrl: "https://images.unsplash.com/photo-1608270586620-248524c67de9?auto=format&fit=crop&q=80&w=256&h=256"
-  },
-  {
-    id: "item-2",
-    name: "Spark Bottled Mineral Water",
-    description: "Premium purified drinking water in an eco-friendly glass bottle.",
-    price: 60,
-    stock: null, // Unlimited
-    imageUrl: "https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&q=80&w=256&h=256"
-  },
-  {
-    id: "item-3",
-    name: "Bohol Peanut Kisses",
-    description: "Famous crisp Bohol peanut cookies shaped like Chocolate Hills.",
-    price: 80,
-    stock: 5,
-    imageUrl: "https://images.unsplash.com/photo-1590080875515-8a3a8dc5735e?auto=format&fit=crop&q=80&w=256&h=256"
-  },
-  {
-    id: "item-4",
-    name: "Branded Beach Towel",
-    description: "Extra large micro-fiber beach towel with premium hotel embroidering.",
-    price: 450,
-    stock: 0, // Out of stock
-    imageUrl: "https://images.unsplash.com/photo-1576426863848-c28f0ca9ca68?auto=format&fit=crop&q=80&w=256&h=256"
-  }
-];
 
 export function IntercomPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -95,15 +94,34 @@ export function IntercomPage() {
   const [activeTab, setActiveTab] = useState<"chat" | "shop">("chat");
 
   // Chat States
+  const INITIAL_MESSAGE_LIMIT = 50;
+  const LOAD_MORE_STEP = 30;
+
   const [messages, setMessages] = useState<Message[]>([]);
+  const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
+  const [messageLimit, setMessageLimit] = useState(INITIAL_MESSAGE_LIMIT);
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [typedMessage, setTypedMessage] = useState<string>("");
-  const [typingState, setTypingState] = useState<boolean>(false);
+  const [isRoomLoading, setIsRoomLoading] = useState<boolean>(true);
+  const [isValidRoom, setIsValidRoom] = useState<boolean>(false);
+  const [roomNumber, setRoomNumber] = useState<string>(roomId || "");
+  const [quickRequests, setQuickRequests] = useState<string[]>([]);
+  const [isStoreEnabled, setIsStoreEnabled] = useState<boolean>(true);
+  const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
+  const [messageError, setMessageError] = useState<string>("");
+  const [storeError, setStoreError] = useState<string>("");
+  const [unreadFromFrontDesk, setUnreadFromFrontDesk] = useState(0);
 
   // Cart & Shop States
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showCartDrawer, setShowCartDrawer] = useState<boolean>(false);
   const [checkoutStep, setCheckoutStep] = useState<"cart" | "payment">("cart");
-  const [paymentMethod, setPaymentMethod] = useState<"cod" | "bill" | "gcash">("cod");
+  const [paymentMethod, setPaymentMethod] = useState<StorePaymentMethod>("cod");
+  const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodConfig[]>([
+    { method: "cod", label: "Cash on Delivery", isEnabled: true },
+    { method: "add-to-bill", label: "Room Bill", isEnabled: true },
+    { method: "gcash", label: "GCash Wallet", isEnabled: true }
+  ]);
   
   // GCash Screenshot State
   const [gcashFile, setGcashFile] = useState<File | null>(null);
@@ -119,21 +137,305 @@ export function IntercomPage() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [callError, setCallError] = useState<string>("");
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const guestPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const guestMediaStreamRef = useRef<MediaStream | null>(null);
+  const guestRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const callUnsubscribeRef = useRef<(() => void) | null>(null);
+  const iceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const processedIceIdsRef = useRef<Set<string>>(new Set());
+
+  const stopGuestCallResources = () => {
+    callUnsubscribeRef.current?.();
+    callUnsubscribeRef.current = null;
+    iceUnsubscribeRef.current?.();
+    iceUnsubscribeRef.current = null;
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+    processedIceIdsRef.current.clear();
+    guestPeerConnectionRef.current?.close();
+    guestPeerConnectionRef.current = null;
+    guestMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    guestMediaStreamRef.current = null;
+    if (guestRemoteAudioRef.current) {
+      guestRemoteAudioRef.current.pause();
+      guestRemoteAudioRef.current.srcObject = null;
+      guestRemoteAudioRef.current = null;
+    }
+  };
 
   // Init logic
   useEffect(() => {
-    const savedName = sessionStorage.getItem("intercom_guest_name");
-    if (savedName) {
-      setGuestName(savedName);
-      setShowNamePrompt(false);
-      initializeChat(savedName);
-    }
+    setGuestName("");
+    setNameInput("");
+    setShowNamePrompt(true);
+  }, [roomId]);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRoomAndSettings() {
+      if (!roomId) {
+        setIsRoomLoading(false);
+        setIsValidRoom(false);
+        return;
+      }
+
+      setIsRoomLoading(true);
+      try {
+        let resolvedRoomNumber = roomId;
+        const directRoom = await getDoc(doc(db, "rooms", roomId));
+        if (directRoom.exists()) {
+          resolvedRoomNumber = directRoom.data().roomNumber || roomId;
+        } else {
+          const roomsQuery = query(collection(db, "rooms"), where("roomNumber", "==", roomId), limit(1));
+          const roomsSnapshot = await getDocs(roomsQuery);
+          if (!roomsSnapshot.empty) {
+            resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
+          } else {
+            const tokenQuery = query(collection(db, "rooms"), where("qrToken", "==", roomId), limit(1));
+            const tokenSnapshot = await getDocs(tokenQuery);
+            if (tokenSnapshot.empty) {
+              if (!isMounted) return;
+              setIsValidRoom(false);
+              setIsRoomLoading(false);
+              return;
+            }
+            resolvedRoomNumber = tokenSnapshot.docs[0].data().roomNumber || roomId;
+          }
+          if (!resolvedRoomNumber) {
+            if (!isMounted) return;
+            setIsValidRoom(false);
+            setIsRoomLoading(false);
+            return;
+          }
+        }
+
+        const [hotelConfigDoc, storeConfigDoc] = await Promise.all([
+          getDoc(doc(db, "settings", "hotelConfig")),
+          getDoc(doc(db, "settings", "storeConfig"))
+        ]);
+
+        if (!isMounted) return;
+        setRoomNumber(resolvedRoomNumber);
+        setIsValidRoom(true);
+        setQuickRequests(
+          hotelConfigDoc.exists() && Array.isArray(hotelConfigDoc.data().intercomQuickRequests)
+            ? hotelConfigDoc.data().intercomQuickRequests.filter(Boolean)
+            : ["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"]
+        );
+        const storeConfig = storeConfigDoc.exists() ? storeConfigDoc.data() : null;
+        setIsStoreEnabled(storeConfig ? storeConfig.isEnabled !== false : true);
+        if (storeConfig && Array.isArray(storeConfig.paymentMethods)) {
+          const enabledPaymentMethods = storeConfig.paymentMethods
+            .filter((method: any) => method && method.isEnabled !== false)
+            .map((method: any) => ({
+              method: method.method,
+              label: method.label || method.method,
+              qrUrl: method.qrUrl || "",
+              accountInfo: method.accountInfo || "",
+              isEnabled: true
+            }))
+            .filter((method: StorePaymentMethodConfig) => ["cod", "add-to-bill", "gcash"].includes(method.method));
+          setStorePaymentMethods(enabledPaymentMethods);
+          if (enabledPaymentMethods.length > 0) {
+            setPaymentMethod(enabledPaymentMethods[0].method);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load intercom room settings:", error);
+        if (isMounted) {
+          setIsValidRoom(false);
+        }
+      } finally {
+        if (isMounted) {
+          setIsRoomLoading(false);
+        }
+      }
+    }
+
+    void loadRoomAndSettings();
+    return () => {
+      isMounted = false;
+    };
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!isValidRoom || !roomNumber) return;
+
+    const messagesQuery = query(
+      collection(db, "intercoms", roomNumber, "messages"),
+      orderBy("timestamp", "asc"),
+      limit(messageLimit)
+    );
+
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        const liveMessages = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          const messageDate = data.timestamp?.toDate ? data.timestamp.toDate() : null;
+          return {
+            id: docSnap.id,
+            sender: data.sender || "guest",
+            text: data.text || "",
+            timestamp: messageDate
+              ? messageDate.toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" })
+              : "",
+            isRead: !!data.isRead,
+            isQuickRequest: !!data.isQuickRequest,
+            isStoreOrder: !!data.isStoreOrder,
+            orderRef: data.orderRef || undefined,
+            isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
+          } satisfies Message;
+        });
+
+        setAllMessagesLoaded(snapshot.docs.length < messageLimit);
+        setMessages(liveMessages);
+
+        // Only mark as read when guest is on the Chat tab
+        if (activeTab === "chat") {
+          const unreadFrontDeskMessages = liveMessages.filter(
+            (message) => message.sender === "front-desk" && !message.isRead
+          );
+          unreadFrontDeskMessages.forEach((message) => {
+            void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+          });
+          setUnreadFromFrontDesk(0);
+        } else {
+          // On Shop tab — count unread for the pulse indicator
+          const count = liveMessages.filter(
+            (message) => message.sender === "front-desk" && !message.isRead
+          ).length;
+          setUnreadFromFrontDesk(count);
+        }
+      },
+      (error) => {
+        console.error("Failed to listen to intercom messages:", error);
+        setMessageError("We could not load the chat. Please refresh or call the front desk.");
+      }
+    );
+
+    return unsubscribe;
+  }, [isValidRoom, roomNumber, messageLimit, activeTab]);
+
+  // Mark unread FD messages as read when guest switches to Chat tab
+  useEffect(() => {
+    if (activeTab !== "chat" || !roomNumber || !isValidRoom) return;
+    const unreadOnChat = messages.filter((m) => m.sender === "front-desk" && !m.isRead);
+    if (unreadOnChat.length === 0) return;
+    unreadOnChat.forEach((message) => {
+      void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
+    });
+    setUnreadFromFrontDesk(0);
+  }, [activeTab, messages, roomNumber, isValidRoom]);
+
+  const handleLoadMore = () => {
+    setMessageLimit((prev) => prev + LOAD_MORE_STEP);
+  };
+
+  useEffect(() => {
+    if (!isStoreEnabled) {
+      setStoreItems([]);
+      return;
+    }
+
+    const storeItemsQuery = query(
+      collection(db, "storeItems"),
+      where("isActive", "==", true)
+    );
+
+    const unsubscribe = onSnapshot(
+      storeItemsQuery,
+      (snapshot) => {
+        setStoreItems(snapshot.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              name: data.name || "Store item",
+              description: data.description || "",
+              price: Number(data.price || 0),
+              stock: data.stock ?? null,
+              imageUrl: data.imageUrl || data.photoUrl || ""
+            };
+          })
+          .sort((a, b) => a.name.localeCompare(b.name)));
+      },
+      (error) => {
+        console.error("Failed to listen to store items:", error);
+        setStoreError("The shop could not load items. Please try again later.");
+      }
+    );
+
+    return unsubscribe;
+  }, [isStoreEnabled]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typingState]);
+  }, [messages]);
+
+  useEffect(() => {
+    if (!isStoreEnabled && activeTab === "shop") {
+      setActiveTab("chat");
+    }
+  }, [activeTab, isStoreEnabled]);
+
+  useEffect(() => {
+    if (!activeOrder || !roomNumber || activeOrder.status === "delivered" || activeOrder.status === "cancelled") return;
+
+    const { orderId, orderRef } = activeOrder;
+    let isCancelled = false;
+
+    const refreshOrderStatus = async () => {
+      try {
+        const response = await fetch("/api/store/order-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderId, orderRef, roomNumber })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Unable to refresh order status.");
+        }
+
+        if (isCancelled) return;
+        const nextStatus = result.data?.status as ActiveOrder["status"] | undefined;
+        if (!nextStatus || !["placed", "confirmed", "out-for-delivery", "delivered", "cancelled"].includes(nextStatus)) return;
+        setActiveOrder((currentOrder) => (
+          currentOrder?.orderId === orderId
+            ? { ...currentOrder, status: nextStatus }
+            : currentOrder
+        ));
+      } catch (error) {
+        console.error("Failed to refresh store order status:", error);
+      }
+    };
+
+    void refreshOrderStatus();
+    const refreshInterval = window.setInterval(() => {
+      void refreshOrderStatus();
+    }, 10000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(refreshInterval);
+    };
+  }, [activeOrder?.orderId, activeOrder?.orderRef, activeOrder?.status, roomNumber]);
 
   // Call timer effect
   useEffect(() => {
@@ -148,18 +450,11 @@ export function IntercomPage() {
     return () => clearInterval(interval);
   }, [callState]);
 
-  // Initialize Chat Thread with welcome message
-  const initializeChat = (name: string) => {
-    const defaultMessages: Message[] = [
-      {
-        id: "welcome-1",
-        sender: "staff",
-        text: `Mabuhay ${name}! Welcome to ${config.brandName}. This is the Front Desk. How can we help you in Room ${roomId || "guest"} today?`,
-        timestamp: getFormattedTime()
-      }
-    ];
-    setMessages(defaultMessages);
-  };
+  useEffect(() => {
+    return () => {
+      stopGuestCallResources();
+    };
+  }, []);
 
   const getFormattedTime = () => {
     return new Date().toLocaleTimeString(config.locale, {
@@ -175,105 +470,202 @@ export function IntercomPage() {
 
     const formattedName = nameInput.trim();
     setGuestName(formattedName);
-    sessionStorage.setItem("intercom_guest_name", formattedName);
     setShowNamePrompt(false);
-    initializeChat(formattedName);
   };
 
   // Text message sending
-  const handleSendMessage = (e: React.FormEvent) => {
+  const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean; isCancelledOrder?: boolean }) => {
+    if (!roomNumber || !guestName.trim()) return;
+    setMessageError("");
+
+    try {
+      await setDoc(doc(db, "intercoms", roomNumber), {
+        roomId: roomNumber,
+        roomNumber,
+        guestName,
+        resolved: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      await addDoc(collection(db, "intercoms", roomNumber, "messages"), {
+        text,
+        sender: "guest",
+        guestName,
+        timestamp: serverTimestamp(),
+        isRead: false,
+        isQuickRequest: !!options?.isQuickRequest,
+        isStoreOrder: !!options?.isStoreOrder,
+        orderRef: options?.orderRef || "",
+        isEarlyCheckInRequest: !!options?.isEarlyCheckInRequest
+      });
+    } catch (error) {
+      console.error("Failed to send intercom message:", error);
+      setMessageError("Your message was not sent. Please try again or call the front desk.");
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!typedMessage.trim()) return;
 
-    const newMessage: Message = {
-      id: `msg-${Date.now()}`,
-      sender: "guest",
-      text: typedMessage.trim(),
-      timestamp: getFormattedTime()
-    };
-
-    setMessages(prev => [...prev, newMessage]);
+    const nextMessage = typedMessage.trim();
     setTypedMessage("");
-
-    // Simulate front desk reply
-    triggerFrontDeskAutoReply(
-      `Thank you, ${guestName}. We have received your message and a front desk agent will get back to you shortly.`
-    );
+    await sendGuestMessage(nextMessage);
   };
 
   // Quick Request Chips
-  const handleQuickRequest = (requestLabel: string) => {
-    const newMessage: Message = {
-      id: `req-${Date.now()}`,
-      sender: "guest",
-      text: `Requested: ${requestLabel}`,
-      timestamp: getFormattedTime(),
-      isQuickRequest: true
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-
-    // Simulate custom replies per request type
-    let responseText = `Received! We have dispatched our housekeeping team to deliver ${requestLabel} to Room ${roomId || ""} shortly. Let us know if you need anything else.`;
-    if (requestLabel === "Do Not Disturb") {
-      responseText = "Understood. We have updated your room status to Do Not Disturb and notified the housekeeping crew.";
-    } else if (requestLabel === "Room Cleaning") {
-      responseText = "Housekeeping team has been scheduled for your room. They will arrive shortly to clean your room.";
-    }
-
-    triggerFrontDeskAutoReply(responseText);
+  const handleQuickRequest = async (requestLabel: string) => {
+    await sendGuestMessage(requestLabel, { isQuickRequest: true });
   };
 
-  // Simulate auto response
-  const triggerFrontDeskAutoReply = (replyText: string) => {
-    setTypingState(true);
-    setTimeout(() => {
-      setTypingState(false);
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `reply-${Date.now()}`,
-          sender: "staff",
-          text: replyText,
-          timestamp: getFormattedTime()
-        }
-      ]);
-    }, 2000);
-  };
-
-  // Voice Call Simulation Actions
+  // Voice Call Signaling Actions
   const handleStartCall = async () => {
+    if (!roomNumber || callState !== "idle") return;
+
     setCallError("");
     setCallState("requesting");
 
     try {
-      // Prompt for real microphone permission to show hardware interactivity
+      const callRef = doc(db, "calls", roomNumber);
+      const existingCall = await getDoc(callRef);
+      const existingStatus = existingCall.exists() ? existingCall.data().status : "";
+      if (existingStatus === "ringing" || existingStatus === "active") {
+        setCallError("A front desk call is already active for this room. Please wait or send a message.");
+        setCallState("idle");
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      guestMediaStreamRef.current = stream;
       setMediaStream(stream);
-      
+      setIsMuted(false);
+
+      const peerConnection = new RTCPeerConnection(rtcConfiguration);
+      guestPeerConnectionRef.current = peerConnection;
+      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        void addDoc(collection(db, "calls", roomNumber, "iceCandidates"), {
+          candidate: event.candidate.toJSON(),
+          from: "guest",
+          createdAt: serverTimestamp()
+        });
+      };
+      peerConnection.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        if (!remoteStream) return;
+        const remoteAudio = guestRemoteAudioRef.current ?? new Audio();
+        remoteAudio.autoplay = true;
+        remoteAudio.srcObject = remoteStream;
+        guestRemoteAudioRef.current = remoteAudio;
+        void remoteAudio.play().catch(() => {
+          // Browser autoplay policy can still require guest interaction.
+        });
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      await setDoc(callRef, {
+        offer: {
+          type: offer.type,
+          sdp: offer.sdp
+        },
+        answer: null,
+        status: "ringing",
+        guestName,
+        startedAt: serverTimestamp(),
+        endedAt: null
+      });
+
+      callUnsubscribeRef.current = onSnapshot(callRef, async (snapshot) => {
+        if (!snapshot.exists()) return;
+        const data = snapshot.data();
+
+        if (data.status === "active") {
+          if (callTimeoutRef.current) {
+            clearTimeout(callTimeoutRef.current);
+            callTimeoutRef.current = null;
+          }
+          if (data.answer && !peerConnection.currentRemoteDescription) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+          setCallState("connected");
+          return;
+        }
+
+        if (data.status === "ended") {
+          stopGuestCallResources();
+          setMediaStream(null);
+          setCallState("ended");
+          setTimeout(() => setCallState("idle"), 1000);
+        }
+      });
+
+      iceUnsubscribeRef.current = onSnapshot(
+        collection(db, "calls", roomNumber, "iceCandidates"),
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type !== "added") return;
+            const data = change.doc.data();
+            if (data.from !== "staff" || processedIceIdsRef.current.has(change.doc.id)) return;
+            processedIceIdsRef.current.add(change.doc.id);
+            if (data.candidate) {
+              void peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+          });
+        }
+      );
+
+      callTimeoutRef.current = setTimeout(async () => {
+        const latestCall = await getDoc(callRef);
+        if (latestCall.exists() && latestCall.data().status === "ringing") {
+          await updateDoc(callRef, {
+            status: "ended",
+            endedAt: serverTimestamp()
+          });
+          setCallError("No answer from the front desk yet. Please try again or send a message.");
+        }
+      }, 30000);
+
       setCallState("ringing");
-      // Simulate ringing period
-      setTimeout(() => {
-        setCallState("connected");
-      }, 3000);
 
     } catch (err: any) {
       console.warn("Microphone access denied or not supported:", err);
-      setCallError(`Could not access microphone. Fallback direct calling enabled.`);
+      stopGuestCallResources();
+      setMediaStream(null);
+      setCallError("Could not access microphone. Fallback direct calling enabled.");
       setCallState("ended");
-      
-      // Auto dismiss ended state after 5 seconds to show tel: link fallback
       setTimeout(() => {
         setCallState("idle");
       }, 5000);
     }
   };
 
-  const handleEndCall = () => {
-    if (mediaStream) {
-      mediaStream.getTracks().forEach(track => track.stop());
-      setMediaStream(null);
+  const handleEndCall = async () => {
+    if (roomNumber) {
+      try {
+        await updateDoc(doc(db, "calls", roomNumber), {
+          status: "ended",
+          endedAt: serverTimestamp()
+        });
+        // Per W2.10 / decision #98: delete the call doc after a 30s
+        // grace period (both sides have observed status: "ended").
+        // Prevents the calls collection from growing unboundedly.
+        setTimeout(() => {
+          if (roomNumber) {
+            deleteDoc(doc(db, "calls", roomNumber)).catch((err) => {
+              console.error("Error deleting call doc:", err);
+            });
+          }
+        }, 30000);
+      } catch (error) {
+        console.error("Error ending call:", error);
+      }
     }
+    stopGuestCallResources();
+    setMediaStream(null);
     setCallState("ended");
     setTimeout(() => {
       setCallState("idle");
@@ -281,8 +673,9 @@ export function IntercomPage() {
   };
 
   const toggleMute = () => {
-    if (mediaStream) {
-      mediaStream.getAudioTracks().forEach(track => {
+    const activeStream = mediaStream || guestMediaStreamRef.current;
+    if (activeStream) {
+      activeStream.getAudioTracks().forEach(track => {
         track.enabled = !track.enabled;
       });
       setIsMuted(prev => !prev);
@@ -327,6 +720,16 @@ export function IntercomPage() {
     return cart.reduce((sum, item) => sum + (item.item.price * item.quantity), 0);
   };
 
+  const getPaymentLabel = (method: StorePaymentMethod) => {
+    const configuredMethod = storePaymentMethods.find(payment => payment.method === method);
+    if (configuredMethod?.label) return configuredMethod.label;
+    if (method === "cod") return "Cash on Delivery";
+    if (method === "add-to-bill") return "Room Bill";
+    return "GCash Transfer";
+  };
+
+  const gcashPaymentConfig = storePaymentMethods.find(method => method.method === "gcash");
+
   // GCash file input change
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -337,9 +740,14 @@ export function IntercomPage() {
   };
 
   // Order placement
-  const handleCheckoutSubmit = (e: React.FormEvent) => {
+  const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
+
+    if (!storePaymentMethods.some(method => method.method === paymentMethod)) {
+      setStoreError("That payment method is no longer available. Please choose another option.");
+      return;
+    }
 
     if (paymentMethod === "gcash" && !gcashFile) {
       alert("Please upload your GCash payment confirmation screenshot.");
@@ -347,45 +755,54 @@ export function IntercomPage() {
     }
 
     setIsUploadingProof(true);
+    setStoreError("");
 
-    setTimeout(() => {
+    try {
+      let paymentProofUrl = "";
+      if (paymentMethod === "gcash" && gcashFile) {
+        const proofRef = ref(storage, `store-orders/${roomNumber}/payment-proof/${Date.now()}-${gcashFile.name}`);
+        const uploadResult = await uploadBytes(proofRef, gcashFile);
+        paymentProofUrl = await getDownloadURL(uploadResult.ref);
+      }
+
+      const response = await fetch("/api/store/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: roomNumber,
+          roomNumber,
+          guestName,
+          items: cart.map(({ item, quantity }) => ({ itemId: item.id, quantity })),
+          paymentMethod,
+          paymentProofUrl
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to place store order.");
+      }
+
       setIsUploadingProof(false);
-      const orderRef = `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
-      const total = getCartSubtotal();
+      const orderRef = result.data.orderRef;
+      const total = result.data.totalAmount;
       const itemsText = cart.map(i => `${i.quantity}x ${i.item.name}`).join(", ");
-      
-      const paymentLabels: Record<string, string> = {
-        cod: "Cash on Delivery",
-        bill: "Room Bill",
-        gcash: "GCash Transfer"
-      };
+      const paymentLabel = getPaymentLabel(paymentMethod);
 
       const newOrder: ActiveOrder = {
+        orderId: result.data.orderId,
         orderRef,
         items: [...cart],
         totalAmount: total,
-        paymentMethod: paymentLabels[paymentMethod],
+        paymentMethod: paymentLabel,
         status: "placed",
         estimatedDelivery: "15-20 mins"
       };
 
       setActiveOrder(newOrder);
 
-      // Post order summary message into chat thread
-      const orderMessage: Message = {
-        id: `ord-msg-${Date.now()}`,
-        sender: "guest",
-        text: `🛒 Ordered items: ${itemsText}. Total: ${formatPrice(total)} via ${paymentLabels[paymentMethod]}. Ref: ${orderRef}`,
-        timestamp: getFormattedTime(),
-        isStoreOrder: true,
-        orderRef
-      };
-
-      setMessages(prev => [...prev, orderMessage]);
-
-      // Trigger automatic front desk confirmation response
-      triggerFrontDeskAutoReply(
-        `Order received! Reference ${orderRef} is placed and our team is gathering your items for delivery to Room ${roomId || ""}.`
+      void sendGuestMessage(
+        `Ordered items: ${itemsText}. Total: ${formatPrice(total)} via ${paymentLabel}. Ref: ${orderRef}`,
+        { isStoreOrder: true, orderRef }
       );
 
       // Clean cart drawer and states
@@ -394,70 +811,50 @@ export function IntercomPage() {
       setGcashPreview(null);
       setShowCartDrawer(false);
       setCheckoutStep("cart");
-    }, 1500);
+    } catch (error: any) {
+      console.error("Failed to place store order:", error);
+      setStoreError(error.message || "Unable to place order. Please try again.");
+      setIsUploadingProof(false);
+    }
   };
 
   // Cancel order
-  const handleCancelOrder = () => {
+  const handleCancelOrder = async () => {
     if (!activeOrder) return;
 
-    const updatedOrder: ActiveOrder = {
-      ...activeOrder,
-      status: "cancelled"
-    };
+    setStoreError("");
 
-    setActiveOrder(updatedOrder);
-
-    // Post cancel message to thread
-    const cancelMessage: Message = {
-      id: `ord-cancel-${Date.now()}`,
-      sender: "guest",
-      text: `🚫 Cancelled Order Ref: ${activeOrder.orderRef}`,
-      timestamp: getFormattedTime(),
-      isCancelledOrder: true,
-      orderRef: activeOrder.orderRef
-    };
-
-    setMessages(prev => [...prev, cancelMessage]);
-
-    triggerFrontDeskAutoReply(
-      `Understood. Order ${activeOrder.orderRef} has been cancelled successfully.`
-    );
-  };
-
-  // Debug tracker simulation
-  const handleSimulateNextStatus = () => {
-    if (!activeOrder) return;
-    
-    const statusSequence: ActiveOrder["status"][] = ["placed", "confirmed", "out-for-delivery", "delivered"];
-    const currentIndex = statusSequence.indexOf(activeOrder.status);
-    
-    if (currentIndex !== -1 && currentIndex < statusSequence.length - 1) {
-      const nextStatus = statusSequence[currentIndex + 1];
-      
-      const statusLabels: Record<string, string> = {
-        confirmed: "Confirmed & Packing",
-        "out-for-delivery": "Out for Delivery",
-        delivered: "Delivered successfully"
-      };
+    try {
+      const response = await fetch("/api/store/cancel-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: activeOrder.orderId,
+          orderRef: activeOrder.orderRef,
+          roomNumber,
+          cancellationReason: "Guest cancelled from intercom"
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Unable to cancel store order.");
+      }
 
       const updatedOrder: ActiveOrder = {
         ...activeOrder,
-        status: nextStatus
+        status: "cancelled"
       };
-      
+
       setActiveOrder(updatedOrder);
 
-      // Trigger status update message from staff
-      setMessages(prev => [
-        ...prev,
-        {
-          id: `status-update-${Date.now()}`,
-          sender: "staff",
-          text: `📦 Update on order ${activeOrder.orderRef}: Status changed to "${statusLabels[nextStatus]}".`,
-          timestamp: getFormattedTime()
-        }
-      ]);
+      void sendGuestMessage(`Cancelled Order Ref: ${activeOrder.orderRef}`, {
+        isStoreOrder: true,
+        isCancelledOrder: true,
+        orderRef: activeOrder.orderRef
+      });
+    } catch (error: any) {
+      console.error("Failed to cancel store order:", error);
+      setStoreError(error.message || "Unable to cancel order. Please contact the front desk.");
     }
   };
 
@@ -468,6 +865,58 @@ export function IntercomPage() {
     if (status === "delivered") return 3;
     return -1; // Cancelled
   };
+
+  const displayMessages: Message[] = messages.length > 0
+    ? messages
+    : [
+        {
+          id: "local-welcome",
+          sender: "front-desk",
+          text: `Mabuhay${guestName ? ` ${guestName}` : ""}! You're connected to the front desk for Room ${roomNumber || roomId || "guest"}. How can we help?`,
+          timestamp: getFormattedTime(),
+          isRead: true
+        }
+      ];
+
+  if (isRoomLoading) {
+    return (
+      <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
+        <div className="w-full max-w-md bg-white shadow-2xl flex flex-col border-x border-gray-200">
+          <div className="bg-gray-950 p-4 space-y-3">
+            <div className="h-9 w-44 rounded bg-white/10 animate-pulse" />
+            <div className="h-4 w-64 rounded bg-white/10 animate-pulse" />
+          </div>
+          <div className="flex-1 p-4 space-y-4">
+            <div className="h-16 w-4/5 rounded-2xl bg-gray-100 animate-pulse" />
+            <div className="h-14 w-2/3 rounded-2xl bg-gray-100 animate-pulse ml-auto" />
+            <div className="h-16 w-3/4 rounded-2xl bg-gray-100 animate-pulse" />
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isValidRoom) {
+    return (
+      <main className="min-h-screen bg-gray-100 flex justify-center items-center font-body p-6">
+        <div className="w-full max-w-md rounded-card-lg bg-white p-6 text-center shadow-xl ring-1 ring-gray-200">
+          <div className="mx-auto h-12 w-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center">
+            <AlertCircle size={24} />
+          </div>
+          <h1 className="mt-4 font-heading text-2xl lowercase text-gray-950">Invalid room QR code</h1>
+          <p className="mt-2 text-sm leading-relaxed text-gray-600">
+            This intercom link does not match an active room. Please call or visit the front desk so we can help you.
+          </p>
+          <a
+            href={`tel:${config.frontDeskPhone}`}
+            className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-bold text-white"
+          >
+            Call Front Desk
+          </a>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
@@ -484,7 +933,7 @@ export function IntercomPage() {
                 {config.brandName} Call
               </span>
               <p className="mt-6 text-xl font-heading tracking-tight lowercase">
-                Room {roomId || "Guest"}
+                Room {roomNumber || roomId || "Guest"}
               </p>
             </div>
 
@@ -556,10 +1005,12 @@ export function IntercomPage() {
                 {roomId || "G"}
               </div>
               <div>
-                <h1 className="font-bold text-sm leading-tight text-white">Room {roomId || "Guest"}</h1>
+                <h1 className="font-bold text-sm leading-tight text-white">Room {roomNumber || roomId || "Guest"}</h1>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
-                  <span className="text-[10px] text-gray-400 font-semibold tracking-wide">Connected to Front Desk</span>
+                  <span className={`h-1.5 w-1.5 rounded-full ${isOffline ? "bg-amber-400" : "bg-green-500 animate-pulse"}`} />
+                  <span className="text-[10px] text-gray-400 font-semibold tracking-wide">
+                    {isOffline ? "Offline - reconnecting" : "Connected to Front Desk"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -595,7 +1046,7 @@ export function IntercomPage() {
           <div className="flex border-t border-white/10 pt-2.5 mt-1">
             <button
               onClick={() => setActiveTab("chat")}
-              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
+              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 relative ${
                 activeTab === "chat" 
                   ? "border-primary text-primary" 
                   : "border-transparent text-gray-400 hover:text-gray-200"
@@ -603,18 +1054,25 @@ export function IntercomPage() {
             >
               <MessageSquare size={14} />
               Chat Support
+              {unreadFromFrontDesk > 0 && activeTab !== "chat" && (
+                <span className="absolute -top-1 right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-pulse">
+                  {unreadFromFrontDesk > 9 ? "9+" : unreadFromFrontDesk}
+                </span>
+              )}
             </button>
-            <button
-              onClick={() => setActiveTab("shop")}
-              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
-                activeTab === "shop" 
-                  ? "border-primary text-primary" 
-                  : "border-transparent text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              <ShoppingBag size={14} />
-              {config.storeName}
-            </button>
+            {isStoreEnabled && (
+              <button
+                onClick={() => setActiveTab("shop")}
+                className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
+                  activeTab === "shop"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                <ShoppingBag size={14} />
+                {config.storeName}
+              </button>
+            )}
           </div>
         </header>
 
@@ -627,7 +1085,29 @@ export function IntercomPage() {
               
               {/* Message scroll thread */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0 select-text">
-                {messages.map((msg) => (
+                {isOffline && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                    You're offline. New messages will sync when your connection returns.
+                  </div>
+                )}
+
+                {messageError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                    {messageError}
+                  </div>
+                )}
+
+                {!allMessagesLoaded && messages.length >= messageLimit && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    className="mx-auto block min-h-[32px] px-4 rounded-lg border border-gray-200 bg-white text-[10px] font-bold text-gray-500 hover:bg-gray-50 hover:text-primary transition"
+                  >
+                    Load earlier messages
+                  </button>
+                )}
+
+                {displayMessages.map((msg) => (
                   <div
                     key={msg.id}
                     className={`flex flex-col max-w-[85%] ${
@@ -640,12 +1120,17 @@ export function IntercomPage() {
                         msg.sender === "guest"
                           ? msg.isStoreOrder
                             ? "bg-primary-light text-primary-dark border border-primary/20 rounded-tr-none font-medium"
-                            : msg.isCancelledOrder
-                              ? "bg-red-50 text-red-700 border border-red-200 rounded-tr-none font-medium"
-                              : "bg-primary text-white rounded-tr-none"
+                            : msg.isQuickRequest
+                              ? "bg-primary-light text-primary-dark border border-primary/20 rounded-tr-none font-bold"
+                              : msg.isCancelledOrder
+                                ? "bg-red-50 text-red-700 border border-red-200 rounded-tr-none font-medium"
+                                : "bg-primary text-white rounded-tr-none"
                           : "bg-white text-gray-900 border border-gray-200 rounded-tl-none"
                       }`}
                     >
+                      {msg.isQuickRequest && (
+                        <span className="mb-1 block text-[10px] uppercase tracking-wider opacity-70">Quick request</span>
+                      )}
                       {msg.text}
                     </div>
 
@@ -656,38 +1141,28 @@ export function IntercomPage() {
                   </div>
                 ))}
 
-                {/* Typing status indicator */}
-                {typingState && (
-                  <div className="flex flex-col items-start mr-auto max-w-[85%]">
-                    <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-4 py-3 flex gap-1 items-center shadow-sm">
-                      <span className="h-1.5 w-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="h-1.5 w-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="h-1.5 w-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
-                  </div>
-                )}
-                
                 <div ref={messagesEndRef} />
               </div>
 
               {/* Chat footer with quick requests and free-text inputs */}
               <div className="bg-white border-t border-gray-150 p-3.5 space-y-3">
                 
-                {/* Quick requests drawer row */}
-                <div className="space-y-1.5">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Quick Requests</p>
-                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none snap-x">
-                    {["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"].map((req) => (
-                      <button
-                        key={req}
-                        onClick={() => handleQuickRequest(req)}
-                        className="snap-start shrink-0 min-h-[32px] px-3.5 rounded-full border border-gray-250 bg-white hover:bg-gray-50 active:scale-95 text-[11px] font-semibold text-gray-700 shadow-sm transition"
-                      >
-                        {req}
-                      </button>
-                    ))}
+                {quickRequests.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Quick Requests</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none snap-x">
+                      {quickRequests.map((req) => (
+                        <button
+                          key={req}
+                          onClick={() => handleQuickRequest(req)}
+                          className="snap-start shrink-0 min-h-[32px] px-3.5 rounded-full border border-gray-250 bg-white hover:bg-gray-50 active:scale-95 text-[11px] font-semibold text-gray-700 shadow-sm transition"
+                        >
+                          {req}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Standard Free text form */}
                 <form onSubmit={handleSendMessage} className="flex gap-2 items-center">
@@ -769,9 +1244,8 @@ export function IntercomPage() {
                         <span>Est. Delivery: <strong>{activeOrder.estimatedDelivery}</strong></span>
                       </div>
 
-                      {/* Controls to simulate or cancel */}
-                      <div className="flex gap-2 pt-1.5 justify-end">
-                        {activeOrder.status === "placed" && (
+                      {activeOrder.status === "placed" && (
+                        <div className="flex gap-2 pt-1.5 justify-end">
                           <button
                             type="button"
                             onClick={handleCancelOrder}
@@ -779,18 +1253,8 @@ export function IntercomPage() {
                           >
                             Cancel Order
                           </button>
-                        )}
-                        {activeOrder.status !== "delivered" && (
-                          <button
-                            type="button"
-                            onClick={handleSimulateNextStatus}
-                            className="min-h-[36px] px-3.5 rounded-lg bg-primary text-xs font-semibold text-white hover:bg-primary-dark transition flex items-center gap-1"
-                          >
-                            Simulate Progress
-                            <ChevronRight size={12} />
-                          </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-xs text-red-700 font-medium">
@@ -807,13 +1271,27 @@ export function IntercomPage() {
                   {config.storeName}
                 </h2>
                 <p className="text-xs text-gray-600 leading-relaxed">
-                  Browse amenities and local Bohol goods. Items will be delivered directly to Room {roomId || ""}.
+                  Browse amenities and local Bohol goods. Items will be delivered directly to Room {roomNumber || roomId || ""}.
                 </p>
               </div>
 
               {/* Items Grid */}
               <div className="grid gap-4 sm:grid-cols-2">
-                {mockStoreItems.map((item) => {
+                {storeError && (
+                  <div className="sm:col-span-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                    {storeError}
+                  </div>
+                )}
+
+                {storeItems.length === 0 && !storeError && (
+                  <div className="sm:col-span-2 rounded-card bg-white p-6 text-center shadow-sm ring-1 ring-gray-200">
+                    <ShoppingBag size={28} className="mx-auto text-gray-300" />
+                    <p className="mt-3 text-sm font-bold text-gray-900">The shop is currently unavailable.</p>
+                    <p className="mt-1 text-xs text-gray-500">Please send a chat message for anything you need.</p>
+                  </div>
+                )}
+
+                {storeItems.map((item) => {
                   const cartQty = cart.find(i => i.item.id === item.id)?.quantity || 0;
                   const isOutOfStock = item.stock === 0;
 
@@ -825,11 +1303,17 @@ export function IntercomPage() {
                       <div className="space-y-2">
                         {/* Image placeholder simulation */}
                         <div className="h-28 w-full rounded-lg overflow-hidden bg-gray-100 border border-gray-100 relative">
-                          <img
-                            src={item.imageUrl}
-                            alt={item.name}
-                            className="h-full w-full object-cover"
-                          />
+                          {item.imageUrl ? (
+                            <img
+                              src={item.imageUrl}
+                              alt={item.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-primary-light text-primary">
+                              <ShoppingBag size={24} />
+                            </div>
+                          )}
                           <div className="absolute top-2 left-2">
                             {isOutOfStock ? (
                               <span className="inline-flex items-center rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 ring-1 ring-inset ring-red-600/10">
@@ -1066,85 +1550,52 @@ export function IntercomPage() {
                   {/* Payment selection list */}
                   <div className="space-y-3">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Select Payment Option</p>
-                    
-                    {/* COD Option */}
-                    <label 
-                      className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
-                        paymentMethod === "cod" 
-                          ? "border-primary bg-primary-light/10" 
-                          : "border-gray-250 hover:bg-gray-50"
-                      }`}
-                    >
-                      <input 
-                        type="radio" 
-                        name="payment"
-                        value="cod"
-                        checked={paymentMethod === "cod"}
-                        onChange={() => setPaymentMethod("cod")}
-                        className="sr-only"
-                      />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-gray-900">Cash on Delivery (COD)</p>
-                          <p className="text-[10px] text-gray-500 font-medium mt-0.5">Pay cash when items are delivered.</p>
-                        </div>
-                        {paymentMethod === "cod" && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
-                      </div>
-                    </label>
 
-                    {/* Add to Bill Option */}
-                    <label 
-                      className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
-                        paymentMethod === "bill" 
-                          ? "border-primary bg-primary-light/10" 
-                          : "border-gray-250 hover:bg-gray-50"
-                      }`}
-                    >
-                      <input 
-                        type="radio" 
-                        name="payment"
-                        value="bill"
-                        checked={paymentMethod === "bill"}
-                        onChange={() => setPaymentMethod("bill")}
-                        className="sr-only"
-                      />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-gray-900">Charge to Room Bill</p>
-                          <p className="text-[10px] text-gray-500 font-medium mt-0.5">Bill collected during your final hotel checkout.</p>
-                        </div>
-                        {paymentMethod === "bill" && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
+                    {storePaymentMethods.length === 0 ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-[11px] font-medium text-amber-800">
+                        Store checkout is temporarily unavailable because no payment method is enabled. Please message the front desk.
                       </div>
-                    </label>
+                    ) : (
+                      storePaymentMethods.map((method) => {
+                        const helperText =
+                          method.method === "cod"
+                            ? "Pay cash when items are delivered."
+                            : method.method === "add-to-bill"
+                              ? "This will be added to your room bill and collected at checkout."
+                              : "Instant transfer. Proof upload required.";
 
-                    {/* GCash Option */}
-                    <label 
-                      className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
-                        paymentMethod === "gcash" 
-                          ? "border-primary bg-primary-light/10" 
-                          : "border-gray-250 hover:bg-gray-50"
-                      }`}
-                    >
-                      <input 
-                        type="radio" 
-                        name="payment"
-                        value="gcash"
-                        checked={paymentMethod === "gcash"}
-                        onChange={() => setPaymentMethod("gcash")}
-                        className="sr-only"
-                      />
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-gray-900">GCash Mobile Wallet</p>
-                          <p className="text-[10px] text-gray-500 font-medium mt-0.5">Instant transfer. Proof upload required.</p>
-                        </div>
-                        {paymentMethod === "gcash" && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
-                      </div>
-                    </label>
+                        return (
+                          <label
+                            key={method.method}
+                            className={`block rounded-lg border p-3.5 cursor-pointer relative transition ${
+                              paymentMethod === method.method
+                                ? "border-primary bg-primary-light/10"
+                                : "border-gray-250 hover:bg-gray-50"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="payment"
+                              value={method.method}
+                              checked={paymentMethod === method.method}
+                              onChange={() => setPaymentMethod(method.method)}
+                              className="sr-only"
+                            />
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-bold text-gray-900">{method.label}</p>
+                                <p className="text-[10px] text-gray-500 font-medium mt-0.5">{helperText}</p>
+                              </div>
+                              {paymentMethod === method.method && <div className="h-4 w-4 rounded-full bg-primary border-2 border-white ring-2 ring-primary shrink-0" />}
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
 
                   {/* Bill Warning banner */}
-                  {paymentMethod === "bill" && (
+                  {paymentMethod === "add-to-bill" && (
                     <div className="rounded-lg bg-blue-50 border border-blue-200 p-3.5 text-[11px] text-blue-800 flex gap-2">
                       <Info size={16} className="text-blue-500 shrink-0 mt-0.5" />
                       <p>
@@ -1156,13 +1607,20 @@ export function IntercomPage() {
                   {/* GCash details and file upload layout */}
                   {paymentMethod === "gcash" && (
                     <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-4">
-                      <div className="text-center space-y-1.5">
-                        <p className="text-xs font-bold text-gray-700">GCash Transfer Details</p>
-                        <p className="text-sm font-bold text-primary-dark">0917 000 0000</p>
-                        <p className="text-[10px] text-gray-500">Account: {config.legalName}</p>
+                      <div className="text-center space-y-2">
+                        <p className="text-xs font-bold text-gray-700">{gcashPaymentConfig?.label || "GCash Transfer Details"}</p>
+                        {gcashPaymentConfig?.qrUrl && (
+                          <img
+                            src={gcashPaymentConfig.qrUrl}
+                            alt="Store GCash QR"
+                            className="mx-auto h-36 w-36 rounded-lg border border-gray-200 bg-white object-contain p-2"
+                          />
+                        )}
+                        <p className="text-[10px] text-gray-500">
+                          {gcashPaymentConfig?.accountInfo || `Account: ${config.legalName}`}
+                        </p>
                       </div>
 
-                      {/* Mock File Uploader */}
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Upload Receipt screenshot</p>
                         
@@ -1211,7 +1669,7 @@ export function IntercomPage() {
                     </GhostButton>
                     <PrimaryButton
                       type="submit"
-                      disabled={isUploadingProof}
+                      disabled={isUploadingProof || storePaymentMethods.length === 0}
                       className="flex-[2] text-xs font-semibold min-h-[44px]"
                     >
                       {isUploadingProof ? (

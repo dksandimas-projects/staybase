@@ -1,7 +1,7 @@
-import { CalendarPlus, CheckCircle2, Home, Mail, Sparkles, Star } from "lucide-react";
+import { CalendarPlus, CheckCircle2, ExternalLink, Home, Mail, Sparkles, Star } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useSearchParams } from "react-router-dom";
-import { scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
+import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
@@ -43,8 +43,37 @@ export function BookingConfirmPage() {
   const paymentMethodLabel = paymentLabels[rawPaymentMethod] ?? rawPaymentMethod;
 
   function handleAddToCalendar() {
-    alert("Adding reservation to your local calendar...");
+    const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+    const descriptionLines = [
+      `Booking reference: ${bookingRef}`,
+      `Guests: ${guests}`,
+      `Room: ${selectedRoom.name}`,
+      `Total: ${formatPrice(total)}`,
+      `Payment: ${paymentMethodLabel}`
+    ];
+    const icsContent = buildIcsContent({
+      uid: `${bookingRef}@${config.domain}`,
+      title: `Stay at ${config.brandName} (${bookingRef})`,
+      description: descriptionLines.join("\n"),
+      location: address,
+      start: checkIn,
+      end: checkOut,
+      allDay: true,
+      brand: config.brandName
+    });
+    downloadIcsFile(`spark-inn-${bookingRef}.ics`, icsContent);
   }
+
+  const googleCalendarUrl = buildGoogleCalendarUrl({
+    uid: `${bookingRef}@${config.domain}`,
+    title: `Stay at ${config.brandName} (${bookingRef})`,
+    description: `Booking reference: ${bookingRef}\nGuests: ${guests}\nRoom: ${selectedRoom.name}\nTotal: ${formatPrice(total)}\nPayment: ${paymentMethodLabel}`,
+    location: `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`,
+    start: checkIn,
+    end: checkOut,
+    allDay: true,
+    brand: config.brandName
+  });
 
   const isOnlinePayment = rawPaymentMethod === "gcash" || rawPaymentMethod === "bank";
 
@@ -157,8 +186,17 @@ export function BookingConfirmPage() {
         >
           <GhostButton type="button" className="sm:min-w-48" onClick={handleAddToCalendar}>
             <CalendarPlus size={18} />
-            Add to Calendar
+            Download .ics
           </GhostButton>
+          <a
+            href={googleCalendarUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-5 text-sm font-semibold text-gray-800 shadow-sm transition hover:border-primary hover:text-primary sm:min-w-48"
+          >
+            <ExternalLink size={16} />
+            Add to Google Calendar
+          </a>
           <PrimaryButton to="/" className="sm:min-w-48">
             <Home size={18} />
             Return to Homepage

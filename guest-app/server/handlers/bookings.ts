@@ -1,6 +1,7 @@
 import { adminDb } from "../lib/firebase-admin";
-import { resend } from "../lib/resend";
-import { calculateBookingTotal } from "@spark-inn/shared";
+import { Timestamp } from "firebase-admin/firestore";
+import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
+import { toDateOrNull, validateCorporateCode } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 interface GuestDetails {
@@ -21,8 +22,8 @@ interface GuestDetails {
 interface CreateBookingBody {
   bookingId: string;
   roomId: string;
-  checkIn: string; // YYYY-MM-DD
-  checkOut: string; // YYYY-MM-DD
+  checkIn: string; // Yyyy-MM-DD
+  checkOut: string; // Yyyy-MM-DD
   guests: number;
   hasBreakfast: boolean;
   guestDetails: GuestDetails;
@@ -31,8 +32,16 @@ interface CreateBookingBody {
   voucherCode?: string;
   paymentMethod: string;
   paymentProofUrl?: string | null;
-  isCorporate: boolean;
+  // Per W1.3 / decision #79 / audit S1.5: the client no longer
+  // sets `isCorporate` directly. The server derives it from a
+  // validated `corporateCode` lookup. The `companyName` on the
+  // booking is sourced from the `corporateCodes` document for
+  // the validated code, never from `guestDetails.companyName`.
   corporateCode?: string;
+  // Per W2.14 / decision #102: set when this booking is created from a
+  // converted corporate inquiry. The convert-to-booking UI (per audit
+  // 1.4 SEV-1 #2) populates this field; normal bookings send null.
+  linkedInquiryId?: string | null;
 }
 
 function getManilaDateInfo() {
@@ -72,8 +81,8 @@ export async function handleCreateBooking(req: any, res: any) {
     voucherCode,
     paymentMethod,
     paymentProofUrl,
-    isCorporate,
-    corporateCode
+    corporateCode,
+    linkedInquiryId
   } = body;
 
   // Basic Input Validation
@@ -105,6 +114,33 @@ export async function handleCreateBooking(req: any, res: any) {
     let finalTotalPrice = 0;
     let computedData: any = {};
 
+    // Detect Spark Rewards member via the request's ID token.
+    // Per W2.2 / decision #90: server is authoritative for member discount.
+    // The client cannot supply a memberDiscount or memberDiscountPct field;
+    // we look up the member by authUser.uid and apply the 3rd stacking
+    // step (DECISIONS-FEATURES.md #13b). The Authorization header is
+    // optional — anonymous bookings get no member discount.
+    let detectedMemberId: string | null = null;
+    let detectedMemberDoc: any = null;
+    const authHeader = req.headers?.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const idToken = authHeader.split("Bearer ")[1];
+      try {
+        const decoded = await adminAuth.verifyIdToken(idToken);
+        const memberRef = adminDb.collection("members").doc(decoded.uid);
+        const memberSnap = await memberRef.get();
+        if (memberSnap.exists) {
+          const m = memberSnap.data()!;
+          if (m.isMember !== false && m.isActive !== false) {
+            detectedMemberId = memberSnap.id;
+            detectedMemberDoc = m;
+          }
+        }
+      } catch (err) {
+        // Invalid/expired token — fall through to anonymous booking
+      }
+    }
+
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
       // 1. Fetch Room Details
@@ -118,7 +154,14 @@ export async function handleCreateBooking(req: any, res: any) {
         throw new Error("Room is inactive");
       }
       if (roomData.status === "blocked") {
-        throw new Error("Room no longer available");
+        const blockedFrom = toDateOrNull(roomData.blockedFrom);
+        const blockedTo = toDateOrNull(roomData.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? checkInDate < blockedTo && checkOutDate > blockedFrom
+          : true;
+        if (windowActive) {
+          throw new Error("Room no longer available");
+        }
       }
       if (guests > roomData.maxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
@@ -132,8 +175,9 @@ export async function handleCreateBooking(req: any, res: any) {
       
       const hasConflict = bookingsSnapshot.docs.some((doc) => {
         const data = doc.data();
-        const existingCheckIn = data.checkIn.toDate();
-        const existingCheckOut = data.checkOut.toDate();
+        const existingCheckIn = toDateOrNull(data.checkIn);
+        const existingCheckOut = toDateOrNull(data.checkOut);
+        if (!existingCheckIn || !existingCheckOut) return false;
         return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
       });
 
@@ -147,35 +191,52 @@ export async function handleCreateBooking(req: any, res: any) {
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 250 };
       const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
-      // 4. Handle Corporate Code validation if corporate is true
+      // 4. Handle Corporate Code validation. Per W1.3 / decision #79 /
+      // audit S1.5: the server is the only source of truth for
+      // `isCorporate` and `companyName`. A client posting
+      // `isCorporate: true, corporateCode: "INVALID"` no longer
+      // gets the corporate rate — the server independently looks
+      // up the code, validates it (active + not expired + under
+      // cap), and sets these fields from the corporateCodes doc.
       let activeRoomRate = roomData.pricePerNight;
       let corporateDetails: any = { isCorporate: false, corporateCode: "", companyName: "" };
 
-      if (isCorporate) {
-        corporateDetails.isCorporate = true;
-        corporateDetails.companyName = guestDetails.companyName || "";
-        if (corporateCode) {
-          corporateDetails.corporateCode = corporateCode;
-          const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
-          const corpCodeDoc = await transaction.get(corpCodeRef);
-          if (corpCodeDoc.exists) {
-            const corpData = corpCodeDoc.data()!;
-            if (corpData.isActive && (!corpData.expiresAt || corpData.expiresAt.toDate() > new Date())) {
-              if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomData.type] !== undefined) {
-                activeRoomRate = corpData.ratePerRoomType[roomData.type];
-              } else {
-                activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
-              }
-            } else {
-              activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
+      if (corporateCode) {
+        const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
+        const corpCodeDoc = await transaction.get(corpCodeRef);
+        if (corpCodeDoc.exists) {
+          const corpData = corpCodeDoc.data()!;
+          const corpValidation = validateCorporateCode({
+            isActive: corpData.isActive !== false,
+            expiresAt: corpData.expiresAt ? corpData.expiresAt.toDate() : null,
+            usageCap: corpData.usageCap ?? null,
+            usageCount: corpData.usageCount || 0
+          });
+          if (corpValidation.valid) {
+            corporateDetails.isCorporate = true;
+            corporateDetails.corporateCode = corporateCode;
+            // The doc's companyName is the source of truth — the
+            // body's guestDetails.companyName is informational only.
+            corporateDetails.companyName = corpData.companyName || "";
+            if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomData.type] !== undefined) {
+              activeRoomRate = corpData.ratePerRoomType[roomData.type];
+            } else if (roomData.corporateRate) {
+              activeRoomRate = roomData.corporateRate;
             }
           } else {
-            activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
+            // Invalid code: fall back to standard rate, do NOT set
+            // isCorporate. The booking still goes through but
+            // without any corporate discount — the server never
+            // trusts the body's claim.
+            activeRoomRate = roomData.pricePerNight;
           }
         } else {
-          activeRoomRate = roomData.corporateRate || roomData.pricePerNight;
+          // Code not found in DB — fall back to standard rate.
+          activeRoomRate = roomData.pricePerNight;
         }
       }
+      // No corporateCode at all → activeRoomRate stays as
+      // roomData.pricePerNight, isCorporate stays false.
 
       // 5. Calculate Nightly Rate Total (support weekend rate)
       let roomTotal = 0;
@@ -185,7 +246,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // Let's check: shared/utils/dates.ts checks day === 0 (Sun) or day === 6 (Sat)
         const day = dateCursor.getUTCDay();
         const isWeekend = day === 0 || day === 6;
-        if (isWeekend && !isCorporate && roomData.weekendRate) {
+        if (isWeekend && !corporateDetails.isCorporate && roomData.weekendRate) {
           roomTotal += roomData.weekendRate;
         } else {
           roomTotal += activeRoomRate;
@@ -199,9 +260,13 @@ export async function handleCreateBooking(req: any, res: any) {
       const subtotal = roomTotal + breakfastTotal;
 
       // 7. Voucher Validation
+      // Per W2.12 / decision #100: corporate bookings never accept
+      // promo vouchers. Silently zero out the discount + clear the
+      // code so the booking doc reflects `voucherDiscount: 0` even
+      // if a guest types a code into the corporate booking form.
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
-      if (voucherCode) {
+      if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
         const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         const voucherDoc = await transaction.get(voucherRef);
@@ -242,9 +307,31 @@ export async function handleCreateBooking(req: any, res: any) {
         }
       }
 
-      const governmentDiscount = Math.round((subtotal - voucherDiscount) * (discountPct / 100));
-      const totalDiscount = voucherDiscount + governmentDiscount;
-      const totalPrice = Math.max(subtotal - totalDiscount, 0);
+      // 8b. Spark Rewards member discount (3rd stacking step per
+      // DECISIONS-FEATURES.md #13b). Read settings/rewardsConfig inside
+      // the transaction. Applied to the post-voucher subtotal.
+      let memberDiscountPct = 0;
+      if (detectedMemberId) {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsDoc = await transaction.get(rewardsRef);
+        if (rewardsDoc.exists) {
+          const rc = rewardsDoc.data()!;
+          if (rc.memberDiscountEnabled !== false) {
+            const pct = Number(rc.memberDiscountPct) || 0;
+            if (pct > 0) memberDiscountPct = pct;
+          }
+        }
+      }
+
+      // Stacking order (per DECISIONS-FEATURES.md #13b):
+      //   1. Senior/PWD on subtotal
+      //   2. Voucher (flat or percent) on post–Senior/PWD subtotal
+      //   3. Member discount (percent) on post-voucher subtotal
+      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const afterVoucher = afterSeniorPwd - voucherDiscount;
+      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
       // Pre-discount total to restore if discount is rejected
       const originalTotalPrice = discountPct > 0 ? (subtotal - voucherDiscount) : null;
@@ -276,11 +363,11 @@ export async function handleCreateBooking(req: any, res: any) {
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
         guestName,
-        guestEmail: guestDetails.email.trim(),
+        guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
-        checkIn: adminDb.doc(`rooms/${roomId}`).firestore.valueType ? checkInDate : checkInDate, // Firestore Timestamps
-        checkOut: checkOutDate,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
         ratePerNight: activeRoomRate,
         totalPrice,
@@ -302,10 +389,13 @@ export async function handleCreateBooking(req: any, res: any) {
         status: paymentProofUrl ? "payment-uploaded" : "pending",
         paymentMethod,
         paymentProofUrl: paymentProofUrl || "",
-        source: isCorporate ? "corporate" : "online",
+        source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
-        memberId: null,
+        // Server-detected Spark Rewards member (per W2.2 / decision #90).
+        // Set from the Authorization Bearer token detected above.
+        memberId: detectedMemberId,
+        memberDiscountPct: memberDiscountPct,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
@@ -316,6 +406,11 @@ export async function handleCreateBooking(req: any, res: any) {
         guestRegistration: null,
         breakfastSelections: {},
         cancellationReason: "",
+        // Per W2.14 / decision #102: linkedInquiryId is set when a booking
+        // is created from a converted corporate inquiry. The body field
+        // is null for normal bookings; the convert-to-booking UI (per
+        // audit 1.4 SEV-1 #2) will populate it.
+        linkedInquiryId: linkedInquiryId || null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -325,7 +420,7 @@ export async function handleCreateBooking(req: any, res: any) {
 
       computedData = {
         guestName,
-        email: guestDetails.email.trim(),
+        email: guestDetails.email.trim().toLowerCase(),
         roomName: roomData.name,
         roomNumber: roomData.roomNumber,
         checkIn,
@@ -337,76 +432,37 @@ export async function handleCreateBooking(req: any, res: any) {
 
     // Send acknowledgment email outside the transaction via Resend
     try {
-      const { guestName, email, roomName, roomNumber } = computedData;
-      const paymentMsg = paymentMethod === "pay-at-hotel"
-        ? "<p><strong>Payment Method:</strong> Pay at Hotel (Present this confirmation at check-in. Payment is due upon arrival.)</p>"
-        : `<p><strong>Payment Method:</strong> ${paymentMethod.toUpperCase()}</p>
-           <p><strong>⚠️ Payment Verification:</strong> Your uploaded proof of payment is under review. Our team will verify it within 24 hours.</p>`;
-
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background-color: #111827; padding: 24px; text-align: center;">
-            <h1 style="color: #EA8A1A; margin: 0; font-size: 24px; text-transform: lowercase;">${config.brandName || "spark inn"}</h1>
-          </div>
-          <div style="padding: 24px;">
-            <h2 style="color: #111827; margin-top: 0;">Booking Request Submitted</h2>
-            <p>Dear ${guestName},</p>
-            <p>Thank you for choosing <strong>${config.brandName || "spark inn"}</strong>. We have received your booking request, and it is currently <strong>under review</strong>.</p>
-            
-            <div style="background-color: #FEF3E2; border-left: 4px solid #EA8A1A; padding: 16px; margin: 20px 0; border-radius: 4px;">
-              <p style="margin: 0; font-weight: bold; color: #C4720E;">⚠️ Review Notice</p>
-              <p style="margin: 4px 0 0 0; font-size: 14px;">Your booking status is currently <strong>Pending Manual Review</strong>. We will review your reservation details and verify any payment receipts/discount IDs submitted. An official confirmation email will be sent once verified.</p>
-            </div>
-
-            <h3 style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; color: #111827;">Reservation Details</h3>
-            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Booking Reference</td>
-                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${finalBookingRef}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Room</td>
-                <td style="padding: 6px 0; text-align: right;">Room ${roomNumber} — ${roomName}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-in Date</td>
-                <td style="padding: 6px 0; text-align: right;">${checkIn} (from ${config.checkInTime || "14:00"})</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-out Date</td>
-                <td style="padding: 6px 0; text-align: right;">${checkOut} (by ${config.checkOutTime || "12:00"})</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Nights</td>
-                <td style="padding: 6px 0; text-align: right;">${numNights} night(s)</td>
-              </tr>
-              <tr style="border-top: 1px dashed #e5e7eb;">
-                <td style="padding: 10px 0; font-weight: bold; color: #111827;">Total Price</td>
-                <td style="padding: 10px 0; font-weight: bold; text-align: right; color: #EA8A1A; font-size: 16px;">₱${finalTotalPrice.toLocaleString()}</td>
-              </tr>
-            </table>
-
-            <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
-              ${paymentMsg}
-            </div>
-
-            <p style="margin-top: 30px; font-size: 13px; color: #6b7280; text-align: center;">
-              J. Borja St, Tagbilaran City, Bohol, 6300<br/>
-              dpo: ${config.dpoEmail || "sparkinn.reservations@gmail.com"} | support: ${config.supportEmail || "sparkinn.dev@gmail.com"}
-            </p>
-          </div>
-        </div>
-      `;
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "sparkinn.dev@gmail.com",
-        to: email,
-        subject: `[${config.brandName || "spark inn"}] Acknowledgment: Booking Submission ${finalBookingRef}`,
-        html: emailHtml
+      await sendBookingTrigger("booking-submitted", {
+        ...computedData,
+        bookingRef: finalBookingRef,
+        guestEmail: computedData.email,
+        paymentMethod
       });
     } catch (emailErr) {
       // Log email error, but do not fail the request since booking document is already written successfully
       console.error("Failed to send acknowledgment email:", emailErr);
+    }
+
+    // Per W4.4 / decision #104: also notify the staff team of the
+    // new online booking. Source is "online" (corporate / walkin
+    // bookings take a different path with their own notifications).
+    // Persist a timestamp on the booking so a re-fire via the
+    // /api/email/staff-new-booking endpoint won't double-send.
+    try {
+      if (!computedData.emailNotificationsSent?.staffNewBooking) {
+        await adminDb.collection("bookings").doc(bookingId).update({
+          "emailNotificationsSent.staffNewBooking": new Date()
+        });
+        await sendStaffNewBookingTrigger({
+          ...computedData,
+          bookingRef: finalBookingRef,
+          guestEmail: computedData.email,
+          paymentMethod,
+          source: computedData.source || "online"
+        });
+      }
+    } catch (staffEmailErr) {
+      console.error("Failed to send staff-new-booking email:", staffEmailErr);
     }
 
     return res.status(200).json({
@@ -443,7 +499,8 @@ export async function handleCreateWalkin(req: any, res: any) {
     guestDetails,
     paymentMethod,
     status,
-    totalPriceOverride
+    totalPriceOverride,
+    linkedInquiryId
   } = body;
 
   if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
@@ -467,6 +524,7 @@ export async function handleCreateWalkin(req: any, res: any) {
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
+    let newBooking: Record<string, any> | null = null;
 
     await adminDb.runTransaction(async (transaction) => {
       // 1. Fetch Room Details
@@ -480,7 +538,14 @@ export async function handleCreateWalkin(req: any, res: any) {
         throw new Error("Room is inactive");
       }
       if (roomData.status === "blocked") {
-        throw new Error("Room no longer available");
+        const blockedFrom = toDateOrNull(roomData.blockedFrom);
+        const blockedTo = toDateOrNull(roomData.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? checkInDate < blockedTo && checkOutDate > blockedFrom
+          : true;
+        if (windowActive) {
+          throw new Error("Room no longer available");
+        }
       }
       if (guests > roomData.maxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
@@ -494,8 +559,9 @@ export async function handleCreateWalkin(req: any, res: any) {
       
       const hasConflict = bookingsSnapshot.docs.some((doc) => {
         const data = doc.data();
-        const existingCheckIn = data.checkIn.toDate();
-        const existingCheckOut = data.checkOut.toDate();
+        const existingCheckIn = toDateOrNull(data.checkIn);
+        const existingCheckOut = toDateOrNull(data.checkOut);
+        if (!existingCheckIn || !existingCheckOut) return false;
         return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
       });
 
@@ -553,17 +619,17 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 7. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       
-      const newBooking = {
+      newBooking = {
         bookingRef,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
         guestName,
-        guestEmail: guestDetails.email.trim(),
+        guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
-        checkIn: checkInDate,
-        checkOut: checkOutDate,
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
         ratePerNight: roomData.pricePerNight,
         totalPrice: finalTotalPrice,
@@ -599,6 +665,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         guestRegistration: null,
         breakfastSelections: {},
         cancellationReason: "",
+        linkedInquiryId: linkedInquiryId || null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -611,6 +678,15 @@ export async function handleCreateWalkin(req: any, res: any) {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
       transaction.set(bookingDocRef, newBooking);
     });
+
+    const resolvedStatus = status || "confirmed";
+    if (resolvedStatus === "confirmed" && newBooking) {
+      try {
+        await sendBookingTrigger("booking-confirmed", { ...newBooking, status: "confirmed" });
+      } catch (emailErr) {
+        console.error("Failed to send walk-in booking confirmation email:", emailErr);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -666,57 +742,10 @@ export async function handleRejectDiscount(req: any, res: any) {
     await bookingRef.update(updates);
 
     try {
-      const discountTypeLabel = bookingData.discountType === "senior" ? "Senior Citizen" : "PWD";
-      const idLabel = bookingData.discountType === "senior" ? "OSCA Card" : "PWD ID";
-      
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background-color: #111827; padding: 24px; text-align: center;">
-            <h1 style="color: #EA8A1A; margin: 0; font-size: 24px; text-transform: lowercase;">${config.brandName || "spark inn"}</h1>
-          </div>
-          <div style="padding: 24px;">
-            <h2 style="color: #DC2626; margin-top: 0;">Discount Verification Update</h2>
-            <p>Dear ${bookingData.guestName},</p>
-            <p>Thank you for your booking at <strong>${config.brandName || "spark inn"}</strong>. We have reviewed your submitted ID for the ${discountTypeLabel} discount on Booking <strong>${bookingData.bookingRef}</strong>.</p>
-            
-            <p>Unfortunately, we were unable to verify your ${discountTypeLabel} ID.</p>
-            ${reason ? `<p style="background-color: #F9FAFB; padding: 12px; border-left: 4px solid #DC2626; border-radius: 4px; font-size: 14px;"><strong>Reason for rejection:</strong> ${reason}</p>` : ""}
-            
-            <p>Your booking remains confirmed. The full rate of <strong>₱${originalTotalPrice.toLocaleString()}</strong> will be collected upon check-in. Please note that we still welcome you to present a valid ${idLabel} at check-in for our team's manual review.</p>
-            
-            <h3 style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; color: #111827; margin-top: 24px;">Reservation Summary</h3>
-            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Booking Reference</td>
-                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${bookingData.bookingRef}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-in Date</td>
-                <td style="padding: 6px 0; text-align: right;">${bookingData.checkIn instanceof Date ? bookingData.checkIn.toISOString().split("T")[0] : bookingData.checkIn.toDate().toISOString().split("T")[0]}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Check-out Date</td>
-                <td style="padding: 6px 0; text-align: right;">${bookingData.checkOut instanceof Date ? bookingData.checkOut.toISOString().split("T")[0] : bookingData.checkOut.toDate().toISOString().split("T")[0]}</td>
-              </tr>
-              <tr style="border-top: 1px dashed #e5e7eb;">
-                <td style="padding: 10px 0; font-weight: bold; color: #111827;">Updated Total Price</td>
-                <td style="padding: 10px 0; font-weight: bold; text-align: right; color: #EA8A1A; font-size: 16px;">₱${originalTotalPrice.toLocaleString()}</td>
-              </tr>
-            </table>
-
-            <p style="margin-top: 30px; font-size: 13px; color: #6b7280; text-align: center;">
-              J. Borja St, Tagbilaran City, Bohol, 6300<br/>
-              dpo: ${config.dpoEmail || "sparkinn.reservations@gmail.com"} | support: ${config.supportEmail || "sparkinn.dev@gmail.com"}
-            </p>
-          </div>
-        </div>
-      `;
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "sparkinn.dev@gmail.com",
-        to: bookingData.guestEmail,
-        subject: `[${config.brandName || "spark inn"}] Discount Verification Update: ${bookingData.bookingRef}`,
-        html: emailHtml
+      await sendBookingTrigger("discount-rejected", {
+        ...bookingData,
+        discountRejectionReason: reason || "",
+        totalPrice: originalTotalPrice
       });
     } catch (emailErr) {
       console.error("Failed to send discount rejection email:", emailErr);
@@ -762,7 +791,7 @@ export async function handleCancelBooking(req: any, res: any) {
 
       const query = adminDb.collection("bookings")
         .where("bookingRef", "==", bookingRef.trim())
-        .where("guestEmail", "==", guestEmail.trim())
+        .where("guestEmail", "==", guestEmail.trim().toLowerCase())
         .limit(1);
       
       const snapshot = await query.get();
@@ -774,8 +803,8 @@ export async function handleCancelBooking(req: any, res: any) {
       bookingData = snapshot.docs[0].data();
     }
 
-    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled") {
-      return res.status(400).json({ success: false, error: `Booking cannot be cancelled because its status is already ${bookingData.status}.` });
+    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled" || bookingData.status === "confirmed" || bookingData.status === "payment-confirmed") {
+      return res.status(400).json({ success: false, error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk to cancel a confirmed booking.` });
     }
 
     await bookingDocumentRef.update({
@@ -785,43 +814,9 @@ export async function handleCancelBooking(req: any, res: any) {
     });
 
     try {
-      const emailHtml = `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
-          <div style="background-color: #111827; padding: 24px; text-align: center;">
-            <h1 style="color: #EA8A1A; margin: 0; font-size: 24px; text-transform: lowercase;">${config.brandName || "spark inn"}</h1>
-          </div>
-          <div style="padding: 24px;">
-            <h2 style="color: #DC2626; margin-top: 0;">Booking Cancelled</h2>
-            <p>Dear ${bookingData.guestName},</p>
-            <p>This email confirms that your reservation at <strong>${config.brandName || "spark inn"}</strong> has been <strong>cancelled</strong>.</p>
-            
-            <h3 style="border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; color: #111827;">Cancellation Details</h3>
-            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Booking Reference</td>
-                <td style="padding: 6px 0; font-weight: bold; text-align: right;">${bookingData.bookingRef}</td>
-              </tr>
-              <tr>
-                <td style="padding: 6px 0; color: #6b7280;">Reason for Cancellation</td>
-                <td style="padding: 6px 0; text-align: right; font-style: italic;">${reason || "Not provided"}</td>
-              </tr>
-            </table>
-
-            <p>If you did not request this cancellation or believe this is an error, please contact our support team immediately at ${config.supportEmail || "sparkinn.dev@gmail.com"}.</p>
-            
-            <p style="margin-top: 30px; font-size: 13px; color: #6b7280; text-align: center;">
-              J. Borja St, Tagbilaran City, Bohol, 6300<br/>
-              support: ${config.supportEmail || "sparkinn.dev@gmail.com"}
-            </p>
-          </div>
-        </div>
-      `;
-
-      await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || "sparkinn.dev@gmail.com",
-        to: bookingData.guestEmail,
-        subject: `[${config.brandName || "spark inn"}] Booking Cancelled: ${bookingData.bookingRef}`,
-        html: emailHtml
+      await sendBookingTrigger("booking-cancelled", {
+        ...bookingData,
+        cancellationReason: reason || ""
       });
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
@@ -847,8 +842,11 @@ export async function handleAddPayment(req: any, res: any) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
 
+    const bookingData = bookingDoc.data()!;
+    const numericAmount = Number(amount);
+
     const paymentRecord = {
-      amount: Number(amount),
+      amount: numericAmount,
       method,
       note: note || "",
       recordedBy: req.staff.email || "staff",
@@ -857,9 +855,301 @@ export async function handleAddPayment(req: any, res: any) {
 
     await bookingRef.collection("payments").add(paymentRecord);
 
+    try {
+      const paymentsSnapshot = await bookingRef.collection("payments").get();
+      const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => {
+        const data = doc.data() as { amount?: number };
+        return sum + Number(data.amount || 0);
+      }, 0);
+
+      const totalPrice = Number(bookingData.totalPrice || 0);
+      const fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+      const isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
+
+      if (fullyPaid && isConfirmableStatus) {
+        await sendBookingTrigger("payment-confirmed", bookingData);
+      }
+
+      // Per W4.4 / decision #104: notify staff when a guest
+      // uploads a payment proof. The `paymentProofUrl` lives on
+      // the booking doc when the guest uploads via Step 3.
+      // Idempotent via the emailNotificationsSent.staffNewPayment
+      // timestamp — only fire once per booking.
+      if (bookingData.paymentProofUrl && !bookingData.emailNotificationsSent?.staffNewPayment) {
+        await bookingRef.update({
+          "emailNotificationsSent.staffNewPayment": new Date()
+        });
+        await sendStaffNewPaymentTrigger(
+          { ...bookingData, bookingRef: bookingData.bookingRef },
+          { ...paymentRecord, paymentProofUrl: bookingData.paymentProofUrl }
+        );
+      }
+    } catch (emailErr) {
+      console.error("Failed to send payment confirmation email:", emailErr);
+    }
+
     return res.status(200).json({ success: true, data: paymentRecord });
   } catch (error: any) {
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
+}
+
+export async function handleConfirmBooking(req: any, res: any) {
+  const { bookingId } = req.body;
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef.get();
+    if (!bookingDoc.exists) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+
+    const bookingData = bookingDoc.data()!;
+    const allowedStatuses = ["pending", "payment-uploaded"];
+    if (!allowedStatuses.includes(bookingData.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be confirmed because its status is already ${bookingData.status}.`
+      });
+    }
+
+    const confirmedBy = req.staff?.email || "staff";
+    await bookingRef.update({
+      status: "confirmed",
+      confirmedAt: new Date(),
+      confirmedBy,
+      updatedAt: new Date()
+    });
+
+    try {
+      await sendBookingTrigger("booking-confirmed", { ...bookingData, status: "confirmed" });
+    } catch (emailErr) {
+      console.error("Failed to send booking confirmation email:", emailErr);
+    }
+
+    return res.status(200).json({ success: true, data: { status: "confirmed" } });
+  } catch (error: any) {
+    console.error("Confirm booking handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+export async function handleCheckoutBooking(req: any, res: any) {
+  const { bookingId } = req.body;
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef.get();
+    if (!bookingDoc.exists) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+
+    const bookingData = bookingDoc.data()!;
+    if (bookingData.status !== "checked-in") {
+      return res.status(400).json({
+        success: false,
+        error: `Booking can only be checked out from 'checked-in' status (current: ${bookingData.status}).`
+      });
+    }
+
+    const checkedOutBy = req.staff?.email || "staff";
+    const totalPrice = Number(bookingData.totalPrice || 0);
+
+    let pointsAwarded = 0;
+    let memberId: string | null = bookingData.memberId || null;
+    let rewardsConfig: any = null;
+
+    // Try to find member either by memberId (if booking is already linked) or by guestEmail
+    let memberDoc: any = null;
+    if (memberId) {
+      memberDoc = await adminDb.collection("members").doc(memberId).get();
+    }
+    if (!memberDoc?.exists && bookingData.guestEmail) {
+      const guestEmail = String(bookingData.guestEmail).toLowerCase();
+      const membersSnap = await adminDb.collection("members")
+        .where("email", "==", guestEmail)
+        .limit(1)
+        .get();
+      if (!membersSnap.empty) {
+        memberDoc = membersSnap.docs[0];
+        memberId = memberDoc.id;
+        // Persist the link for future use
+        await bookingRef.update({ memberId });
+      }
+    }
+
+    if (memberDoc?.exists) {
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const pointsEnabled = rewardsConfig?.pointsEnabled !== false;
+
+      if (pointsEnabled && rewardsConfig) {
+        const earningMode = rewardsConfig.earningMode || "per-spend";
+        if (earningMode === "per-spend") {
+          const pointsPerHundred = Number(rewardsConfig.pointsPerHundred || 0);
+          pointsAwarded = Math.floor((totalPrice / 100) * pointsPerHundred);
+        } else {
+          pointsAwarded = Number(rewardsConfig.pointsPerBooking || 0);
+        }
+      }
+    }
+
+    await adminDb.runTransaction(async (transaction) => {
+      transaction.update(bookingRef, {
+        status: "checked-out",
+        checkedOutAt: new Date(),
+        checkedOutBy,
+        pointsAwarded,
+        updatedAt: new Date()
+      });
+
+      if (bookingData.roomId) {
+        const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
+        transaction.update(roomRef, {
+          status: "available",
+          housekeepingStatus: "dirty",
+          updatedAt: new Date()
+        });
+      }
+
+      // Per W2.7 / decision #95: auto-archive the intercom thread on
+      // checkout. Sets `intercoms/{roomNumber}.resolved = true` so the
+      // thread moves out of the active inbox tab. Staff can reopen from
+      // the admin Inbox by toggling resolved: false.
+      const roomNumber = String(bookingData.roomNumber || "");
+      if (roomNumber) {
+        const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
+        transaction.set(
+          intercomRef,
+          { resolved: true, resolvedAt: new Date(), resolvedBy: checkedOutBy, roomNumber, updatedAt: new Date() },
+          { merge: true }
+        );
+      }
+
+      if (memberId && pointsAwarded > 0) {
+        const memberRef = adminDb.collection("members").doc(memberId);
+        const memberDoc = await transaction.get(memberRef);
+        if (memberDoc.exists) {
+          const currentPoints = Number(memberDoc.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            updatedAt: new Date()
+          });
+
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: new Date()
+          });
+        }
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "checked-out",
+        pointsAwarded,
+        memberId
+      }
+    });
+  } catch (error: any) {
+    console.error("Checkout booking handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+export async function handleLookupBooking(req: any, res: any) {
+  const { bookingRef, guestEmail } = req.body || {};
+  if (!bookingRef || !guestEmail) {
+    return res.status(400).json({ success: false, error: "Booking reference and guest email are required." });
+  }
+
+  const trimmedRef = String(bookingRef).trim();
+  const normalizedEmail = String(guestEmail).trim().toLowerCase();
+
+  try {
+    const snapshot = await adminDb.collection("bookings")
+      .where("bookingRef", "==", trimmedRef)
+      .where("guestEmail", "==", normalizedEmail)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      const fallbackSnapshot = await adminDb.collection("bookings")
+        .where("bookingRef", "==", trimmedRef)
+        .limit(5)
+        .get();
+
+      const matched = fallbackSnapshot.docs.find((doc: any) => {
+        const data = doc.data();
+        return String(data.guestEmail || "").trim().toLowerCase() === normalizedEmail;
+      });
+
+      if (!matched) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+
+      const bookingData: any = { id: matched.id, ...matched.data() };
+      return await enrichAndRespond(res, bookingData);
+    }
+
+    const bookingDoc = snapshot.docs[0];
+    const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
+    return await enrichAndRespond(res, bookingData);
+  } catch (error: any) {
+    console.error("Booking lookup failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
+  }
+}
+
+async function enrichAndRespond(res: any, bookingData: any) {
+  let roomData: any = null;
+  if (bookingData.roomId) {
+    try {
+      const roomDoc = await adminDb.collection("rooms").doc(String(bookingData.roomId)).get();
+      if (roomDoc.exists) {
+        roomData = roomDoc.data();
+      }
+    } catch (roomErr) {
+      console.error("Failed to enrich booking with room data:", roomErr);
+    }
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      id: bookingData.id,
+      bookingRef: bookingData.bookingRef,
+      guestName: bookingData.guestName,
+      guestEmail: bookingData.guestEmail,
+      guestPhone: bookingData.guestPhone,
+      roomId: bookingData.roomId,
+      roomNumber: bookingData.roomNumber,
+      roomName: roomData?.name || bookingData.roomType || "",
+      roomType: bookingData.roomType,
+      checkIn: bookingData.checkIn,
+      checkOut: bookingData.checkOut,
+      numNights: bookingData.numNights,
+      numGuests: bookingData.numGuests,
+      ratePerNight: bookingData.ratePerNight,
+      totalPrice: bookingData.totalPrice,
+      paymentMethod: bookingData.paymentMethod,
+      status: bookingData.status,
+      hasBreakfast: bookingData.hasBreakfast,
+      specialRequests: bookingData.specialRequests || ""
+    }
+  });
 }

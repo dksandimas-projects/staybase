@@ -31,7 +31,7 @@ Spark Inn is the reference deployment of a white-label hotel booking and managem
 | Data fetching (API) | TanStack Query |
 | Data fetching (Firestore) | Custom hooks with onSnapshot |
 | Validation | Zod |
-| PDF | jsPDF |
+| PDF / screen capture | jsPDF + html2canvas |
 | QR Codes | qrcode.react |
 | Charts | Recharts |
 | Git hooks | Husky + Conventional Commits |
@@ -49,7 +49,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Task type | Read these MDs |
 |---|---|
 | Guest UI task | `plan/docs/FRONTEND.md` + `plan/guest-app/CLAUDE.md` + relevant feature MD |
-| Admin UI task | `plan/docs/FRONTEND.md` + `plan/admin-app/CLAUDE.md` + relevant feature MD |
+| Admin UI task | `plan/docs/FRONTEND.md` + `plan/admin-app/CLAUDE.md §Mobile UX building blocks` + `plan/features/ADMIN-MOBILE.md` + relevant feature MD |
 | Data / API task | `plan/docs/BACKEND.md` + `plan/docs/TYPES.md` + `plan/docs/API-ROUTES.md` |
 | Full feature build | All of the above + `plan/docs/DECISIONS-FEATURES.md` |
 | Auth / roles | `plan/features/AUTH-ROLES.md` + `plan/docs/BACKEND.md` |
@@ -59,6 +59,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Email / PDF | `plan/features/EMAIL-PDF-STORAGE.md` + `plan/docs/API-ROUTES.md` |
 | Security / PII / compliance | `plan/docs/SECURITY.md` + `plan/docs/GOTCHAS.md` + `plan/docs/DECISIONS-FEATURES.md` |
 | New feature / architecture | `plan/docs/DECISIONS-ARCH.md` + `plan/docs/GOTCHAS.md` |
+| Vercel deployment / function count | `plan/docs/VERCEL-FUNCTION-LIMIT.md` + `plan/docs/FILE-STRUCTURE.md` |
 | White-label deployment | `plan/docs/WHITE-LABEL.md` + `plan/docs/DECISIONS-ARCH.md` |
 | Spark Essentials store | `plan/features/STORE-GUEST.md` + `plan/features/STORE-MANAGEMENT.md` + `plan/docs/BACKEND.md` |
 | Spark Rewards / member auth | `plan/features/SPARK-REWARDS.md` + `plan/docs/BACKEND.md` |
@@ -76,6 +77,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/docs/TYPES.md` — Canonical TypeScript types for all shared models
 - `plan/docs/ENV-SETUP.md` — All environment variables
 - `plan/docs/FILE-STRUCTURE.md` — Full folder tree, naming conventions
+- `plan/docs/VERCEL-FUNCTION-LIMIT.md` — Hobby plan 12-function cap: layout rules, what counts, how to verify, what NOT to do
 - `plan/docs/DECISIONS-ARCH.md` — Architecture, stack, tooling, security, white-label decisions
 - `plan/docs/DECISIONS-FEATURES.md` — Feature scope, product, business rules, compliance decisions
 - `plan/docs/GOTCHAS.md` — What agents must never do
@@ -109,6 +111,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/INTERCOM-INBOX.md` — Chat list, notification sound, quick request badges
 - `plan/features/QR-MANAGEMENT.md` — QR per room, regenerate, print
 - `plan/features/SETTINGS.md` — Hotel info, payment methods, staff accounts, website content
+- `plan/features/ADMIN-MOBILE.md` — Admin app responsive layout (Phase 11.7, shipped 2026-06-18) — sidebar / header / drawer / data table for < 768px + `useBreakpoint` + Toast + ConfirmForm + BottomTabBar + focus trap
 
 ### plan/features/ — Spark Rewards
 - `plan/features/SPARK-REWARDS.md` — guest auth, member registration, profile portal, points, admin member management
@@ -145,7 +148,7 @@ These apply to every file in every app. No exceptions.
 - **Never commit `.env` files**
 - **Never log PII** — no console.log of guest names, emails, or payment data
 - **Never expose payment proof URLs in guest-app** — admin-only
-- **Consent checkbox required at booking Step 2** — links to `/privacy`, blocks submission if unchecked
+- **Consent checkbox required at booking Step 2** — links to `/privacy` and `/terms`, blocks submission if unchecked
 - **Comply with RA 10173** — see `plan/docs/SECURITY.md` for full requirements
 - **Rate limit all public API endpoints** — booking creation, voucher/code validation, email resend
 

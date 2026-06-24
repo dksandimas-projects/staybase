@@ -58,7 +58,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Number of guests (required, max = room capacity)
 - [ ] Special requests (optional, textarea)
 - [ ] Corporate fields (shown only on `/corporate/book` flow): company name (required), designation, company address, number of rooms, purpose of stay, preferred billing arrangement
-- [ ] Privacy consent checkbox — "I agree to the [Privacy Policy] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` in a new tab
+- [ ] Privacy and terms consent checkbox — "I agree to the [Privacy Policy] and [Terms of Service] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` and `/terms` in new tabs
 - [ ] Back button to Step 1, Next button to Step 3
 - [ ] Inline Zod validation — errors shown per field on blur
 - [ ] Next button disabled until consent checkbox is checked
@@ -98,10 +98,11 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ### Data & Logic Checklist
 - [ ] Voucher validation calls `/api/validate/voucher` — server-side only
 - [ ] Discount and voucher calculations happen client-side for display, server-side for storage
-- [ ] Payment screenshot uploaded to Firebase Storage before booking creation
+- [ ] Booking flow preallocates a Firestore booking document ID before Step 3 uploads; `/api/bookings/create` must create the booking document at that same ID
+- [ ] Payment screenshot uploaded to Firebase Storage before booking creation using the preallocated booking ID path
 - [ ] `paymentProofUrl` stored in booking document
 - [ ] Pay at Hotel: no upload required, `paymentMethod = "pay-at-hotel"`
-- [ ] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) — stored at `bookings/{bookingId}/discount-id/{filename}`; `discountIdPhotoUrl` stored on booking document
+- [ ] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) using the preallocated booking ID path; `discountIdPhotoUrl` stored on booking document
 - [ ] Discount ID upload is required client-side but also validated server-side — if `discountType != ""` and `discountIdPhotoUrl` is null, booking creation is rejected
 
 ---
@@ -125,7 +126,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ### Data & Logic Checklist
 - [ ] Booking creation via `/api/bookings/create` using Firestore transaction — see `plan/features/AVAILABILITY-LOCKING.md`
-- [ ] Booking reference generated server-side: `{config.bookingRefPrefix}-YYYYMMDD-NNN`
+- [ ] Booking document ID is preallocated client-side for Storage uploads; booking reference generated server-side: `{config.bookingRefPrefix}-YYYYMMDD-NNN`
 - [ ] Rate locked at booking creation time — stored in `ratePerNight`
 - [ ] Email triggered via `/api/email/booking-submitted` after successful creation — acts as an acknowledgment/receipt submission warning the guest that their booking/payment is under review and that an official confirmation will follow once verified
 - [ ] `isCorporate`, `corporateCode`, `companyName` set server-side — never trusted from client

@@ -27,9 +27,9 @@ The `/rooms` page displays all active rooms in a grid. Guests can filter by room
 - [ ] Page hero — Apollo heading "our rooms", brief subtitle
 - [ ] Filter bar — room type filter (All, Single, Standard Double, Standard Twin, Executive, Family) + guest count input
 - [ ] Room grid — responsive (1 col mobile, 2 col tablet, 3 col desktop)
-- [ ] Room card — image, name, type badge, bed definition, max capacity, key amenities, price per night, availability badge, Book Now CTA
+- [ ] Room card — image, name, type badge, bed definition (from type, W3.7), max capacity, key amenities (from type, W3.7), price per night, availability badge, Book Now CTA
 - [ ] Availability badge — color-coded per `plan/docs/FRONTEND.md §Status Badge Colors` (Available green, Occupied red, Blocked gray)
-- [ ] Room detail modal — full description, all amenities, all photos (carousel), bed definition, capacity, price + weekend rate, Book Now CTA
+- [ ] Room detail modal — full description (from type, W3.7), all amenities (from type, W3.7), all photos (carousel), bed definition (from type, W3.7), capacity, price + weekend rate, Book Now CTA
 - [ ] Photo carousel in modal — multiple images, dots indicator, swipeable on mobile
 - [ ] Book Now CTA — navigates to `/book?roomId=xxx&checkIn=xxx&checkOut=xxx` if dates selected, else to `/book`
 - [ ] Framer Motion entrance animation on cards — subtle opacity + translateY on scroll
@@ -47,8 +47,14 @@ The `/rooms` page displays all active rooms in a grid. Guests can filter by room
 - [ ] Loading state — skeleton cards in grid layout
 - [ ] Empty state after filter — "No rooms match your filters" with reset option
 - [ ] All rooms occupied — show all cards with Occupied badges, no hidden rooms
-- [ ] Single image room — no carousel, just single photo
-- [ ] Missing room photo — show brand placeholder with spark inn logo
+- [ ] Single image type — no carousel, just single hero photo
+- [ ] Missing type photo — show brand placeholder with spark inn logo
+
+> **Photos are resolved per room TYPE, not per room** *(per `plan/features/SETTINGS.md §Room Type Photos`)*. The hero image is the first entry of the joined `roomType.imageUrls[]` from `useRoomTypes`. The "Missing room photo" branch fires when the type's `imageUrls[]` is empty AND the static `ROOM_TYPE_IMAGES` fallback (in `guest-app/src/data/homepage.ts`) has no entry for that type.
+>
+> **Pricing + max occupancy are resolved per room TYPE** *(per W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`)*. The card "Up to N guests" + "From ₱X" values come from the joined `roomType` via `getRoomTypeRates(roomTypes, room.type)`. The room detail modal's Capacity and Weekend fields are also type-driven. Per-room `pricePerNight` / `weekendRate` / `corporateRate` / `maxCapacity` are no longer in the data model.
+>
+> **Bed description, full description, and amenities are resolved per room TYPE** *(per W3.7 / `plan/features/ROOM-MANAGEMENT.md §W3.7`)*. The card's bed description line, the detail modal's full description block, and the amenity list all come from the joined `roomType` via `roomTypes.find(t => t.value === room.type)?.X`. Per-room `bedDefinition` / `description` / `amenities` are no longer in the data model.
 
 ## Manual QA
 

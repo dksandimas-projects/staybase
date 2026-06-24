@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 // Mock Firebase Admin SDK
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const mockCorporateCodes: Record<string, any> = {
     "ACME2026": {
       exists: true,
@@ -84,7 +84,7 @@ vi.mock("../lib/firebase-admin", () => {
   };
 });
 
-import { handleValidateCorporateCode } from "../handlers/corporate-codes";
+import { handleValidateCorporateCode } from "../../server/handlers/corporate-codes";
 
 const mockResponse = () => {
   const res: any = {};

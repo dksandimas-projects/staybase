@@ -34,15 +34,17 @@ import {
   staggerChild,
   staggerContainer,
   DEFAULT_ROOM_TYPES,
-  VERSION
+  VERSION,
+  type Room
 } from "@spark-inn/shared";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
-import { rooms } from "../data/rooms";
+import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
@@ -70,16 +72,29 @@ export function CorporateBookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const currentStepKey = searchParams.get("step") ?? "gate";
+  const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
 
   // Corporate validation state (persisted in sessionStorage)
   const [accessCode, setAccessCode] = useState("");
   const [codeError, setCodeError] = useState("");
   const [isValidating, setIsValidating] = useState(false);
-  
+
   const [companyName, setCompanyName] = useState(() => sessionStorage.getItem("corp_companyName") ?? "");
   const [activeCode, setActiveCode] = useState(() => sessionStorage.getItem("corp_code") ?? "");
   const [discountPercent, setDiscountPercent] = useState(() => Number(sessionStorage.getItem("corp_discount") ?? "0"));
   const [isFlatRate, setIsFlatRate] = useState(() => sessionStorage.getItem("corp_isFlatRate") === "true");
+  // Per audit S4.1 / decision #101: store the negotiated
+  // ratePerRoomType map returned by /api/validate/corporate-code so
+  // the client picks the negotiated rate for the chosen room type
+  // (not the flat `room.corporateRate` fallback).
+  const [ratePerRoomType, setRatePerRoomType] = useState<Record<string, number>>(() => {
+    try {
+      const stored = sessionStorage.getItem("corp_ratePerRoomType");
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
 
   // Booking states
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
@@ -93,6 +108,10 @@ export function CorporateBookingPage() {
 
   // Breakfast config fetched from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+
+  // Live rooms from Firestore
+  const { rooms, loading: roomsLoading } = useRooms();
+  const { roomTypes } = useRoomTypes();
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -166,17 +185,28 @@ export function CorporateBookingPage() {
     () =>
       rooms.filter((room) => {
         const typeMatches = selectedType === "all" || room.type === selectedType;
-        return room.isActive && room.maxCapacity >= guests && typeMatches;
+        const cap = getRoomTypeRates(roomTypes, room.type)?.maxCapacity ?? 0;
+        return room.isActive && cap >= guests && typeMatches;
       }),
     [guests, selectedType]
   );
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
+  // Per W3.6 — pricing + max occupancy live on the room's type.
+  const selectedRoomRates = selectedRoom ? getRoomTypeRates(roomTypes, selectedRoom.type) : null;
+  const selectedMaxCapacity = selectedRoomRates?.maxCapacity ?? 0;
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRatePerPerson = breakfastConfig.ratePerPersonPerNight;
 
   // Calculate pricing
-  const baseRate = selectedRoom ? selectedRoom.corporateRate : 0;
+  // Per audit S4.1 / decision #101: prefer the negotiated rate for
+  // the chosen room type from the corporateCodes/{code} doc. Fall
+  // back to the type's flat corporateRate only when the negotiated
+  // map has no entry for this room type.
+  const negotiatedRate = selectedRoom && ratePerRoomType && ratePerRoomType[selectedRoom.type] !== undefined
+    ? ratePerRoomType[selectedRoom.type]
+    : (selectedRoomRates?.corporateRate ?? 0);
+  const baseRate = negotiatedRate;
   // Apply additional code discount if active
   const ratePerNight = Math.round(baseRate * (1 - discountPercent / 100));
 
@@ -212,9 +242,9 @@ export function CorporateBookingPage() {
     email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestDetails.email) ? "" : "Enter a valid email address.",
     phone: guestDetails.phone.trim().length >= 8 ? "" : "Phone number is required.",
     guestCount:
-      Number(guestDetails.guestCount) >= 1 && selectedRoom && Number(guestDetails.guestCount) <= selectedRoom.maxCapacity
+      Number(guestDetails.guestCount) >= 1 && selectedMaxCapacity > 0 && Number(guestDetails.guestCount) <= selectedMaxCapacity
         ? ""
-        : `Guest count must be between 1 and ${selectedRoom?.maxCapacity ?? guests}.`,
+        : `Guest count must be between 1 and ${selectedMaxCapacity || guests}.`,
     designation: guestDetails.designation.trim() ? "" : "Designation is required.",
     companyAddress: guestDetails.companyAddress.trim() ? "" : "Company address is required."
   };
@@ -286,10 +316,18 @@ export function CorporateBookingPage() {
         setActiveCode(result.data.code);
         setDiscountPercent(0);
         setIsFlatRate(false);
+        // Per audit S4.1 / decision #101: capture the negotiated
+        // ratePerRoomType map returned by the server. Each room
+        // type has its own negotiated rate; falling back to the
+        // flat `room.corporateRate` only happens when the map has
+        // no entry for the chosen room type.
+        const nextRatePerRoomType = result.data.ratePerRoomType || {};
+        setRatePerRoomType(nextRatePerRoomType);
         sessionStorage.setItem("corp_companyName", result.data.companyName);
         sessionStorage.setItem("corp_code", result.data.code);
         sessionStorage.setItem("corp_discount", "0");
         sessionStorage.setItem("corp_isFlatRate", "false");
+        sessionStorage.setItem("corp_ratePerRoomType", JSON.stringify(nextRatePerRoomType));
       } else {
         setCodeError(result.error || corporateCodeMessages.invalid);
       }
@@ -381,7 +419,7 @@ export function CorporateBookingPage() {
 
     try {
       const body = {
-        bookingId: `corp-${Date.now()}`,
+        bookingId,
         roomId: selectedRoom?.id ?? "",
         checkIn,
         checkOut,
@@ -403,7 +441,11 @@ export function CorporateBookingPage() {
         discountType: "" as const,
         discountIdPhotoUrl: null,
         paymentMethod: "pay-at-hotel",
-        isCorporate: true,
+        // Per W1.3 / decision #79 / audit S1.5: the server
+        // derives `isCorporate` from the validated `corporateCode`
+        // lookup. The client no longer sets it. The booking body's
+        // companyName is also overridden by the doc's companyName
+        // server-side.
         corporateCode: activeCode || undefined,
         _hp: "",
       };
@@ -463,11 +505,11 @@ export function CorporateBookingPage() {
           <span className="min-h-11 min-w-11" />
         </div>
         
-        {/* Persistent corporate rate badge */}
+        {/* Persistent corporate rate badge — per W2.13 / decision #101 */}
         {(companyName || isFlatRate) && currentStepKey !== "confirm" && (
           <div className="bg-primary/10 border-t border-primary/20 text-center py-1.5 text-xs text-primary font-medium">
             Active Negotiated Pricing: <span className="font-bold underline">{companyName || "Flat Corporate Rate"}</span>
-            {activeCode && ` (${discountPercent}% additional discount applied)`}
+            {activeCode && " — Negotiated rate applied"}
           </div>
         )}
       </header>
@@ -703,23 +745,43 @@ export function CorporateBookingPage() {
           <div>
             <div className="mb-5 flex flex-col gap-3 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="font-semibold text-gray-950">{availableRooms.length} corporate options found</p>
+                <p className="font-semibold text-gray-950">
+                  {roomsLoading ? "Loading rooms..." : `${availableRooms.length} corporate options found`}
+                </p>
                 <p className="text-xs text-gray-600">Locked to company contract terms.</p>
               </div>
             </div>
 
-            <motion.div 
-              className="grid gap-6 md:grid-cols-2" 
-              variants={staggerContainer} 
+            {roomsLoading ? (
+              <div className="grid gap-6 md:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="rounded-card bg-white shadow-sm ring-1 ring-gray-200 overflow-hidden animate-pulse">
+                    <div className="aspect-[16/10] bg-gray-200" />
+                    <div className="p-5 space-y-3">
+                      <div className="h-5 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                      <div className="h-8 bg-gray-100 rounded w-full" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+            <motion.div
+              className="grid gap-6 md:grid-cols-2"
+              variants={staggerContainer}
               initial={shouldReduceMotion ? false : "hidden"}
               animate="visible"
             >
               {availableRooms.map((room) => {
                 const isSelected = selectedRoomId === room.id;
                 const typeLabel = DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.shortLabel ?? room.type;
-                
+
+                // Per W3.6 — pricing lives on the type.
+                const roomRates = getRoomTypeRates(roomTypes, room.type);
+                const roomMaxCapacity = roomRates?.maxCapacity ?? 0;
+
                 // Price calculations
-                const baseCorp = room.corporateRate;
+                const baseCorp = roomRates?.corporateRate ?? 0;
                 const discountedCorp = Math.round(baseCorp * (1 - discountPercent / 100));
 
                 return (
@@ -732,7 +794,7 @@ export function CorporateBookingPage() {
                     variants={staggerChild}
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-section-bg relative">
-                      <img src={room.imageUrls[0]} alt={room.name} className="h-full w-full object-cover" />
+                      <img src={getRoomTypeImages(roomTypes, room.type)[0]} alt={room.name} className="h-full w-full object-cover" />
                       <div className="absolute top-3 left-3 flex gap-2">
                         <span className="rounded bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary">
                           {typeLabel}
@@ -743,15 +805,15 @@ export function CorporateBookingPage() {
                     <div className="p-5 flex flex-col flex-1">
                       <h3 className="text-lg font-semibold text-gray-950">{room.name}</h3>
                       <p className="mt-2 text-xs text-gray-500 leading-normal flex-1 line-clamp-2">
-                        {room.description}
+                        {roomTypes.find((t) => t.value === room.type)?.description || ""}
                       </p>
 
                       <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
                         <span className="flex items-center gap-1.5">
                           <Users size={14} className="text-primary" />
-                          Capacity: Up to {room.maxCapacity}
+                          Capacity: Up to {roomMaxCapacity}
                         </span>
-                        <span>{room.bedDefinition}</span>
+                        <span>{roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}</span>
                       </div>
 
                       {/* Corporate Rate Display */}
@@ -808,6 +870,7 @@ export function CorporateBookingPage() {
                 );
               })}
             </motion.div>
+            )}
           </div>
         </section>
 
@@ -1044,6 +1107,10 @@ export function CorporateBookingPage() {
                   <Link className="font-semibold text-primary underline" target="_blank" to="/privacy">
                     Privacy Policy
                   </Link>{" "}
+                  and{" "}
+                  <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                    Terms of Service
+                  </Link>{" "}
                   and consent to corporate accounts audit guidelines under {config.applicableLaw}.
                 </span>
               </label>
@@ -1058,6 +1125,7 @@ export function CorporateBookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             total={total}
             ratePerNight={ratePerNight}
             breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
@@ -1091,8 +1159,13 @@ export function CorporateBookingPage() {
   // ==================== STEP 3: REVIEW & PAY ====================
   if (currentStepKey === "review") {
     const isPersonalPay = guestDetails.billingArrangement === "personal";
-    const isFileUploaded = Boolean(billingFile);
-    const canConfirm = termsConsent && isFileUploaded && Boolean(selectedRoom);
+    // Per W2.11 / decision #99: LOU is no longer collected in Phase 1.
+    // The previous isFileUploaded requirement blocked chargeback
+    // bookings, but the file was never actually uploaded (only the
+    // filename was stored in state). The file picker has been replaced
+    // with a note; staff tracks receipt via the louReceived boolean on
+    // the booking drawer.
+    const canConfirm = termsConsent && Boolean(selectedRoom);
 
     return bookingShell(
       <>
@@ -1203,29 +1276,17 @@ export function CorporateBookingPage() {
                   </div>
                 </div>
               ) : (
-                /* Company Charge Back LOU Upload */
+                /* Company Charge Back (no LOU upload per W2.11 / decision #99) */
                 <div>
                   <h3 className="text-lg font-semibold text-gray-950">Company Charge Back Direct Billing</h3>
                   <p className="mt-1 text-sm text-gray-600">
-                    Your company account has been set to direct bill. Please upload your Letter of Undertaking (LOU), Travel Voucher, or approved Purchase Order to authorize this reservation.
+                    Your company account has been set to direct bill. The negotiated corporate rate has been applied to your stay.
                   </p>
 
-                  <div className="mt-6">
-                    <p className="text-sm font-medium text-gray-700 mb-2">Upload Authorization / LOU Document <span className="text-red-500">*</span></p>
-                    <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition hover:bg-gray-50">
-                      <UploadCloud size={32} className="text-primary mb-2" />
-                      <span className="text-sm font-semibold text-gray-900">
-                        {billingFile ? `Document Loaded: ${billingFile}` : "Upload LOU / Authorization PDF"}
-                      </span>
-                      <span className="mt-1 text-xs text-gray-500">PDF, DOCX, or Image up to 5MB</span>
-                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*" onChange={handleFileChange} />
-                    </label>
-                  </div>
-
-                  <div className="mt-5 rounded-lg bg-primary-light/50 border border-primary/20 p-4 text-xs text-gray-700 flex gap-2">
+                  <div className="mt-6 rounded-lg bg-primary-light/50 border border-primary/20 p-4 text-xs text-gray-700 flex gap-2">
                     <Info size={16} className="text-primary shrink-0 mt-0.5" />
                     <p>
-                      Your company travel administrator will review and sign off the direct billing arrangements. The reservation remains in <span className="font-semibold">Pending Verification</span> state until authorization document is audited.
+                      Our accounts team will email you within 24 hours to request your company's Letter of Undertaking (LOU), Travel Voucher, or approved Purchase Order. You don't need to upload anything here. The reservation will be marked <span className="font-semibold">Pending Verification</span> until authorization is received.
                     </p>
                   </div>
                 </div>
@@ -1242,7 +1303,11 @@ export function CorporateBookingPage() {
                   type="checkbox"
                 />
                 <span>
-                  I declare the travel information is correct. I agree to the hotel check-in/out policies, room guidelines, and corporate audit rules.
+                  I declare the travel information is correct. I agree to the hotel check-in/out policies, room guidelines, corporate audit rules, and{" "}
+                  <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                    Terms of Service
+                  </Link>
+                  .
                 </span>
               </label>
 
@@ -1273,6 +1338,7 @@ export function CorporateBookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
             total={total}
             ratePerNight={ratePerNight}
             breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
@@ -1283,9 +1349,13 @@ export function CorporateBookingPage() {
         <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
           <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs text-gray-600">Verification file upload check</p>
+              <p className="text-xs text-gray-600">
+                {isPersonalPay ? "Payment receipt uploaded" : "Authorization via email after booking"}
+              </p>
               <p className="text-sm font-semibold text-gray-950">
-                {isFileUploaded ? "Verification file uploaded" : "File upload required"}
+                {isPersonalPay
+                  ? (billingFile ? "Payment receipt uploaded" : "Payment receipt upload required")
+                  : "No LOU upload needed — accounts team will email you"}
               </p>
             </div>
             {canConfirm ? (
@@ -1455,7 +1525,8 @@ interface BookingReviewAsideProps {
   guests: number;
   hasBreakfast: boolean;
   nights: number;
-  room: (typeof rooms)[number] | undefined;
+  room: Room | undefined;
+  typeImageUrls?: string[];
   total: number;
   ratePerNight: number;
   breakfastRatePerPerson?: number;
@@ -1468,6 +1539,7 @@ function BookingReviewAside({
   hasBreakfast,
   nights,
   room,
+  typeImageUrls = [],
   total,
   ratePerNight,
   breakfastRatePerPerson = 250
@@ -1480,7 +1552,7 @@ function BookingReviewAside({
   return (
     <aside className="lg:sticky lg:top-36 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-        <img src={room.imageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
+        <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
         <div className="p-5">
           <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">

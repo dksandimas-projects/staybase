@@ -34,9 +34,24 @@ Guests have the following rights under RA 10173. The hotel must be able to fulfi
 - **Right to be informed** — covered by the Privacy Policy page (`/privacy`) and consent checkbox at booking
 - **Right to access** — guest can request a copy of their booking data via email to the hotel
 - **Right to correction** — guest can request correction of inaccurate data
-- **Right to erasure** — guest can request deletion of their data; hotel must comply unless data is needed for legal/regulatory purposes (e.g. tax records)
+- **Right to erasure** — guest can request deletion of their data through `My Profile → Delete Account` (calls `/api/members/delete-account`, per W1.4 / decision #49 / audit S2.3) or by emailing the DPO. Hotel complies unless data is needed for legal/regulatory purposes (e.g. RA 11862 guest registry records within their 6-month retention window)
 - **Right to object** — guest can object to processing for non-essential purposes
 - **Right to data portability** — provide data in a readable format upon request
+
+### Member Account Erasure Flow
+
+Online account deletion (Spark Rewards) flows through the server-side `/api/members/delete-account` route. The handler runs an Admin SDK transaction and post-transaction cleanup in this order:
+
+1. Verify Firebase ID token — UID of caller must match the member being erased
+2. Body must include `{ confirmation: "erase-my-account" }` to prevent accidental POSTs
+3. Transaction: for every booking with `memberId == uid`, write an anonymized audit record to `bookings/audit/records/{bookingId}` (contains `bookingRef`, `roomId`/`roomNumber`/`roomType`, `checkIn`/`checkOut`, `numNights`, `numGuests`, `totalPrice`, `status`, `source`, `createdAt`, `erasedAt`, `erasedByUid` — no PII) and then scrub the booking of `memberId`, `guestName`, `guestEmail`, `guestPhone`. Mark the member doc `isErased: true`, blank `fullName` / `email` / `phone` / `photoUrl`, zero `rewardsPoints`, and set `isActive: false`.
+4. After the transaction commits, read every `members/{uid}/pointsHistory` doc and delete in a batch (Firestore transactions cannot list collections).
+5. Delete the `members/{uid}` document outright.
+6. Delete the Firebase Auth user via `adminAuth.deleteUser(uid)`. Treat `auth/user-not-found` as success (already gone).
+
+Firestore rule for the new audit collection (`bookings/audit/records/{id}`): `allow read: if isStaff(); allow write: if false;`. Server-only writes, staff-only reads.
+
+Guest registry records collected at physical check-in (nationality, ID type, ID number) are out of scope for this online erasure flow — they are retained for a minimum of 6 months per RA 11862. The deletion confirmation modal links to this policy so guests are not surprised.
 
 ### Data Protection Officer (DPO)
 
@@ -64,8 +79,9 @@ If a breach occurs affecting guest PII:
 ### Privacy Notice
 
 - Full Privacy Policy at `/privacy` on the guest site
+- Terms of Service at `/terms` on the guest site
 - Consent checkbox required at Step 2 (Guest Details) of booking flow
-- Privacy Policy link in footer of all public pages
+- Privacy Policy and Terms of Service links in footer of all public pages
 - Privacy Policy link in all guest-facing booking confirmation emails
 
 ---
@@ -80,11 +96,13 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 - Never expose `remarks` (internal notes) to guest-facing queries — filter server-side
 
 ### `bookings`
-- Read: staff/admin OR matching `guestEmail` (for booking lookup — server-side verification only)
-- Create: anyone (booking creation via API route — not direct client write)
-- Update: staff/admin only
+- Read: staff/admin only in Firestore client rules; guest lookup is server-side by booking ref + email
+- Create: denied in Firestore client rules; all booking document creation is server-side via API route transaction
+- Update: staff/admin only for operational updates from the authenticated admin app
 - Delete: admin only
-- **Critical:** Direct client writes to `bookings` are NOT allowed — all writes go through the API route transaction
+- **Critical:** Direct client booking creation is NOT allowed. Public/corporate booking creation uses `/api/bookings/create`; staff walk-in/manual creation uses `/api/bookings/create-walkin`. Both routes use Admin SDK transactions and bypass Firestore client rules.
+- **Staff operational updates:** Authenticated staff/admin may update existing booking documents directly from the admin app for low-risk operational fields such as status progression, check-in/check-out registry fields, guest ID URL, breakfast selections, notes, `discountVerified`, and `handledBy`.
+- **Server-only booking mutations:** Use API routes for operations that require transactions, guest identity checks, audit records, or emails: booking creation, cancellation, discount rejection, onsite payment recording, points redemption/undo, and any future operation that changes totals or member balances.
 
 ### `guests`
 - Read: owner (matching UID) or staff/admin
@@ -98,6 +116,7 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `corporateInquiries`
 - Read/Write: staff/admin only
 - Contains contact PII — never expose to guest-facing app
+- Public guest submissions go through `/api/corporate/inquiry`; Firestore client-side creates are not allowed
 
 ### `corporateCodes`
 - Read: anyone — needed for validation on `/corporate/book`
@@ -128,6 +147,12 @@ Full rules in `firebase/storage.rules`. Intent:
 - Read: authenticated staff/admin only — **never public**
 - Write: anyone (guests upload during booking flow — use a time-limited upload token approach or validate booking context)
 - URLs stored in Firestore `bookings` documents — access controlled via Firestore rules
+- `bookingId` is preallocated by the booking flow before upload, then passed to `/api/bookings/create`; the API creates the booking document at that exact ID inside the transaction
+
+### Discount ID photos (`bookings/{bookingId}/discount-id/{filename}`)
+- Read: authenticated staff/admin only — **never public**
+- Write: anyone (guests upload during booking flow before booking creation)
+- `bookingId` follows the same preallocated-ID contract as payment proof uploads
 
 ### Website content photos (`settings/website-content/**`)
 - Read: public
@@ -157,6 +182,7 @@ Full rules in `firebase/storage.rules`. Intent:
 ### Rate Limiting
 - Implement rate limiting on public endpoints to prevent abuse:
   - `/api/bookings/create` — max 5 requests per IP per minute
+  - `/api/corporate/inquiry` — max 5 requests per IP per minute
   - `/api/validate/voucher` — max 20 requests per IP per minute
   - `/api/validate/corporate-code` — max 10 requests per IP per minute
   - `/api/email/*` — max 3 requests per booking ref per hour
@@ -212,9 +238,9 @@ Cloudflare's invisible CAPTCHA replacement. Free with no usage limits. Real user
 
 **Where to apply:**
 - `/api/bookings/create` — booking creation (highest risk)
+- `/api/corporate/inquiry` — corporate inquiry submission
 - `/api/validate/voucher` — voucher validation
 - `/api/validate/corporate-code` — corporate code validation
-- Corporate inquiry form submission (direct Firestore write — add server-side verification step)
 
 **Environment variables needed:**
 - `TURNSTILE_SITE_KEY` — public, used in guest-app
@@ -300,6 +326,12 @@ Minimum required content (legal copy — DK or client to finalize with a lawyer 
 - Date of last update
 
 See `plan/features/STATIC-PAGES.md §Privacy Policy` for UI implementation.
+
+## Terms of Service Page (`/terms`)
+
+Minimum required content is defined in `plan/docs/LEGAL.md §Guest Terms of Service`.
+
+See `plan/features/STATIC-PAGES.md §Terms of Service` for UI implementation.
 
 ---
 

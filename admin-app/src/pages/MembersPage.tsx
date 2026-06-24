@@ -3,6 +3,7 @@ import { useAdmin, Member, PointsLog } from "../context/AdminContext";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/Toast";
 import { Award, User, Mail, Phone, Calendar, Plus, ShieldAlert, AwardIcon, Coins, History } from "lucide-react";
 import config from "@config";
 
@@ -12,6 +13,7 @@ export function MembersPage() {
     updateMemberPoints, 
     toggleMemberActive 
   } = useAdmin();
+  const toast = useToast();
 
   // Search and Drawer state
   const [searchText, setSearchText] = useState("");
@@ -59,7 +61,7 @@ export function MembersPage() {
 
     setAdjustAmount("");
     setAdjustReason("");
-    alert("Member rewards balance adjusted and logged successfully.");
+    toast.success("Points balance updated", `${amountNum > 0 ? "+" : ""}${amountNum} pts — ${adjustType}`);
   };
 
   const handleToggleAccount = () => {
@@ -121,6 +123,32 @@ export function MembersPage() {
     }
   ];
 
+  const renderMemberCard = (row: Member) => {
+    const isSuspended = !row.isActive;
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-base font-bold text-gray-900">{row.fullName}</p>
+          <StatusBadge label={row.isActive ? "Active" : "Suspended"} status={row.isActive ? "confirmed" : "dirty"} />
+        </div>
+        <p className="text-xs text-gray-600">{row.email}</p>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Member Since</p>
+            <p className="text-xs text-gray-700">{row.memberSince}</p>
+          </div>
+          <span
+            className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold ${
+              isSuspended ? "bg-gray-100 text-gray-500" : "bg-primary text-white"
+            }`}
+          >
+            {row.rewardsPoints} pts
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   // Filtering row listings based on search box input
   const filteredMembers = members.filter(member => 
     member.fullName.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -153,6 +181,9 @@ export function MembersPage() {
         columns={columns}
         rows={filteredMembers}
         onRowClick={handleRowClick}
+        renderMobileCard={renderMemberCard}
+        emptyMessage="No members match the current search."
+        mobileCardShowChevron
       />
 
       {/* Member Details Drawer (D-04) */}

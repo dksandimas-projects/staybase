@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import {
   browserSessionPersistence,
   getIdTokenResult,
@@ -8,18 +8,38 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut
 } from "firebase/auth";
-import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
+import { ACTIVE_BOOKING_STATUSES, CreateRoomInput, DEFAULT_ROOM_TYPES, MAX_ROOM_TYPE_PHOTOS, type RoomTypeEntry } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
+import { db, storage } from "../firebase/config";
+import { notify } from "../components/Toast";
 
 type StaffRole = "front-desk" | "admin";
+
+const rtcConfiguration: RTCConfiguration = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
 
 interface AdminUser {
   uid: string;
   email: string;
   role: StaffRole;
+}
+
+export interface StaffMember {
+  uid: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  nationality: string;
+  role: StaffRole;
+  isActive: boolean;
+  createdAt: string;
+  disabledAt: string | null;
+  createdBy: string;
+  disabledBy: string;
 }
 
 // Interfaces aligning with plan/docs/TYPES.md
@@ -28,19 +48,19 @@ export interface Room {
   name: string;
   roomNumber: string;
   type: string;
-  description: string;
-  maxCapacity: number;
-  bedDefinition: string;
-  pricePerNight: number;
-  weekendRate: number;
-  corporateRate: number;
-  amenities: string[];
-  imageUrls: string[];
   isActive: boolean;
   status: "available" | "occupied" | "blocked";
   housekeepingStatus: "clean" | "dirty" | "in-progress";
   blockReason: string;
+  blockedFrom: string | null;
+  blockedTo: string | null;
   remarks: string;
+  qrToken: string;
+  // `bedDefinition`, `description`, `amenities`, `maxCapacity`, and the
+  // rate fields (`pricePerNight` / `weekendRate` / `corporateRate`) are
+  // intentionally absent — they now live on the RoomType entry. See
+  // `plan/features/RATE-MANAGEMENT.md §W3.6` and the W3.7 notes in
+  // `plan/features/SETTINGS.md §Room Types`.
 }
 
 export interface OnsitePayment {
@@ -94,6 +114,7 @@ export interface Booking {
   pointsRedeemedAt: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
@@ -152,6 +173,11 @@ export interface Voucher {
   isActive: boolean;
   createdBy: string;
   createdAt: string;
+  // Per W4.4 / decision #104: when a voucher is issued to a
+  // specific guest, their email is captured here and the
+  // voucher-issued email is fired (server-rendered, with the
+  // code in a large monospace block).
+  guestEmail: string | null;
 }
 
 export interface CorporateCode {
@@ -199,6 +225,22 @@ export interface IntercomMessage {
   isQuickRequest: boolean;
   isStoreOrder: boolean;
   orderRef?: string;
+  isEarlyCheckInRequest?: boolean;
+}
+
+export interface IntercomThread {
+  roomId: string;
+  roomNumber: string;
+  guestName: string;
+  resolved: boolean;
+  updatedAt: string;
+}
+
+export interface IncomingCall {
+  roomId: string;
+  guestName: string;
+  status: "ringing" | "active" | "ended";
+  offer?: RTCSessionDescriptionInit;
 }
 
 export interface StoreOrderItem {
@@ -232,6 +274,8 @@ export interface StoreOrder {
   paymentMethod: "cod" | "add-to-bill" | "gcash";
   paymentProofUrl: string;
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
+  stockRestoredAt: string | null;
+  stockDecrementedAt: string | null;
   isBilled: boolean;
   billedAt: string | null;
   cancellationReason: string;
@@ -253,6 +297,9 @@ export interface AdminContextType {
   toggleHousekeepingStatus: (roomId: string) => void | Promise<void>;
   updateRoomConfig: (roomId: string, updates: Partial<Room>) => void | Promise<void>;
   addRoomBlock: (roomId: string, dates: { from: string; to: string }, reason: string) => void | Promise<void>;
+  createRoom: (input: CreateRoomInput) => Promise<{ success: boolean; error?: string; roomId?: string }>;
+  deleteRoom: (roomId: string) => Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }>;
+  hasActiveBookings: (roomId: string) => number;
 
   // Bookings
   bookings: Booking[];
@@ -273,6 +320,16 @@ export interface AdminContextType {
   corporateInquiries: CorporateInquiry[];
   updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => void;
   addInquiryNote: (inquiryId: string, text: string) => void;
+  convertInquiryToBooking: (input: {
+    inquiryId: string;
+    roomId: string;
+    checkIn: string;
+    checkOut: string;
+    guests: number;
+    hasBreakfast: boolean;
+    paymentMethod: string;
+    ratePerNightOverride?: number | null;
+  }) => Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }>;
 
   // Members
   members: Member[];
@@ -281,21 +338,23 @@ export interface AdminContextType {
 
   // Intercom Inbox
   intercoms: Record<string, IntercomMessage[]>;
+  intercomThreads: Record<string, IntercomThread>;
   sendIntercomMessage: (roomId: string, text: string, sender?: "guest" | "front-desk") => void;
   markChatAsRead: (roomId: string) => void;
-  incomingCall: { roomId: string; guestName: string; status: "ringing" | "active" | "ended" } | null;
-  triggerIncomingCall: (roomId: string, guestName: string) => void;
-  acceptCall: () => void;
-  declineCall: () => void;
+  setIntercomResolved: (roomId: string, resolved: boolean) => void | Promise<void>;
+  incomingCall: IncomingCall | null;
+  triggerIncomingCall: (roomId: string, guestName: string) => void | Promise<void>;
+  acceptCall: () => void | Promise<void>;
+  declineCall: () => void | Promise<void>;
 
   // Store Orders
   storeOrders: StoreOrder[];
-  updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"]) => void;
-  billStoreOrder: (orderId: string) => void;
+  updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"], cancellationReason?: string) => void | Promise<void>;
+  billStoreOrder: (orderId: string) => void | Promise<void>;
   storeItems: StoreItem[];
-  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => void;
-  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => void;
-  deleteStoreItem: (itemId: string) => void;
+  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => Promise<void>;
+  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => Promise<void>;
+  deleteStoreItem: (itemId: string) => Promise<void>;
 
   // Configurations
   hotelConfig: any;
@@ -303,13 +362,52 @@ export interface AdminContextType {
   rewardsConfig: any;
   breakfastConfig: any;
   storeConfig: any;
-  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => void;
+  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<void>;
+
+  // Staff Accounts
+  staff: StaffMember[];
+  createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string }>;
+  disableStaff: (uid: string) => Promise<{ success: boolean; error?: string }>;
 
   // Room Types Config
-  roomTypes: { value: string; label: string; shortLabel: string }[];
-  addRoomType: (rt: { value: string; label: string; shortLabel: string }) => void;
-  updateRoomType: (value: string, updates: Partial<{ label: string; shortLabel: string }>) => void;
+  roomTypes: RoomTypeEntry[];
+  addRoomType: (
+    rt: {
+      value: string;
+      label: string;
+      shortLabel: string;
+      imageUrls?: string[];
+      bedDefinition: string;
+      description: string;
+      amenities: string[];
+      maxCapacity: number;
+      pricePerNight: number;
+      weekendRate: number;
+      corporateRate: number;
+    }
+  ) => void;
+  updateRoomType: (
+    value: string,
+    updates: Partial<
+      Pick<
+        RoomTypeEntry,
+        | "label"
+        | "shortLabel"
+        | "imageUrls"
+        | "bedDefinition"
+        | "description"
+        | "amenities"
+        | "maxCapacity"
+        | "pricePerNight"
+        | "weekendRate"
+        | "corporateRate"
+      >
+    >
+  ) => void;
   deleteRoomType: (value: string) => void;
+  uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
+  removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
+  reorderRoomTypePhotos: (typeValue: string, imageUrls: string[]) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -386,6 +484,19 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     const roomsRef = collection(db, "rooms");
     const unsubscribe = onSnapshot(roomsRef, (snapshot) => {
       const roomsData: Room[] = [];
+      const parseDateString = (val: any) => {
+        if (!val) return null;
+        if (typeof val.toDate === "function") {
+          return val.toDate().toISOString().split("T")[0];
+        }
+        if (val instanceof Date) {
+          return val.toISOString().split("T")[0];
+        }
+        if (typeof val === "string") {
+          return val.split("T")[0];
+        }
+        return null;
+      };
       snapshot.forEach((doc) => {
         const data = doc.data();
         roomsData.push({
@@ -393,19 +504,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           name: data.name || "",
           roomNumber: data.roomNumber || "",
           type: data.type || "",
-          description: data.description || "",
-          maxCapacity: data.maxCapacity || 0,
-          bedDefinition: data.bedDefinition || "",
-          pricePerNight: data.pricePerNight || 0,
-          weekendRate: data.weekendRate || 0,
-          corporateRate: data.corporateRate || 0,
-          amenities: data.amenities || [],
-          imageUrls: data.imageUrls || [],
           isActive: data.isActive !== false,
           status: data.status || "available",
           housekeepingStatus: data.housekeepingStatus || "clean",
+          blockedFrom: parseDateString(data.blockedFrom),
+          blockedTo: parseDateString(data.blockedTo),
           blockReason: data.blockReason || "",
-          remarks: data.remarks || ""
+          remarks: data.remarks || "",
+          qrToken: data.qrToken || ""
         });
       });
 
@@ -423,12 +529,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const toggleHousekeepingStatus = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
-    
+
+    // Per W1.15 / decision #88 / DASHBOARD-OVERVIEW.md: cycle order is
+    // clean -> dirty -> in-progress -> clean (a room is cleaned, gets
+    // used and goes dirty, is then taken for cleaning which is in-progress,
+    // and returns to clean when done).
     let nextHK: Room["housekeepingStatus"] = "clean";
     if (room.housekeepingStatus === "clean") {
-      nextHK = "in-progress";
-    } else if (room.housekeepingStatus === "in-progress") {
       nextHK = "dirty";
+    } else if (room.housekeepingStatus === "dirty") {
+      nextHK = "in-progress";
     } else {
       nextHK = "clean";
     }
@@ -462,13 +572,141 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addRoomBlock = async (roomId: string, dates: { from: string; to: string }, reason: string) => {
     try {
       const roomRef = doc(db, "rooms", roomId);
+      const fromDate = new Date(`${dates.from}T00:00:00`);
+      const toDate = new Date(`${dates.to}T23:59:59`);
       await updateDoc(roomRef, {
         status: "blocked",
-        blockReason: `${reason} (${dates.from} to ${dates.to})`,
+        blockReason: reason,
+        blockedFrom: Timestamp.fromDate(fromDate),
+        blockedTo: Timestamp.fromDate(toDate),
         updatedAt: serverTimestamp()
       });
     } catch (error) {
       console.error("Error adding room block in Firestore:", error);
+    }
+  };
+
+  // Per `plan/features/ROOM-MANAGEMENT.md §Create`. The room id is the
+  // auto-generated Firestore document id; the modal is responsible for
+  // surfacing the success/failure result to the staff member.
+  const createRoom = async (input: CreateRoomInput): Promise<{ success: boolean; error?: string; roomId?: string }> => {
+    try {
+      const normalizedNumber = input.roomNumber.trim();
+      const existing = rooms.find(
+        (r) => r.roomNumber.trim().toLowerCase() === normalizedNumber.toLowerCase()
+      );
+      if (existing) {
+        const error = `Room number ${normalizedNumber} is already in use.`;
+        notify.error("Cannot create room", error);
+        return { success: false, error };
+      }
+
+      const docRef = await addDoc(collection(db, "rooms"), {
+        name: input.name.trim(),
+        roomNumber: normalizedNumber,
+        type: input.type,
+        isActive: input.isActive,
+        status: input.status,
+        housekeepingStatus: input.housekeepingStatus,
+        blockReason: input.status === "blocked" ? (input.blockReason || "") : "",
+        blockedFrom: null,
+        blockedTo: null,
+        remarks: input.remarks || "",
+        qrToken: "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      return { success: true, roomId: docRef.id };
+    } catch (error) {
+      console.error("Error creating room in Firestore:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to create room", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Per `plan/features/ROOM-MANAGEMENT.md §Delete`. Hard delete with
+  // cascade cleanup of: room photos in Storage (`rooms/{roomId}/*`),
+  // intercom thread + messages (`intercoms/{roomNumber}/{document=**}`),
+  // and call signaling doc + ICE candidates (`calls/{roomNumber}/{document=**}`).
+  // The function is gated by `hasActiveBookings` — staff must first
+  // cancel or check out any pending/confirmed/checked-in bookings
+  // before a room can be removed. Historical bookings keep their
+  // denormalized roomNumber/roomType so receipts and audit logs
+  // remain readable; only the live `roomId` pointer is removed.
+  const hasActiveBookings = (roomId: string): number => {
+    return bookings.filter(
+      (b) => b.roomId === roomId && (ACTIVE_BOOKING_STATUSES as readonly string[]).includes(b.status)
+    ).length;
+  };
+
+  async function deleteSubcollection(parentPath: string) {
+    const snap = await getDocs(collection(db, parentPath));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+  }
+
+  const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) {
+      const error = "Room not found.";
+      notify.error("Cannot delete room", error);
+      return { success: false, error };
+    }
+
+    const activeCount = hasActiveBookings(roomId);
+    if (activeCount > 0) {
+      const error = `Room ${room.roomNumber} has ${activeCount} active booking${activeCount === 1 ? "" : "s"}. Cancel or check them out first.`;
+      notify.warning("Cannot delete room", error);
+      return { success: false, error, blockedByActiveBookings: activeCount };
+    }
+
+    try {
+      // 1) Room photos in Storage — best-effort (don't fail the whole
+      //    delete on Storage errors; the room is being removed anyway).
+      try {
+        const folderRef = storageRef(storage, `rooms/${roomId}`);
+        const listed = await listAll(folderRef);
+        await Promise.all(listed.items.map((item) => deleteObject(item).catch(() => undefined)));
+      } catch (storageErr) {
+        console.warn(`Storage cleanup for room ${roomId} skipped:`, storageErr);
+      }
+
+      // 2) Intercom thread + messages (keyed by roomNumber).
+      if (room.roomNumber) {
+        try {
+          await deleteSubcollection(`intercoms/${room.roomNumber}/messages`);
+        } catch (intercomErr) {
+          console.warn(`Intercom messages cleanup for room ${room.roomNumber} skipped:`, intercomErr);
+        }
+        try {
+          await deleteDoc(doc(db, "intercoms", room.roomNumber));
+        } catch (intercomDocErr) {
+          console.warn(`Intercom thread doc cleanup for room ${room.roomNumber} skipped:`, intercomDocErr);
+        }
+
+        // 3) Call signaling doc + ICE candidates.
+        try {
+          await deleteSubcollection(`calls/${room.roomNumber}/iceCandidates`);
+        } catch (callErr) {
+          console.warn(`Call ICE cleanup for room ${room.roomNumber} skipped:`, callErr);
+        }
+        try {
+          await deleteDoc(doc(db, "calls", room.roomNumber));
+        } catch (callDocErr) {
+          console.warn(`Call doc cleanup for room ${room.roomNumber} skipped:`, callDocErr);
+        }
+      }
+
+      // 4) Finally, the room document itself.
+      await deleteDoc(doc(db, "rooms", roomId));
+
+      return { success: true };
+    } catch (error) {
+      console.error("Error deleting room in Firestore:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to delete room", message);
+      return { success: false, error: message };
     }
   };
 
@@ -554,6 +792,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             pointsRedeemedAt: data.pointsRedeemedAt || null,
             hasBreakfast: !!data.hasBreakfast,
             breakfastRate: data.breakfastRate || 0,
+            reminderSentAt: data.reminderSentAt ? parseDateTimeString(data.reminderSentAt) : null,
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
             cancellationReason: data.cancellationReason || "",
@@ -608,6 +847,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
+      } else if (status === "checked-out") {
+        const token = await auth.currentUser?.getIdToken();
+        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://localhost:3000"
+          : import.meta.env.VITE_GUEST_APP_URL || "";
+
+        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/checkout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to checkout booking via server API.");
+        }
       } else {
         const updatePayload: Record<string, any> = {
           status,
@@ -623,21 +880,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               void updateRoomConfig(matchedRoom.id, { status: "occupied" });
             }
           }
-        } else if (status === "checked-out") {
-          const booking = bookings.find(b => b.id === bookingId);
-          if (booking) {
-            const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
-            if (matchedRoom) {
-              void updateRoomConfig(matchedRoom.id, { status: "available", housekeepingStatus: "dirty" });
-            }
-          }
         }
 
         await updateDoc(bookingDocRef, updatePayload);
       }
     } catch (error) {
       console.error("Error updating booking status:", error);
-      alert("Failed to update booking status: " + (error instanceof Error ? error.message : String(error)));
+      notify.error("Failed to update booking status", error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -740,6 +989,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             isActive: data.isActive !== false,
             createdBy: data.createdBy || "",
             createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
+            guestEmail: data.guestEmail || null,
           });
         });
 
@@ -763,6 +1013,39 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         createdBy: staff?.uid || "unknown",
         createdAt: Timestamp.now(),
       });
+
+      // Per W4.4 / decision #104: when a voucher is issued with
+      // a non-empty guestEmail, fire the voucher-issued email so
+      // the guest knows the code. The server validates the email
+      // + room types and renders the template; the client cannot
+      // override the recipient.
+      if (voucher.guestEmail && voucher.guestEmail.trim()) {
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+            ? "http://localhost:3000"
+            : import.meta.env.VITE_GUEST_APP_URL || "";
+          await fetch(`${baseUrl.replace(/\/$/, "")}/api/email/voucher-issued`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": token ? `Bearer ${token}` : ""
+            },
+            body: JSON.stringify({
+              voucher: {
+                code: voucher.code,
+                discountType: voucher.discountType,
+                discountValue: voucher.discountValue,
+                expiresAt: voucher.expiresAt,
+                applicableRoomTypes: voucher.applicableRoomTypes || [],
+                guestEmail: voucher.guestEmail
+              }
+            })
+          });
+        } catch (emailErr) {
+          console.error("Failed to send voucher-issued email:", emailErr);
+        }
+      }
     } catch (error) {
       console.error("Error adding voucher:", error);
     }
@@ -910,55 +1193,97 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Members Data State
-  const [members, setMembers] = useState<Member[]>([
-    {
-      id: "mem-42",
-      memberNumber: "SR-00042",
-      fullName: "Alex Mercer",
-      email: "member@sparkinn.com",
-      phone: "+63 912 345 6789",
-      photoUrl: "",
-      authProvider: "email",
-      isMember: true,
-      memberSince: "2025-06-02",
-      rewardsPoints: 2480,
-      tier: "standard",
-      isActive: true,
-      pointsHistory: [
-        {
-          id: "pt-1",
-          type: "earn",
-          points: 800,
-          description: "Stay Checkout Earnings (SI-08103)",
-          reason: "Checkout bonus points",
-          bookingId: "bk-3",
-          by: "system",
-          at: "2025-08-09"
+  // Per W2.14 / decision #102 / audit S4.2: convert a corporate
+  // inquiry into a real bookings document via the server-side
+  // /api/corporate/convert-inquiry route. The handler is
+  // staff-only, transactionally creates the booking with
+  // linkedInquiryId + isCorporate (server-derived) + source:
+  // "corporate", flips the inquiry status to "converted", and
+  // appends a back-link note. We pre-allocate the bookingId
+  // here so the booking is at a known doc id.
+  const convertInquiryToBooking = async (input: {
+    inquiryId: string;
+    roomId: string;
+    checkIn: string;
+    checkOut: string;
+    guests: number;
+    hasBreakfast: boolean;
+    paymentMethod: string;
+    ratePerNightOverride?: number | null;
+  }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+        ? "http://localhost:3000"
+        : import.meta.env.VITE_GUEST_APP_URL || "";
+      const bookingId = doc(collection(db, "bookings")).id;
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
         },
-        {
-          id: "pt-2",
-          type: "manual",
-          points: 680,
-          description: "Loyalty Adjustment",
-          reason: "Front desk courtesy credit",
-          bookingId: null,
-          by: "admin",
-          at: "2025-08-08"
-        },
-        {
-          id: "pt-3",
-          type: "earn",
-          points: 1000,
-          description: "Welcome Rewards Bonus",
-          reason: "Registration welcome points",
-          bookingId: null,
-          by: "system",
-          at: "2025-06-02"
-        }
-      ]
+        body: JSON.stringify({
+          inquiryId: input.inquiryId,
+          bookingId,
+          roomId: input.roomId,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          guests: input.guests,
+          hasBreakfast: input.hasBreakfast,
+          paymentMethod: input.paymentMethod,
+          ratePerNightOverride: input.ratePerNightOverride ?? null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        return { success: false, error: data?.error || "Failed to convert inquiry into a booking." };
+      }
+      return {
+        success: true,
+        bookingId: data.data?.bookingId || bookingId,
+        bookingRef: data.data?.bookingRef,
+        totalPrice: data.data?.totalPrice
+      };
+    } catch (err: any) {
+      console.error("Convert inquiry failed:", err);
+      return { success: false, error: err?.message || "Failed to convert inquiry into a booking." };
     }
-  ]);
+  };
+
+  // Members Data State
+  // Per W1.12 / decision #85: real `onSnapshot` listener on the `members`
+  // collection. Replaces the hardcoded `useState<Member[]>([fake entry])`
+  // mock that hid all real members from the admin UI. Cleanup on unmount.
+  const [members, setMembers] = useState<Member[]>([]);
+  useEffect(() => {
+    const membersRef = collection(db, "members");
+    const unsubscribe = onSnapshot(membersRef, (snapshot) => {
+      const membersData: Member[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        membersData.push({
+          id: doc.id,
+          memberNumber: data.memberNumber || "",
+          fullName: data.fullName || "",
+          email: data.email || "",
+          phone: data.phone || "",
+          photoUrl: data.photoUrl || "",
+          authProvider: data.authProvider || "email",
+          isMember: data.isMember !== false,
+          memberSince: data.memberSince || "",
+          rewardsPoints: data.rewardsPoints || 0,
+          tier: data.tier || "standard",
+          isActive: data.isActive !== false,
+          pointsHistory: data.pointsHistory || []
+        });
+      });
+      // Sort by member number for stable display
+      membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
+      setMembers(membersData);
+    });
+    return unsubscribe;
+  }, []);
 
   const updateMemberPoints = (memberId: string, amount: number, type: PointsLog["type"], reason: string) => {
     setMembers(prev => prev.map(mem => {
@@ -988,210 +1313,547 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, isActive: !m.isActive } : m));
   };
 
-  // Intercom log (inbox) state
-  const [intercoms, setIntercoms] = useState<Record<string, IntercomMessage[]>>({
-    "305": [
-      {
-        id: "int-1",
-        text: "Mabuhay Alex! Welcome to spark inn. This is the Front Desk. How can we help you in Room 305 today?",
-        sender: "front-desk",
-        guestName: "Front Desk Staff",
-        timestamp: "10:00 AM",
-        isRead: true,
-        isQuickRequest: false,
-        isStoreOrder: false
-      },
-      {
-        id: "int-2",
-        text: "Hi! Can we get an extra blanket for Room 305?",
-        sender: "guest",
-        guestName: "Alex Mercer",
-        timestamp: "10:15 AM",
-        isRead: false,
-        isQuickRequest: false,
-        isStoreOrder: false
-      }
-    ]
-  });
+  // Intercom log (inbox) state — live from Firestore, keyed by room number
+  const [intercoms, setIntercoms] = useState<Record<string, IntercomMessage[]>>({});
+  const [intercomThreads, setIntercomThreads] = useState<Record<string, IntercomThread>>({});
 
-  const sendIntercomMessage = (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
-    const activeRoomMsgs = intercoms[roomId] || [];
-    const newMsg: IntercomMessage = {
-      id: `int-${Date.now()}`,
-      text,
-      sender,
-      guestName: sender === "guest" ? "Guest" : "Front Desk",
-      timestamp: new Date().toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" }),
-      isRead: sender === "front-desk",
-      isQuickRequest: false,
-      isStoreOrder: false
-    };
+  const formatIntercomTimestamp = (value: any) => {
+    if (!value) return "";
+    const date = typeof value.toDate === "function" ? value.toDate() : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" });
+  };
 
-    setIntercoms(prev => ({
-      ...prev,
-      [roomId]: [...activeRoomMsgs, newMsg]
-    }));
-
-    // Trigger mock automatic guest reply if staff sent the message
-    if (sender === "front-desk") {
-      setTimeout(() => {
-        setIntercoms(prev => {
-          const msgs = prev[roomId] || [];
-          return {
-            ...prev,
-            [roomId]: [
-              ...msgs,
-              {
-                id: `int-guest-reply-${Date.now()}`,
-                text: "Thank you for the quick response! (Simulated Guest)",
-                sender: "guest",
-                guestName: "Guest",
-                timestamp: new Date().toLocaleTimeString(config.locale, { hour: "2-digit", minute: "2-digit" }),
-                isRead: false,
-                isQuickRequest: false,
-                isStoreOrder: false
-              }
-            ]
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "intercoms"),
+      (snapshot) => {
+        const threads: Record<string, IntercomThread> = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const roomNumber = data.roomNumber || docSnap.id;
+          threads[roomNumber] = {
+            roomId: data.roomId || docSnap.id,
+            roomNumber,
+            guestName: data.guestName || "",
+            resolved: !!data.resolved,
+            updatedAt: formatIntercomTimestamp(data.updatedAt)
           };
         });
-      }, 3500);
+        setIntercomThreads(threads);
+      },
+      (error) => {
+        console.error("Error listening to intercom thread metadata:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
+    if (roomNumbers.length === 0) {
+      setIntercoms({});
+      return;
+    }
+
+    const unsubscribes = roomNumbers.map((roomNumber) => {
+      const messagesQuery = query(
+        collection(db, "intercoms", roomNumber, "messages"),
+        orderBy("timestamp", "asc")
+      );
+
+      return onSnapshot(
+        messagesQuery,
+        (snapshot) => {
+          const messages: IntercomMessage[] = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              text: data.text || "",
+              sender: data.sender || "guest",
+              guestName: data.guestName || "",
+              timestamp: formatIntercomTimestamp(data.timestamp),
+              isRead: !!data.isRead,
+              isQuickRequest: !!data.isQuickRequest,
+              isStoreOrder: !!data.isStoreOrder,
+              orderRef: data.orderRef || undefined,
+              isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
+            };
+          });
+
+          setIntercoms((prev) => {
+            if (messages.length === 0) {
+              const { [roomNumber]: _removed, ...rest } = prev;
+              return rest;
+            }
+            return { ...prev, [roomNumber]: messages };
+          });
+        },
+        (error) => {
+          console.error(`Error listening to intercom messages for room ${roomNumber}:`, error);
+        }
+      );
+    });
+
+    return () => {
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [rooms]);
+
+  const sendIntercomMessage = async (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
+    try {
+      await setDoc(doc(db, "intercoms", roomId), {
+        roomId,
+        roomNumber: roomId,
+        resolved: false,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+        text,
+        sender,
+        guestName: sender === "guest" ? "Guest" : currentUser?.email || "Front Desk",
+        timestamp: serverTimestamp(),
+        isRead: sender === "front-desk",
+        isQuickRequest: false,
+        isStoreOrder: false,
+        isEarlyCheckInRequest: false
+      });
+    } catch (error) {
+      console.error("Error sending intercom message:", error);
     }
   };
 
-  const markChatAsRead = (roomId: string) => {
-    setIntercoms(prev => {
-      const msgs = prev[roomId];
-      if (!msgs) return prev;
-      return {
-        ...prev,
-        [roomId]: msgs.map(m => ({ ...m, isRead: true }))
+  const markChatAsRead = async (roomId: string) => {
+    const unreadGuestMessages = (intercoms[roomId] || []).filter((message) => message.sender === "guest" && !message.isRead);
+    if (unreadGuestMessages.length === 0) return;
+
+    try {
+      await Promise.all(
+        unreadGuestMessages.map((message) =>
+          updateDoc(doc(db, "intercoms", roomId, "messages", message.id), {
+            isRead: true
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Error marking intercom messages as read:", error);
+    }
+  };
+
+  const setIntercomResolved = async (roomId: string, resolved: boolean) => {
+    if (!roomId) return;
+
+    try {
+      await setDoc(doc(db, "intercoms", roomId), {
+        roomId,
+        roomNumber: roomId,
+        resolved,
+        resolvedAt: resolved ? serverTimestamp() : null,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error updating intercom resolved status:", error);
+    }
+  };
+
+  // Call Signaling state — live from Firestore calls/{roomId}
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const adminPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const adminMediaStreamRef = useRef<MediaStream | null>(null);
+  const adminRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
+  const adminPreviousCallRoomIdRef = useRef<string | null>(null);
+
+  const cleanupAdminCall = () => {
+    adminIceUnsubscribeRef.current?.();
+    adminIceUnsubscribeRef.current = null;
+    adminProcessedIceIdsRef.current.clear();
+    adminPeerConnectionRef.current?.close();
+    adminPeerConnectionRef.current = null;
+    adminMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    adminMediaStreamRef.current = null;
+    if (adminRemoteAudioRef.current) {
+      adminRemoteAudioRef.current.pause();
+      adminRemoteAudioRef.current.srcObject = null;
+      adminRemoteAudioRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, "calls"),
+      (snapshot) => {
+        const activeCalls = snapshot.docs
+          .map((docSnap): IncomingCall & { startedAt: number } => {
+            const data = docSnap.data();
+            return {
+              roomId: docSnap.id,
+              guestName: data.guestName || "Guest",
+              status: data.status || "ended",
+              offer: data.offer || undefined,
+              startedAt: data.startedAt?.toMillis ? data.startedAt.toMillis() : 0
+            };
+          })
+          .filter((call) =>
+            (call.status === "ringing" || call.status === "active") && !!call.roomId
+          )
+          .sort((a, b) => b.startedAt - a.startedAt);
+
+        const nextCall = activeCalls[0] || null;
+        // Per W2.6 / decision #94: "second wins" — if a new active
+        // call arrives while a previous one was being shown, write
+        // status: "ended" to the old call doc so the previous guest's
+        // UI sees the call end via its snapshot listener. The new
+        // call is the only one shown in the inbox.
+        const previousRoomId = adminPreviousCallRoomIdRef.current;
+        if (nextCall && previousRoomId && nextCall.roomId !== previousRoomId) {
+          void updateDoc(doc(db, "calls", previousRoomId), {
+            status: "ended",
+            endedAt: serverTimestamp(),
+            endedReason: "superseded-by-other-call"
+          }).catch((err) => {
+            console.error("Error ending superseded call:", err);
+          });
+          cleanupAdminCall();
+        }
+        adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
+        setIncomingCall(nextCall);
+        if (!nextCall) {
+          cleanupAdminCall();
+          adminPreviousCallRoomIdRef.current = null;
+        }
+      },
+      (error) => {
+        console.error("Error listening to WebRTC calls:", error);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+      cleanupAdminCall();
+    };
+  }, []);
+
+  const triggerIncomingCall = async (roomId: string, guestName: string) => {
+    if (!roomId) return;
+    await setDoc(doc(db, "calls", roomId), {
+      answer: null,
+      status: "ringing",
+      guestName,
+      startedAt: serverTimestamp(),
+      endedAt: null
+    }, { merge: true });
+  };
+
+  const acceptCall = async () => {
+    if (!incomingCall) return;
+
+    try {
+      const callRef = doc(db, "calls", incomingCall.roomId);
+
+      if (!incomingCall.offer) {
+        await updateDoc(callRef, {
+          status: "active",
+          endedAt: null
+        });
+        return;
+      }
+
+      cleanupAdminCall();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      adminMediaStreamRef.current = stream;
+
+      const peerConnection = new RTCPeerConnection(rtcConfiguration);
+      adminPeerConnectionRef.current = peerConnection;
+      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+
+      peerConnection.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        void addDoc(collection(db, "calls", incomingCall.roomId, "iceCandidates"), {
+          candidate: event.candidate.toJSON(),
+          from: "staff",
+          createdAt: serverTimestamp()
+        });
       };
+      peerConnection.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        if (!remoteStream) return;
+        const remoteAudio = adminRemoteAudioRef.current ?? new Audio();
+        remoteAudio.autoplay = true;
+        remoteAudio.srcObject = remoteStream;
+        adminRemoteAudioRef.current = remoteAudio;
+        void remoteAudio.play().catch(() => {
+          // Browser autoplay policy can still require staff interaction.
+        });
+      };
+
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      adminIceUnsubscribeRef.current = onSnapshot(
+        collection(db, "calls", incomingCall.roomId, "iceCandidates"),
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type !== "added") return;
+            const data = change.doc.data();
+            if (data.from !== "guest" || adminProcessedIceIdsRef.current.has(change.doc.id)) return;
+            adminProcessedIceIdsRef.current.add(change.doc.id);
+            if (data.candidate) {
+              void peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+          });
+        }
+      );
+
+      await updateDoc(callRef, {
+        answer: {
+          type: answer.type,
+          sdp: answer.sdp
+        },
+        status: "active",
+        endedAt: null
+      });
+    } catch (error) {
+      console.error("Error accepting WebRTC call:", error);
+      cleanupAdminCall();
+      await updateDoc(doc(db, "calls", incomingCall.roomId), {
+        status: "ended",
+        endedAt: serverTimestamp()
+      });
+    }
+  };
+
+  const declineCall = async () => {
+    if (!incomingCall) return;
+    cleanupAdminCall();
+    await updateDoc(doc(db, "calls", incomingCall.roomId), {
+      status: "ended",
+      endedAt: serverTimestamp()
     });
   };
 
-  // Call Signaling state
-  const [incomingCall, setIncomingCall] = useState<AdminContextType["incomingCall"]>(null);
+  // Store Orders State — live from Firestore
+  const [storeOrders, setStoreOrders] = useState<StoreOrder[]>([]);
 
-  const triggerIncomingCall = (roomId: string, guestName: string) => {
-    setIncomingCall({ roomId, guestName, status: "ringing" });
+  const formatStoreDate = (value: any) => {
+    if (!value) return "";
+    const date = typeof value.toDate === "function" ? value.toDate() : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toISOString();
   };
 
-  const acceptCall = () => {
-    if (incomingCall) {
-      setIncomingCall({ ...incomingCall, status: "active" });
-    }
-  };
-
-  const declineCall = () => {
-    setIncomingCall(null);
-  };
-
-  // Store Orders State
-  const [storeOrders, setStoreOrders] = useState<StoreOrder[]>([
-    {
-      id: "ord-1",
-      orderRef: "ORD-8714",
-      roomId: "rm-305",
-      roomNumber: "305",
-      bookingId: "bk-2",
-      guestName: "Alex Mercer",
-      items: [
-        { itemId: "item-1", name: "San Miguel Pale Pilsen (Can)", price: 120, quantity: 2 },
-        { itemId: "item-3", name: "Bohol Peanut Kisses", price: 80, quantity: 1 }
-      ],
-      totalAmount: 320,
-      paymentMethod: "add-to-bill",
-      paymentProofUrl: "",
-      status: "placed",
-      isBilled: false,
-      billedAt: null,
-      cancellationReason: "",
-      handledBy: "",
-      notes: "Deliver cold pilsen.",
-      createdAt: new Date().toISOString()
-    }
-  ]);
-
-  const updateStoreOrderStatus = (orderId: string, status: StoreOrder["status"]) => {
-    setStoreOrders(prev => prev.map(ord => ord.id === orderId ? { ...ord, status } : ord));
-  };
-
-  const billStoreOrder = (orderId: string) => {
-    setStoreOrders(prev => prev.map(ord => {
-      if (ord.id === orderId) {
-        return {
-          ...ord,
-          isBilled: true,
-          billedAt: new Date().toISOString()
-        };
+  useEffect(() => {
+    const storeOrdersQuery = query(collection(db, "storeOrders"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(
+      storeOrdersQuery,
+      (snapshot) => {
+        setStoreOrders(snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            orderRef: data.orderRef || "",
+            roomId: data.roomId || "",
+            roomNumber: data.roomNumber || "",
+            bookingId: data.bookingId || null,
+            guestName: data.guestName || "",
+            items: Array.isArray(data.items) ? data.items : [],
+            totalAmount: Number(data.totalAmount || 0),
+            paymentMethod: data.paymentMethod || "cod",
+            paymentProofUrl: data.paymentProofUrl || "",
+            status: data.status || "placed",
+            stockRestoredAt: data.stockRestoredAt ? formatStoreDate(data.stockRestoredAt) : null,
+            stockDecrementedAt: data.stockDecrementedAt ? formatStoreDate(data.stockDecrementedAt) : null,
+            isBilled: !!data.isBilled,
+            billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
+            cancellationReason: data.cancellationReason || "",
+            handledBy: data.handledBy || "",
+            notes: data.notes || "",
+            createdAt: formatStoreDate(data.createdAt)
+          } satisfies StoreOrder;
+        }));
+      },
+      (error) => {
+        console.error("Error listening to store orders:", error);
       }
-      return ord;
-    }));
-  };
+    );
 
-  // Store Catalog State
-  const [storeItems, setStoreItems] = useState<StoreItem[]>([
-    {
-      id: "item-1",
-      name: "San Miguel Pale Pilsen",
-      category: "drinks",
-      description: "Ice-cold local pilsner beer, 330ml can.",
-      price: 120,
-      stock: 18,
-      imageUrl: "https://images.unsplash.com/photo-1608270586620-248524c67de9?auto=format&fit=crop&q=80&w=256&h=256",
-      isActive: true,
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "item-2",
-      name: "Spark Still Water",
-      category: "drinks",
-      description: "Premium purified drinking water in a glass bottle.",
-      price: 60,
-      stock: null,
-      imageUrl: "https://images.unsplash.com/photo-1523362628745-0c100150b504?auto=format&fit=crop&q=80&w=256&h=256",
-      isActive: true,
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "item-3",
-      name: "Bohol Peanut Kisses",
-      category: "snacks",
-      description: "Crisp local peanut cookies shaped like Chocolate Hills.",
-      price: 80,
-      stock: 4,
-      imageUrl: "https://images.unsplash.com/photo-1590080875515-8a3a8dc5735e?auto=format&fit=crop&q=80&w=256&h=256",
-      isActive: true,
-      createdAt: "2026-06-01"
-    },
-    {
-      id: "item-4",
-      name: "Extra Beach Towel",
-      category: "rentals",
-      description: "Large microfiber towel for pool trips and beach days.",
-      price: 150,
-      stock: 0,
-      imageUrl: "",
-      isActive: false,
-      createdAt: "2026-06-01"
+    return unsubscribe;
+  }, []);
+
+  const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
+    if (status === "cancelled" || status === "confirmed") {
+      await runTransaction(db, async (transaction) => {
+        const orderRef = doc(db, "storeOrders", orderId);
+        const orderSnap = await transaction.get(orderRef);
+        if (!orderSnap.exists()) {
+          throw new Error("Store order not found");
+        }
+
+        const orderData = orderSnap.data();
+        const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
+
+        if (status === "cancelled") {
+          const shouldRestoreStock = !!orderData.stockDecrementedAt && !orderData.stockRestoredAt;
+          const itemRefs = shouldRestoreStock
+            ? orderItems.map((item: any) => doc(db, "storeItems", item.itemId))
+            : [];
+          const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+
+          itemSnaps.forEach((itemSnap, index) => {
+            if (!itemSnap.exists()) return;
+            const itemData = itemSnap.data();
+            const stock = itemData.stock ?? null;
+            if (stock !== null) {
+              transaction.update(itemRefs[index], {
+                stock: Number(stock || 0) + Number(orderItems[index].quantity || 0),
+                updatedAt: serverTimestamp()
+              });
+            }
+          });
+
+          transaction.update(orderRef, {
+            status,
+            cancellationReason,
+            stockRestoredAt: shouldRestoreStock ? serverTimestamp() : orderData.stockRestoredAt || null,
+            updatedAt: serverTimestamp(),
+            handledBy: currentUser?.uid || currentUser?.email || ""
+          });
+          return;
+        }
+
+        // status === "confirmed": decrement stock exactly once on placed -> confirmed transition
+        if (orderData.status === "placed" && !orderData.stockDecrementedAt) {
+          const itemRefs = orderItems.map((item: any) => doc(db, "storeItems", item.itemId));
+          const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+          itemSnaps.forEach((itemSnap, index) => {
+            if (!itemSnap.exists()) return;
+            const itemData = itemSnap.data();
+            const stock = itemData.stock ?? null;
+            if (stock !== null) {
+              const remaining = Number(stock || 0) - Number(orderItems[index].quantity || 0);
+              if (remaining < 0) {
+                throw new Error("INSUFFICIENT_STOCK");
+              }
+              transaction.update(itemRefs[index], {
+                stock: remaining,
+                updatedAt: serverTimestamp()
+              });
+            }
+          });
+          transaction.update(orderRef, {
+            status,
+            stockDecrementedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            handledBy: currentUser?.uid || currentUser?.email || ""
+          });
+          return;
+        }
+
+        transaction.update(orderRef, {
+          status,
+          updatedAt: serverTimestamp(),
+          handledBy: currentUser?.uid || currentUser?.email || ""
+        });
+      });
+      return;
     }
-  ]);
 
-  const addStoreItem = (item: Omit<StoreItem, "id" | "createdAt">) => {
-    const nextItem: StoreItem = {
-      ...item,
-      id: `item-${Date.now()}`,
-      createdAt: new Date().toISOString()
-    };
-    setStoreItems(prev => [nextItem, ...prev]);
+    await updateDoc(doc(db, "storeOrders", orderId), {
+      status,
+      updatedAt: serverTimestamp(),
+      handledBy: currentUser?.uid || currentUser?.email || ""
+    });
   };
 
-  const updateStoreItem = (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
-    setStoreItems(prev => prev.map(item => item.id === itemId ? { ...item, ...updates } : item));
+  const billStoreOrder = async (orderId: string) => {
+    await updateDoc(doc(db, "storeOrders", orderId), {
+      isBilled: true,
+      billedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      handledBy: currentUser?.uid || currentUser?.email || ""
+    });
   };
 
-  const deleteStoreItem = (itemId: string) => {
-    setStoreItems(prev => prev.filter(item => item.id !== itemId));
+  // Store Catalog State — live from Firestore
+  const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+
+  const normalizeStoreCategory = (category: unknown): StoreItem["category"] => {
+    return ["drinks", "snacks", "toiletries", "rentals", "other"].includes(String(category))
+      ? String(category) as StoreItem["category"]
+      : "other";
+  };
+
+  useEffect(() => {
+    const storeItemsQuery = query(collection(db, "storeItems"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(
+      storeItemsQuery,
+      (snapshot) => {
+        setStoreItems(snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            name: data.name || "Store item",
+            category: normalizeStoreCategory(data.category),
+            description: data.description || "",
+            price: Number(data.price || 0),
+            stock: data.stock === null ? null : Math.max(0, Number(data.stock || 0)),
+            imageUrl: data.imageUrl || "",
+            isActive: data.isActive !== false,
+            createdAt: formatStoreDate(data.createdAt)
+          } satisfies StoreItem;
+        }));
+      },
+      (error) => {
+        console.error("Error listening to store items:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const addStoreItem = async (item: Omit<StoreItem, "id" | "createdAt">) => {
+    try {
+      await addDoc(collection(db, "storeItems"), {
+        ...item,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdBy: currentUser?.uid || currentUser?.email || ""
+      });
+    } catch (error) {
+      console.error("Error adding store item:", error);
+      notify.error("Failed to add store item", error instanceof Error ? error.message : "Unknown error");
+    }
+  };
+
+  const updateStoreItem = async (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
+    try {
+      await updateDoc(doc(db, "storeItems", itemId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.uid || currentUser?.email || ""
+      });
+    } catch (error) {
+      console.error("Error updating store item:", error);
+      notify.error("Failed to update store item", error instanceof Error ? error.message : "Unknown error");
+    }
+  };
+
+  const deleteStoreItem = async (itemId: string) => {
+    try {
+      await updateDoc(doc(db, "storeItems", itemId), {
+        isActive: false,
+        deletedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser?.uid || currentUser?.email || ""
+      });
+    } catch (error) {
+      console.error("Error disabling store item:", error);
+      notify.error("Failed to disable store item", error instanceof Error ? error.message : "Unknown error");
+    }
   };
 
   // Settings Mock States
@@ -1210,9 +1872,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     hotelStory: "A hospitality story built on consistency...",
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
+    roomTypes: [...DEFAULT_ROOM_TYPES],
     bookingPaymentMethods: [
-      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "BDO: 001234567890 (Spark Inn)" },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "GCash: 09170000000 (Daniel Sandimas)" },
+      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "" },
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "" },
       { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
     ]
   });
@@ -1242,7 +1905,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     pointsPerHundred: 10,
     memberDiscountEnabled: true,
     memberDiscountPct: 10,
-    pointsRedemptionRate: 100
+    pointsRedemptionRate: 100,
+    rewardsName: "Spark Rewards",
+    rewardsTagline: "Earn points on completed stays, unlock member-only perks."
   });
 
   const [breakfastConfig, setBreakfastConfig] = useState({
@@ -1261,47 +1926,356 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     paymentMethods: [
       { method: "cod", label: "Cash on Delivery", isEnabled: true },
       { method: "add-to-bill", label: "Room Bill", isEnabled: true },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true }
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "", accountInfo: "" }
     ]
   });
 
-  const updateSettings = (section: any, data: any) => {
-    if (section === "hotelConfig") setHotelConfig(prev => ({ ...prev, ...data }));
-    if (section === "websiteContent") setWebsiteContent(prev => ({ ...prev, ...data }));
-    if (section === "rewardsConfig") setRewardsConfig(prev => ({ ...prev, ...data }));
-    if (section === "breakfastConfig") setBreakfastConfig(prev => ({ ...prev, ...data }));
-    if (section === "storeConfig") setStoreConfig(prev => ({ ...prev, ...data }));
+  // Subscribe to all settings documents from Firestore
+  useEffect(() => {
+    const settingsRef = collection(db, "settings");
+    const unsubscribe = onSnapshot(
+      settingsRef,
+      (snapshot) => {
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const docId = docSnap.id;
+          switch (docId) {
+            case "hotelConfig":
+              setHotelConfig(data as typeof hotelConfig);
+              break;
+            case "websiteContent":
+              setWebsiteContent(data as typeof websiteContent);
+              break;
+            case "rewardsConfig":
+              setRewardsConfig(data as typeof rewardsConfig);
+              break;
+            case "breakfastConfig":
+              setBreakfastConfig(data as typeof breakfastConfig);
+              break;
+            case "storeConfig":
+              setStoreConfig(data as typeof storeConfig);
+              break;
+          }
+        });
+      },
+      (error) => {
+        console.error("Error listening to settings collection:", error);
+      }
+    );
+    return unsubscribe;
+  }, []);
+
+  const updateSettings = async (section: string, data: any) => {
+    try {
+      const docRef = doc(db, "settings", section);
+      await setDoc(docRef, data, { merge: true });
+    } catch (error) {
+      console.error(`Error updating ${section}:`, error);
+      notify.error("Failed to save settings", error instanceof Error ? error.message : "Unknown error");
+    }
   };
 
-  // Room Types State
-  const [roomTypes, setRoomTypes] = useState<{ value: string; label: string; shortLabel: string }[]>(() => {
-    const saved = localStorage.getItem("sim_admin_room_types");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return [...DEFAULT_ROOM_TYPES];
+  // Room Types State — sourced from settings/hotelConfig.roomTypes
+  // (per W3.3). The hotelConfig onSnapshot writes to the local
+  // state when the field is present; the admin save handler below
+  // persists back to Firestore. Each entry carries its own
+  // `imageUrls[]` (per W3.5) AND the type-level pricing + capacity
+  // model (per W3.6) so all rooms of a type share the same gallery,
+  // occupancy cap, and rate matrix.
+  const [roomTypes, setRoomTypes] = useState<RoomTypeEntry[]>(() => {
+    return DEFAULT_ROOM_TYPES.map((t) => ({ ...t, imageUrls: [...t.imageUrls] }));
   });
 
-  const saveRoomTypes = (newTypes: typeof roomTypes) => {
+  useEffect(() => {
+    if (Array.isArray(hotelConfig.roomTypes) && hotelConfig.roomTypes.length > 0) {
+      setRoomTypes(
+        hotelConfig.roomTypes.map((t: any) => ({
+          value: t.value,
+          label: t.label || t.value,
+          shortLabel: t.shortLabel || t.label || t.value,
+          imageUrls: Array.isArray(t.imageUrls) ? t.imageUrls : [],
+          bedDefinition: t.bedDefinition || "",
+          description: t.description || "",
+          amenities: Array.isArray(t.amenities) ? t.amenities : [],
+          maxCapacity: Number(t.maxCapacity) || 1,
+          pricePerNight: Number(t.pricePerNight) || 0,
+          weekendRate: Number(t.weekendRate) || 0,
+          corporateRate: Number(t.corporateRate) || 0
+        }))
+      );
+    }
+  }, [hotelConfig.roomTypes]);
+
+  const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
     setRoomTypes(newTypes);
-    localStorage.setItem("sim_admin_room_types", JSON.stringify(newTypes));
+    try {
+      await updateDoc(doc(db, "settings", "hotelConfig"), {
+        roomTypes: newTypes,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      console.error("Failed to save room types to Firestore:", error);
+    }
   };
 
-  const addRoomType = (rt: { value: string; label: string; shortLabel: string }) => {
-    const updated = [...roomTypes, rt];
-    saveRoomTypes(updated);
+  const addRoomType = async (
+    rt: {
+      value: string;
+      label: string;
+      shortLabel: string;
+      imageUrls?: string[];
+      bedDefinition: string;
+      description: string;
+      amenities: string[];
+      maxCapacity: number;
+      pricePerNight: number;
+      weekendRate: number;
+      corporateRate: number;
+    }
+  ) => {
+    const newType: RoomTypeEntry = {
+      value: rt.value,
+      label: rt.label,
+      shortLabel: rt.shortLabel,
+      imageUrls: Array.isArray(rt.imageUrls) ? rt.imageUrls : [],
+      bedDefinition: rt.bedDefinition.trim(),
+      description: rt.description || "",
+      amenities: Array.isArray(rt.amenities) ? rt.amenities.filter((a) => a && a.trim()) : [],
+      maxCapacity: Math.max(1, Math.floor(rt.maxCapacity)),
+      pricePerNight: Math.max(0, rt.pricePerNight),
+      weekendRate: Math.max(0, rt.weekendRate),
+      corporateRate: Math.max(0, rt.corporateRate)
+    };
+    const updated = [...roomTypes, newType];
+    await saveRoomTypes(updated);
   };
 
-  const updateRoomType = (value: string, updates: Partial<{ label: string; shortLabel: string }>) => {
-    const updated = roomTypes.map(t => t.value === value ? { ...t, ...updates } : t);
-    saveRoomTypes(updated);
+  const updateRoomType = async (
+    value: string,
+    updates: Partial<
+      Pick<
+        RoomTypeEntry,
+        | "label"
+        | "shortLabel"
+        | "imageUrls"
+        | "bedDefinition"
+        | "description"
+        | "amenities"
+        | "maxCapacity"
+        | "pricePerNight"
+        | "weekendRate"
+        | "corporateRate"
+      >
+    >
+  ) => {
+    const updated = roomTypes.map((t) => (t.value === value ? { ...t, ...updates } : t));
+    await saveRoomTypes(updated);
   };
 
-  const deleteRoomType = (value: string) => {
-    const updated = roomTypes.filter(t => t.value !== value);
-    saveRoomTypes(updated);
+  const deleteRoomType = async (value: string) => {
+    // Best-effort cleanup of the type's photos in Storage. The room
+    // type may already be detached from any room; orphaned files
+    // do not block the type deletion.
+    try {
+      const folderRef = storageRef(storage, `room-types/${value}`);
+      const listed = await listAll(folderRef);
+      await Promise.all(listed.items.map((item) => deleteObject(item).catch(() => undefined)));
+    } catch (storageErr) {
+      console.warn(`Storage cleanup for room type ${value} skipped:`, storageErr);
+    }
+    const updated = roomTypes.filter((t) => t.value !== value);
+    await saveRoomTypes(updated);
+  };
+
+  // Per `plan/features/SETTINGS.md §Room Types` — upload a single
+  // photo for a room type, append its download URL to the type's
+  // `imageUrls[]`, and persist. Enforces `MAX_ROOM_TYPE_PHOTOS`.
+  const uploadRoomTypePhoto = async (typeValue: string, file: File): Promise<{ success: boolean; error?: string; url?: string }> => {
+    const type = roomTypes.find((t) => t.value === typeValue);
+    if (!type) return { success: false, error: "Room type not found." };
+    if (type.imageUrls.length >= MAX_ROOM_TYPE_PHOTOS) {
+      const error = `Maximum ${MAX_ROOM_TYPE_PHOTOS} photos per room type.`;
+      notify.warning("Photo limit reached", error);
+      return { success: false, error };
+    }
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `room-types/${typeValue}/${Date.now()}-${safeName}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      const next = [...type.imageUrls, url];
+      await updateRoomType(typeValue, { imageUrls: next });
+      return { success: true, url };
+    } catch (error) {
+      console.error("Error uploading room type photo:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to upload photo", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Remove a single photo: drop the URL from the type's array and
+  // best-effort delete the underlying Storage object. The list
+  // update always runs even if the Storage delete fails (the file
+  // becomes orphaned but the type stays consistent).
+  const removeRoomTypePhoto = async (typeValue: string, url: string): Promise<{ success: boolean; error?: string }> => {
+    const type = roomTypes.find((t) => t.value === typeValue);
+    if (!type) return { success: false, error: "Room type not found." };
+    try {
+      const next = type.imageUrls.filter((u) => u !== url);
+      await updateRoomType(typeValue, { imageUrls: next });
+      try {
+        const fileRef = storageRef(storage, url);
+        await deleteObject(fileRef);
+      } catch (storageErr) {
+        console.warn(`Storage delete for ${url} skipped:`, storageErr);
+      }
+      return { success: true };
+    } catch (error) {
+      console.error("Error removing room type photo:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to remove photo", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Persist a new ordering of `imageUrls[]` for a room type.
+  const reorderRoomTypePhotos = async (typeValue: string, imageUrls: string[]): Promise<{ success: boolean; error?: string }> => {
+    const type = roomTypes.find((t) => t.value === typeValue);
+    if (!type) return { success: false, error: "Room type not found." };
+    try {
+      await updateRoomType(typeValue, { imageUrls });
+      return { success: true };
+    } catch (error) {
+      console.error("Error reordering room type photos:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to save photo order", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Staff Accounts — live from `guests/{uid}` where role is staff (front-desk | admin).
+  // Per SETTINGS.md §4 + audit S5.2: this is the source of truth for the Staff
+  // Accounts tab. The /api/admin/create-staff and /api/admin/disable-staff
+  // handlers write here transactionally; Firestore listeners refresh the UI.
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+
+  useEffect(() => {
+    const staffRef = query(
+      collection(db, "guests"),
+      where("role", "in", ["front-desk", "admin"])
+    );
+    const unsubscribe = onSnapshot(
+      staffRef,
+      (snapshot) => {
+        const staffData: StaffMember[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const createdAt = data.createdAt
+            ? (typeof data.createdAt.toDate === "function"
+                ? data.createdAt.toDate().toISOString()
+                : String(data.createdAt))
+            : "";
+          const disabledAt = data.disabledAt
+            ? (typeof data.disabledAt.toDate === "function"
+                ? data.disabledAt.toDate().toISOString()
+                : String(data.disabledAt))
+            : null;
+          staffData.push({
+            uid: docSnap.id,
+            fullName: data.fullName || "",
+            email: data.email || "",
+            phone: data.phone || "",
+            nationality: data.nationality || "",
+            role: data.role === "admin" ? "admin" : "front-desk",
+            isActive: data.isActive !== false,
+            createdAt,
+            disabledAt,
+            createdBy: data.createdBy || "",
+            disabledBy: data.disabledBy || ""
+          });
+        });
+
+        staffData.sort((a, b) => {
+          if (a.role !== b.role) return a.role === "admin" ? -1 : 1;
+          return a.email.localeCompare(b.email);
+        });
+        setStaff(staffData);
+      },
+      (error) => {
+        console.error("Error listening to staff collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  const getApiBaseUrl = () => {
+    if (typeof window === "undefined") return "";
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:3000";
+    }
+    return import.meta.env.VITE_GUEST_APP_URL || "";
+  };
+
+  const createStaff = async (input: {
+    fullName: string;
+    email: string;
+    password: string;
+    phone?: string;
+    nationality?: string;
+    role: StaffRole;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/create-staff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          fullName: input.fullName,
+          email: input.email,
+          password: input.password,
+          phone: input.phone || "",
+          nationality: input.nationality || "",
+          role: input.role
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to create staff account." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error creating staff account:", err);
+      return { success: false, error: err?.message || "Failed to create staff account." };
+    }
+  };
+
+  const disableStaff = async (uid: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/disable-staff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ uid })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to disable staff account." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error disabling staff account:", err);
+      return { success: false, error: err?.message || "Failed to disable staff account." };
+    }
   };
 
   return (
@@ -1316,6 +2290,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         toggleHousekeepingStatus,
         updateRoomConfig,
         addRoomBlock,
+        createRoom,
+        deleteRoom,
+        hasActiveBookings,
         bookings,
         updateBookingStatus,
         addOnsitePayment,
@@ -1330,12 +2307,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         corporateInquiries,
         updateInquiryStatus,
         addInquiryNote,
+        convertInquiryToBooking,
         members,
         updateMemberPoints,
         toggleMemberActive,
         intercoms,
+        intercomThreads,
         sendIntercomMessage,
         markChatAsRead,
+        setIntercomResolved,
         incomingCall,
         triggerIncomingCall,
         acceptCall,
@@ -1356,7 +2336,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         roomTypes,
         addRoomType,
         updateRoomType,
-        deleteRoomType
+        deleteRoomType,
+        uploadRoomTypePhoto,
+        removeRoomTypePhoto,
+        reorderRoomTypePhotos,
+        staff,
+        createStaff,
+        disableStaff
       }}
     >
       {children}

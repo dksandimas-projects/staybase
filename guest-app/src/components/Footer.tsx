@@ -11,7 +11,8 @@ const footerLinks = [
   { label: "Rewards", to: "/rewards" },
   { label: "My Booking", to: "/my-booking" },
   { label: "Contact", to: "/contact" },
-  { label: "Privacy", to: "/privacy" }
+  { label: "Privacy", to: "/privacy" },
+  { label: "Terms", to: "/terms" }
 ];
 
 export function Footer() {
