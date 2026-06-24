@@ -57,10 +57,16 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 ## Branching & Commit Rules
 
 **Branch naming:**
-- `feature/booking-flow` — new feature
-- `feature/admin-dashboard` — new feature
-- `fix/availability-locking` — bug fix
-- `plan/docs/update-backend-schema` — documentation only
+- `feature/<phase-n>-<short-slug>` — new feature (e.g. `feature/phase-9-booking-lookup`, `feature/phase-4-booking-flow`)
+- `fix/<phase-n>-<short-slug>` — bug fix (e.g. `fix/phase-5-availability-locking`)
+- `docs/<phase-n>-<short-slug>` — documentation-only (e.g. `docs/phase-9-update-roadmap`)
+- Audit fix branches use the audit ID: `fix/audit-24-store-charges-schema`
+
+**Why include the phase number:**
+- A glance at any open or recent branch tells you which phase of the roadmap it belongs to, even after the work is merged and the commit history is months old.
+- Branch names stay stable if work spans multiple phase boundaries (don't rename mid-flight just because scope drifted).
+- The phase number is the project's primary planning unit (see `plan/project/ROADMAP.md`). Putting it on the branch keeps branches and roadmap in lockstep.
+- The `phase-` prefix is required; bare `feature/<name>` is reserved for cross-cutting work that doesn't fit a single phase (rare — prefer scoping it to a phase).
 
 **Conventional Commits:**
 
@@ -75,6 +81,12 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | `style:` | Formatting, whitespace | None |
 
 Husky's `commit-msg` hook auto-bumps `shared/VERSION.ts` based on the prefix.
+
+**Branch retention (do not delete merged branches):**
+- Once a feature/fix/docs branch is merged into `dev`, **leave the branch in place** — locally and on origin. Merged branches are cheap, and the commit history is the source of truth for "what was in this feature/fix before it landed." Deleting a merged branch throws away its human-readable label (e.g. `feature/email-system`) and makes it harder to grep, bisect, or re-cherry-pick later.
+- If a branch was force-pushed, rebased, or otherwise lost, recreate it at the original tip commit: `git branch <name> <sha>`. The SHA is recoverable from `dev`'s log.
+- Do **not** run `git branch -d` / `git branch -D` / `git push origin --delete` on merged branches without explicit user instruction.
+- The only acceptable reasons to delete a branch are: (a) the user explicitly asks, or (b) the branch was created by mistake and never merged anywhere (e.g. typo'd name, abandoned spike).
 
 ---
 

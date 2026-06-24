@@ -16,12 +16,16 @@ service cloud.firestore {
 
     match /rooms/{roomId} {
       allow read: if true;
-      allow write: if isStaff();
+      // Per W3.4 / `plan/features/ROOM-MANAGEMENT.md §Delete`: only
+      // admins can hard-delete a room document. Front-desk can still
+      // create, edit, and toggle active/blocked status.
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
     }
 
     match /bookings/{bookingId} {
       allow read: if isStaff();
-      allow create: if true;
+      allow create: if false;
       allow update: if isStaff();
       allow delete: if isAdmin();
 
@@ -29,6 +33,15 @@ service cloud.firestore {
         allow read, create: if isStaff();
         allow update, delete: if false;
       }
+    }
+
+    // Per W1.4 / decision #49 / audit S2.3: anonymized booking audit
+    // records written by /api/members/delete-account. Staff can read
+    // for accounting / RA 11862 compliance; clients cannot write or
+    // read; server-side only.
+    match /bookings/audit/records/{auditId} {
+      allow read: if isStaff();
+      allow write: if false;
     }
 
     match /guests/{userId} {
@@ -39,7 +52,8 @@ service cloud.firestore {
 
     match /members/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
-      allow create, update: if signedIn() && (isStaff() || request.auth.uid == userId);
+      allow create: if false;
+      allow update: if signedIn() && (isStaff() || request.auth.uid == userId);
       allow delete: if isAdmin() || (signedIn() && request.auth.uid == userId);
 
       match /pointsHistory/{entryId} {
@@ -56,7 +70,12 @@ service cloud.firestore {
 
     match /corporateInquiries/{inquiryId} {
       allow read, update, delete: if isStaff();
-      allow create: if true;
+      allow create: if isStaff();
+    }
+
+    match /contactInquiries/{inquiryId} {
+      allow read, update, delete: if isStaff();
+      allow create: if isStaff();
     }
 
     match /corporateCodes/{code} {
@@ -83,8 +102,8 @@ service cloud.firestore {
     }
 
     match /storeOrders/{orderId} {
-      allow read, update: if isStaff();
-      allow create: if true;
+      allow read, create: if true;
+      allow update: if isStaff();
       allow delete: if isAdmin();
     }
 

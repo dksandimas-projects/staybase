@@ -23,6 +23,15 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
 | New corporate inquiry | `/api/email/corporate-inquiry` | Staff (admin email) | When inquiry form submitted on guest site |
 | Discount rejected | `/api/email/discount-rejected` | Guest | When staff rejects Senior/PWD discount ID |
+| Early check-in request | `/api/email/early-checkin-request` | Staff (admin email) | When Spark Rewards member requests early check-in for an upcoming booking |
+| Voucher issued *(per `DECISIONS-FEATURES.md #104` — implemented in Phase 11.6 Batch 10)* | `/api/email/voucher-issued` | Guest | When admin creates a voucher with a non-empty `guestEmail` |
+| Store order placed | `/api/email/store-order-placed` | Guest | When guest places a store order via Intercom Shop |
+| Store order confirmed | `/api/email/store-order-confirmed` | Guest | When staff confirms the order (status: placed → confirmed) |
+| Store order out for delivery | `/api/email/store-order-out-for-delivery` | Guest | When staff marks the order as out for delivery |
+| Store order delivered | `/api/email/store-order-delivered` | Guest | When staff marks the order as delivered |
+| Store order cancelled | `/api/email/store-order-cancelled` | Guest | When order is cancelled (by guest or staff) |
+| New online booking | `/api/email/staff-new-booking` | Staff (`settings/hotelConfig.staffEmail`) | When a new online booking is created |
+| New payment proof | `/api/email/staff-new-payment` | Staff (`settings/hotelConfig.staffEmail`) | When guest uploads GCash/bank payment proof |
 
 ### Email Content Checklist
 
@@ -64,10 +73,21 @@ Triggered by `/api/email/discount-rejected` when staff rejects a Senior Citizen 
 ### Email Logic Checklist
 
 - [ ] All email routes validate Firebase ID token (staff routes) or accept booking ref + email for guest-triggered resend
-- [ ] Check-in reminder: implement via a scheduled Vercel cron job or trigger on booking confirmation — checks all `confirmed` bookings where `checkIn = tomorrow`
+- [ ] Check-in reminder: implement via Vercel Cron — checks all `confirmed` bookings where `checkIn = tomorrow`
 - [ ] Resend client initialized once in `api/lib/resend.ts`
 - [ ] Email templates defined server-side as HTML strings or React Email components
 - [ ] On Resend API error: log error server-side, return error response — do not silently fail
+
+### Check-In Reminder Scheduling Decision
+
+Use Vercel Cron for check-in reminders. The cron job runs once daily against `/api/email/checkin-reminder`; when the route receives a cron-authenticated request with no booking body, it queries confirmed bookings whose `checkIn` is tomorrow in `config.timezone` and sends one reminder email per matching booking.
+
+`vercel.json` cron entry spec:
+- Path: `/api/email/checkin-reminder`
+- Schedule: daily at `0 0 * * *` UTC, which runs at 08:00 in Asia/Manila
+- Auth: Vercel sends `Authorization: Bearer {CRON_SECRET}`; `CRON_SECRET` must be configured in Vercel and must not use a `VITE_` prefix
+- Method: Vercel invokes cron paths with `GET`; the route also keeps staff-triggered `POST` support for manual resend/testing
+- Idempotency: **required** *(Per `DECISIONS-FEATURES.md #83`)*. The cron sender writes `reminderSentAt: Timestamp` to the booking in the same transaction that sends the email, and the cron query filters `where("reminderSentAt", "==", null)`. Retries do not double-send.
 
 ---
 

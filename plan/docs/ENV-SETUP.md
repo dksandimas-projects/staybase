@@ -27,6 +27,9 @@ VITE_FIREBASE_APP_ID=
 # Cloudflare Turnstile (public key — safe to expose to browser)
 VITE_TURNSTILE_SITE_KEY=
 
+# Sentry browser error reporting (public DSN — safe to expose to browser)
+VITE_SENTRY_DSN=
+
 # Firebase Admin SDK (server-side only — never prefix with VITE_)
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
@@ -41,6 +44,9 @@ ADMIN_NOTIFICATION_EMAIL=sparkinn.dev@gmail.com
 
 # Cloudflare Turnstile (secret key — server-side only)
 TURNSTILE_SECRET_KEY=
+
+# Vercel Cron (server-side only — never prefix with VITE_)
+CRON_SECRET=
 ```
 
 ---
@@ -56,6 +62,9 @@ VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
 
+# Sentry browser error reporting (public DSN — safe to expose to browser)
+VITE_SENTRY_DSN=
+
 # Guest app URL (for linking to booking pages from admin)
 VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
 ```
@@ -68,6 +77,7 @@ VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
 - `FIREBASE_PRIVATE_KEY` contains newlines — wrap in quotes in `.env` and use `.replace(/\\n/g, '\n')` when initializing the Admin SDK
 - In Vercel dashboard, set all env vars once — they apply to both the frontend build and the API functions in the same deployment
 - `FIREBASE_PROJECT_ID` appears twice (once as `VITE_FIREBASE_PROJECT_ID` for client, once as `FIREBASE_PROJECT_ID` for Admin SDK) — both are needed
+- `CRON_SECRET` protects scheduled Vercel Cron email jobs and must match the bearer token expected by `/api/email/checkin-reminder`
 
 ---
 

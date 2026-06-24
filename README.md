@@ -2,11 +2,14 @@
 
 White-label hotel booking and management system. Spark Inn (Bohol, Philippines) is the reference deployment.
 
+> **Phase 11.7 — Admin Mobile UX is shipped (v0.90.0).** The admin dashboard now has a three-mode responsive sidebar, a sticky mobile header with the brand wordmark, full-screen bottom-sheet drawers, a `DataTable` mobile card view, and a persistent bottom tab bar on operational pages. The full design contract is in `plan/features/ADMIN-MOBILE.md`; the implementation status is in `plan/project/ROADMAP.md §Phase 11.7`. Manual device testing on iPhone SE / iPhone 14 / Pixel 7 / iPad is the only remaining P3 work.
+
 ## Start here
 
 - **Agents / AI tools:** read `CLAUDE.md` first — it has the full project context, read bundles, and hard rules.
 - **Setup:** follow `plan/project/SETUP-GUIDE.md` to get the project running locally and deployed.
 - **Build order:** see `plan/project/ROADMAP.md` for the prioritized development checklist.
+- **Production launch:** see `plan/project/DEPLOY.md` for the staging → production cutover procedure.
 
 ## Structure
 

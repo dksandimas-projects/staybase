@@ -21,6 +21,7 @@ import { RoomsPage } from "./pages/RoomsPage";
 import { SignInPage } from "./pages/SignInPage";
 import { SignUpPage } from "./pages/SignUpPage";
 import { StaysPage } from "./pages/StaysPage";
+import { TermsPage } from "./pages/TermsPage";
 
 export function App() {
   return (
@@ -158,8 +159,16 @@ export function App() {
         <Route
           path="/privacy"
           element={
-            <WithMeta title="Privacy Policy" description={`Read how ${config.brandName} handles guest personal data and privacy rights.`}>
+            <WithMeta title="Privacy Policy" description={`Read how ${config.brandName} handles guest personal data and privacy rights.`} noIndex>
               <PrivacyPage />
+            </WithMeta>
+          }
+        />
+        <Route
+          path="/terms"
+          element={
+            <WithMeta title="Terms of Service" description={`Read ${config.brandName} booking, cancellation, discount, and guest stay terms.`} noIndex>
+              <TermsPage />
             </WithMeta>
           }
         />

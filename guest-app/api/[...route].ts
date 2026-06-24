@@ -1,21 +1,63 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { 
-  handleCreateBooking, 
-  handleCreateWalkin, 
-  handleAddPayment, 
-  handleRejectDiscount, 
-  handleCancelBooking 
-} from "./handlers/bookings";
-import { handleValidateVoucher } from "./handlers/vouchers";
-import { handleValidateCorporateCode } from "./handlers/corporate-codes";
-import { adminAuth } from "./lib/firebase-admin";
+import {
+  handleCreateBooking,
+  handleCreateWalkin,
+  handleAddPayment,
+  handleRejectDiscount,
+  handleCancelBooking,
+  handleConfirmBooking,
+  handleCheckoutBooking,
+  handleLookupBooking
+} from "../server/handlers/bookings";
+import { handleValidateVoucher } from "../server/handlers/vouchers";
+import { handleValidateCorporateCode } from "../server/handlers/corporate-codes";
+import { handleCreateCorporateInquiry, handleConvertInquiryToBooking } from "../server/handlers/corporate-inquiries";
+import { handleCreateContactInquiry } from "../server/handlers/contact";
+import { handleGenerateReference } from "../server/handlers/reference";
+import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption, handleEraseMemberAccount } from "../server/handlers/members";
+import { handleEmailTrigger } from "../server/handlers/email";
+import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
+import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
+import { adminAuth } from "../server/lib/firebase-admin";
+import config from "@config";
 
-async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
+const staffOnlyEmailActions = new Set([
+  "payment-confirmed",
+  "booking-confirmed",
+  "discount-rejected",
+  // Per W4.4 / decision #104: the 8 new templates are
+  // server-triggered from authenticated mutations; the public
+  // /api/email/* endpoint only re-sends for guest-driven actions.
+  // voucher-issued + store-order-* + staff-* are not in
+  // publicEmailActions below — they bypass the endpoint and are
+  // fired directly from the handler.
+  "voucher-issued",
+  "store-order-placed",
+  "store-order-confirmed",
+  "store-order-out-for-delivery",
+  "store-order-delivered",
+  "store-order-cancelled",
+  "staff-new-booking",
+  "staff-new-payment"
+]);
+const publicEmailActions = new Set([
+  "booking-submitted",
+  "payment-confirmed",
+  "booking-confirmed",
+  "checkin-reminder",
+  "booking-cancelled",
+  "corporate-inquiry",
+  "discount-rejected",
+  "early-checkin-request"
+]);
+
+async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; role?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
     return {
       success: true,
       uid: "mock_staff_uid",
-      email: "mock_staff@sparkinn.com"
+      email: "mock_staff@sparkinn.com",
+      role: "admin"
     };
   }
 
@@ -33,7 +75,39 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
     return {
       success: true,
       uid: decodedToken.uid,
-      email: decodedToken.email
+      email: decodedToken.email,
+      role: decodedToken.role
+    };
+  } catch (err) {
+    console.error("Token verification failed:", err);
+    return { success: false, error: "Unauthorized: Invalid or expired token." };
+  }
+}
+
+async function authenticateUser(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; name?: string; picture?: string; error?: string }> {
+  if (process.env.NODE_ENV === "test") {
+    return {
+      success: true,
+      uid: "mock_member_uid",
+      email: "member@sparkinn.com",
+      name: "Mock Member"
+    };
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return { success: false, error: "Unauthorized: Missing or invalid authorization token." };
+  }
+
+  const token = authHeader.split("Bearer ")[1];
+  try {
+    const decodedToken = await adminAuth.verifyIdToken(token);
+    return {
+      success: true,
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      name: decodedToken.name,
+      picture: decodedToken.picture
     };
   } catch (err) {
     console.error("Token verification failed:", err);
@@ -107,12 +181,34 @@ async function verifyTurnstile(token: string | undefined): Promise<{ success: bo
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 1. Enforce CORS
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // Per W4.6 / W1.13 / decision #106 / #86: explicit allowlist from config + dev origins.
+  // `Access-Control-Allow-Credentials` is removed — Firebase ID tokens ride in the
+  // Authorization header, not cookies, so credentials are not needed.
+  // (Closes SEV-1 #2 cross-cutting + 1.7 SEV-1 from the audit.)
+  const ALLOWED_ORIGINS = new Set<string>([
+    `https://${config.domain}`,
+    `https://${config.adminDomain}`,
+    `https://www.${config.domain}`,
+    "http://localhost:5173", // guest-app dev (Vite)
+    "http://localhost:5174", // admin-app dev (Vite)
+    "http://localhost:3000", // generic CRA / Next.js dev
+  ]);
+  const requestOrigin = (req.headers.origin || req.headers.referer || "") as string;
+  let allowOrigin = "";
+  try {
+    const originHost = new URL(requestOrigin).host;
+    if (ALLOWED_ORIGINS.has(requestOrigin) || ALLOWED_ORIGINS.has(`https://${originHost}`) || ALLOWED_ORIGINS.has(`http://${originHost}`)) {
+      allowOrigin = requestOrigin;
+    }
+  } catch {
+    // requestOrigin was empty or malformed — no allow-origin echoed
+  }
+  if (allowOrigin) res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization"
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, X-Cron-Secret"
   );
 
   if (req.method === "OPTIONS") {
@@ -187,6 +283,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleRejectDiscount(req, res);
   }
 
+  if (domain === "bookings" && action === "confirm" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many confirm requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleConfirmBooking(req, res);
+  }
+
+  if (domain === "bookings" && action === "checkout" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many checkout requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleCheckoutBooking(req, res);
+  }
+
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
     let authResult = { success: false, uid: "", email: "" };
     if (req.headers.authorization) {
@@ -197,6 +319,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult.success ? authResult : null;
     return await handleCancelBooking(req, res);
+  }
+
+  if (domain === "bookings" && action === "lookup" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many lookup attempts. Please try again in a minute." });
+    }
+    return await handleLookupBooking(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
@@ -227,6 +356,203 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleValidateCorporateCode(req, res);
+  }
+
+  if (domain === "corporate" && action === "inquiry" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`corporate-inquiry:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many inquiry requests. Please try again in a minute." });
+    }
+
+    if (req.body && typeof req.body === "object" && req.body._hp) {
+      return res.status(200).json({
+        success: true,
+        data: { inquiryId: "hp_" + Math.random().toString(36).substring(2, 9) }
+      });
+    }
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleCreateCorporateInquiry(req, res);
+  }
+
+  if (domain === "contact" && action === "inquiry" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`contact-inquiry:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many contact requests. Please try again in a minute." });
+    }
+
+    if (req.body && typeof req.body === "object" && req.body._hp) {
+      return res.status(200).json({
+        success: true,
+        data: { inquiryId: "hp_" + Math.random().toString(36).substring(2, 9) }
+      });
+    }
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleCreateContactInquiry(req, res);
+  }
+
+  // Per W2.14 / decision #102 / audit S4.2: staff can convert a
+  // corporate inquiry into a real bookings document. The new
+  // booking is pre-filled from the inquiry (company, contact,
+  // preferred dates, numRooms), linked back via linkedInquiryId,
+  // and the inquiry status flips to "converted" + a note + the
+  // back-link is persisted. The booking source is "corporate" per
+  // W2.15 / decision #103.
+  if (domain === "corporate" && action === "convert-inquiry" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleConvertInquiryToBooking(req, res);
+  }
+
+  if (domain === "reference" && action === "generate" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleGenerateReference(req, res);
+  }
+
+  if (domain === "members" && action === "register" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-register:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many rewards registration requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+    return await handleRegisterMember(req, res);
+  }
+
+  if (domain === "members" && action === "redeem-points" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleRedeemMemberPoints(req, res);
+  }
+
+  if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can undo points redemption." });
+    }
+    (req as any).staff = authResult;
+    return await handleUndoMemberPointsRedemption(req, res);
+  }
+
+  if (domain === "members" && action === "delete-account" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many account deletion requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+    return await handleEraseMemberAccount(req, res);
+  }
+
+  if (domain === "admin" && action === "create-staff" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can create staff accounts." });
+    }
+    (req as any).staff = authResult;
+    return await handleCreateStaff(req, res);
+  }
+
+  if (domain === "admin" && action === "disable-staff" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can disable staff accounts." });
+    }
+    (req as any).staff = authResult;
+    return await handleDisableStaff(req, res);
+  }
+
+  if (domain === "store" && action === "create-order" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`store:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
+    }
+
+    return await handleCreateStoreOrder(req, res);
+  }
+
+  if (domain === "store" && action === "cancel-order" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`store-cancel:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many store cancellation requests. Please try again in a minute." });
+    }
+
+    return await handleCancelStoreOrder(req, res);
+  }
+
+  if (domain === "store" && action === "order-status" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`store-status:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many store status requests. Please try again in a minute." });
+    }
+
+    return await handleGetStoreOrderStatus(req, res);
+  }
+
+  const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
+
+  if (domain === "email" && publicEmailActions.has(action) && (req.method === "POST" || isCronEmailMethod)) {
+    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 3600000)) {
+      return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
+    }
+
+    const cronSecret = req.headers["x-cron-secret"];
+    const authHeader = req.headers.authorization;
+    const bearerSecret =
+      typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.split("Bearer ")[1]
+        : "";
+    const isCronRequest =
+      action === "checkin-reminder" &&
+      process.env.CRON_SECRET &&
+      ((typeof cronSecret === "string" && cronSecret === process.env.CRON_SECRET) ||
+        bearerSecret === process.env.CRON_SECRET);
+
+    if (staffOnlyEmailActions.has(action) || (action === "checkin-reminder" && !isCronRequest)) {
+      const authResult = await authenticateStaff(req);
+      if (!authResult.success) {
+        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+      }
+      (req as any).staff = authResult;
+    } else if (req.headers.authorization) {
+      const authResult = await authenticateStaff(req);
+      if (!authResult.success) {
+        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+      }
+      (req as any).staff = authResult;
+    }
+
+    return await handleEmailTrigger(req, res, action as Parameters<typeof handleEmailTrigger>[2]);
   }
 
   // Fallback 404

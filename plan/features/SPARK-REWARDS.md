@@ -40,8 +40,8 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### Data & Logic Checklist
 - [ ] Firebase Auth: `signInWithGoogle()` (Google OAuth provider) + `signInWithEmailAndPassword()` + `createUserWithEmailAndPassword()`
-- [ ] On first Google Sign-In: check if `members/{uid}` exists — if not, create member document with profile data from Google account
-- [ ] On email/password signup: create Firebase Auth user + create `members/{uid}` document
+- [ ] On first Google Sign-In: after Firebase Auth succeeds, POST `/api/members/register` with the guest Firebase ID token if `members/{uid}` does not exist or is not enrolled
+- [ ] On email/password signup: create Firebase Auth user, then POST `/api/members/register` with the guest Firebase ID token to create/enroll `members/{uid}`
 - [ ] `onAuthStateChanged` listener in guest auth context — unsubscribe on cleanup
 - [ ] Guest auth context separate from admin auth context — different Firebase Auth flows, same Firebase project
 - [ ] Password reset: `sendPasswordResetEmail()` via Firebase Auth
@@ -52,13 +52,13 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### UI Checklist
 - [ ] Post-booking prompt (Step 4 — Confirmation page) — "Join Spark Rewards and earn points on this stay!" CTA — shown only to non-members / logged-out guests
-- [ ] One-click join if already signed in — just opt-in, no extra form
+- [ ] One-click join if already signed in — POST `/api/members/register`, no extra form
 - [ ] If not signed in — show Google Sign-In + quick email signup inline on confirmation page
 - [ ] Standalone signup at `/rewards` — marketing page with program overview + sign-up form
 - [ ] Homepage CTA — "Join Spark Rewards" link in navbar and/or footer
 
 ### Data & Logic Checklist
-- [ ] On registration: create `members/{uid}` with `isMember: true`, `memberSince: now`, `rewardsPoints: 0`, `tier: "standard"` (placeholder), `memberNumber: "{config.memberNumberPrefix}-XXXXX"` (generated server-side via `/api/members/register` — sequential, zero-padded 5 digits)
+- [ ] On registration: POST `/api/members/register`; API creates or enrolls `members/{uid}` with `isMember: true`, `memberSince: now`, `rewardsPoints: 0`, `tier: "standard"` (placeholder), `memberNumber: "{config.memberNumberPrefix}-XXXXX"` (sequential, zero-padded 5 digits)
 - [ ] Link past bookings by email: on registration, query `bookings` where `guestEmail == member.email` — update those bookings with `memberId` field
 - [ ] If guest registered post-booking: link the just-completed booking to their new member account
 
@@ -95,7 +95,7 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 - [ ] **Points earning info** — if `settings/rewardsConfig.pointsEnabled` is true, show how points are earned (e.g. "Earn {X} points per booking" or "Earn {X} points per ₱100 spent") — pulled from `settings/rewardsConfig`; if disabled, hide points balance section entirely
 - [ ] **Member discount badge** — if `settings/rewardsConfig.memberDiscountEnabled` is true, show "You get {X}% off every booking as a member" — if disabled, hide
 - [ ] **Early check-in perk** — always shown (not configurable off); "Request Early Check-In" button → sends a tagged message to front desk via `intercoms` (or email if no active room intercom); subject to availability
-- [ ] Points redemption — admin-only from booking detail drawer (staff applies on guest's behalf); My Rewards page shows current balance only — no guest-facing redeem button in Phase 1
+- [ ] Points redemption — staff-only from booking detail drawer via `/api/members/redeem-points`; My Rewards page shows current balance only — no guest-facing redeem button in Phase 1
 
 ### Data & Logic Checklist
 - [ ] Profile: `getDoc` / `updateDoc` on `members/{uid}`
@@ -105,6 +105,8 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 - [ ] Early check-in request: `addDoc` to `intercoms/{roomId}/messages` tagged `isEarlyCheckInRequest: true` OR POST to `/api/email/early-checkin-request` if no active room — always shown to members regardless of rewards config
 - [ ] Member discount: if `settings/rewardsConfig.memberDiscountEnabled`, show discount badge in booking Step 1 for logged-in members (auto-applied) — if disabled, no discount shown
 - [ ] Points awarded on booking checkout: if `settings/rewardsConfig.pointsEnabled`, compute points earned from booking `totalPrice` or flat per-booking value per `rewardsConfig` — `updateDoc` on `members/{uid}.rewardsPoints` + `addDoc` to pointsHistory when booking status changes to `checked-out`; triggered server-side via API route
+- [ ] Points redemption: POST `/api/members/redeem-points`; API transaction validates member balance and redemption rate, updates booking totals, deducts points, and writes points history
+- [ ] Undo points redemption: POST `/api/members/undo-redemption`; admin-only and only while booking status is `confirmed`
 - [ ] Auth guard: all `/account/*` routes redirect to `/signin` if not authenticated
 
 ---

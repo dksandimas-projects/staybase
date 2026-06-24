@@ -18,22 +18,26 @@ export interface Room {
   name: string;
   roomNumber: string;
   type: RoomType;
-  description: string;
-  maxCapacity: number;
-  bedDefinition: string;
-  pricePerNight: number;
-  weekendRate: number;
-  corporateRate: number;
-  amenities: string[];
-  imageUrls: string[];
   isActive: boolean;
   status: RoomStatus;
   housekeepingStatus: HousekeepingStatus;
   blockReason: string;
   remarks: string;
+  qrToken?: string;
   createdAt: Date;
   updatedAt: Date;
 }
+
+// `bedDefinition`, `description`, `amenities`, `maxCapacity`,
+// `pricePerNight`, `weekendRate`, and `corporateRate` were moved off the
+// Room document and onto the RoomType entry (see `RoomTypeEntry` in
+// `shared/constants/index.ts`) across W3.6 and W3.7. All rooms of a
+// type now share the same bed, description, amenities, occupancy cap,
+// and rate matrix. The Rates tab is the canonical edit surface for
+// the rate matrix; the Room Types section of Settings (with its new
+// Edit modal as of W3.7) is the canonical edit surface for the rest.
+// Consumers join the type by `Room.type` at read time via `useRoomTypes`
+// + the `getRoomTypeImages` / `getRoomTypeRates` helpers.
 
 export interface Booking {
   id: string;
@@ -77,9 +81,34 @@ export interface Booking {
   pointsRedeemedAt: Date | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type IntercomSender = "guest" | "front-desk";
+
+export interface IntercomMessage {
+  id: string;
+  text: string;
+  sender: IntercomSender;
+  guestName: string;
+  timestamp: Date;
+  isRead: boolean;
+  isQuickRequest: boolean;
+  isStoreOrder: boolean;
+  orderRef?: string;
+  isEarlyCheckInRequest?: boolean;
+}
+
+export interface IntercomThread {
+  roomId: string;
+  roomNumber: string;
+  guestName: string;
+  resolved: boolean;
+  updatedAt: Date;
+  resolvedAt?: Date | null;
 }

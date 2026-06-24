@@ -4,33 +4,45 @@ import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { useToast } from "../components/Toast";
 import { formatPrice } from "../utils/format";
-import { 
-  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck, 
-  Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone 
+import { useBreakpoint } from "../utils/useBreakpoint";
+import {
+  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck,
+  Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone
 } from "lucide-react";
 import config from "@config";
 
 export function RatesPage() {
-  const { 
-    rooms,
-    vouchers, 
-    addVoucher, 
-    toggleVoucherActive, 
-    corporateCodes, 
+  const {
+    vouchers,
+    addVoucher,
+    toggleVoucherActive,
+    corporateCodes,
     addCorporateCode,
     toggleCorporateCodeActive,
     deleteCorporateCode,
     hotelConfig,
     breakfastConfig,
     updateSettings,
-    updateRoomConfig,
+    updateRoomType,
     roomTypes
   } = useAdmin();
+  const { isMobile } = useBreakpoint();
+  const toast = useToast();
 
   // Modal State
   const [isVchModalOpen, setIsVchModalOpen] = useState(false);
   const [isCorpModalOpen, setIsCorpModalOpen] = useState(false);
+
+  // Two-click confirm state for the delete-corporate-code action.
+  // Set to the code being confirmed; click 2 within 3s executes the delete.
+  const [pendingDeleteCode, setPendingDeleteCode] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingDeleteCode) return;
+    const timer = setTimeout(() => setPendingDeleteCode(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteCode]);
 
   // Voucher Form States
   const [vchCode, setVchCode] = useState("");
@@ -39,20 +51,26 @@ export function RatesPage() {
   const [usageCap, setUsageCap] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [applicableRooms, setApplicableRooms] = useState<string[]>([]);
+  // Per W4.4 / decision #104: optional guest email — when set,
+  // the server fires a voucher-issued email to the guest with
+  // the code in a large monospace block.
+  const [vchGuestEmail, setVchGuestEmail] = useState("");
 
   // Corporate Code Form States
   const [corpCode, setCorpCode] = useState("");
   const [companyName, setCompanyName] = useState("");
-  
-  // Local pricing states per room type (Standard, Weekend, Flat Corporate)
+
+  // Local pricing state per room type — the source of truth now lives on
+  // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
+  // §W3.6`), so the local state is just the in-flight form buffer that
+  // is flushed via `updateRoomType` on save.
   const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>(() => {
     const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
     roomTypes.forEach(t => {
-      const match = rooms.find(r => r.type === t.value);
       initialPrices[t.value] = {
-        base: match?.pricePerNight ?? 3200,
-        weekend: match?.weekendRate ?? 3700,
-        corporate: match?.corporateRate ?? 2880
+        base: t.pricePerNight,
+        weekend: t.weekendRate,
+        corporate: t.corporateRate
       };
     });
     return initialPrices;
@@ -61,7 +79,7 @@ export function RatesPage() {
   const [roomRates, setRoomRates] = useState<Record<string, string>>(() => {
     const initialRates: Record<string, string> = {};
     roomTypes.forEach(t => {
-      initialRates[t.value] = "2880";
+      initialRates[t.value] = String(t.pricePerNight);
     });
     return initialRates;
   });
@@ -72,11 +90,10 @@ export function RatesPage() {
       const updated = { ...prev };
       roomTypes.forEach(t => {
         if (!updated[t.value]) {
-          const match = rooms.find(r => r.type === t.value);
           updated[t.value] = {
-            base: match?.pricePerNight ?? 3200,
-            weekend: match?.weekendRate ?? 3700,
-            corporate: match?.corporateRate ?? 2880
+            base: t.pricePerNight,
+            weekend: t.weekendRate,
+            corporate: t.corporateRate
           };
         }
       });
@@ -87,12 +104,12 @@ export function RatesPage() {
       const updated = { ...prev };
       roomTypes.forEach(t => {
         if (!updated[t.value]) {
-          updated[t.value] = "2880";
+          updated[t.value] = String(t.pricePerNight);
         }
       });
       return updated;
     });
-  }, [roomTypes, rooms]);
+  }, [roomTypes]);
 
   // Local breakfast rate state
   const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
@@ -100,8 +117,8 @@ export function RatesPage() {
   // Local payment gateways states
   const [paymentMethods, setPaymentMethods] = useState<any[]>(() => {
     return hotelConfig.bookingPaymentMethods || [
-      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "BDO: 001234567890 (Spark Inn)" },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "GCash: 09170000000 (Daniel Sandimas)" },
+      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "" },
+      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "" },
       { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
     ];
   });
@@ -127,7 +144,8 @@ export function RatesPage() {
       expiresAt: expiresAt || null,
       applicableRoomTypes: applicableRooms,
       isActive: true,
-      createdBy: "admin"
+      createdBy: "admin",
+      guestEmail: vchGuestEmail.trim() || null
     });
 
     setVchCode("");
@@ -136,7 +154,6 @@ export function RatesPage() {
     setExpiresAt("");
     setApplicableRooms([]);
     setIsVchModalOpen(false);
-    alert("Promo voucher created successfully!");
   };
 
   const handleCorpSubmit = (e: React.FormEvent) => {
@@ -164,43 +181,51 @@ export function RatesPage() {
     setCorpCode("");
     setCompanyName("");
     setIsCorpModalOpen(false);
-    alert("Negotiated corporate access code created successfully!");
   };
 
-  // Save room prices changes
-  const handleSaveRates = (e: React.FormEvent) => {
+  // Save room prices changes — per W3.6 the rate matrix lives on the
+  // room type, so we flush one `updateRoomType` per type rather than
+  // batching across rooms of that type.
+  const [isSavingRates, setIsSavingRates] = useState(false);
+  const handleSaveRates = async (e: React.FormEvent) => {
     e.preventDefault();
-    rooms.forEach(room => {
-      const typeRates = prices[room.type];
-      if (typeRates) {
-        updateRoomConfig(room.id, {
-          pricePerNight: typeRates.base,
-          weekendRate: typeRates.weekend,
-          corporateRate: typeRates.corporate
+    setIsSavingRates(true);
+    try {
+      const updates = roomTypes.map(t => {
+        const next = prices[t.value];
+        if (!next) return Promise.resolve();
+        return updateRoomType(t.value, {
+          pricePerNight: next.base,
+          weekendRate: next.weekend,
+          corporateRate: next.corporate
         });
-      }
-    });
-    alert("Dynamic base room rates, weekend surcharges, and flat corporate rates saved successfully!");
+      });
+      await Promise.all(updates);
+      toast.success("Rates saved", "Rate matrix updated for all room types.");
+    } catch (err) {
+      console.error("Error saving rates:", err);
+      toast.error("Failed to save rates", err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsSavingRates(false);
+    }
   };
 
   // Save breakfast pricing changes
-  const handleSaveBreakfastRate = (e: React.FormEvent) => {
+  const handleSaveBreakfastRate = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("breakfastConfig", {
+    await updateSettings("breakfastConfig", {
       ...breakfastConfig,
       ratePerPersonPerNight: parseFloat(bfRate) || 300
     });
-    alert("Breakfast service pricing saved successfully!");
   };
 
   // Save payment config changes
-  const handleSavePayments = (e: React.FormEvent) => {
+  const handleSavePayments = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings("hotelConfig", {
+    await updateSettings("hotelConfig", {
       ...hotelConfig,
       bookingPaymentMethods: paymentMethods
     });
-    alert("Booking payment gateway configurations saved successfully!");
   };
 
   // Toggle payment method enabled/disabled
@@ -308,19 +333,54 @@ export function RatesPage() {
           </button>
           <button
             onClick={() => {
-              if (confirm(`Are you sure you want to delete corporate code ${row.code}?`)) {
+              if (pendingDeleteCode === row.code) {
                 deleteCorporateCode(row.code);
+                setPendingDeleteCode(null);
+              } else {
+                setPendingDeleteCode(row.code);
               }
             }}
-            className="min-h-[32px] px-3.5 inline-flex items-center gap-1 rounded bg-gray-50 text-gray-700 hover:bg-gray-200 text-xs font-semibold shadow-sm transition"
+            className={`min-h-[32px] px-3.5 inline-flex items-center gap-1 rounded text-xs font-semibold shadow-sm transition ${
+              pendingDeleteCode === row.code
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "bg-gray-50 text-gray-700 hover:bg-gray-200"
+            }`}
           >
             <Trash2 size={12} className="inline mr-1" />
-            Delete
+            {pendingDeleteCode === row.code ? "Click to confirm" : "Delete"}
           </button>
         </div>
       )
     }
   ];
+
+  const renderVoucherCard = (row: Voucher) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-sm font-bold text-primary-dark">{row.code}</span>
+        <StatusBadge label={row.isActive ? "Active" : "Inactive"} status={row.isActive ? "confirmed" : "dirty"} />
+      </div>
+      <p className="text-base font-bold text-gray-900">
+        {row.discountType === "percent" ? `${row.discountValue}% Off` : `${formatPrice(row.discountValue)} Off`}
+      </p>
+      <p className="text-xs text-gray-500">
+        {row.usageCount} {row.usageCap ? `/ ${row.usageCap} limit` : "usages"} · {row.expiresAt || "Never expires"}
+      </p>
+    </div>
+  );
+
+  const renderCorpCard = (row: CorporateCode & { id: string }) => (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-sm font-bold text-primary-dark">{row.code}</span>
+        <StatusBadge label={row.isActive ? "Active" : "Inactive"} status={row.isActive ? "confirmed" : "dirty"} />
+      </div>
+      <p className="text-base font-bold text-gray-900">{row.companyName}</p>
+      <p className="text-xs text-gray-500">
+        Double {formatPrice(row.ratePerRoomType["standard-double"] || 0)} · Exec {formatPrice(row.ratePerRoomType["executive"] || 0)} · {row.usageCount} bookings
+      </p>
+    </div>
+  );
 
   return (
     <div className="space-y-8 font-body">
@@ -339,82 +399,155 @@ export function RatesPage() {
           </h2>
 
           <form onSubmit={handleSaveRates} className="space-y-5">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-150 text-xs">
-                <thead>
-                  <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
-                    <th className="py-2.5">Room Type</th>
-                    <th className="py-2.5">Standard Rate (Base)</th>
-                    <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
-                    <th className="py-2.5">Corporate Rate (Flat)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {roomTypes.map((type) => (
-                    <tr key={type.value} className="text-xs">
-                      <td className="py-3 font-semibold text-gray-800">{type.label}</td>
-                      <td className="py-2 pr-4">
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            value={prices[type.value]?.base || 0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrices(prev => ({
-                                ...prev,
-                                [type.value]: { ...prev[type.value], base: val }
-                              }));
-                            }}
-                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
-                          />
-                        </div>
-                      </td>
-                      <td className="py-2 pr-4">
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            value={prices[type.value]?.weekend || 0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrices(prev => ({
-                                ...prev,
-                                [type.value]: { ...prev[type.value], weekend: val }
-                              }));
-                            }}
-                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
-                          />
-                        </div>
-                      </td>
-                      <td className="py-2">
-                        <div className="relative flex items-center">
-                          <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            value={prices[type.value]?.corporate || 0}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value) || 0;
-                              setPrices(prev => ({
-                                ...prev,
-                                [type.value]: { ...prev[type.value], corporate: val }
-                              }));
-                            }}
-                            className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
-                          />
-                        </div>
-                      </td>
+            {isMobile ? (
+              <div className="space-y-3">
+                {roomTypes.map((type) => (
+                  <div key={type.value} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-gray-800">{type.label}</p>
+                      <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">{type.value}</span>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Standard Rate (Base)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={prices[type.value]?.base || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setPrices(prev => ({
+                              ...prev,
+                              [type.value]: { ...prev[type.value], base: val }
+                            }));
+                          }}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Weekend Rate (Fri/Sat)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={prices[type.value]?.weekend || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setPrices(prev => ({
+                              ...prev,
+                              [type.value]: { ...prev[type.value], weekend: val }
+                            }));
+                          }}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Corporate Rate (Flat)</label>
+                      <div className="relative mt-1 flex items-center">
+                        <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={prices[type.value]?.corporate || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setPrices(prev => ({
+                              ...prev,
+                              [type.value]: { ...prev[type.value], corporate: val }
+                            }));
+                          }}
+                          className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-150 text-xs">
+                  <thead>
+                    <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
+                      <th className="py-2.5">Room Type</th>
+                      <th className="py-2.5">Standard Rate (Base)</th>
+                      <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
+                      <th className="py-2.5">Corporate Rate (Flat)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {roomTypes.map((type) => (
+                      <tr key={type.value} className="text-xs">
+                        <td className="py-3 font-semibold text-gray-800">{type.label}</td>
+                        <td className="py-2 pr-4">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              value={prices[type.value]?.base || 0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrices(prev => ({
+                                  ...prev,
+                                  [type.value]: { ...prev[type.value], base: val }
+                                }));
+                              }}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2 pr-4">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              value={prices[type.value]?.weekend || 0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrices(prev => ({
+                                  ...prev,
+                                  [type.value]: { ...prev[type.value], weekend: val }
+                                }));
+                              }}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2">
+                          <div className="relative flex items-center">
+                            <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              value={prices[type.value]?.corporate || 0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                setPrices(prev => ({
+                                  ...prev,
+                                  [type.value]: { ...prev[type.value], corporate: val }
+                                }));
+                              }}
+                              className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div className="pt-2 border-t border-gray-100 flex justify-between items-center">
               <span className="text-[10px] text-gray-400 font-semibold leading-relaxed">
@@ -422,10 +555,11 @@ export function RatesPage() {
               </span>
               <button
                 type="submit"
-                className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                disabled={isSavingRates}
+                className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save size={14} />
-                Save Rates Matrix
+                {isSavingRates ? "Saving…" : "Save Rates Matrix"}
               </button>
             </div>
           </form>
@@ -573,6 +707,8 @@ export function RatesPage() {
         <DataTable
           columns={voucherColumns}
           rows={vouchers}
+          renderMobileCard={renderVoucherCard}
+          emptyMessage="No vouchers configured yet."
         />
       </div>
 
@@ -596,6 +732,8 @@ export function RatesPage() {
         <DataTable
           columns={corpColumns}
           rows={corporateCodes.map(c => ({ ...c, id: c.code }))}
+          renderMobileCard={renderCorpCard}
+          emptyMessage="No corporate codes configured yet."
         />
       </div>
 
@@ -666,6 +804,21 @@ export function RatesPage() {
               />
             </label>
           </div>
+
+          {/* Per W4.4 / decision #104: optional guest email — when set, the
+              server fires a voucher-issued email to the guest with the
+              code in a large monospace block. */}
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+            Guest Email (optional — sends the code to this address)
+            <input
+              type="email"
+              placeholder="guest@example.com"
+              value={vchGuestEmail}
+              onChange={(e) => setVchGuestEmail(e.target.value)}
+              className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+            />
+            <span className="text-[10px] font-medium text-gray-500">Leave blank to keep the code in the admin only.</span>
+          </label>
 
           {/* Room type check lists */}
           <div className="space-y-2">
@@ -738,7 +891,7 @@ export function RatesPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               {roomTypes.map((t) => (
                 <label key={t.value} className="flex flex-col gap-2 font-medium text-gray-600">
-                  {t.label} (Base: ₱{rooms.find(r => r.type === t.value)?.pricePerNight || 3200})
+                  {t.label} (Base: {formatPrice(t.pricePerNight)})
                   <input
                     type="number"
                     value={roomRates[t.value] || ""}

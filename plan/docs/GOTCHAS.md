@@ -29,6 +29,7 @@ Things agents must never do. Check this file before implementing any feature.
 
 - **`shared/` is an npm workspace package (`@spark-inn/shared`)** — always import from the package name, never via relative paths like `../../shared/types`. Relative imports break when files move.
 - **`api/` handlers run in Node.js, not Vite** — they cannot use Vite path aliases. Import `@spark-inn/shared` via the workspace package (works in Node.js), and import `hotel.config.ts` via relative path (`../../hotel.config.ts`).
+- **Never add files under `guest-app/api/` other than `[...route].ts`** — Vercel treats every `.ts` file in `api/` (and subdirs) as a separate serverless function. Hobby plan caps at 12. Handlers, lib, and tests all live outside `api/` (`server/` and `tests/api/`). See `plan/docs/VERCEL-FUNCTION-LIMIT.md`.
 - **Always run `npm install` from the repo root** — not from inside individual app folders. The root `package.json` manages all workspace dependencies together.
 - **Never add `@spark-inn/shared` to `devDependencies`** — it must be in `dependencies` so Vercel can resolve it during deployment.
 
@@ -56,6 +57,7 @@ Things agents must never do. Check this file before implementing any feature.
 ## Payments & Uploads
 
 - **Payment proof uploads go to Firebase Storage** — store the download URL in the booking document's `paymentProofUrl` field.
+- **Booking upload paths use a preallocated Firestore booking ID** — the client may reserve a `bookings/{bookingId}` document ID before Step 3 uploads, but `/api/bookings/create` must create that exact document inside the transaction. The guest-facing `bookingRef` is still generated server-side inside the transaction.
 - **Never store raw file blobs in Firestore** — Firestore has a 1MB document size limit. Always use Firebase Storage for files.
 - **Compress images before upload** — use the shared `compressImageFile()` utility for room photos, IDs, payment proofs, QR images, store item photos, and website content photos so uploads stay readable but efficient.
 
@@ -80,13 +82,15 @@ Things agents must never do. Check this file before implementing any feature.
 - **Never log PII** — no `console.log(guestEmail)`, `console.log(guestName)`, or similar in any environment. Logs may be stored by Vercel and are accessible to anyone with project access.
 - **Never expose payment proof URLs in guest-app** — `paymentProofUrl` is admin-only. Never include it in guest-facing API responses or Firestore queries from guest-app.
 - **Never expose `remarks` field to guest-app** — room remarks are internal staff notes only. Filter before returning room data to guests.
-- **Never write booking documents directly from the client** — all booking creation goes through `/api/bookings/create`. Direct client writes bypass the availability transaction and security checks.
+- **Never create booking documents directly from the client** — public online/corporate bookings go through `/api/bookings/create`, and staff walk-ins go through authenticated `/api/bookings/create-walkin`. Direct client creates bypass the availability transaction and security checks. Authenticated staff/admin may still update existing booking documents directly for ordinary operational fields permitted by Firestore rules.
+- **Never create corporate inquiry documents directly from the guest client** — public inquiry submissions must go through `/api/corporate/inquiry` so Turnstile, honeypot, validation, rate limiting, and staff notifications run server-side.
+- **Never create Spark Rewards member documents directly from the guest client** — enrollment must go through `/api/members/register` so `memberNumber` is generated server-side and past booking linkage runs consistently.
 - **Never trust client-supplied role, `isCorporate`, or `corporateCode`** — always derive from server-side token verification or Firestore lookup.
 - **Booking lookup requires BOTH ref AND email** — never return booking data on ref alone. Prevents enumeration attacks.
 - **Do not share PII via intercom chat** — staff must use the booking system for sensitive information. Intercom is open and unencrypted at rest.
 - **Rate limit public API endpoints** — voucher validation, corporate code validation, and booking creation are unauthenticated and must be rate-limited to prevent abuse.
 - **Firebase Storage payment proof files are not public** — Storage rules must restrict read access to authenticated staff. A leaked URL without proper rules gives anyone access.
-- **Consent checkbox is required at booking Step 2** — do not allow booking submission without it. Links to `/privacy` page.
+- **Consent checkbox is required at booking Step 2** — do not allow booking submission without it. Links to `/privacy` and `/terms` pages.
 - **Honeypot field must be hidden via CSS, not `display:none`** — bots detect and skip `display:none` fields. Use `position: absolute; opacity: 0; pointer-events: none` instead.
 - **Honeypot rejection must be silent** — return `200` with a fake success response when honeypot is filled. Never return an error that reveals the anti-bot mechanism.
 - **Turnstile token must be verified server-side** — client-side Turnstile rendering is not enough. Always POST the token to Cloudflare's verification endpoint in the API route before processing any request.

@@ -6,7 +6,7 @@
 
 ## Overview
 
-Admin-only page at `/settings`. Organized into tabs. Covers hotel information, payment methods, email configuration, staff account management, discount rules, voucher management, intercom quick requests, and website content editing for all public pages.
+Admin-only page at `/settings`. Organized into tabs. Covers hotel information, email configuration, staff account management, discount rules, intercom quick requests, and website content editing for all public pages. **Booking payment methods are managed in Rates** — see `plan/features/RATE-MANAGEMENT.md` (per W3.1).
 
 ---
 
@@ -107,6 +107,20 @@ Editable copy and photos for public pages. Changes reflect on the guest site in 
 - [ ] Amenities section — list of items (title, description, icon name); add/remove/reorder
 - [ ] Featured rooms selector — pick 3 rooms from a dropdown of active rooms
 
+**Room Type Photos** *(per W3.5 — type-driven gallery)*:
+
+> **W3.6 + W3.7 update:** The room type entry owns the rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. The **Rates** tab still exists for bulk rate review but rates can also be edited per-type from Settings. Rooms created against a type inherit all of these properties by joining `Room.type` at read time.
+- [ ] Each row in the **Room Layout Classifications** table shows a **Photos** column with `{count} / {MAX_ROOM_TYPE_PHOTOS}` and three actions: **Edit**, **Photos**, **Delete**
+- [ ] **Edit modal** — exposes all 9 type-level fields: label, shortLabel, bedDefinition (required), description (textarea), amenities (comma-separated, parsed to a string array on save), maxCapacity, pricePerNight, weekendRate, corporateRate. The identifier key (`value`) is shown read-only at the top — to rename a type, delete and re-add. Save calls `updateRoomType` with the diff.
+- [ ] **Add modal** — same 9 fields, plus `value` (kebab-case unique key) + `imageUrls: []` (the type's gallery starts empty; photos are added via the Photos modal). `bedDefinition` is required and validated.
+- [ ] Clicking **Photos** opens a Modal with a thumbnail grid of the type's current images
+- [ ] Modal footer has an **Add photos** button (multiple file input, image-only, compressed client-side) and a **Close** button
+- [ ] Each photo card shows the image preview, a "Hero" badge on the first photo, and three actions: **move to first** (set as hero), **move to next** (reorder right), and **Delete**
+- [ ] Photos are stored at `room-types/{typeValue}/{filename}` in Storage (public read, staff write)
+- [ ] The hero image is the first element of the array; reorder is persisted via `updateRoomType({ imageUrls })`
+- [ ] Maximum `MAX_ROOM_TYPE_PHOTOS` (currently 10) per type — enforced in the upload UI with a friendly warning
+- [ ] Source: `settings/hotelConfig.roomTypes[].imageUrls` — read at `useRoomTypes` and joined on the `Room.type` field by the guest app
+
 **About Us:**
 - [ ] Hero / banner photo (upload)
 - [ ] Mission, vision, hotel story fields (also in Hotel Info tab — link or sync)
@@ -151,7 +165,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 - [ ] Enable/disable store globally — toggle
 - [ ] Product catalog management — see `plan/features/STORE-MANAGEMENT.md §Catalog Management` for full checklist
-- [ ] Store payment methods — CoD, Add to Bill, GCash (with QR upload + account info) — independent of booking payment methods
+- [x] Store payment methods — CoD, Add to Bill, GCash (with QR URL + account info) — independent of booking payment methods
 - [ ] Low stock threshold — number input (default 5)
 - [ ] Both Admin and Front Desk can access this tab
 - [ ] Source: `settings/storeConfig`
@@ -194,7 +208,7 @@ Admin-only tab. Controls all configurable loyalty program settings.
 
 ---
 
-### 10. Legal Content
+### 12. Legal Content
 
 Editable by hotel admin — no redeploy required. Changes reflect on guest site immediately.
 

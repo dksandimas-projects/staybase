@@ -13,6 +13,7 @@ import {
   Phone,
   Plus,
   ShieldCheck,
+  Sparkles,
   UploadCloud,
   UserRound,
   Users,
@@ -38,6 +39,8 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
+import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
+import { useGuestAuth } from "../context/GuestAuthContext";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
@@ -85,19 +88,37 @@ export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading: roomsLoading } = useRooms();
+  const { roomTypes } = useRoomTypes();
+  const { memberProfile } = useGuestAuth();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
   const isReviewStep = currentStepKey === "review";
+
+  // Spark Rewards member discount: the value is read from settings/rewardsConfig
+  // and applied server-side in handleCreateBooking (per W2.2 / decision #90).
+  // We mirror it client-side for the price summary display only; the server
+  // is authoritative on the actual charge.
+  // (Definition moved below the useState declarations; see memberDiscountPct
+  // derived after rewardsConfig is loaded.)
 
   // Persistent unique booking ID pre-generated client-side
   const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
 
   // Dynamic config states loaded from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+  const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
   const [websiteContent, setWebsiteContent] = useState<any>(null);
   const [allBookings, setAllBookings] = useState<any[]>([]);
   const [settingsLoading, setSettingsLoading] = useState(true);
+
+  // Spark Rewards member discount (client-side display mirror).
+  // The actual charge is computed server-side in handleCreateBooking
+  // (per W2.2 / decision #90) using the same value from rewardsConfig.
+  const memberDiscountPct = rewardsConfig?.memberDiscountEnabled !== false
+    && memberProfile
+    ? Number(rewardsConfig?.memberDiscountPct) || 0
+    : 0;
 
   const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getTodayIso());
   const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getTomorrowIso());
@@ -160,9 +181,11 @@ export function BookingPage() {
     const reqStart = new Date(`${checkIn}T00:00:00Z`);
     const reqEnd = new Date(`${checkOut}T00:00:00Z`);
 
+
     return rooms.filter((room) => {
       const typeMatches = selectedType === "all" || room.type === selectedType;
-      if (!room.isActive || room.status === "blocked" || room.maxCapacity < guests || !typeMatches) {
+      const cap = getRoomTypeRates(roomTypes, room.type)?.maxCapacity ?? 0;
+      if (!room.isActive || room.status === "blocked" || cap < guests || !typeMatches) {
         return false;
       }
 
@@ -176,15 +199,18 @@ export function BookingPage() {
 
       return !hasOverlap;
     });
-  }, [rooms, allBookings, checkIn, checkOut, guests, selectedType]);
+  }, [rooms, roomTypes, allBookings, checkIn, checkOut, guests, selectedType]);
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
+  // Per W3.6 — pricing + max occupancy live on the room's type.
+  const selectedRoomRates = selectedRoom ? getRoomTypeRates(roomTypes, selectedRoom.type) : null;
+  const selectedMaxCapacity = selectedRoomRates?.maxCapacity ?? 0;
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
   // Calculate room total client-side, incorporating weekend rates (Saturdays and Sundays)
   const roomTotal = useMemo(() => {
-    if (!selectedRoom) return 0;
+    if (!selectedRoom || !selectedRoomRates) return 0;
     let totalRate = 0;
     const start = new Date(`${checkIn}T00:00:00Z`);
     for (let i = 0; i < nights; i++) {
@@ -192,14 +218,14 @@ export function BookingPage() {
       date.setUTCDate(start.getUTCDate() + i);
       const day = date.getUTCDay(); // 0 = Sun, 6 = Sat
       const isWeekend = day === 0 || day === 6;
-      if (isWeekend && selectedRoom.weekendRate) {
-        totalRate += selectedRoom.weekendRate;
+      if (isWeekend && selectedRoomRates.weekendRate) {
+        totalRate += selectedRoomRates.weekendRate;
       } else {
-        totalRate += selectedRoom.pricePerNight;
+        totalRate += selectedRoomRates.pricePerNight;
       }
     }
     return totalRate;
-  }, [selectedRoom, checkIn, nights]);
+  }, [selectedRoom, selectedRoomRates, checkIn, nights]);
 
   const discountPct = discountType === "none" ? 0 : 20;
   const breakfastTotal = hasBreakfast ? breakfastRate * guests * nights : 0;
@@ -213,15 +239,16 @@ export function BookingPage() {
     return voucherDiscountValue;
   }, [voucherApplied, voucherDiscountType, voucherDiscountValue, subtotal]);
 
-  const total = selectedRoom
+  const total = selectedRoom && selectedRoomRates
     ? calculateBookingTotal({
-        ratePerNight: selectedRoom.pricePerNight,
+        ratePerNight: selectedRoomRates.pricePerNight,
         numNights: nights,
         numGuests: guests,
         breakfastRate: breakfastRate,
         hasBreakfast,
         discountPct,
-        voucherDiscount
+        voucherDiscount,
+        memberDiscountPct
       })
     : 0;
 
@@ -247,13 +274,15 @@ export function BookingPage() {
     email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestDetails.email) ? "" : "Enter a valid email address.",
     phone: guestDetails.phone.trim().length >= 8 ? "" : "Phone number is required.",
     guestCount:
-      Number(guestDetails.guestCount) >= 1 && selectedRoom && Number(guestDetails.guestCount) <= selectedRoom.maxCapacity
+      Number(guestDetails.guestCount) >= 1 && selectedMaxCapacity > 0 && Number(guestDetails.guestCount) <= selectedMaxCapacity
         ? ""
-        : `Guest count must be between 1 and ${selectedRoom?.maxCapacity ?? guests}.`
+        : `Guest count must be between 1 and ${selectedMaxCapacity || guests}.`
   };
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedRoom);
-  const nightlyTotal = selectedRoom ? selectedRoom.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0) : 0;
+  const nightlyTotal = selectedRoomRates
+    ? selectedRoomRates.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0)
+    : 0;
 
   // Real-time Firestore Listeners and Config Fetches
   useEffect(() => {
@@ -262,6 +291,10 @@ export function BookingPage() {
         const bSnap = await getDoc(doc(db, "settings", "breakfastConfig"));
         if (bSnap.exists()) {
           setBreakfastConfig(bSnap.data() as any);
+        }
+        const rSnap = await getDoc(doc(db, "settings", "rewardsConfig"));
+        if (rSnap.exists()) {
+          setRewardsConfig(rSnap.data());
         }
         const hSnap = await getDoc(doc(db, "settings", "hotelConfig"));
         if (hSnap.exists()) {
@@ -491,7 +524,10 @@ export function BookingPage() {
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
           paymentProofUrl: paymentProofUrl,
-          isCorporate: false,
+          // Per W1.3 / decision #79 / audit S1.5: the standard
+          // online booking flow is never corporate. The server
+          // derives `isCorporate` only from a validated
+          // `corporateCode` lookup, so this field is omitted.
           turnstileToken: turnstileToken || "mock_token",
           _hp: guestDetails._hp || ""
         })
@@ -680,6 +716,10 @@ export function BookingPage() {
                   <Link className="font-semibold text-primary underline" target="_blank" to="/privacy">
                     Privacy Policy
                   </Link>{" "}
+                  and{" "}
+                  <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
+                    Terms of Service
+                  </Link>{" "}
                   and consent to the collection of my personal data for booking purposes.
                 </span>
               </label>
@@ -698,8 +738,17 @@ export function BookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
+            typeRates={selectedRoomRates}
+            typeDescription={selectedRoomRates ? roomTypes.find((t) => t.value === selectedRoom?.type)?.description : ""}
             total={total}
             breakfastRate={breakfastRate}
+            discountPct={discountPct}
+            discountType={discountType}
+            voucherDiscount={voucherDiscount}
+            voucherApplied={voucherApplied}
+            memberDiscountPct={memberDiscountPct}
+            isMember={!!memberProfile}
           />
         </section>
 
@@ -1090,7 +1139,11 @@ export function BookingPage() {
                   <Link to="/privacy" target="_blank" className="font-semibold text-primary underline">
                     Privacy Policy
                   </Link>{" "}
-                  and Terms of Service. I understand that my booking is subject to the cancellation policy selected.
+                  and{" "}
+                  <Link to="/terms" target="_blank" className="font-semibold text-primary underline">
+                    Terms of Service
+                  </Link>
+                  . I understand that my booking is subject to the cancellation policy selected.
                 </span>
               </label>
             </div>
@@ -1117,11 +1170,16 @@ export function BookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             room={selectedRoom}
+            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
+            typeRates={selectedRoomRates}
+            typeDescription={selectedRoomRates ? roomTypes.find((t) => t.value === selectedRoom?.type)?.description : ""}
             total={total}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
             discountType={discountType}
             voucherApplied={voucherApplied}
+            memberDiscountPct={memberDiscountPct}
+            isMember={!!memberProfile}
           />
         </section>
 
@@ -1269,12 +1327,16 @@ export function BookingPage() {
             >
               {availableRooms.map((room, index) => {
                 const isSelected = room.id === selectedRoom?.id;
+                // Per W3.6 — pricing lives on the room's type.
+                const roomRates = getRoomTypeRates(roomTypes, room.type);
+                const roomPricePerNight = roomRates?.pricePerNight ?? 0;
+                const roomMaxCapacity = roomRates?.maxCapacity ?? 0;
                 const roomOnlyTotal = calculateBookingTotal({
-                  ratePerNight: room.pricePerNight,
+                  ratePerNight: roomPricePerNight,
                   numNights: nights
                 });
                 const breakfastTotal = calculateBookingTotal({
-                  ratePerNight: room.pricePerNight,
+                  ratePerNight: roomPricePerNight,
                   numNights: nights,
                   numGuests: guests,
                   breakfastRate: breakfastRatePerPerson,
@@ -1292,7 +1354,7 @@ export function BookingPage() {
                   >
                     <div className="grid md:grid-cols-[280px_1fr]">
                       <div className="relative min-h-64 overflow-hidden bg-section-bg">
-                        <img src={room.imageUrls[0]} alt={room.name} className="h-full w-full object-cover" />
+                        <img src={getRoomTypeImages(roomTypes, room.type)[0]} alt={room.name} className="h-full w-full object-cover" />
                         {index === 0 ? (
                           <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
                             Recommended
@@ -1306,11 +1368,11 @@ export function BookingPage() {
                               {typeLabel}
                             </span>
                             <h2 className="mt-3 text-2xl font-semibold text-gray-950">{room.name}</h2>
-                            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{room.description}</p>
+                            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{roomTypes.find((t) => t.value === room.type)?.description || ""}</p>
                           </div>
                           <div className="sm:text-right">
                             <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-                            <p className="text-2xl font-semibold text-gray-950">{formatPrice(room.pricePerNight)}</p>
+                            <p className="text-2xl font-semibold text-gray-950">{formatPrice(roomPricePerNight)}</p>
                             <p className="text-sm text-gray-500">per night</p>
                           </div>
                         </div>
@@ -1318,11 +1380,11 @@ export function BookingPage() {
                         <div className="mt-5 flex flex-wrap gap-4 text-sm text-gray-600">
                           <span className="flex items-center gap-2">
                             <BedDouble size={16} className="text-primary" />
-                            {room.bedDefinition}
+                            {roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}
                           </span>
                           <span className="flex items-center gap-2">
                             <Users size={16} className="text-primary" />
-                            Up to {room.maxCapacity}
+                            Up to {roomMaxCapacity}
                           </span>
                           <span className="flex items-center gap-2">
                             <CalendarDays size={16} className="text-primary" />
@@ -1335,7 +1397,7 @@ export function BookingPage() {
                             active={isSelected && rateChoice === "room-only"}
                             label="Room Only"
                             helper="Simple stay, flexible payment at the hotel"
-                            priceLabel={`${formatPrice(room.pricePerNight)} / night`}
+                            priceLabel={`${formatPrice(roomPricePerNight)} / night`}
                             totalLabel={`${formatPrice(roomOnlyTotal)} total`}
                             onSelect={() => selectRoom(room.id, "room-only")}
                           />
@@ -1344,7 +1406,7 @@ export function BookingPage() {
                               active={isSelected && rateChoice === "room-breakfast"}
                               label="Room + Breakfast"
                               helper="Includes daily local breakfast for selected guests"
-                              priceLabel={`${formatPrice(room.pricePerNight + breakfastRatePerPerson * guests)} / night`}
+                              priceLabel={`${formatPrice(roomPricePerNight + breakfastRatePerPerson * guests)} / night`}
                               totalLabel={`${formatPrice(breakfastTotal)} total`}
                               onSelect={() => selectRoom(room.id, "room-breakfast")}
                             />
@@ -1449,12 +1511,19 @@ interface BookingReviewAsideProps {
   hasBreakfast: boolean;
   nights: number;
   room: Room | undefined;
+  typeImageUrls?: string[];
+  // Per W3.6 — pricing lives on the type.
+  typeRates?: { maxCapacity: number; pricePerNight: number; weekendRate: number; corporateRate: number } | null;
+  // Per W3.7 — description lives on the type.
+  typeDescription?: string;
   total: number;
   discountPct?: number;
   voucherDiscount?: number;
   discountType?: "none" | "senior" | "pwd";
   voucherApplied?: boolean;
   breakfastRate?: number;
+  memberDiscountPct?: number;
+  isMember?: boolean;
 }
 
 function BookingReviewAside({
@@ -1464,16 +1533,22 @@ function BookingReviewAside({
   hasBreakfast,
   nights,
   room,
+  typeImageUrls = [],
+  typeRates,
+  typeDescription = "",
   total,
   discountPct = 0,
   voucherDiscount = 0,
   discountType = "none",
   voucherApplied = false,
-  breakfastRate
+  breakfastRate,
+  memberDiscountPct = 0,
+  isMember = false
 }: BookingReviewAsideProps) {
   if (!room) return null;
 
   const roomTotal = useMemo(() => {
+    if (!typeRates) return 0;
     let totalRate = 0;
     const start = new Date(`${checkIn}T00:00:00Z`);
     for (let i = 0; i < nights; i++) {
@@ -1481,10 +1556,10 @@ function BookingReviewAside({
       date.setUTCDate(start.getUTCDate() + i);
       const day = date.getUTCDay(); // 0 = Sun, 6 = Sat
       const isWeekend = day === 0 || day === 6;
-      if (isWeekend && room.weekendRate) {
-        totalRate += room.weekendRate;
+      if (isWeekend && typeRates.weekendRate) {
+        totalRate += typeRates.weekendRate;
       } else {
-        totalRate += room.pricePerNight;
+        totalRate += typeRates.pricePerNight;
       }
     }
     return totalRate;
@@ -1494,14 +1569,17 @@ function BookingReviewAside({
   const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;
   const subtotal = roomTotal + breakfastTotal;
   const discountAmount = subtotal * (discountPct / 100);
+  const afterSeniorPwd = subtotal - discountAmount;
+  const afterVoucher = afterSeniorPwd - voucherDiscount;
+  const memberDiscountAmount = afterVoucher * (memberDiscountPct / 100);
 
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-        <img src={room.imageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
+        <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
         <div className="p-5">
           <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
-          <p className="mt-2 text-sm leading-6 text-gray-600">{room.description}</p>
+          <p className="mt-2 text-sm leading-6 text-gray-600">{typeDescription}</p>
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">
             <SummaryCell label="Check-in" value={formatStayDate(checkIn)} />
             <SummaryCell alignEnd label="Check-out" value={formatStayDate(checkOut)} />
@@ -1529,6 +1607,15 @@ function BookingReviewAside({
               <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
                 <span>Voucher Discount</span>
                 <span>-{formatPrice(voucherDiscount)}</span>
+              </div>
+            ) : null}
+            {isMember && memberDiscountPct > 0 ? (
+              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles size={12} />
+                  Spark Rewards Member Rate ({memberDiscountPct}%)
+                </span>
+                <span>-{formatPrice(memberDiscountAmount)}</span>
               </div>
             ) : null}
             <div className="flex justify-between border-t border-dashed border-gray-200 pt-3 text-lg font-semibold text-gray-950">

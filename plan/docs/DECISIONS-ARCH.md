@@ -12,6 +12,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 1 | Hosting: single Vercel project (monorepo) — guest-app + api/ deployed together, admin-app as a second deployment from the same project |
 | 2 | Firebase usage: Auth + Firestore + Storage ONLY — no Firebase Hosting, no Cloud Functions |
 | 3 | API: Single Vercel catch-all `/api/[...route].ts` living inside `guest-app/` — deployed as part of the guest app Vercel deployment |
+| 3a | Server-side modules (handlers, lib) live in `guest-app/server/` — **not** under `api/` — to keep the function count at 1 (Vercel Hobby plan = 12-function cap). Integration tests live in `guest-app/tests/api/`. See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for the full rules. |
 | 4 | Email: Resend via Vercel API routes (not Firebase Cloud Functions) |
 | 5 | Shared code: `shared/` is an npm workspace package (`@spark-inn/shared`) — imported by both apps and api/ without path alias hacks |
 | 6 | Two separate React + Vite apps — `guest-app/` and `admin-app/` — sharing one Firebase project |
@@ -67,6 +68,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 56 | Analytics: 8 key GA4 events for product decisions — full event list in `FRONTEND.md §Analytics Events`; GA4 only loads when `config.analyticsId` is non-empty |
 | 57 | Post-launch support: DK offers a monthly maintenance retainer — critical bugs fixed within 24 hours, minor bugs within 5 business days; full terms in `plan/docs/LEGAL.md` |
 | 58 | UX Philosophy: "It Just Works" — Apple-inspired approach applied to every screen. 10 tenets: zero friction, progressive disclosure, smart defaults, optimistic UI, skeleton loaders, inline validation, no dead ends, purposeful delight, consistency, and forgiving interactions. Full spec + per-app checklists in `FRONTEND.md §UX Philosophy` |
+| 59 | PDF and screen capture: jsPDF generates downloadable receipts and forms; html2canvas captures DOM-rendered layouts when a visual snapshot is needed |
 
 ---
 
@@ -88,6 +90,7 @@ Manual QA for all UI, flows, and integration scenarios. Automated tests for the 
 | U-3 | `shared/utils/points.ts` | Per-booking earning (flat `pointsPerBooking`); per-spend earning (`floor(totalPrice / 100) × pointsPerHundred`); redemption value (`points × rate / 100`); insufficient balance returns error |
 | U-4 | `shared/utils/references.ts` | Booking ref format (`{prefix}-YYYYMMDD-NNN`); zero-padding to 3 digits; member number format (`{prefix}-NNNNN`, 5 digits); store order ref (`SO-YYYYMMDD-NNN`); same-day counter increments correctly |
 | U-5 | `shared/utils/vouchers.ts` | `isActive: false` → rejected; expired (`expiresAt < now`) → rejected; usage cap at exact limit → rejected; `usageCap: null` (unlimited) → accepted; room type mismatch → rejected; empty `applicableRoomTypes` → accepted for all types; flat discount > total → ₱0 floor; percent calculation correct |
+| U-6 | `shared/utils/corporate-codes.ts` | `isActive: false` → rejected; expired (`expiresAt < now`) → rejected; usage cap at exact limit → rejected; `usageCap: null` (unlimited) → accepted; valid code returns corporate rate and metadata |
 
 ---
 

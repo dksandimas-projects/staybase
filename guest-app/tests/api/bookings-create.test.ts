@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import handler from "../[...route]";
+import handler from "../../api/[...route]";
 
 // Global mock state
 let mockRooms: Record<string, any> = {};
@@ -13,7 +13,7 @@ let setCalls: any[] = [];
 let updateCalls: any[] = [];
 
 // Mock Resend
-vi.mock("../lib/resend", () => ({
+vi.mock("../../server/lib/resend", () => ({
   resend: {
     emails: {
       send: vi.fn().mockResolvedValue({ id: "mock_email_id" })
@@ -22,7 +22,7 @@ vi.mock("../lib/resend", () => ({
 }));
 
 // Mock Firebase Admin SDK
-vi.mock("../lib/firebase-admin", () => {
+vi.mock("../../server/lib/firebase-admin", () => {
   const createDocRef = (path: string) => {
     const [coll, docId] = path.split("/");
     return {
@@ -637,13 +637,18 @@ describe("/api/bookings/create", () => {
     });
 
     test("POST /api/bookings/cancel: transitions booking status to cancelled", async () => {
+      // Per audit S1.4 / decision: only `pending` and `payment-uploaded`
+      // bookings can be self-cancelled. Once payment is confirmed or the
+      // booking is confirmed, the guest must contact the front desk to
+      // cancel. This test uses a `pending` booking — the only state
+      // where self-cancel is valid per Phase 11.6 Batch 6.
       const activeBooking = {
         id: "booking_to_cancel",
         bookingId: "booking_to_cancel",
         bookingRef: "SI-20260608-011",
         guestName: "Guest To Cancel",
         guestEmail: "cancel@guest.com",
-        status: "confirmed",
+        status: "pending",
         checkIn: { toDate: () => new Date("2026-06-12") },
         checkOut: { toDate: () => new Date("2026-06-14") }
       };
@@ -663,6 +668,69 @@ describe("/api/bookings/create", () => {
 
       expect(activeBooking.status).toBe("cancelled");
       expect(activeBooking.cancellationReason).toBe("Change of plans");
+    });
+
+    test("POST /api/bookings/cancel: rejects self-cancel after confirmed (audit S1.4)", async () => {
+      // Per audit S1.4 / Phase 11.6 Batch 6: confirmed bookings must
+      // not be self-cancellable. The server is the source of truth;
+      // the UI may hide the button, but the handler must reject.
+      const confirmedBooking = {
+        id: "booking_confirmed",
+        bookingId: "booking_confirmed",
+        bookingRef: "SI-20260608-012",
+        guestName: "Confirmed Guest",
+        guestEmail: "confirmed@guest.com",
+        status: "confirmed",
+        checkIn: { toDate: () => new Date("2026-06-12") },
+        checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockBookings.push(confirmedBooking);
+
+      const req = mockRequest(
+        { bookingId: "booking_confirmed", reason: "Change of plans" },
+        "POST",
+        "/api/bookings/cancel",
+        { authorization: "Bearer mock_token" }
+      );
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.stringMatching(/cannot be cancelled because its status is already confirmed/i)
+      }));
+      expect(confirmedBooking.status).toBe("confirmed");
+    });
+
+    test("POST /api/bookings/cancel: rejects self-cancel after payment-confirmed (audit S1.4)", async () => {
+      const paymentConfirmedBooking = {
+        id: "booking_payment_confirmed",
+        bookingId: "booking_payment_confirmed",
+        bookingRef: "SI-20260608-013",
+        guestName: "Payment Confirmed Guest",
+        guestEmail: "payment-confirmed@guest.com",
+        status: "payment-confirmed",
+        checkIn: { toDate: () => new Date("2026-06-12") },
+        checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockBookings.push(paymentConfirmedBooking);
+
+      const req = mockRequest(
+        { bookingId: "booking_payment_confirmed", reason: "Change of plans" },
+        "POST",
+        "/api/bookings/cancel",
+        { authorization: "Bearer mock_token" }
+      );
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.stringMatching(/cannot be cancelled because its status is already payment-confirmed/i)
+      }));
+      expect(paymentConfirmedBooking.status).toBe("payment-confirmed");
     });
   });
 });

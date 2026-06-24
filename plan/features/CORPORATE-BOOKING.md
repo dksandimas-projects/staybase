@@ -45,6 +45,10 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 - [ ] `companyName` stored on booking — sourced from code validation response or entered by guest
 - [ ] `usageCount` on `corporateCodes` document incremented server-side on successful booking
 - [ ] Corporate booking source: `source = "corporate"`
+- [ ] **Negotiated rate is flat per room type** *(Per `DECISIONS-FEATURES.md #101`)*. `ratePerRoomType[roomType]` overrides the standard rate. UI label is "Negotiated rate applied" (no `(X% additional discount applied)` wording). Falls back to `room.corporateRate` if the room type is missing from the map, with a console warning.
+- [ ] **No promo vouchers in corporate bookings** *(Per `DECISIONS-FEATURES.md #100`)*. The `voucherDiscount` is hardcoded to `0` in `CorporateBookingPage`. Negotiated rates are the only discount.
+- [ ] **LOU (Letter of Undertaking) is not collected in Phase 1** *(Per `DECISIONS-FEATURES.md #99`)*. The "Charge Back" path on the form shows a note: "Our accounts team will email you within 24 hours to request your LOU." Staff tracks receipt via the `louReceived: boolean` field on the booking drawer.
+- [ ] **Bookings created from a converted inquiry have `linkedInquiryId: string` set** *(Per `DECISIONS-FEATURES.md #102`)*. The inquiry's `convertedBookingId` is set in the same transaction.
 
 ## Edge Cases & States
 
