@@ -45,7 +45,7 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 ### UI Checklist
 - [ ] Dark hero section — eyebrow, background photo, Apollo heading, subtext — all editable from Settings → Branding
 - [ ] Perks section — grid of perk items (title, description, icon) — editable from Settings → Website Content → Corporate page → Perks
-- [ ] Rooms overview — eyebrow + heading + subtext editable from Settings → Website Content → Corporate page → Rooms Overview; room type cards themselves are driven by the live room types
+- [ ] Rooms overview — eyebrow + heading + subtext editable from Settings → Website Content → Corporate page → Rooms Overview; **one card per room type sourced from `useRoomTypes()` filtered to types that have at least one active room** (per `feat/fix-corporate-accommodation-types-dynamic` — previously derived from a hardcoded `data/rooms.ts` fallback which silently missed admin-added types)
 - [ ] Retreat CTA banner — heading + description + button label editable from Settings → Website Content → Corporate page → Retreat CTA Banner
 - [ ] Corporate inquiry form — company name, contact person, email, phone, number of rooms, preferred dates, special requirements, Submit button
 - [ ] CTA to corporate booking: "Have a negotiated rate? Book directly at `/corporate/book`" — Spark Orange button
