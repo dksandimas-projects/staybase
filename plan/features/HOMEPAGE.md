@@ -6,7 +6,7 @@
 
 ## Overview
 
-The public homepage at `/`. First impression for all guests — must emotionally answer "why stay here?" within 3 seconds. Leads with hero, immediately followed by an availability checker above the fold. Content is partially editable from the admin Settings → Website Content tab.
+The public homepage at `/`. First impression for all guests — must emotionally answer "why stay here?" within 3 seconds. Leads with hero, immediately followed by an availability checker above the fold. Content is editable from the admin Settings → Website Content tab (list-based content) and Settings → Branding (hero photos, hero copy, logos).
 
 **Sections in order:** Hero → Availability Checker → Featured Rooms → Amenities → Services → Spark Rewards → Map → Footer
 
