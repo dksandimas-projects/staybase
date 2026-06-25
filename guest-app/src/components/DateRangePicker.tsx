@@ -1,17 +1,27 @@
 import { useMemo } from "react";
+import { cn } from "../utils/cn";
+
+type DateRangePickerOrientation = "horizontal" | "vertical";
 
 interface DateRangePickerProps {
   checkIn: string;
   checkOut: string;
   onCheckInChange: (value: string) => void;
   onCheckOutChange: (value: string) => void;
+  orientation?: DateRangePickerOrientation;
 }
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function DateRangePicker({ checkIn, checkOut, onCheckInChange, onCheckOutChange }: DateRangePickerProps) {
+export function DateRangePicker({
+  checkIn,
+  checkOut,
+  onCheckInChange,
+  onCheckOutChange,
+  orientation = "vertical"
+}: DateRangePickerProps) {
   const minCheckOut = useMemo(() => {
     if (!checkIn) return todayIso();
     const next = new Date(`${checkIn}T00:00:00`);
@@ -20,7 +30,12 @@ export function DateRangePicker({ checkIn, checkOut, onCheckInChange, onCheckOut
   }, [checkIn]);
 
   return (
-    <div className="grid gap-3">
+    <div
+      className={cn(
+        "grid gap-3",
+        orientation === "horizontal" && "sm:grid-cols-2"
+      )}
+    >
       <label className="grid gap-2 text-sm font-medium text-gray-700">
         Check-in
         <input
