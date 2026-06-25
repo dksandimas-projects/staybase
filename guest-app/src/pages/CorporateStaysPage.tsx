@@ -25,7 +25,7 @@ import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
-import { ROOM_TYPE_IMAGES } from "../data/homepage";
+import { ROOM_TYPE_IMAGES, CORPORATE_HERO_LQIP } from "../data/homepage";
 import { useRooms } from "../hooks/useRooms";
 import { useRoomTypes } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
@@ -33,6 +33,7 @@ import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_CORPORATE_PAGE_CONTENT, type RoomTypeEntry } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import type { ContentItem } from "@spark-inn/shared";
+import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 
 const PERK_ICON_MAP: Record<string, LucideIcon> = {
@@ -282,10 +283,11 @@ export function CorporateStaysPage() {
       <section className="relative -mt-20 flex min-h-[85vh] items-center justify-center overflow-hidden bg-gray-950 pt-20 px-4">
         <div className="absolute inset-0 z-0 opacity-30">
           {corpHeroPhoto ? (
-            <img
+            <HeroImage
               className="w-full h-full object-cover"
               alt="Sophisticated corporate meeting room and lounge"
               src={corpHeroPhoto}
+              placeholder={CORPORATE_HERO_LQIP}
             />
           ) : (
             <HeroSkeleton />

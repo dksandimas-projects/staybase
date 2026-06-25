@@ -28,6 +28,19 @@
     <meta name="twitter:image" content="https://sparkinnbohol.com/brand/FINAL%20LOGO.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      Image CDN preconnects. The hero photos on the public site are
+      the LCP element on every page, so the TLS handshake needs to
+      finish as early as possible. `crossorigin` is required for any
+      host that serves CORS-bearing responses (the Google and
+      Firebase Storage hosts do; Unsplash does not, so we skip
+      `crossorigin` for that one). The actual `<link rel="preload">`
+      for the resolved hero URL is injected at runtime by
+      `HeroImage.tsx` once `usePublicSiteContent` resolves.
+    -->
+    <link rel="preconnect" href="https://lh3.googleusercontent.com" crossorigin />
+    <link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://images.unsplash.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="apple-touch-icon" href="/brand/icon-192.png" />
     <link rel="icon" href="/brand/ICON LOGO.png" />
