@@ -7,13 +7,15 @@ import {
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
-  Award
+  Award, Star
 } from "lucide-react";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { ListEditor, type ListEditorItem } from "../components/ListEditor";
+import { RoomPicker } from "../components/RoomPicker";
 
 type TabId = "hotel" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
 type StoreCategory = StoreItem["category"];
@@ -158,12 +160,12 @@ function BrandingAssetRow({
 }
 
 export function SettingsPage() {
-  const { 
-    hotelConfig, 
-    websiteContent, 
-    rewardsConfig, 
-    breakfastConfig, 
-    storeConfig, 
+  const {
+    hotelConfig,
+    websiteContent,
+    rewardsConfig,
+    breakfastConfig,
+    storeConfig,
     updateSettings,
     roomTypes,
     addRoomType,
@@ -175,6 +177,7 @@ export function SettingsPage() {
     uploadBrandingAsset,
     resetBrandingAsset,
     storeItems,
+    rooms,
     addStoreItem,
     updateStoreItem,
     deleteStoreItem,
@@ -230,6 +233,32 @@ export function SettingsPage() {
   const [rewardsHeroEyebrow, setRewardsHeroEyebrow] = useState(websiteContent.rewards?.heroEyebrow ?? "");
   const [rewardsHeroHeading, setRewardsHeroHeading] = useState(websiteContent.rewards?.heroHeading ?? "");
   const [rewardsHeroSubtext, setRewardsHeroSubtext] = useState(websiteContent.rewards?.heroSubtext ?? "");
+
+  // Website Content tab — list-based content for the homepage
+  // (amenities, services, featured rooms, Spark Rewards promo).
+  // Hydrated from websiteContent; persisted via handleSaveWebsiteContent
+  // using the existing `updateSettings("websiteContent", ...)` path.
+  const [homepageAmenities, setHomepageAmenities] = useState<ListEditorItem[]>(
+    websiteContent.homepage?.amenities ?? []
+  );
+  const [homepageServices, setHomepageServices] = useState<ListEditorItem[]>(
+    websiteContent.homepage?.services ?? []
+  );
+  const [homepageFeaturedRoomIds, setHomepageFeaturedRoomIds] = useState<string[]>(
+    websiteContent.homepage?.featuredRoomIds ?? []
+  );
+  const [sparkRewardsEnabled, setSparkRewardsEnabled] = useState<boolean>(
+    websiteContent.homepage?.sparkRewards?.isEnabled ?? true
+  );
+  const [sparkRewardsHeading, setSparkRewardsHeading] = useState<string>(
+    websiteContent.homepage?.sparkRewards?.heading ?? ""
+  );
+  const [sparkRewardsDescription, setSparkRewardsDescription] = useState<string>(
+    websiteContent.homepage?.sparkRewards?.description ?? ""
+  );
+  const [sparkRewardsPerks, setSparkRewardsPerks] = useState<ListEditorItem[]>(
+    websiteContent.homepage?.sparkRewards?.perks ?? []
+  );
 
 
 
@@ -344,6 +373,13 @@ export function SettingsPage() {
     setRewardsHeroEyebrow(websiteContent.rewards?.heroEyebrow || "");
     setRewardsHeroHeading(websiteContent.rewards?.heroHeading || "");
     setRewardsHeroSubtext(websiteContent.rewards?.heroSubtext || "");
+    setHomepageAmenities(websiteContent.homepage?.amenities || []);
+    setHomepageServices(websiteContent.homepage?.services || []);
+    setHomepageFeaturedRoomIds(websiteContent.homepage?.featuredRoomIds || []);
+    setSparkRewardsEnabled(websiteContent.homepage?.sparkRewards?.isEnabled !== false);
+    setSparkRewardsHeading(websiteContent.homepage?.sparkRewards?.heading || "");
+    setSparkRewardsDescription(websiteContent.homepage?.sparkRewards?.description || "");
+    setSparkRewardsPerks(websiteContent.homepage?.sparkRewards?.perks || []);
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
@@ -364,6 +400,30 @@ export function SettingsPage() {
   // editors (amenities, services, featured rooms, spark rewards
   // promo) are still pending. Hero copy was moved to the Branding
   // tab in this change.
+
+  // Persist the list-shaped homepage content (amenities, services,
+  // featured rooms, Spark Rewards promo) to `settings/websiteContent`.
+  // Hero copy + photos are owned by the Branding tab; we only touch
+  // the four sub-objects this form owns and leave everything else
+  // (hero copy, etc.) intact via the spread.
+  const handleSaveWebsiteContent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await updateSettings("websiteContent", {
+      homepage: {
+        ...(websiteContent.homepage || {}),
+        amenities: homepageAmenities,
+        services: homepageServices,
+        featuredRoomIds: homepageFeaturedRoomIds,
+        sparkRewards: {
+          ...((websiteContent.homepage?.sparkRewards as Record<string, unknown>) || {}),
+          isEnabled: sparkRewardsEnabled,
+          heading: sparkRewardsHeading,
+          description: sparkRewardsDescription,
+          perks: sparkRewardsPerks
+        }
+      }
+    });
+  };
 
   // Persist all hero copy fields to `settings/websiteContent`. Logo
   // and hero-photo overrides are saved on their own (upload / reset
@@ -1012,38 +1072,133 @@ export function SettingsPage() {
             </form>
           )}
 
-          {/* TAB 3: WEBSITE CONTENT CONFIG (non-hero copy). Hero
-              photos + hero copy moved to the Branding tab. This tab
-              is reserved for the list-based website content
-              (amenities, services, featured rooms, spark rewards
-              promo) once that editor is built. For now it links to
-              the new Branding tab where every guest-facing hero
-              lives. */}
+          {/* TAB 3: WEBSITE CONTENT — list-shaped homepage content
+              (amenities, services, featured rooms, Spark Rewards
+              promo). Hero photos + hero copy live in the Branding
+              tab. All sub-objects persist to settings/websiteContent
+              via the single "Save Content" button. */}
           {activeTab === "website" && (
-            <div className="space-y-6 text-xs">
+            <form onSubmit={handleSaveWebsiteContent} className="space-y-8 text-xs">
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Guest Web Landing Editor</h3>
                 <p className="text-[10px] text-gray-500 mt-0.5">
-                  List-based content for the public site. Hero photos and hero copy moved to the{" "}
+                  List-based content for the public site. Hero photos and hero copy live in the{" "}
                   <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
                   tab.
                 </p>
               </div>
 
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-800">
-                <p className="font-bold">Heroes are now in Branding</p>
-                <p className="mt-1 leading-relaxed">
-                  Homepage / about / corporate / rewards hero photos and their heading &amp; subtext now live in the <strong>Branding</strong> tab, alongside the navbar and footer logo overrides.
+              {/* Amenities grid */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Amenities</h4>
+                <p className="text-[10px] text-gray-500">
+                  Four-up grid on the homepage. Each card shows an icon, a title, and a short description. Disabled items are hidden from the guest site.
                 </p>
+                <ListEditor
+                  label="Amenity items"
+                  helper="Add or remove the boutique amenities shown to guests on the homepage. Reorder by using the up/down handles."
+                  value={homepageAmenities}
+                  onChange={setHomepageAmenities}
+                  defaultIcon="sparkles"
+                />
               </div>
 
-              <div className="rounded-xl border border-gray-200 bg-white p-5 text-xs text-gray-700">
-                <p className="font-bold text-gray-900">Coming soon</p>
-                <p className="mt-1 leading-relaxed">
-                  Amenities grid editor, services card editor, featured-rooms selector, and the Spark Rewards promo block. Until then, edit those values directly in <code>settings/websiteContent</code> on Firestore.
+              {/* Featured rooms selector */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Featured Rooms</h4>
+                <p className="text-[10px] text-gray-500">
+                  Up to 3 active rooms surface in the homepage &quot;Stay with us&quot; section. The order here is the order shown on the guest site. When empty, the homepage falls back to the first 3 active rooms.
                 </p>
+                <RoomPicker
+                  rooms={rooms}
+                  roomTypes={roomTypes}
+                  value={homepageFeaturedRoomIds}
+                  onChange={setHomepageFeaturedRoomIds}
+                />
               </div>
-            </div>
+
+              {/* Services cards */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Services</h4>
+                <p className="text-[10px] text-gray-500">
+                  Two-up service cards (Tour Packages, Car Rentals) that link to the contact form. The CTA is always &quot;Contact us&quot; → <code>/contact</code> and is not editable.
+                </p>
+                <ListEditor
+                  label="Service items"
+                  helper="Add or remove the service cards. Disable to hide a card from the homepage without deleting its content."
+                  value={homepageServices}
+                  onChange={setHomepageServices}
+                  defaultIcon="palmtree"
+                />
+              </div>
+
+              {/* Spark Rewards promo */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Spark Rewards Promo</h4>
+                <p className="text-[10px] text-gray-500">
+                  The dark promo block on the homepage that advertises the loyalty program. Hides entirely when disabled.
+                </p>
+                <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setSparkRewardsEnabled(!sparkRewardsEnabled)}
+                    className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                      sparkRewardsEnabled ? "bg-primary" : "bg-gray-200"
+                    }`}
+                  >
+                    <div
+                      className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        sparkRewardsEnabled ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                  <span className="flex items-center gap-2">
+                    <Star size={12} className="text-primary" />
+                    Show the Spark Rewards block on the homepage
+                  </span>
+                </label>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Heading
+                    <input
+                      type="text"
+                      value={sparkRewardsHeading}
+                      onChange={(e) => setSparkRewardsHeading(e.target.value)}
+                      placeholder="Stay often, feel known"
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Description
+                    <textarea
+                      value={sparkRewardsDescription}
+                      onChange={(e) => setSparkRewardsDescription(e.target.value)}
+                      rows={2}
+                      placeholder="One-line marketing copy shown above the perks grid."
+                      className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                </div>
+                <ListEditor
+                  label="Perks"
+                  helper="Perks shown in the dark block. Disabled perks stay in the data so the order is preserved; they just don't render."
+                  value={sparkRewardsPerks}
+                  onChange={setSparkRewardsPerks}
+                  defaultIcon="sparkles"
+                  emptyItem={{ title: "", description: "", icon: "sparkles" }}
+                />
+              </div>
+
+              <div className="pt-2 border-t border-gray-150 flex justify-end">
+                <button
+                  type="submit"
+                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+                >
+                  <Save size={14} />
+                  Save Content
+                </button>
+              </div>
+            </form>
           )}
 
           {/* TAB 3: REWARDS CONFIG — admin-only (per W3.2) */}

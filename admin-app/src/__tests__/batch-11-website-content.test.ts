@@ -239,3 +239,93 @@ describe("Branding — admin app normalizes partial websiteContent docs", () => 
     expect(reachInReads.length, "expected every websiteContent.X.Y read to use ?. (optional chaining)").toBe(0);
   });
 });
+
+describe("Website Content editors — list-shaped homepage content", () => {
+  const settingsPageSrc = readFileSync(
+    resolve(__dirname, "../../src/pages/SettingsPage.tsx"),
+    "utf8"
+  );
+  const listEditorSrc = readFileSync(
+    resolve(__dirname, "../../src/components/ListEditor.tsx"),
+    "utf8"
+  );
+  const roomPickerSrc = readFileSync(
+    resolve(__dirname, "../../src/components/RoomPicker.tsx"),
+    "utf8"
+  );
+  const sharedConstantsSrc = readFileSync(
+    resolve(__dirname, "../../../shared/constants/index.ts"),
+    "utf8"
+  );
+  const adminCtxSrc = readFileSync(
+    resolve(__dirname, "../../src/context/AdminContext.tsx"),
+    "utf8"
+  );
+
+  it("SettingsPage uses ListEditor for amenities, services, and spark rewards perks", () => {
+    expect(settingsPageSrc).toMatch(/import\s*\{[^}]*ListEditor[^}]*\}\s*from\s*["']\.\.\/components\/ListEditor["']/);
+    expect(settingsPageSrc).toMatch(/<ListEditor[\s\S]*?value=\{homepageAmenities\}[\s\S]*?\/>/);
+    expect(settingsPageSrc).toMatch(/<ListEditor[\s\S]*?value=\{homepageServices\}[\s\S]*?\/>/);
+    expect(settingsPageSrc).toMatch(/<ListEditor[\s\S]*?value=\{sparkRewardsPerks\}[\s\S]*?\/>/);
+  });
+
+  it("SettingsPage uses RoomPicker for featuredRoomIds", () => {
+    expect(settingsPageSrc).toMatch(/import\s*\{[^}]*RoomPicker[^}]*\}\s*from\s*["']\.\.\/components\/RoomPicker["']/);
+    expect(settingsPageSrc).toMatch(/<RoomPicker[\s\S]*?value=\{homepageFeaturedRoomIds\}[\s\S]*?\/>/);
+  });
+
+  it("SettingsPage persists all four sub-objects via a single handleSaveWebsiteContent", () => {
+    expect(settingsPageSrc).toMatch(/handleSaveWebsiteContent\s*=\s*async/);
+    expect(settingsPageSrc).toMatch(/amenities:\s*homepageAmenities/);
+    expect(settingsPageSrc).toMatch(/services:\s*homepageServices/);
+    expect(settingsPageSrc).toMatch(/featuredRoomIds:\s*homepageFeaturedRoomIds/);
+    expect(settingsPageSrc).toMatch(/isEnabled:\s*sparkRewardsEnabled/);
+  });
+
+  it("Spark Rewards promo block has an enable/disable toggle wired to setSparkRewardsEnabled", () => {
+    // The Settings page should own a toggle that flips the local
+    // state and gets persisted with the rest of the form.
+    expect(settingsPageSrc).toMatch(/setSparkRewardsEnabled\(!sparkRewardsEnabled\)/);
+    expect(settingsPageSrc).toMatch(/Spark Rewards block on the homepage/);
+  });
+
+  it("The 'Coming soon' stub is gone", () => {
+    expect(settingsPageSrc).not.toMatch(/Coming soon/);
+    expect(settingsPageSrc).not.toMatch(/edit those values directly in.*Firestore/i);
+  });
+
+  it("ListEditor supports add / remove / reorder + isEnabled toggle", () => {
+    expect(listEditorSrc).toMatch(/function\s+add\s*\(/);
+    expect(listEditorSrc).toMatch(/function\s+remove\s*\(/);
+    expect(listEditorSrc).toMatch(/function\s+move\s*\(/);
+    expect(listEditorSrc).toMatch(/patch\(index,\s*\{ isEnabled/);
+  });
+
+  it("ListEditor picks icons from KNOWN_CONTENT_ICONS", () => {
+    expect(listEditorSrc).toMatch(/KNOWN_CONTENT_ICONS\.map\(/);
+  });
+
+  it("RoomPicker caps selection at MAX_FEATURED_ROOMS and emits the new array", () => {
+    expect(roomPickerSrc).toMatch(/MAX_FEATURED_ROOMS/);
+    expect(roomPickerSrc).toMatch(/onChange\(next\)/);
+  });
+
+  it("RoomPicker filters to active rooms only", () => {
+    expect(roomPickerSrc).toMatch(/rooms\.filter\(\(r\)\s*=>\s*r\.isActive\)/);
+  });
+
+  it("shared/constants exports KNOWN_CONTENT_ICONS + MAX_FEATURED_ROOMS", () => {
+    expect(sharedConstantsSrc).toMatch(/export const KNOWN_CONTENT_ICONS/);
+    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_ROOMS\s*=\s*3/);
+  });
+
+  it("AdminContext seed includes the four list-based sub-objects", () => {
+    // The seed (and the merge function) must default the four
+    // sub-objects so a fresh admin session renders the editors
+    // with example content instead of empty placeholders.
+    expect(adminCtxSrc).toMatch(/amenities:\s*\[\s*\{[^}]*Consistent comfort/);
+    expect(adminCtxSrc).toMatch(/services:\s*\[\s*\{[^}]*Tour Packages/);
+    expect(adminCtxSrc).toMatch(/featuredRoomIds:\s*\["room-201"/);
+    expect(adminCtxSrc).toMatch(/sparkRewards:\s*\{[\s\S]*?Earn points on completed stays/);
+  });
+});
