@@ -110,7 +110,9 @@ export function RewardsLandingPage() {
             <HeroSkeleton />
           )}
         </div>
-        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/65 to-transparent z-0" />
+        {/* Stronger gradient + drop-shadow on the text so the
+            hero reads on any background photo. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/40 via-gray-950/70 to-gray-950/90 z-0" />
 
         <motion.div
           animate="visible"
@@ -118,13 +120,13 @@ export function RewardsLandingPage() {
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <div className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary-light mb-6 backdrop-blur-sm">
+          <div className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary-light mb-6 backdrop-blur-sm drop-shadow-md">
             <Sparkles size={14} /> {config.rewardsName} {heroEyebrow}
           </div>
-          <h1 className="font-heading text-4xl leading-none text-white sm:text-7xl lg:text-8xl tracking-tight">
+          <h1 className="font-heading text-4xl leading-none text-white sm:text-7xl lg:text-8xl tracking-tight drop-shadow-[0_2px_12px_rgba(0,0,0,0.7)]">
             {heroHeading}
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-200 sm:text-lg">
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-200 sm:text-lg drop-shadow-md">
             {heroSubtext}
           </p>
 
@@ -132,12 +134,12 @@ export function RewardsLandingPage() {
             {/* Logged-out: standard CTAs */}
             {!loading && !user && (
               <>
-                <PrimaryButton to="/signup" className="min-w-[220px] shadow-lg">
+                <PrimaryButton to="/signup" className="min-w-[220px] shadow-lg drop-shadow-md">
                   Join Spark Rewards
                 </PrimaryButton>
                 <GhostButton
                   to="/signin"
-                  className="min-w-[220px] border-white text-white hover:bg-white/10"
+                  className="min-w-[220px] border-white text-white drop-shadow-sm hover:bg-white/10"
                 >
                   Sign In
                 </GhostButton>
@@ -153,7 +155,7 @@ export function RewardsLandingPage() {
               <PrimaryButton
                 type="button"
                 onClick={handleEnroll}
-                className="min-w-[240px] shadow-lg"
+                className="min-w-[240px] shadow-lg drop-shadow-md"
                 disabled={enrolling}
               >
                 {enrolling ? (
@@ -168,7 +170,7 @@ export function RewardsLandingPage() {
             )}
 
             {isMember && (
-              <PrimaryButton to="/account/rewards" className="min-w-[240px] shadow-lg">
+              <PrimaryButton to="/account/rewards" className="min-w-[240px] shadow-lg drop-shadow-md">
                 Go to My Rewards Dashboard <ArrowRight size={16} />
               </PrimaryButton>
             )}
