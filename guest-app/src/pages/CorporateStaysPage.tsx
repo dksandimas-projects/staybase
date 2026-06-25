@@ -32,6 +32,7 @@ import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 import { usePublicSiteContent, type ContentItem } from "../hooks/usePublicSiteContent";
+import { HeroSkeleton } from "../components/HeroSkeleton";
 
 const PERK_ICON_MAP: Record<string, LucideIcon> = {
   coins: Coins,
@@ -217,11 +218,15 @@ export function CorporateStaysPage() {
       {/* Dark Hero Section */}
       <section className="relative -mt-20 flex min-h-[85vh] items-center justify-center overflow-hidden bg-gray-950 pt-20 px-4">
         <div className="absolute inset-0 z-0 opacity-30">
-          <img
-            className="w-full h-full object-cover"
-            alt="Sophisticated corporate meeting room and lounge"
-            src={corpHeroPhoto}
-          />
+          {corpHeroPhoto ? (
+            <img
+              className="w-full h-full object-cover"
+              alt="Sophisticated corporate meeting room and lounge"
+              src={corpHeroPhoto}
+            />
+          ) : (
+            <HeroSkeleton />
+          )}
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-transparent z-0" />
 

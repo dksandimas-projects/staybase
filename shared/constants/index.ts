@@ -92,3 +92,12 @@ export type ContentIconName = (typeof KNOWN_CONTENT_ICONS)[number];
 // falls back to the first 3 active rooms when this list is empty.
 export const MAX_FEATURED_ROOMS = 3;
 
+// localStorage cache key + TTL for the public site content
+// (`usePublicSiteContent`). Returning visitors get an instant
+// render from the cache while Firestore validates in the
+// background — no "fallback-image flash" while waiting for the
+// custom upload to load. Bump the `:v1` suffix if the cached
+// shape ever changes.
+export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v1";
+export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+

@@ -3,6 +3,7 @@ import { Sparkles, Award, Heart, CheckCircle2 } from "lucide-react";
 import config from "@config";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
+import { HeroSkeleton } from "../components/HeroSkeleton";
 import { fadeUp, staggerContainer, scaleIn } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
@@ -17,7 +18,7 @@ export function AboutPage() {
       };
 
   const { about } = usePublicSiteContent();
-  const aboutHeroImage = about.heroPhotoUrl;
+  const aboutHeroPhoto = about.heroPhotoUrl;
   const aboutHeroHeading = about.heroHeading;
   const missionText = about.missionStatement;
   const visionText = about.visionStatement;
@@ -33,11 +34,15 @@ export function AboutPage() {
 
         {/* Hero Section */}
         <section className="relative -mt-20 flex h-[45vh] min-h-[320px] items-center justify-center overflow-hidden px-4 pt-20 text-center">
-          <img
-            src={aboutHeroImage}
-            alt="Boutique hotel pool and lobby facade in Bohol"
-            className="absolute inset-0 h-full w-full object-cover"
-          />
+          {aboutHeroPhoto ? (
+            <img
+              src={aboutHeroPhoto}
+              alt="Boutique hotel pool and lobby facade in Bohol"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : (
+            <HeroSkeleton />
+          )}
           <div className="absolute inset-0 bg-gray-950/45 backdrop-blur-[1px]" />
           
           <div className="relative z-10 space-y-4">
