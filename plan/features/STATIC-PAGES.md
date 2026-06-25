@@ -44,19 +44,20 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 
 ### UI Checklist
 - [ ] Dark hero section — eyebrow, background photo, Apollo heading, subtext — all editable from Settings → Branding
-- [ ] Perks section — grid of perk items (title, description, icon) — editable from Settings
-- [ ] Rooms overview — room type cards with photos, bed definition, capacity — NO prices shown
+- [ ] Perks section — grid of perk items (title, description, icon) — editable from Settings → Website Content → Corporate page → Perks
+- [ ] Rooms overview — eyebrow + heading + subtext editable from Settings → Website Content → Corporate page → Rooms Overview; room type cards themselves are driven by the live room types
+- [ ] Retreat CTA banner — heading + description + button label editable from Settings → Website Content → Corporate page → Retreat CTA Banner
 - [ ] Corporate inquiry form — company name, contact person, email, phone, number of rooms, preferred dates, special requirements, Submit button
 - [ ] CTA to corporate booking: "Have a negotiated rate? Book directly at `/corporate/book`" — Spark Orange button
 - [ ] Footer
 
 ### Data & Logic Checklist
-- [ ] Fetch `settings/websiteContent.corporate` for `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl`, and `perks[]` — all editable from Settings → Branding
+- [ ] Fetch `settings/websiteContent.corporate` for `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl`, `perks[]`, `roomsOverview{Eyebrow,Heading,Description}`, and `retreat{Heading,Description,CtaLabel}` — all editable from Settings
 - [ ] Hero eyebrow falls back to `data/homepage.ts → corporateHeroEyebrow` when `corporate.heroEyebrow` is empty
 - [ ] Hero photo falls back to `data/homepage.ts → corporateHeroImage` (Unsplash) when `corporate.heroPhotoUrl` is empty
-
-### Data & Logic Checklist
-- [ ] Fetch `settings/websiteContent.corporate` for hero content and perks
+- [ ] Rooms overview + retreat CTA copy falls back to `DEFAULT_CORPORATE_PAGE_CONTENT` from `@spark-inn/shared` when the corresponding `corporate.*` field is empty
+- [ ] Default perks list is the `DEFAULT_CORPORATE_PERKS` constant from `@spark-inn/shared` (6 entries: Negotiated Rates, Group Bookings, Dedicated Support, High-Speed Wi-Fi, Premium Security, Flexible Bookings) — seeded by `AdminContext.mergeWebsiteContent` when the Firestore doc has no `corporate.perks[]`
+- [ ] **Auto-population** — `DEFAULT_CORPORATE_PAGE_CONTENT` is the single source of truth for the hero text, rooms overview copy, retreat CTA copy, and the hero photo URL. The admin editor's state is hydrated from this constant when the Firestore value is empty (admin sees the current text in the inputs without having to retype), AND a one-time backfill in `AdminContext` writes any empty corporate field to `settings/websiteContent.corporate` the first time an admin loads the dashboard. Idempotent — subsequent loads short-circuit
 - [ ] Fetch all active rooms for the rooms overview section
 - [ ] Inquiry form submission: POST `/api/corporate/inquiry`; API creates `corporateInquiries/{id}` with `status: "new"`
 - [ ] No corporate rates displayed anywhere on this page

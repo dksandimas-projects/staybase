@@ -30,8 +30,9 @@ import { ROOM_TYPE_IMAGES } from "../data/homepage";
 import { useRoomTypes, getRoomTypeImages, getRoomTypeRates } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
-import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
-import { usePublicSiteContent, type ContentItem } from "../hooks/usePublicSiteContent";
+import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES, DEFAULT_CORPORATE_PAGE_CONTENT } from "@spark-inn/shared";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import type { ContentItem } from "@spark-inn/shared";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 
 const PERK_ICON_MAP: Record<string, LucideIcon> = {
@@ -394,17 +395,19 @@ export function CorporateStaysPage() {
       {/* Rooms Overview Grid (NO PRICES) */}
       <section className="py-24 bg-gray-50 border-t border-gray-200">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div 
+          <motion.div
             className="text-center mb-16"
             variants={fadeUp}
             {...entranceProps}
           >
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary">Accommodation Types</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+              {corporate.roomsOverviewEyebrow || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow}
+            </p>
             <h2 className="mt-3 font-heading text-3xl text-gray-950 sm:text-4xl">
-              Rooms Built for Productivity & Rest
+              {corporate.roomsOverviewHeading || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading}
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-sm text-gray-600 leading-relaxed">
-              Explore our range of boutique rooms. All rooms feature workspaces, high-speed Wi-Fi, air conditioning, and premium linens. No prices are shown below; corporate rates are negotiated based on contract terms.
+              {corporate.roomsOverviewDescription || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description}
             </p>
             <div className="mt-4 mx-auto w-16 h-1 bg-primary rounded" />
           </motion.div>
@@ -496,16 +499,16 @@ export function CorporateStaysPage() {
           <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full -ml-24 -mb-24 pointer-events-none" />
           <h2 className="font-heading text-3xl md:text-4xl text-white mb-4 relative z-10">
-            Partner with us for your next team retreat.
+            {corporate.retreatHeading || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.heading}
           </h2>
           <p className="font-body text-base md:text-lg text-white/90 mb-8 max-w-2xl mx-auto relative z-10">
-            Experience the perfect blend of Bohol's natural charm and the high-efficiency environment your business demands. Fully catered planning options are available.
+            {corporate.retreatDescription || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.description}
           </p>
-          <button 
+          <button
             className="bg-white text-primary px-8 py-3 rounded-lg font-semibold hover:bg-primary-light transition active:scale-95 relative z-10 min-h-11 shadow-sm"
             onClick={() => scrollToForm()}
           >
-            Get in Touch
+            {corporate.retreatCtaLabel || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel}
           </button>
         </div>
       </section>
