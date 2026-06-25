@@ -1903,7 +1903,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         { title: "Easy city access", description: "A practical Tagbilaran base for tours, meetings, errands, and onward travel.", icon: "map", isEnabled: true },
         { title: "Warm front desk care", description: "Helpful support for arrivals, local questions, and small travel details.", icon: "users", isEnabled: true }
       ],
-      featuredRoomIds: ["room-201", "room-204", "room-301"],
+      featuredTypeValues: ["executive", "standard-double", "family"],
       services: [
         { title: "Tour Packages", description: "Ask our team for help arranging Bohol countryside tours, island plans, and local experiences.", icon: "palmtree", isEnabled: true },
         { title: "Car Rentals", description: "Coordinate simple transportation support for business trips, family errands, or day tours.", icon: "car", isEnabled: true }
@@ -1965,7 +1965,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           { title: "Easy city access", description: "A practical Tagbilaran base for tours, meetings, errands, and onward travel.", icon: "map", isEnabled: true },
           { title: "Warm front desk care", description: "Helpful support for arrivals, local questions, and small travel details.", icon: "users", isEnabled: true }
         ],
-        featuredRoomIds: ["room-201", "room-204", "room-301"],
+      featuredTypeValues: ["executive", "standard-double", "family"],
         services: [
           { title: "Tour Packages", description: "Ask our team for help arranging Bohol countryside tours, island plans, and local experiences.", icon: "palmtree", isEnabled: true },
           { title: "Car Rentals", description: "Coordinate simple transportation support for business trips, family errands, or day tours.", icon: "car", isEnabled: true }
@@ -2024,9 +2024,33 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         services: Array.isArray(homepageRaw.services)
           ? (homepageRaw.services as typeof seed.homepage.services)
           : seed.homepage.services,
-        featuredRoomIds: Array.isArray(homepageRaw.featuredRoomIds)
-          ? (homepageRaw.featuredRoomIds as string[])
-          : seed.homepage.featuredRoomIds,
+        featuredTypeValues: (() => {
+          // Prefer the new `featuredTypeValues` field. If absent
+          // and the doc still carries the legacy
+          // `featuredRoomIds` (pre-migration), map each id to its
+          // room type via the `roomTypes` already loaded into
+          // context, dedupe, and seed the new field. This is a
+          // one-time migration — the next admin save writes the
+          // new field and the old one is dropped.
+          if (Array.isArray(homepageRaw.featuredTypeValues)) {
+            return homepageRaw.featuredTypeValues as string[];
+          }
+          if (Array.isArray(homepageRaw.featuredRoomIds) && roomTypes.length > 0) {
+            const typeByValue = new Map(roomTypes.map((t) => [t.value, t.value]));
+            const derived: string[] = [];
+            for (const id of homepageRaw.featuredRoomIds as unknown[]) {
+              if (typeof id !== "string") continue;
+              const matched = rooms.find((r) => r.id === id);
+              if (!matched) continue;
+              const typeValue = typeByValue.get(matched.type);
+              if (typeValue && !derived.includes(typeValue)) {
+                derived.push(typeValue);
+              }
+            }
+            if (derived.length > 0) return derived;
+          }
+          return seed.homepage.featuredTypeValues;
+        })(),
         sparkRewards: {
           ...seed.homepage.sparkRewards,
           ...(sparkRewardsRaw || {}),

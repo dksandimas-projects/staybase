@@ -50,7 +50,14 @@ export interface PublicHeroContent {
 
 export interface PublicHomepageContent extends PublicHeroContent {
   amenities: ContentItem[];
-  featuredRoomIds: string[];
+  // Type values featured on the homepage "Stay with us" section.
+  // Each value resolves to its first active room at render time.
+  // Previously `featuredRoomIds: string[]` (per-room IDs) — that
+  // model was wrong because the card content all comes from the
+  // room TYPE, not the individual room. See
+  // `shared/constants/index.ts → MAX_FEATURED_TYPES` for the
+  // full rationale.
+  featuredTypeValues: string[];
   services: ContentItem[];
   sparkRewards: SparkRewardsPromo;
 }
@@ -206,7 +213,10 @@ function buildFallback(): PublicSiteContent {
         icon: "",
         isEnabled: true
       })),
-      featuredRoomIds: ["room-201", "room-204", "room-301"],
+      // Defaults to three canonical Spark Inn types so the homepage
+      // shows a representative room card on first visit. The page
+      // resolves each to its first active room.
+      featuredTypeValues: ["executive", "standard-double", "family"],
       services: fallbackServices.map((entry) => ({
         title: entry.title,
         description: entry.description,
@@ -260,7 +270,7 @@ function buildEmptyState(): PublicSiteContent {
       heroSubtext: "",
       heroPhotoUrl: "",
       amenities: [],
-      featuredRoomIds: [],
+      featuredTypeValues: [],
       services: [],
       sparkRewards: {
         heading: "",
@@ -373,9 +383,20 @@ export function usePublicSiteContent(): PublicSiteContent {
       const rawAmenities = homepageRaw ? toContentItemArray(homepageRaw.amenities) : [];
       const rawServices = homepageRaw ? toContentItemArray(homepageRaw.services) : [];
       const rawPerks = corporateRaw ? toContentItemArray(corporateRaw.perks) : [];
-      const rawFeatured = Array.isArray(homepageRaw?.featuredRoomIds)
-        ? (homepageRaw!.featuredRoomIds as unknown[]).filter((v): v is string => typeof v === "string")
-        : [];
+      // Per the type-driven featured-types model: read the new
+      // `featuredTypeValues` array. If a doc still carries the
+      // old `featuredRoomIds` (pre-migration) and no new field,
+      // we pass it through as-is; the page will treat unknown
+      // entries as type values, which is fine — old entries that
+      // match room type values (e.g. "executive") will be treated
+      // as types, others will be skipped. AdminContext's
+      // `mergeWebsiteContent` does the canonical migration on
+      // save.
+      const rawFeatured: string[] = Array.isArray(homepageRaw?.featuredTypeValues)
+        ? (homepageRaw!.featuredTypeValues as unknown[]).filter((v): v is string => typeof v === "string")
+        : Array.isArray(homepageRaw?.featuredRoomIds)
+          ? (homepageRaw!.featuredRoomIds as unknown[]).filter((v): v is string => typeof v === "string")
+          : [];
 
       const hc = (hotelConfig ?? {}) as Record<string, unknown>;
       const brandName = typeof hc.hotelName === "string" && hc.hotelName.length > 0 ? hc.hotelName : config.brandName;
@@ -393,7 +414,7 @@ export function usePublicSiteContent(): PublicSiteContent {
           heroSubtext: pickString(homepageRaw, "heroSubtext", fb.homepage.heroSubtext),
           heroPhotoUrl: pickString(homepageRaw, "heroPhotoUrl", fb.homepage.heroPhotoUrl),
           amenities: rawAmenities.length > 0 ? rawAmenities : fb.homepage.amenities,
-          featuredRoomIds: rawFeatured.length > 0 ? rawFeatured : fb.homepage.featuredRoomIds,
+          featuredTypeValues: rawFeatured.length > 0 ? rawFeatured : fb.homepage.featuredTypeValues,
           services: rawServices.length > 0 ? rawServices : fb.homepage.services,
           sparkRewards: homepageRaw ? buildSparkRewards(homepageRaw.sparkRewards) : fb.homepage.sparkRewards
         },
