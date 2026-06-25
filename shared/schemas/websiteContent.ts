@@ -72,7 +72,20 @@ export const CorporateContentSchema = PublicHeroSchema.extend({
       icon: z.string().optional(),
       isEnabled: z.boolean().optional()
     })
-  )
+  ),
+  // Rooms overview section on /corporate (eyebrow + heading + subtext).
+  // All optional — the guest app falls back to hardcoded copy in
+  // `CorporateStaysPage` when empty. Edited from Settings → Website
+  // Content → Corporate page.
+  roomsOverviewEyebrow: z.string().default(""),
+  roomsOverviewHeading: z.string().default(""),
+  roomsOverviewDescription: z.string().default(""),
+  // Retreat CTA banner at the bottom of the "rooms" section
+  // (heading + description + button label). All optional with the
+  // same fallback behavior as the rooms overview block above.
+  retreatHeading: z.string().default(""),
+  retreatDescription: z.string().default(""),
+  retreatCtaLabel: z.string().default("")
 });
 
 export const RewardsContentSchema = PublicHeroSchema;
