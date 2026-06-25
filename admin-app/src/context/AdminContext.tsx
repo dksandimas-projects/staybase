@@ -2208,22 +2208,36 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // One-time corporate backfill. Runs once per admin session
   // (gated by a ref) after the initial Firestore snapshot delivers
-  // `websiteContent`. For each of the 10 corporate fields that is
-  // empty (`""` or missing), write the corresponding value from
+  // `websiteContent`. For each of the 9 corporate text fields that
+  // is empty (`""` or missing), write the corresponding value from
   // `DEFAULT_CORPORATE_PAGE_CONTENT` to
   // `settings/websiteContent.corporate` via the existing
   // `updateSettings` (which uses `setDoc(..., { merge: true })`).
   //
-  // Why: the new fields added in `feat/corporate-content-editable`
+  // Why: the new text fields added in `feat/corporate-content-editable`
   // would otherwise rely on the guest app's `||` fallback forever.
   // Backfilling once on first admin load locks the page to the
-  // same copy + image the deploy-time fallback provides, so the
-  // admin editor and the guest site agree without a manual save.
+  // same copy the deploy-time fallback provides, so the admin
+  // editor and the guest site agree without a manual save.
   // Idempotent — subsequent loads see the backfilled values and
   // the `if (!corporate.X)` check short-circuits, so no extra
   // writes happen. The ref prevents re-runs when `websiteContent`
   // updates for unrelated reasons (e.g. any other settings doc
   // changes).
+  //
+  // `corporate.heroPhotoUrl` is intentionally NOT backfilled.
+  // Unlike text, the photo URL has a binary "no custom upload"
+  // semantic: the guest app's `pickString` falls back to the
+  // static `corporateHeroImage` in `data/homepage.ts` when the
+  // Firestore value is empty. Persisting the default URL into
+  // Firestore would (a) undo the admin's Reset action on the
+  // very next dashboard load, and (b) freeze the hero image
+  // to whatever URL was in `DEFAULT_CORPORATE_PAGE_CONTENT.hero
+  // .photoUrl` at the moment of first load — preventing future
+  // edits to the static `corporateHeroImage` from ever reaching
+  // the public site. The admin editor's pre-population still
+  // works because `mergeWebsiteContent` keeps the in-editor
+  // `heroPhotoUrl` field empty when no custom upload exists.
   const hasBackfilledCorporateRef = useRef(false);
   useEffect(() => {
     if (hasBackfilledCorporateRef.current) return;
@@ -2240,7 +2254,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     if (!corporate.heroEyebrow) updates.heroEyebrow = DEFAULT_CORPORATE_PAGE_CONTENT.hero.eyebrow;
     if (!corporate.heroHeading) updates.heroHeading = DEFAULT_CORPORATE_PAGE_CONTENT.hero.heading;
     if (!corporate.heroSubtext) updates.heroSubtext = DEFAULT_CORPORATE_PAGE_CONTENT.hero.subtext;
-    if (!corporate.heroPhotoUrl) updates.heroPhotoUrl = DEFAULT_CORPORATE_PAGE_CONTENT.hero.photoUrl;
     if (!corporate.roomsOverviewEyebrow) updates.roomsOverviewEyebrow = DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow;
     if (!corporate.roomsOverviewHeading) updates.roomsOverviewHeading = DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading;
     if (!corporate.roomsOverviewDescription) updates.roomsOverviewDescription = DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description;
