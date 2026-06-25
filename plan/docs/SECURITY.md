@@ -114,6 +114,12 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 - **Note:** `intercomQuickRequests` and `notificationSoundUrl` are in `hotelConfig` — public read is acceptable as these are non-sensitive
 - **Note:** `websiteContent.{homepage,about,corporate,rewards,branding}` carry hero copy + photo URLs + logo URLs. Public read is acceptable — all data is non-sensitive marketing material. The `branding` sub-object enables the navbar logo override and the fix for the dark-on-dark logo visibility bug; URLs are public-read anyway because the guest site already serves them via `usePublicSiteContent`.
 
+### Client-side cache for `settings/websiteContent` (localStorage)
+- A non-sensitive snapshot of the resolved public site content is cached in `localStorage` (key `publicSiteContent:v1`, 5-minute TTL) so returning visitors get an instant render of the admin's custom hero images / logos / perks — no static-fallback flash while Firestore loads. Cached value is the **resolved** shape (custom URL or static fallback already applied) so the page can render directly from cache.
+- TTL bounds staleness: an admin upload made while a public tab is open takes effect within 5 minutes (or on next page load). For instant cross-tab updates the admin tab writes directly to Firestore; the public tab will pick up the new value on the next mount or cache expiry.
+- Cache writes and reads are no-ops on the server (no `window`), in private mode (`SecurityError`), and on quota errors — the public site is best-effort and still works without the cache.
+- Implementation: `shared/utils/cache.ts` (`readCacheWithTtl`, `writeCache`, `clearCache`) + `PUBLIC_SITE_CONTENT_CACHE_KEY` / `PUBLIC_SITE_CONTENT_CACHE_TTL_MS` in `shared/constants/index.ts`.
+
 ### `corporateInquiries`
 - Read/Write: staff/admin only
 - Contains contact PII — never expose to guest-facing app

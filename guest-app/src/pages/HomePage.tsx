@@ -7,13 +7,13 @@ import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
+import { HeroSkeleton } from "../components/HeroSkeleton";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
-import { homepageHeroImage } from "../data/homepage";
 
 const amenityIcons = [BedDouble, MapPin, Users, Sparkles, Wifi, Coffee];
 
@@ -63,7 +63,14 @@ export function HomePage() {
     return rooms.slice(0, 3);
   }, [rooms, homepage.featuredRoomIds]);
 
-  const heroPhoto = homepage.heroPhotoUrl || homepageHeroImage;
+  // `homepage.heroPhotoUrl` is empty during the initial Firestore
+  // load (skeleton shown below) and resolves to either the
+  // admin's custom upload or the static `homepageHeroImage`
+  // fallback once the hook finishes. The OR was previously
+  // needed for the loading phase, but the hook now leaves the
+  // field empty during load so the page never flashes the
+  // fallback before the custom image arrives.
+  const heroPhoto = homepage.heroPhotoUrl;
   const visibleServices = homepage.services.filter((s) => s.isEnabled !== false);
   const sparkRewardsVisible = homepage.sparkRewards.isEnabled !== false;
   const visibleRewards = sparkRewardsVisible
@@ -94,11 +101,15 @@ export function HomePage() {
       <Navbar overHero />
 
       <section className="relative -mt-20 flex min-h-screen items-center justify-center overflow-hidden px-4 pt-20 text-center">
-        <img
-          src={heroPhoto}
-          alt="Warm boutique hotel pool surrounded by calm tropical greenery"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+        {heroPhoto ? (
+          <img
+            src={heroPhoto}
+            alt="Warm boutique hotel pool surrounded by calm tropical greenery"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <HeroSkeleton />
+        )}
         <div className="absolute inset-0 bg-gray-950/45" />
         <motion.div
           animate="visible"

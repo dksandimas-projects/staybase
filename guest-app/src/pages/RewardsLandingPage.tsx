@@ -18,6 +18,7 @@ import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
+import { HeroSkeleton } from "../components/HeroSkeleton";
 import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { auth } from "../firebase/auth";
@@ -99,11 +100,15 @@ export function RewardsLandingPage() {
 
       <section className="relative -mt-20 flex min-h-[90vh] items-center justify-center overflow-hidden bg-gray-950 pt-20 px-4">
         <div className="absolute inset-0 z-0 opacity-40">
-          <img
-            className="w-full h-full object-cover"
-            alt="Warm boutique hotel lobby interior at sunset"
-            src={heroPhoto}
-          />
+          {heroPhoto ? (
+            <img
+              className="w-full h-full object-cover"
+              alt="Warm boutique hotel lobby interior at sunset"
+              src={heroPhoto}
+            />
+          ) : (
+            <HeroSkeleton />
+          )}
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/65 to-transparent z-0" />
 
