@@ -353,7 +353,15 @@ WebsiteContent {
     heroSubtext: string
     heroPhotoUrl: string
     amenities: WebsiteContentItem[]
-    featuredRoomIds: string[]
+    // Room TYPE values featured on the homepage "Stay with us"
+    // section. The page resolves each value to its first
+    // active room and renders one card per type. Capped at
+    // MAX_FEATURED_TYPES (3) at the editor and at the renderer.
+    // Previously `featuredRoomIds: string[]` (physical room
+    // doc IDs) — see MAX_FEATURED_TYPES in shared/constants for
+    // the rationale; AdminContext.mergeWebsiteContent does a
+    // one-time migration on read.
+    featuredTypeValues: string[]
     services: (WebsiteContentItem & { isEnabled: boolean })[]
     sparkRewards: SparkRewardsPromo
   }

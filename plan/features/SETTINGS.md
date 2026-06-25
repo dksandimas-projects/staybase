@@ -146,13 +146,17 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 - [ ] Default items pre-seeded: "Consistent comfort", "Easy city access", "Warm front desk care"
 - [ ] Source: `settings/websiteContent.homepage.amenities`
 
-**Featured Rooms** (up to 3 on the "Stay with us" section)
-- [ ] Two-pane selector: available active rooms on the left, featured on the right
-- [ ] Each row in the right pane: room name, room number, type, position number badge
-- [ ] Add / remove / reorder (up/down) the picked list; capped at `MAX_FEATURED_ROOMS = 3`
-- [ ] When the picked list is empty the guest site falls back to the first 3 active rooms
-- [ ] Type-image thumbnails pulled from `roomTypes[room.type].imageUrls[0]`
-- [ ] Source: `settings/websiteContent.homepage.featuredRoomIds`
+**Featured Room Types** (up to 3 on the "Stay with us" section)
+- [ ] Two-pane selector: available room types on the left, featured types on the right
+- [ ] Each row in the left pane shows the type label + the count of *active* rooms of that type. Types with zero active rooms are grayed out and can't be added (no card would render anyway)
+- [ ] Each row in the right pane shows the type label + active-room count + a position number badge (the order here is the render order on the public site)
+- [ ] Add / remove / reorder (up/down) the picked list; capped at `MAX_FEATURED_TYPES = 3` (renamed from the old `MAX_FEATURED_ROOMS = 3` alias which is kept for the migration window)
+- [ ] When the picked list is empty the guest site falls back to the first `MAX_FEATURED_TYPES` *distinct* types that have at least one active room (NOT raw room IDs — that was the bug the type-driven model fixes)
+- [ ] The card content (image, bed, amenities, capacity, price, description) all comes from the room TYPE via `roomTypes[value]` — the picked physical room is only used for the `key` and the Book Now deep link
+- [ ] A picked type that has no active rooms is silently skipped (no empty card)
+- [ ] Source: `settings/websiteContent.homepage.featuredTypeValues`
+
+**Migration from the old per-room picker** — the previous model was `featuredRoomIds: string[]` (a list of physical room doc IDs). That was wrong: every card field is type-driven, so picking "Room 201" vs "Room 202" (both `executive`) rendered identically. `AdminContext.mergeWebsiteContent` does a one-time migration on read: if the doc still carries the old `featuredRoomIds` and no new `featuredTypeValues`, it maps each id to its room type via the `roomTypes` already in context, dedupes, and returns the new field. The next admin save writes the new field and the old one is dropped. localStorage cache key bumped from `publicSiteContent:v1` to `v2` so old cached entries are ignored.
 
 **Homepage Services** (two-up service cards)
 - [ ] Add / remove / reorder the service cards. Each row: title, description, icon, isEnabled toggle

@@ -15,7 +15,7 @@ import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
-import { RoomPicker } from "../components/RoomPicker";
+import { TypePicker } from "../components/TypePicker";
 
 type TabId = "hotel" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
 type StoreCategory = StoreItem["category"];
@@ -244,8 +244,8 @@ export function SettingsPage() {
   const [homepageServices, setHomepageServices] = useState<ListEditorItem[]>(
     websiteContent.homepage?.services ?? []
   );
-  const [homepageFeaturedRoomIds, setHomepageFeaturedRoomIds] = useState<string[]>(
-    websiteContent.homepage?.featuredRoomIds ?? []
+  const [homepageFeaturedTypeValues, setHomepageFeaturedTypeValues] = useState<string[]>(
+    websiteContent.homepage?.featuredTypeValues ?? []
   );
   const [sparkRewardsEnabled, setSparkRewardsEnabled] = useState<boolean>(
     websiteContent.homepage?.sparkRewards?.isEnabled ?? true
@@ -375,7 +375,7 @@ export function SettingsPage() {
     setRewardsHeroSubtext(websiteContent.rewards?.heroSubtext || "");
     setHomepageAmenities(websiteContent.homepage?.amenities || []);
     setHomepageServices(websiteContent.homepage?.services || []);
-    setHomepageFeaturedRoomIds(websiteContent.homepage?.featuredRoomIds || []);
+    setHomepageFeaturedTypeValues(websiteContent.homepage?.featuredTypeValues || []);
     setSparkRewardsEnabled(websiteContent.homepage?.sparkRewards?.isEnabled !== false);
     setSparkRewardsHeading(websiteContent.homepage?.sparkRewards?.heading || "");
     setSparkRewardsDescription(websiteContent.homepage?.sparkRewards?.description || "");
@@ -413,7 +413,7 @@ export function SettingsPage() {
         ...(websiteContent.homepage || {}),
         amenities: homepageAmenities,
         services: homepageServices,
-        featuredRoomIds: homepageFeaturedRoomIds,
+        featuredTypeValues: homepageFeaturedTypeValues,
         sparkRewards: {
           ...((websiteContent.homepage?.sparkRewards as Record<string, unknown>) || {}),
           isEnabled: sparkRewardsEnabled,
@@ -1122,17 +1122,30 @@ export function SettingsPage() {
                 />
               </div>
 
-              {/* Featured rooms selector */}
+              {/* Featured types selector (replaces the old per-room
+                  picker; see TypePicker for the rationale). The
+                  admin picks room types; the homepage renders one
+                  card per type with the type's photo, bed,
+                  amenities, capacity, and price. */}
               <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Featured Rooms</h4>
-                <p className="text-[10px] text-gray-500">
-                  Up to 3 active rooms surface in the homepage &quot;Stay with us&quot; section. The order here is the order shown on the guest site. When empty, the homepage falls back to the first 3 active rooms.
-                </p>
-                <RoomPicker
-                  rooms={rooms}
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Featured Room Types</h4>
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-[10px] text-blue-800">
+                  <p className="font-bold">Heads-up — types, not rooms</p>
+                  <p className="mt-1 leading-relaxed">
+                    Featured rooms now picks room <em>types</em>, not specific rooms. The card for each type shows the type's photo, bed, amenities, capacity, and price — all of which are type-level. If your previous selection used room IDs (e.g. &quot;room-201&quot;), it has been auto-mapped to its type.
+                  </p>
+                </div>
+                <TypePicker
                   roomTypes={roomTypes}
-                  value={homepageFeaturedRoomIds}
-                  onChange={setHomepageFeaturedRoomIds}
+                  activeRoomCounts={(() => {
+                    const counts: Record<string, number> = {};
+                    for (const r of rooms) {
+                      if (r.isActive) counts[r.type] = (counts[r.type] ?? 0) + 1;
+                    }
+                    return counts;
+                  })()}
+                  value={homepageFeaturedTypeValues}
+                  onChange={setHomepageFeaturedTypeValues}
                 />
               </div>
 
