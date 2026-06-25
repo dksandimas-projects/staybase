@@ -1201,7 +1201,7 @@ export function BookingPage() {
             {/* Cloudflare Turnstile Challenge */}
             <div
               ref={turnstileContainerRef}
-              className="cf-turnstile mt-6 flex justify-center"
+              className="mt-6 flex justify-center"
             ></div>
 
             {submitError && (
