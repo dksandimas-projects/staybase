@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAdmin, type StoreItem } from "../context/AdminContext";
-import { compressImageFile, MAX_ROOM_TYPE_PHOTOS, type RoomTypeEntry } from "@spark-inn/shared";
+import { compressImageFile, MAX_ROOM_TYPE_PHOTOS, DEFAULT_CORPORATE_PAGE_CONTENT, type RoomTypeEntry } from "@spark-inn/shared";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
@@ -260,6 +260,35 @@ export function SettingsPage() {
     websiteContent.homepage?.sparkRewards?.perks ?? []
   );
 
+  // Corporate page content (Website Content → Corporate page). The
+  // corporate hero is owned by the Branding tab; this section owns
+  // the rest of the page: perks grid, rooms overview copy, and the
+  // retreat CTA banner. All fields are plain strings; perks share
+  // the homepage's `ListEditor` shape (title / description / icon /
+  // isEnabled) so the editor is identical to the one used for
+  // homepage amenities / services / Spark Rewards perks.
+  const [corporatePerks, setCorporatePerks] = useState<ListEditorItem[]>(
+    websiteContent.corporate?.perks ?? []
+  );
+  const [corporateRoomsOverviewEyebrow, setCorporateRoomsOverviewEyebrow] = useState<string>(
+    websiteContent.corporate?.roomsOverviewEyebrow ?? ""
+  );
+  const [corporateRoomsOverviewHeading, setCorporateRoomsOverviewHeading] = useState<string>(
+    websiteContent.corporate?.roomsOverviewHeading ?? ""
+  );
+  const [corporateRoomsOverviewDescription, setCorporateRoomsOverviewDescription] = useState<string>(
+    websiteContent.corporate?.roomsOverviewDescription ?? ""
+  );
+  const [corporateRetreatHeading, setCorporateRetreatHeading] = useState<string>(
+    websiteContent.corporate?.retreatHeading ?? ""
+  );
+  const [corporateRetreatDescription, setCorporateRetreatDescription] = useState<string>(
+    websiteContent.corporate?.retreatDescription ?? ""
+  );
+  const [corporateRetreatCtaLabel, setCorporateRetreatCtaLabel] = useState<string>(
+    websiteContent.corporate?.retreatCtaLabel ?? ""
+  );
+
 
 
   // 3. Rewards Config states
@@ -367,9 +396,16 @@ export function SettingsPage() {
     setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
     setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
     setAboutHeroHeading(websiteContent.about?.heroHeading || "");
-    setCorporateHeroEyebrow(websiteContent.corporate?.heroEyebrow || "");
-    setCorporateHeroHeading(websiteContent.corporate?.heroHeading || "");
-    setCorporateHeroSubtext(websiteContent.corporate?.heroSubtext || "");
+    // Per `feat/corporate-content-editable` — the four corporate
+    // hero fields are pre-populated from the shared
+    // `DEFAULT_CORPORATE_PAGE_CONTENT` constant when the Firestore
+    // value is empty, so the editor inputs show the current text
+    // instead of blank fields. Same source of truth as the guest
+    // app's `||` fallback in `CorporateStaysPage` and the one-time
+    // Firestore backfill in `AdminContext`.
+    setCorporateHeroEyebrow(websiteContent.corporate?.heroEyebrow || DEFAULT_CORPORATE_PAGE_CONTENT.hero.eyebrow);
+    setCorporateHeroHeading(websiteContent.corporate?.heroHeading || DEFAULT_CORPORATE_PAGE_CONTENT.hero.heading);
+    setCorporateHeroSubtext(websiteContent.corporate?.heroSubtext || DEFAULT_CORPORATE_PAGE_CONTENT.hero.subtext);
     setRewardsHeroEyebrow(websiteContent.rewards?.heroEyebrow || "");
     setRewardsHeroHeading(websiteContent.rewards?.heroHeading || "");
     setRewardsHeroSubtext(websiteContent.rewards?.heroSubtext || "");
@@ -380,6 +416,31 @@ export function SettingsPage() {
     setSparkRewardsHeading(websiteContent.homepage?.sparkRewards?.heading || "");
     setSparkRewardsDescription(websiteContent.homepage?.sparkRewards?.description || "");
     setSparkRewardsPerks(websiteContent.homepage?.sparkRewards?.perks || []);
+    setCorporatePerks(websiteContent.corporate?.perks || []);
+    // Per `feat/corporate-content-editable` — the six new
+    // corporate page fields are pre-populated from
+    // `DEFAULT_CORPORATE_PAGE_CONTENT` when the Firestore value
+    // is empty, mirroring the same pattern as the corporate hero
+    // fields above and the one-time Firestore backfill in
+    // `AdminContext`.
+    setCorporateRoomsOverviewEyebrow(
+      websiteContent.corporate?.roomsOverviewEyebrow || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow
+    );
+    setCorporateRoomsOverviewHeading(
+      websiteContent.corporate?.roomsOverviewHeading || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading
+    );
+    setCorporateRoomsOverviewDescription(
+      websiteContent.corporate?.roomsOverviewDescription || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description
+    );
+    setCorporateRetreatHeading(
+      websiteContent.corporate?.retreatHeading || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.heading
+    );
+    setCorporateRetreatDescription(
+      websiteContent.corporate?.retreatDescription || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.description
+    );
+    setCorporateRetreatCtaLabel(
+      websiteContent.corporate?.retreatCtaLabel || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel
+    );
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
@@ -402,10 +463,11 @@ export function SettingsPage() {
   // tab in this change.
 
   // Persist the list-shaped homepage content (amenities, services,
-  // featured rooms, Spark Rewards promo) to `settings/websiteContent`.
-  // Hero copy + photos are owned by the Branding tab; we only touch
-  // the four sub-objects this form owns and leave everything else
-  // (hero copy, etc.) intact via the spread.
+  // featured rooms, Spark Rewards promo) + the corporate page
+  // content (perks, rooms overview, retreat CTA) to
+  // `settings/websiteContent`. Hero copy + photos are owned by the
+  // Branding tab; we only touch the sub-objects this form owns and
+  // leave everything else (hero copy, etc.) intact via the spread.
   const handleSaveWebsiteContent = async (e: React.FormEvent) => {
     e.preventDefault();
     await updateSettings("websiteContent", {
@@ -421,6 +483,16 @@ export function SettingsPage() {
           description: sparkRewardsDescription,
           perks: sparkRewardsPerks
         }
+      },
+      corporate: {
+        ...(websiteContent.corporate || {}),
+        perks: corporatePerks,
+        roomsOverviewEyebrow: corporateRoomsOverviewEyebrow,
+        roomsOverviewHeading: corporateRoomsOverviewHeading,
+        roomsOverviewDescription: corporateRoomsOverviewDescription,
+        retreatHeading: corporateRetreatHeading,
+        retreatDescription: corporateRetreatDescription,
+        retreatCtaLabel: corporateRetreatCtaLabel
       }
     });
   };
@@ -1219,6 +1291,119 @@ export function SettingsPage() {
                   defaultIcon="sparkles"
                   emptyItem={{ title: "", description: "", icon: "sparkles" }}
                 />
+              </div>
+
+              {/* Corporate page — perks, rooms overview copy, and the
+                  retreat CTA banner. The corporate hero is owned by
+                  the Branding tab; this section owns the rest of the
+                  page. Fields with no override here fall back to
+                  hardcoded copy in `CorporateStaysPage` so the page
+                  is never blank on a fresh deploy. */}
+              <div className="space-y-6 rounded-card border border-gray-150 bg-gray-50/30 p-5">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  <Building2 size={12} /> Corporate page
+                </div>
+                <p className="text-[10px] text-gray-500 -mt-3">
+                  Editable content for <code>/corporate</code> other than the hero. The dark hero (eyebrow, heading, subtext, photo) lives in the{" "}
+                  <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
+                  tab.
+                </p>
+
+                {/* Perks grid */}
+                <div className="space-y-3">
+                  <h5 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Perks Grid</h5>
+                  <p className="text-[10px] text-gray-500">
+                    Three-up grid on <code>/corporate</code> showing the corporate benefits (negotiated rates, group bookings, dedicated support, etc.). Disabled perks are hidden from the guest site.
+                  </p>
+                  <ListEditor
+                    label="Perks"
+                    helper="Add, remove, or reorder the perks. Disable to hide a perk without deleting its content."
+                    value={corporatePerks}
+                    onChange={setCorporatePerks}
+                    defaultIcon="coins"
+                    emptyItem={{ title: "", description: "", icon: "coins" }}
+                  />
+                </div>
+
+                {/* Rooms overview copy */}
+                <div className="space-y-3">
+                  <h5 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Rooms Overview</h5>
+                  <p className="text-[10px] text-gray-500">
+                    The eyebrow + heading + subtext shown above the room type cards on <code>/corporate</code>. The cards themselves are driven by the live room types, not this editor.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow
+                      <input
+                        type="text"
+                        value={corporateRoomsOverviewEyebrow}
+                        onChange={(e) => setCorporateRoomsOverviewEyebrow(e.target.value)}
+                        placeholder="Accommodation Types"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Heading
+                      <input
+                        type="text"
+                        value={corporateRoomsOverviewHeading}
+                        onChange={(e) => setCorporateRoomsOverviewHeading(e.target.value)}
+                        placeholder="Rooms Built for Productivity & Rest"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      value={corporateRoomsOverviewDescription}
+                      onChange={(e) => setCorporateRoomsOverviewDescription(e.target.value)}
+                      rows={3}
+                      placeholder="Marketing copy shown beneath the rooms overview heading."
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+
+                {/* Retreat CTA banner */}
+                <div className="space-y-3">
+                  <h5 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Retreat CTA Banner</h5>
+                  <p className="text-[10px] text-gray-500">
+                    The orange banner between the rooms overview and the inquiry form. The button scrolls to the inquiry form (target is not editable).
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
+                      Heading
+                      <input
+                        type="text"
+                        value={corporateRetreatHeading}
+                        onChange={(e) => setCorporateRetreatHeading(e.target.value)}
+                        placeholder="Partner with us for your next team retreat."
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
+                      Description
+                      <textarea
+                        value={corporateRetreatDescription}
+                        onChange={(e) => setCorporateRetreatDescription(e.target.value)}
+                        rows={2}
+                        placeholder="One-line marketing copy shown under the heading."
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
+                      Button label
+                      <input
+                        type="text"
+                        value={corporateRetreatCtaLabel}
+                        onChange={(e) => setCorporateRetreatCtaLabel(e.target.value)}
+                        placeholder="Get in Touch"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <div className="pt-2 border-t border-gray-150 flex justify-end">
