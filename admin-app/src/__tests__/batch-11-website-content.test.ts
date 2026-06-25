@@ -87,8 +87,13 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(homeSrc).not.toMatch(/import\s*\{[^}]*\bamenities\b[^}]*\}\s*from\s*["']\.\.\/data\/homepage["']/);
     });
 
-    it("derives featured rooms from settings.featuredRoomIds (not hard-coded ids)", () => {
-      expect(homeSrc).toMatch(/homepage\.featuredRoomIds/);
+    it("derives featured rooms from settings.featuredTypeValues (not hard-coded ids)", () => {
+      // The new model is type-driven (featuredTypeValues) — see
+      // `MAX_FEATURED_TYPES` in `shared/constants/index.ts` for
+      // the full rationale.
+      expect(homeSrc).toMatch(/homepage\.featuredTypeValues/);
+      // The old per-room field must be gone from the page.
+      expect(homeSrc).not.toMatch(/homepage\.featuredRoomIds/);
       // The hard-coded `const ids = ["room-201", "room-204", "room-301"]`
       // block must be gone.
       expect(homeSrc).not.toMatch(/const\s+ids\s*=\s*\[\s*["']room-201["']/);
@@ -249,8 +254,8 @@ describe("Website Content editors — list-shaped homepage content", () => {
     resolve(__dirname, "../../src/components/ListEditor.tsx"),
     "utf8"
   );
-  const roomPickerSrc = readFileSync(
-    resolve(__dirname, "../../src/components/RoomPicker.tsx"),
+  const typePickerSrc = readFileSync(
+    resolve(__dirname, "../../src/components/TypePicker.tsx"),
     "utf8"
   );
   const sharedConstantsSrc = readFileSync(
@@ -269,16 +274,19 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(settingsPageSrc).toMatch(/<ListEditor[\s\S]*?value=\{sparkRewardsPerks\}[\s\S]*?\/>/);
   });
 
-  it("SettingsPage uses RoomPicker for featuredRoomIds", () => {
-    expect(settingsPageSrc).toMatch(/import\s*\{[^}]*RoomPicker[^}]*\}\s*from\s*["']\.\.\/components\/RoomPicker["']/);
-    expect(settingsPageSrc).toMatch(/<RoomPicker[\s\S]*?value=\{homepageFeaturedRoomIds\}[\s\S]*?\/>/);
+  it("SettingsPage uses TypePicker for featuredTypeValues (replaces RoomPicker)", () => {
+    expect(settingsPageSrc).toMatch(/import\s*\{[^}]*TypePicker[^}]*\}\s*from\s*["']\.\.\/components\/TypePicker["']/);
+    expect(settingsPageSrc).toMatch(/<TypePicker[\s\S]*?value=\{homepageFeaturedTypeValues\}[\s\S]*?\/>/);
+    // The old RoomPicker must be gone.
+    expect(settingsPageSrc).not.toMatch(/<RoomPicker/);
+    expect(settingsPageSrc).not.toMatch(/from\s*["']\.\.\/components\/RoomPicker["']/);
   });
 
   it("SettingsPage persists all four sub-objects via a single handleSaveWebsiteContent", () => {
     expect(settingsPageSrc).toMatch(/handleSaveWebsiteContent\s*=\s*async/);
     expect(settingsPageSrc).toMatch(/amenities:\s*homepageAmenities/);
     expect(settingsPageSrc).toMatch(/services:\s*homepageServices/);
-    expect(settingsPageSrc).toMatch(/featuredRoomIds:\s*homepageFeaturedRoomIds/);
+    expect(settingsPageSrc).toMatch(/featuredTypeValues:\s*homepageFeaturedTypeValues/);
     expect(settingsPageSrc).toMatch(/isEnabled:\s*sparkRewardsEnabled/);
   });
 
@@ -305,18 +313,27 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(listEditorSrc).toMatch(/KNOWN_CONTENT_ICONS\.map\(/);
   });
 
-  it("RoomPicker caps selection at MAX_FEATURED_ROOMS and emits the new array", () => {
-    expect(roomPickerSrc).toMatch(/MAX_FEATURED_ROOMS/);
-    expect(roomPickerSrc).toMatch(/onChange\(next\)/);
+  it("TypePicker caps selection at MAX_FEATURED_TYPES and emits the new array", () => {
+    expect(typePickerSrc).toMatch(/MAX_FEATURED_TYPES/);
+    expect(typePickerSrc).toMatch(/onChange\(next\)/);
   });
 
-  it("RoomPicker filters to active rooms only", () => {
-    expect(roomPickerSrc).toMatch(/rooms\.filter\(\(r\)\s*=>\s*r\.isActive\)/);
+  it("TypePicker filters to types with at least one active room", () => {
+    // The picker shows the count of active rooms per type and
+    // disables the Add button when the count is zero. The new
+    // model is type-driven, not room-driven.
+    expect(typePickerSrc).toMatch(/activeCount/);
+    expect(typePickerSrc).toMatch(/activeRoomCounts/);
+    // The Add button is disabled when the type has no active
+    // rooms OR the cap has been reached.
+    expect(typePickerSrc).toMatch(/disabled=\{disabled \|\| value\.length >= maxItems\}/);
   });
 
-  it("shared/constants exports KNOWN_CONTENT_ICONS + MAX_FEATURED_ROOMS", () => {
+  it("shared/constants exports KNOWN_CONTENT_ICONS + MAX_FEATURED_TYPES", () => {
     expect(sharedConstantsSrc).toMatch(/export const KNOWN_CONTENT_ICONS/);
-    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_ROOMS\s*=\s*3/);
+    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_TYPES\s*=\s*3/);
+    // Backward-compat alias for the migration window.
+    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_ROOMS\s*=\s*MAX_FEATURED_TYPES/);
   });
 
   it("AdminContext seed includes the four list-based sub-objects", () => {
@@ -325,8 +342,22 @@ describe("Website Content editors — list-shaped homepage content", () => {
     // with example content instead of empty placeholders.
     expect(adminCtxSrc).toMatch(/amenities:\s*\[\s*\{[^}]*Consistent comfort/);
     expect(adminCtxSrc).toMatch(/services:\s*\[\s*\{[^}]*Tour Packages/);
-    expect(adminCtxSrc).toMatch(/featuredRoomIds:\s*\["room-201"/);
+    // The featured field is now type-driven (was `featuredRoomIds`).
+    expect(adminCtxSrc).toMatch(/featuredTypeValues:\s*\["executive"/);
+    expect(adminCtxSrc).not.toMatch(/featuredRoomIds:\s*\["room-201"/);
     expect(adminCtxSrc).toMatch(/sparkRewards:\s*\{[\s\S]*?Earn points on completed stays/);
+  });
+
+  it("AdminContext migrates the old featuredRoomIds to featuredTypeValues on read", () => {
+    // Migration step in `mergeWebsiteContent`: if the doc still
+    // carries the old `featuredRoomIds` array and no new
+    // `featuredTypeValues`, derive the new field by mapping
+    // each id to its room type via the `roomTypes` already in
+    // context, dedupe, and return. The canonical migration
+    // happens on the next admin save.
+    expect(adminCtxSrc).toMatch(/homepageRaw\.featuredTypeValues/);
+    expect(adminCtxSrc).toMatch(/homepageRaw\.featuredRoomIds/);
+    expect(adminCtxSrc).toMatch(/derived\.push\(typeValue\)/);
   });
 });
 
@@ -441,7 +472,11 @@ describe("No hero fallback flash — initial state must not show the static imag
   });
 
   it("shared/constants exports the cache key + 5-minute TTL", () => {
-    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_KEY\s*=\s*["']publicSiteContent:v1["']/);
+    // v2 — bumped from v1 because `homepage.featuredRoomIds`
+    // was renamed to `homepage.featuredTypeValues`. v1 entries
+    // are now shape-incompatible and fall through to the empty
+    // state.
+    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_KEY\s*=\s*["']publicSiteContent:v2["']/);
     expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
   });
 

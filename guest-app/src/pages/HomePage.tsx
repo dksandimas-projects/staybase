@@ -14,6 +14,7 @@ import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { MAX_FEATURED_TYPES } from "@spark-inn/shared";
 
 const amenityIcons = [BedDouble, MapPin, Users, Sparkles, Wifi, Coffee];
 
@@ -56,12 +57,46 @@ export function HomePage() {
   const [checkOut, setCheckOut] = useState("2026-06-14");
   const [guests, setGuests] = useState(2);
 
+  // Resolve `featuredTypeValues` to a list of physical rooms
+  // for the "Stay with us" section. Each type value is matched
+  // against the first *active* room of that type — the card
+  // content (image, price, bed, amenities, description) all
+  // comes from the type via `RoomCard` props, so the room ID is
+  // only used for the `key` and the Book-Now deep link.
+  //
+  // - A type that has no active rooms is skipped silently (we
+  //   don't render an empty card).
+  // - An empty `featuredTypeValues` falls back to the first
+  //   `MAX_FEATURED_TYPES` distinct types that have at least
+  //   one active room. The previous model fell back to
+  //   `rooms.slice(0, 3)` which could pick multiple rooms of
+  //   the same type and miss others entirely.
   const featured = useMemo(() => {
-    const ids = homepage.featuredRoomIds;
-    const matched = rooms.filter((r) => ids.includes(r.id));
-    if (matched.length > 0) return matched;
-    return rooms.slice(0, 3);
-  }, [rooms, homepage.featuredRoomIds]);
+    const typeValues = homepage.featuredTypeValues;
+    const orderedTypes: string[] =
+      typeValues.length > 0
+        ? typeValues
+        : (() => {
+            const seen = new Set<string>();
+            const out: string[] = [];
+            for (const r of rooms) {
+              if (r.isActive && !seen.has(r.type)) {
+                seen.add(r.type);
+                out.push(r.type);
+                if (out.length >= MAX_FEATURED_TYPES) break;
+              }
+            }
+            return out;
+          })();
+
+    const resolved: typeof rooms = [];
+    for (const typeValue of orderedTypes) {
+      if (resolved.length >= MAX_FEATURED_TYPES) break;
+      const candidate = rooms.find((r) => r.type === typeValue && r.isActive);
+      if (candidate) resolved.push(candidate);
+    }
+    return resolved;
+  }, [rooms, homepage.featuredTypeValues]);
 
   // `homepage.heroPhotoUrl` is empty during the initial Firestore
   // load (skeleton shown below) and resolves to either the
