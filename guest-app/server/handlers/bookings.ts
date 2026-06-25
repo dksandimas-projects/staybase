@@ -21,7 +21,13 @@ interface GuestDetails {
 
 interface CreateBookingBody {
   bookingId: string;
-  roomId: string;
+  // Per the room-type booking refactor: clients send the chosen
+  // `roomType` instead of a specific `roomId`. The transaction
+  // below picks the first non-conflicting physical room of that
+  // type and stores its `roomId` + `roomNumber` on the booking doc.
+  // Schema is unchanged — the booking still references a real
+  // `rooms/<id>` document.
+  roomType: string;
   checkIn: string; // Yyyy-MM-DD
   checkOut: string; // Yyyy-MM-DD
   guests: number;
@@ -70,7 +76,7 @@ export async function handleCreateBooking(req: any, res: any) {
 
   const {
     bookingId,
-    roomId,
+    roomType,
     checkIn,
     checkOut,
     guests,
@@ -86,7 +92,7 @@ export async function handleCreateBooking(req: any, res: any) {
   } = body;
 
   // Basic Input Validation
-  if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
+  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !guestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
   }
 
@@ -113,6 +119,10 @@ export async function handleCreateBooking(req: any, res: any) {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let computedData: any = {};
+    // Captured inside the transaction so the response payload
+    // can surface the auto-assigned physical room.
+    let assignedRoomId = "";
+    let assignedRoomNumber = "";
 
     // Detect Spark Rewards member via the request's ID token.
     // Per W2.2 / decision #90: server is authoritative for member discount.
@@ -143,47 +153,92 @@ export async function handleCreateBooking(req: any, res: any) {
 
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
-      // 1. Fetch Room Details
-      const roomRef = adminDb.collection("rooms").doc(roomId);
-      const roomDoc = await transaction.get(roomRef);
-      if (!roomDoc.exists) {
-        throw new Error("Room not found");
+      // 1. Load the room type entry from `settings/hotelConfig`.
+      // Per W3.6 + W3.7, rate matrix + max capacity live on the
+      // type, not on individual room docs. Reading the type here
+      // is the canonical source for the booking pricing and the
+      // candidate-room filter (max capacity, type label).
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      if (!hotelConfigDoc.exists) {
+        throw new Error("Room type catalog is not configured.");
       }
-      const roomData = roomDoc.data()!;
-      if (!roomData.isActive) {
-        throw new Error("Room is inactive");
+      const hotelConfig = hotelConfigDoc.data()!;
+      const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
+      if (!typeEntry) {
+        throw new Error("Selected room type is not available.");
       }
-      if (roomData.status === "blocked") {
-        const blockedFrom = toDateOrNull(roomData.blockedFrom);
-        const blockedTo = toDateOrNull(roomData.blockedTo);
-        const windowActive = blockedFrom && blockedTo
-          ? checkInDate < blockedTo && checkOutDate > blockedFrom
-          : true;
-        if (windowActive) {
-          throw new Error("Room no longer available");
-        }
-      }
-      if (guests > roomData.maxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
+      const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
+      const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
+      const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
+      const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
+
+      if (guests > typeMaxCapacity) {
+        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
 
-      // 2. Overlapping Booking Check
-      const bookingsQuery = adminDb.collection("bookings")
-        .where("roomId", "==", roomId)
-        .where("status", "!=", "cancelled");
-      const bookingsSnapshot = await transaction.get(bookingsQuery);
-      
-      const hasConflict = bookingsSnapshot.docs.some((doc) => {
-        const data = doc.data();
-        const existingCheckIn = toDateOrNull(data.checkIn);
-        const existingCheckOut = toDateOrNull(data.checkOut);
-        if (!existingCheckIn || !existingCheckOut) return false;
-        return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
-      });
+      // 2. Find an available physical room of this type. Sort
+      // candidates by `roomNumber` for deterministic assignment
+      // so two concurrent requests can't fight over the same room.
+      const candidatesQuery = adminDb.collection("rooms")
+        .where("type", "==", roomType)
+        .where("isActive", "==", true);
+      const candidatesSnapshot = await transaction.get(candidatesQuery);
+      const candidates = candidatesSnapshot.docs
+        .map((d) => ({ id: d.id, data: d.data() }))
+        .filter((c) => c.data && c.data.isActive !== false)
+        .sort((a, b) => {
+          const an = String(a.data.roomNumber || a.id);
+          const bn = String(b.data.roomNumber || b.id);
+          return an.localeCompare(bn, undefined, { numeric: true });
+        });
 
-      if (hasConflict) {
+      if (candidates.length === 0) {
         throw new Error("Room no longer available");
       }
+
+      let assignedRoom: { id: string; data: any } | null = null;
+      for (const candidate of candidates) {
+        const cData = candidate.data;
+        // Per-room blocked window check
+        if (cData.status === "blocked") {
+          const blockedFrom = toDateOrNull(cData.blockedFrom);
+          const blockedTo = toDateOrNull(cData.blockedTo);
+          const windowActive = blockedFrom && blockedTo
+            ? checkInDate < blockedTo && checkOutDate > blockedFrom
+            : true;
+          if (windowActive) {
+            continue;
+          }
+        }
+        // Overlapping booking check for this candidate
+        const overlapQuery = adminDb.collection("bookings")
+          .where("roomId", "==", candidate.id)
+          .where("status", "!=", "cancelled");
+        const overlapSnapshot = await transaction.get(overlapQuery);
+        const hasConflict = overlapSnapshot.docs.some((doc) => {
+          const data = doc.data();
+          const existingCheckIn = toDateOrNull(data.checkIn);
+          const existingCheckOut = toDateOrNull(data.checkOut);
+          if (!existingCheckIn || !existingCheckOut) return false;
+          return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
+        });
+        if (hasConflict) {
+          continue;
+        }
+        assignedRoom = candidate;
+        break;
+      }
+
+      if (!assignedRoom) {
+        throw new Error("Room no longer available");
+      }
+
+      const roomId = assignedRoom.id;
+      const roomData = assignedRoom.data;
+      assignedRoomId = roomId;
+      assignedRoomNumber = String(roomData.roomNumber || "");
 
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
@@ -198,7 +253,7 @@ export async function handleCreateBooking(req: any, res: any) {
       // gets the corporate rate — the server independently looks
       // up the code, validates it (active + not expired + under
       // cap), and sets these fields from the corporateCodes doc.
-      let activeRoomRate = roomData.pricePerNight;
+      let activeRoomRate = typeBaseRate;
       let corporateDetails: any = { isCorporate: false, corporateCode: "", companyName: "" };
 
       if (corporateCode) {
@@ -218,25 +273,25 @@ export async function handleCreateBooking(req: any, res: any) {
             // The doc's companyName is the source of truth — the
             // body's guestDetails.companyName is informational only.
             corporateDetails.companyName = corpData.companyName || "";
-            if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomData.type] !== undefined) {
-              activeRoomRate = corpData.ratePerRoomType[roomData.type];
-            } else if (roomData.corporateRate) {
-              activeRoomRate = roomData.corporateRate;
+            if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomType] !== undefined) {
+              activeRoomRate = corpData.ratePerRoomType[roomType];
+            } else if (typeCorporateRate) {
+              activeRoomRate = typeCorporateRate;
             }
           } else {
             // Invalid code: fall back to standard rate, do NOT set
             // isCorporate. The booking still goes through but
             // without any corporate discount — the server never
             // trusts the body's claim.
-            activeRoomRate = roomData.pricePerNight;
+            activeRoomRate = typeBaseRate;
           }
         } else {
           // Code not found in DB — fall back to standard rate.
-          activeRoomRate = roomData.pricePerNight;
+          activeRoomRate = typeBaseRate;
         }
       }
       // No corporateCode at all → activeRoomRate stays as
-      // roomData.pricePerNight, isCorporate stays false.
+      // typeBaseRate, isCorporate stays false.
 
       // 5. Calculate Nightly Rate Total (support weekend rate)
       let roomTotal = 0;
@@ -246,8 +301,8 @@ export async function handleCreateBooking(req: any, res: any) {
         // Let's check: shared/utils/dates.ts checks day === 0 (Sun) or day === 6 (Sat)
         const day = dateCursor.getUTCDay();
         const isWeekend = day === 0 || day === 6;
-        if (isWeekend && !corporateDetails.isCorporate && roomData.weekendRate) {
-          roomTotal += roomData.weekendRate;
+        if (isWeekend && !corporateDetails.isCorporate && typeWeekendRate) {
+          roomTotal += typeWeekendRate;
         } else {
           roomTotal += activeRoomRate;
         }
@@ -361,7 +416,7 @@ export async function handleCreateBooking(req: any, res: any) {
         bookingRef,
         roomId,
         roomNumber: roomData.roomNumber,
-        roomType: roomData.type,
+        roomType,
         guestName,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
@@ -430,6 +485,12 @@ export async function handleCreateBooking(req: any, res: any) {
       };
     });
 
+    // Capture the assigned room outside the transaction scope so
+    // the response can hand the roomId/roomNumber to the client for
+    // the confirmation page. The booking doc also stores both.
+    // (assignedRoomId / assignedRoomNumber were captured inside the
+    // transaction above.)
+
     // Send acknowledgment email outside the transaction via Resend
     try {
       await sendBookingTrigger("booking-submitted", {
@@ -469,7 +530,10 @@ export async function handleCreateBooking(req: any, res: any) {
       success: true,
       data: {
         bookingId,
-        bookingRef: finalBookingRef
+        bookingRef: finalBookingRef,
+        roomId: assignedRoomId,
+        roomNumber: assignedRoomNumber,
+        roomType
       }
     });
 

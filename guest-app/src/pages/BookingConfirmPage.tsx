@@ -7,7 +7,7 @@ import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { rooms } from "../data/rooms";
+import { useRoomTypes } from "../hooks/useRoomTypes";
 import { formatPrice } from "../utils/format";
 
 function formatStayDate(value: string) {
@@ -22,17 +22,23 @@ function formatStayDate(value: string) {
 export function BookingConfirmPage() {
   const [searchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
+  const { roomTypes } = useRoomTypes();
 
   // Read query params from URL
   const bookingRef = searchParams.get("bookingRef") ?? `SI-${new Date().getFullYear()}0612-042`;
   const checkIn = searchParams.get("checkIn") ?? "2026-06-12";
   const checkOut = searchParams.get("checkOut") ?? "2026-06-14";
   const guests = Number(searchParams.get("guests") ?? 2);
-  const roomId = searchParams.get("roomId") ?? "room-201";
+  // Per the room-type booking refactor: confirmation page receives
+  // the chosen `roomType` and the server-assigned `roomNumber`
+  // (passed through from /api/bookings/create response). Falls back
+  // to `roomId` for legacy URL params.
+  const roomTypeParam = searchParams.get("roomType") ?? "";
+  const roomNumberParam = searchParams.get("roomNumber") ?? "";
+  const roomTypeEntry = roomTypes.find((t) => t.value === roomTypeParam);
+  const roomDisplayLabel = roomTypeEntry?.label ?? roomTypeParam;
   const rawPaymentMethod = searchParams.get("paymentMethod") ?? "gcash";
   const total = Number(searchParams.get("total") ?? 6400);
-
-  const selectedRoom = rooms.find((room) => room.id === roomId) ?? rooms[0];
 
   const paymentLabels: Record<string, string> = {
     gcash: "Digital Wallet (GCash/Maya)",
@@ -44,10 +50,13 @@ export function BookingConfirmPage() {
 
   function handleAddToCalendar() {
     const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+    const roomLine = roomNumberParam
+      ? `${roomDisplayLabel} — Room ${roomNumberParam}`
+      : roomDisplayLabel;
     const descriptionLines = [
       `Booking reference: ${bookingRef}`,
       `Guests: ${guests}`,
-      `Room: ${selectedRoom.name}`,
+      `Room: ${roomLine}`,
       `Total: ${formatPrice(total)}`,
       `Payment: ${paymentMethodLabel}`
     ];
@@ -67,7 +76,12 @@ export function BookingConfirmPage() {
   const googleCalendarUrl = buildGoogleCalendarUrl({
     uid: `${bookingRef}@${config.domain}`,
     title: `Stay at ${config.brandName} (${bookingRef})`,
-    description: `Booking reference: ${bookingRef}\nGuests: ${guests}\nRoom: ${selectedRoom.name}\nTotal: ${formatPrice(total)}\nPayment: ${paymentMethodLabel}`,
+    description: (() => {
+      const roomLine = roomNumberParam
+        ? `${roomDisplayLabel} — Room ${roomNumberParam}`
+        : roomDisplayLabel;
+      return `Booking reference: ${bookingRef}\nGuests: ${guests}\nRoom: ${roomLine}\nTotal: ${formatPrice(total)}\nPayment: ${paymentMethodLabel}`;
+    })(),
     location: `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`,
     start: checkIn,
     end: checkOut,
@@ -131,7 +145,12 @@ export function BookingConfirmPage() {
             <div className="flex justify-between border-b border-gray-100 pb-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Room Type</p>
-                <p className="mt-1 font-semibold text-gray-900">{selectedRoom.name}</p>
+                <p className="mt-1 font-semibold text-gray-900">
+                  {roomDisplayLabel || "Reserved"}
+                  {roomNumberParam ? (
+                    <span className="ml-2 text-sm font-medium text-primary">Room {roomNumberParam}</span>
+                  ) : null}
+                </p>
               </div>
             </div>
 

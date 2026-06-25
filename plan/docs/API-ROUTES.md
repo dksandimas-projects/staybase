@@ -68,7 +68,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock) |
+| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` for the confirmation page. |
 | `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
 | `/api/bookings/lookup` | POST | None (owner by ref+email) | Look up a single booking by `bookingRef` + `guestEmail` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}` |
