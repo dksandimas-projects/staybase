@@ -118,7 +118,12 @@ export function HomePage() {
       checkOut,
       guests: String(guests)
     });
-    navigate(`/rooms?${params.toString()}`);
+    // Per the catalog-only /rooms refactor: the rooms page no longer
+    // surfaces date-aware availability, so the homepage checker's
+    // Search button sends guests straight into the booking flow with
+    // the dates they just picked. The /rooms page is the
+    // "browse all room types" entry point (navbar / footer).
+    navigate(`/book?${params.toString()}`);
   }
 
   const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
@@ -193,6 +198,7 @@ export function HomePage() {
               checkOut={checkOut}
               onCheckInChange={setCheckIn}
               onCheckOutChange={setCheckOut}
+              orientation="horizontal"
             />
             <label className="grid gap-2 text-sm font-medium text-gray-700 lg:min-w-36">
               Guests
