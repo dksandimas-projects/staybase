@@ -103,6 +103,7 @@ export function CorporateStaysPage() {
   const { corporate } = usePublicSiteContent();
   const { roomTypes } = useRoomTypes();
   const corpHeroPhoto = corporate.heroPhotoUrl;
+  const corpHeroEyebrow = corporate.heroEyebrow;
 
   const resolveTypeImages = (typeValue: string): string[] => {
     const live = getRoomTypeImages(roomTypes, typeValue);
@@ -231,7 +232,7 @@ export function CorporateStaysPage() {
           variants={fadeUp}
         >
           <p className="font-heading text-lg italic text-primary-light sm:text-2xl tracking-wider">
-            Curated hospitality for executive comfort
+            {corpHeroEyebrow}
           </p>
           <h1 className="mt-4 font-heading text-4xl leading-tight text-white sm:text-6xl lg:text-7xl">
             {corpHeading}

@@ -6,7 +6,8 @@ import {
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
-  Upload, ChevronLeft, ChevronRight, X
+  Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
+  Award
 } from "lucide-react";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -14,7 +15,7 @@ import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { useBreakpoint } from "../utils/useBreakpoint";
 
-type TabId = "hotel" | "roomtypes" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
+type TabId = "hotel" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
 type StoreCategory = StoreItem["category"];
 type StorePaymentMethodSetting = {
   method: string;
@@ -32,6 +33,130 @@ const storeCategories: { value: StoreCategory; label: string }[] = [
   { value: "other", label: "Other" }
 ];
 
+// Reusable uploader for a single branding asset (hero photo or logo).
+// `value` is the currently stored URL in `settings/websiteContent`
+// (may be the empty string when no override is set). `fallback` is the
+// deploy-time asset the guest app uses when `value === ""`. `label`
+// and `helper` describe what the asset is shown to users as. The
+// component shows the live preview (uploaded URL or fallback),
+// exposes an upload button + a reset button when an override exists,
+// and surfaces upload errors inline.
+interface BrandingAssetRowProps {
+  label: string;
+  helper: string;
+  value: string;
+  fallback?: string;
+  fallbackLabel?: string;
+  onUpload: (file: File) => Promise<{ success: boolean; error?: string }>;
+  onReset: () => Promise<{ success: boolean; error?: string }>;
+  previewClassName?: string;
+}
+
+function BrandingAssetRow({
+  label,
+  helper,
+  value,
+  fallback,
+  fallbackLabel,
+  onUpload,
+  onReset,
+  previewClassName
+}: BrandingAssetRowProps) {
+  const [status, setStatus] = useState<"idle" | "uploading" | "resetting">("idle");
+  const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewSrc = value || fallback || "";
+  const hasOverride = value.length > 0;
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setError("");
+    setStatus("uploading");
+    const result = await onUpload(file);
+    if (!result.success) {
+      setError(result.error || "Upload failed");
+    }
+    setStatus("idle");
+  }
+
+  async function handleReset() {
+    if (!hasOverride) return;
+    setError("");
+    setStatus("resetting");
+    const result = await onReset();
+    if (!result.success) {
+      setError(result.error || "Reset failed");
+    }
+    setStatus("idle");
+  }
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-[120px_1fr] sm:items-start">
+      <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-section-bg sm:h-20 sm:w-28">
+        {previewSrc ? (
+          <img
+            src={previewSrc}
+            alt={`${label} preview`}
+            className={`h-full w-full ${previewClassName ?? "object-contain"}`}
+          />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200 text-center text-[10px] text-gray-500">
+            <ImagePlus size={18} className="opacity-50" />
+            <p className="mt-1 font-semibold opacity-70">{fallbackLabel || "No asset yet"}</p>
+          </div>
+        )}
+      </div>
+      <div className="space-y-2">
+        <div>
+          <p className="text-xs font-semibold text-gray-800">{label}</p>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-gray-500">{helper}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          <button
+            type="button"
+            disabled={status === "uploading"}
+            onClick={() => fileInputRef.current?.click()}
+            className="min-h-[36px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Upload size={13} />
+            {status === "uploading" ? "Uploading..." : hasOverride ? "Replace" : "Upload"}
+          </button>
+          {hasOverride && (
+            <button
+              type="button"
+              disabled={status === "resetting"}
+              onClick={handleReset}
+              className="min-h-[36px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RotateCcw size={13} />
+              {status === "resetting" ? "Resetting..." : "Reset to default"}
+            </button>
+          )}
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+              hasOverride
+                ? "bg-primary-light text-primary-dark"
+                : "bg-gray-100 text-gray-500"
+            }`}
+          >
+            {hasOverride ? "Custom override" : "Using default"}
+          </span>
+        </div>
+        {error && <p className="text-[10px] text-red-600">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const { 
     hotelConfig, 
@@ -47,6 +172,8 @@ export function SettingsPage() {
     uploadRoomTypePhoto,
     removeRoomTypePhoto,
     reorderRoomTypePhotos,
+    uploadBrandingAsset,
+    resetBrandingAsset,
     storeItems,
     addStoreItem,
     updateStoreItem,
@@ -88,11 +215,20 @@ export function SettingsPage() {
   const [missionStatement, setMissionStatement] = useState(hotelConfig.missionStatement);
   const [hotelStory, setHotelStory] = useState(hotelConfig.hotelStory);
 
-  // 2. Website Content states
-  const [heroHeading, setHeroHeading] = useState(websiteContent.homepage.heroHeading);
-  const [heroSubtext, setHeroSubtext] = useState(websiteContent.homepage.heroSubtext);
-  const [corpHeading, setCorpHeading] = useState(websiteContent.corporate.heroHeading);
-  const [corpSubtext, setCorpSubtext] = useState(websiteContent.corporate.heroSubtext);
+  // 2. Website Content states (Branding tab). Hero copy for every page
+  // lives here. The Website Content tab (amenities / services / etc.)
+  // no longer owns any hero copy — see `handleSaveBranding` below.
+  const [homepageHeroHeading, setHomepageHeroHeading] = useState(websiteContent.homepage.heroHeading);
+  const [homepageHeroSubtext, setHomepageHeroSubtext] = useState(websiteContent.homepage.heroSubtext);
+  const [aboutHeroHeading, setAboutHeroHeading] = useState(websiteContent.about.heroHeading);
+  const [corporateHeroEyebrow, setCorporateHeroEyebrow] = useState(websiteContent.corporate.heroEyebrow);
+  const [corporateHeroHeading, setCorporateHeroHeading] = useState(websiteContent.corporate.heroHeading);
+  const [corporateHeroSubtext, setCorporateHeroSubtext] = useState(websiteContent.corporate.heroSubtext);
+  const [rewardsHeroEyebrow, setRewardsHeroEyebrow] = useState(websiteContent.rewards.heroEyebrow);
+  const [rewardsHeroHeading, setRewardsHeroHeading] = useState(websiteContent.rewards.heroHeading);
+  const [rewardsHeroSubtext, setRewardsHeroSubtext] = useState(websiteContent.rewards.heroSubtext);
+
+
 
   // 3. Rewards Config states
   const [pointsEnabled, setPointsEnabled] = useState(rewardsConfig.pointsEnabled);
@@ -196,6 +332,15 @@ export function SettingsPage() {
     setMemberDiscountPct(String(rewardsConfig.memberDiscountPct ?? 10));
     setRewardsName(rewardsConfig.rewardsName || "Spark Rewards");
     setRewardsTagline(rewardsConfig.rewardsTagline || "");
+    setHomepageHeroHeading(websiteContent.homepage.heroHeading || "");
+    setHomepageHeroSubtext(websiteContent.homepage.heroSubtext || "");
+    setAboutHeroHeading(websiteContent.about.heroHeading || "");
+    setCorporateHeroEyebrow(websiteContent.corporate.heroEyebrow || "");
+    setCorporateHeroHeading(websiteContent.corporate.heroHeading || "");
+    setCorporateHeroSubtext(websiteContent.corporate.heroSubtext || "");
+    setRewardsHeroEyebrow(websiteContent.rewards.heroEyebrow || "");
+    setRewardsHeroHeading(websiteContent.rewards.heroHeading || "");
+    setRewardsHeroSubtext(websiteContent.rewards.heroSubtext || "");
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
@@ -212,11 +357,38 @@ export function SettingsPage() {
     });
   };
 
-  const handleSaveWebsite = async (e: React.FormEvent) => {
+  // The Website Content tab is a stub while the list-based content
+  // editors (amenities, services, featured rooms, spark rewards
+  // promo) are still pending. Hero copy was moved to the Branding
+  // tab in this change.
+
+  // Persist all hero copy fields to `settings/websiteContent`. Logo
+  // and hero-photo overrides are saved on their own (upload / reset
+  // buttons) and do not flow through this form.
+  const handleSaveBranding = async (e: React.FormEvent) => {
     e.preventDefault();
     await updateSettings("websiteContent", {
-      homepage: { ...websiteContent.homepage, heroHeading, heroSubtext },
-      corporate: { ...websiteContent.corporate, heroHeading: corpHeading, heroSubtext: corpSubtext }
+      homepage: {
+        ...websiteContent.homepage,
+        heroHeading: homepageHeroHeading,
+        heroSubtext: homepageHeroSubtext
+      },
+      about: {
+        ...websiteContent.about,
+        heroHeading: aboutHeroHeading
+      },
+      corporate: {
+        ...websiteContent.corporate,
+        heroEyebrow: corporateHeroEyebrow,
+        heroHeading: corporateHeroHeading,
+        heroSubtext: corporateHeroSubtext
+      },
+      rewards: {
+        ...websiteContent.rewards,
+        heroEyebrow: rewardsHeroEyebrow,
+        heroHeading: rewardsHeroHeading,
+        heroSubtext: rewardsHeroSubtext
+      }
     });
   };
 
@@ -425,6 +597,7 @@ export function SettingsPage() {
   const tabs = [
     { id: "hotel" as const, label: "Hotel Settings", icon: Landmark },
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
+    { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
@@ -596,64 +769,232 @@ export function SettingsPage() {
             </form>
           )}
 
-          {/* TAB 2: WEBSITE CONTENT CONFIG */}
-          {activeTab === "website" && (
-            <form onSubmit={handleSaveWebsite} className="space-y-6 text-xs">
+          {/* TAB 2: BRANDING — hero photos, hero copy, and logo
+              overrides. Per `plan/features/SETTINGS.md §Branding`.
+              Every public page's hero lives here, with its photo
+              uploader + heading/subtext inputs grouped together. The
+              Website Content tab (next) only owns non-hero copy:
+              amenities, services, featured rooms, spark rewards. */}
+          {activeTab === "branding" && (
+            <form onSubmit={handleSaveBranding} className="space-y-8 text-xs">
               <div>
-                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Guest Web Landing Editor</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">Edit heading statements and tagline copy shown to guests on public views.</p>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Branding &amp; Heroes</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Upload hero photos, edit hero copy, and override logos for every public page. Logo overrides win over the deploy-time assets in <code>hotel.config.ts</code>; leave them empty to keep the originals.
+                </p>
               </div>
 
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Hero Segment</h4>
-                
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Homepage Main Heading Banner
-                  <input
-                    type="text"
-                    required
-                    value={heroHeading}
-                    onChange={(e) => setHeroHeading(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                  />
-                </label>
+              {/* Hero Photos */}
+              <div className="space-y-5">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Hero Photos</h4>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Homepage Supporting Tagline
-                  <input
-                    type="text"
-                    required
-                    value={heroSubtext}
-                    onChange={(e) => setHeroSubtext(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                  />
-                </label>
+                <BrandingAssetRow
+                  label="Homepage hero photo"
+                  helper="Full-bleed background for /. Recommended 1920x1080. Shows behind the headline and the Book / View rooms buttons."
+                  value={websiteContent.homepage.heroPhotoUrl}
+                  fallbackLabel="Default: hotel pool photo"
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 1080, quality: 0.85 });
+                    return uploadBrandingAsset("homepage.heroPhotoUrl", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("homepage.heroPhotoUrl")}
+                />
+
+                <BrandingAssetRow
+                  label="About hero photo"
+                  helper="Top of /about. Recommended 1920x600."
+                  value={websiteContent.about.heroPhotoUrl}
+                  fallbackLabel="Default: boutique hotel photo"
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 600, quality: 0.85 });
+                    return uploadBrandingAsset("about.heroPhotoUrl", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("about.heroPhotoUrl")}
+                />
+
+                <BrandingAssetRow
+                  label="Corporate hero photo"
+                  helper="Top of /corporate. Recommended 1920x1080."
+                  value={websiteContent.corporate.heroPhotoUrl}
+                  fallbackLabel="Default: corporate boardroom photo"
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 1080, quality: 0.85 });
+                    return uploadBrandingAsset("corporate.heroPhotoUrl", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("corporate.heroPhotoUrl")}
+                />
+
+                <BrandingAssetRow
+                  label="Rewards hero photo"
+                  helper="Top of /rewards. Recommended 1920x1080."
+                  value={websiteContent.rewards.heroPhotoUrl}
+                  fallbackLabel="Default: warm lobby interior"
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 1080, quality: 0.85 });
+                    return uploadBrandingAsset("rewards.heroPhotoUrl", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("rewards.heroPhotoUrl")}
+                />
               </div>
 
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Corporate Stays Banners</h4>
-                
+              {/* Hero Copy */}
+              <div className="space-y-5">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Hero Copy</h4>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Homepage heading
+                    <input
+                      type="text"
+                      required
+                      value={homepageHeroHeading}
+                      onChange={(e) => setHomepageHeroHeading(e.target.value)}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Homepage subtext
+                    <input
+                      type="text"
+                      required
+                      value={homepageHeroSubtext}
+                      onChange={(e) => setHomepageHeroSubtext(e.target.value)}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                </div>
+
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Corporate Page Hero Heading
+                  About hero heading
                   <input
                     type="text"
                     required
-                    value={corpHeading}
-                    onChange={(e) => setCorpHeading(e.target.value)}
+                    value={aboutHeroHeading}
+                    onChange={(e) => setAboutHeroHeading(e.target.value)}
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
                   />
                 </label>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Corporate Supporting Summary
-                  <textarea
-                    required
-                    value={corpSubtext}
-                    onChange={(e) => setCorpSubtext(e.target.value)}
-                    rows={2}
-                    className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
-                  />
-                </label>
+                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <Building2 size={12} /> Corporate hero
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow
+                      <input
+                        type="text"
+                        value={corporateHeroEyebrow}
+                        onChange={(e) => setCorporateHeroEyebrow(e.target.value)}
+                        placeholder="Curated hospitality for executive comfort"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
+                      Heading
+                      <input
+                        type="text"
+                        required
+                        value={corporateHeroHeading}
+                        onChange={(e) => setCorporateHeroHeading(e.target.value)}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      required
+                      rows={2}
+                      value={corporateHeroSubtext}
+                      onChange={(e) => setCorporateHeroSubtext(e.target.value)}
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <Award size={12} /> Rewards hero
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow pill (right of the program name)
+                      <input
+                        type="text"
+                        value={rewardsHeroEyebrow}
+                        onChange={(e) => setRewardsHeroEyebrow(e.target.value)}
+                        placeholder="Loyalty Program"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                      <span className="text-[10px] text-gray-500">Renders as &quot;{config.rewardsName || "Spark Rewards"} {rewardsHeroEyebrow || "Loyalty Program"}&quot; in the pill.</span>
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Heading
+                      <input
+                        type="text"
+                        required
+                        value={rewardsHeroHeading}
+                        onChange={(e) => setRewardsHeroHeading(e.target.value)}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      required
+                      rows={2}
+                      value={rewardsHeroSubtext}
+                      onChange={(e) => setRewardsHeroSubtext(e.target.value)}
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Logo Overrides */}
+              <div className="space-y-5">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Logo Overrides</h4>
+                <p className="text-[10px] text-gray-500">
+                  Uploads here override the deploy-time logos in <code>hotel.config.ts</code>. The Navbar uses the <em>on-dark</em> variant when transparent over a hero and the regular variant when scrolled. If you only upload one variant it&apos;s mirrored across both states.
+                </p>
+
+                <BrandingAssetRow
+                  label="Navbar logo (solid background)"
+                  helper="Used in the sticky/scrolled state and on every non-hero page. Colored version on a light background."
+                  value={websiteContent.branding.logoNavbar}
+                  fallback={`/brand/${config.logos.navbar}`}
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
+                    return uploadBrandingAsset("branding.logoNavbar", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("branding.logoNavbar")}
+                />
+
+                <BrandingAssetRow
+                  label="Navbar logo (over hero, dark background)"
+                  helper="Use a light/white version for visibility over the dark hero photo. This is the variant that fixes the dark-on-dark logo bug in the over-hero state."
+                  value={websiteContent.branding.logoNavbarOnDark}
+                  fallback={`/brand/${config.logos.navbar}`}
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
+                    return uploadBrandingAsset("branding.logoNavbarOnDark", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("branding.logoNavbarOnDark")}
+                />
+
+                <BrandingAssetRow
+                  label="Footer logo"
+                  helper="White version for the dark sidebar footer."
+                  value={websiteContent.branding.logoFooter}
+                  fallback={`/brand/${config.logos.white}`}
+                  onUpload={async (file) => {
+                    const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
+                    return uploadBrandingAsset("branding.logoFooter", compressed.file);
+                  }}
+                  onReset={() => resetBrandingAsset("branding.logoFooter")}
+                />
               </div>
 
               <div className="pt-2 border-t border-gray-150 flex justify-end">
@@ -662,10 +1003,44 @@ export function SettingsPage() {
                   className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
                 >
                   <Save size={14} />
-                  Save Landing Content
+                  Save Hero Copy
                 </button>
               </div>
             </form>
+          )}
+
+          {/* TAB 3: WEBSITE CONTENT CONFIG (non-hero copy). Hero
+              photos + hero copy moved to the Branding tab. This tab
+              is reserved for the list-based website content
+              (amenities, services, featured rooms, spark rewards
+              promo) once that editor is built. For now it links to
+              the new Branding tab where every guest-facing hero
+              lives. */}
+          {activeTab === "website" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Guest Web Landing Editor</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  List-based content for the public site. Hero photos and hero copy moved to the{" "}
+                  <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
+                  tab.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-800">
+                <p className="font-bold">Heroes are now in Branding</p>
+                <p className="mt-1 leading-relaxed">
+                  Homepage / about / corporate / rewards hero photos and their heading &amp; subtext now live in the <strong>Branding</strong> tab, alongside the navbar and footer logo overrides.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-5 text-xs text-gray-700">
+                <p className="font-bold text-gray-900">Coming soon</p>
+                <p className="mt-1 leading-relaxed">
+                  Amenities grid editor, services card editor, featured-rooms selector, and the Spark Rewards promo block. Until then, edit those values directly in <code>settings/websiteContent</code> on Firestore.
+                </p>
+              </div>
+            </div>
           )}
 
           {/* TAB 3: REWARDS CONFIG — admin-only (per W3.2) */}

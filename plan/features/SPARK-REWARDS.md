@@ -64,6 +64,30 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ---
 
+## Spark Rewards Landing (`/rewards`)
+
+Public marketing page for the loyalty program. Hero is admin-editable from Settings → Branding.
+
+### UI Checklist
+- [ ] Dark hero section — eyebrow pill, background photo, Apollo heading, subtext, primary + secondary CTAs (all editable from Settings → Branding)
+- [ ] Eyebrow pill renders as `"{config.rewardsName} {rewards.heroEyebrow}"` — e.g. "Spark Rewards Loyalty Program"
+- [ ] Logged-out guests: "Join Spark Rewards" + "Sign In" CTAs
+- [ ] Logged-in non-members: one-click "Enroll in Spark Rewards (One-Click)" button
+- [ ] Logged-in members: "Go to My Rewards Dashboard" CTA
+- [ ] "How It Works" 3-step grid
+- [ ] Member privileges grid (4 cards)
+- [ ] Bottom orange CTA section
+- [ ] Footer
+
+### Data & Logic Checklist
+- [ ] Fetch `settings/websiteContent.rewards` for `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl` — all editable from Settings → Branding
+- [ ] Hero photo falls back to `data/homepage.ts → rewardsHeroImage` (Google CDN) when `rewards.heroPhotoUrl` is empty
+- [ ] Hero heading falls back to `data/homepage.ts → rewardsHeroHeading` ("Earn Every Stay") when `rewards.heroHeading` is empty
+- [ ] Hero subtext falls back to `data/homepage.ts → rewardsHeroSubtext` when empty
+- [ ] Eyebrow falls back to `data/homepage.ts → rewardsHeroEyebrowSuffix` ("Loyalty Program") when empty
+
+---
+
 ## Member Portal
 
 ### My Profile (`/account/profile`)
