@@ -325,9 +325,20 @@ export function BookingPage() {
     async function fetchAvailability() {
       try {
         const params = new URLSearchParams({ checkIn, checkOut });
-        const response = await fetch(`/api/rooms/availability?${params.toString()}`);
+        const url = `/api/rooms/availability?${params.toString()}`;
+        const response = await fetch(url);
+        if (cancelled) return;
         if (!response.ok) {
-          throw new Error(`Availability request failed: ${response.status}`);
+          throw new Error(`Availability request failed: ${response.status} ${response.statusText} (${url})`);
+        }
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("application/json")) {
+          // Common in dev when `vercel dev` is not running — the SPA shell
+          // is returned for unknown routes and the response is HTML, not JSON.
+          throw new Error(
+            `Availability endpoint did not return JSON (content-type: "${contentType}", status: ${response.status}). ` +
+              `Is the API function running? Start it with "vercel dev" (npm run dev:guest).`
+          );
         }
         const json = await response.json();
         if (cancelled) return;
