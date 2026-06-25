@@ -30,8 +30,6 @@ import {
   getNumNights,
   staggerChild,
   staggerContainer,
-  DEFAULT_ROOM_TYPES,
-  Room,
   compressImageFile
 } from "@spark-inn/shared";
 import config from "@config";
@@ -125,8 +123,11 @@ export function BookingPage() {
   const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getTodayIso());
   const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getTomorrowIso());
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
-  const [selectedType, setSelectedType] = useState("all");
-  const [selectedRoomId, setSelectedRoomId] = useState(searchParams.get("roomId") ?? "");
+  // Per the room-type booking refactor: Step 1 now shows one card
+  // per room type (not per physical room). The guest picks a type;
+  // the server auto-assigns a physical room of that type inside
+  // the availability transaction.
+  const [selectedRoomType, setSelectedRoomType] = useState(searchParams.get("roomType") ?? "");
   
   // RateChoice initially set based on query search params
   const [rateChoice, setRateChoice] = useState<RateChoice>(() =>
@@ -178,40 +179,61 @@ export function BookingPage() {
 
   const nights = Math.max(getNumNights(checkIn, checkOut), 1);
 
-  // Filter available rooms dynamically by checking active date overlaps client-side
-  const availableRooms = useMemo(() => {
+  // Per the room-type booking refactor: Step 1 shows one card
+  // per room type. For each type, count the candidate physical
+  // rooms (active, capacity-ok) and subtract the ones with an
+  // overlapping active booking. The result drives the
+  // "X of Y available for your dates" copy on each card.
+  const typeAvailability = useMemo(() => {
     const reqStart = new Date(`${checkIn}T00:00:00Z`);
     const reqEnd = new Date(`${checkOut}T00:00:00Z`);
 
-    return rooms.filter((room) => {
-      const typeMatches = selectedType === "all" || room.type === selectedType;
-      const cap = getRoomTypeRates(roomTypes, room.type)?.maxCapacity ?? 0;
-      if (!room.isActive || room.status === "blocked" || cap < guests || !typeMatches) {
-        return false;
-      }
-
-      // Check if there is an overlapping active booking
-      const hasOverlap = bookedRanges.some((range) => {
-        if (range.roomId !== room.id) return false;
-        const bStart = new Date(`${range.checkIn}T00:00:00Z`);
-        const bEnd = new Date(`${range.checkOut}T00:00:00Z`);
-        return bStart < reqEnd && bEnd > reqStart;
-      });
-
-      return !hasOverlap;
+    return roomTypes.map((type) => {
+      const candidates = rooms.filter(
+        (room) => room.type === type.value && room.isActive && room.status !== "blocked"
+      );
+      const bookedRoomIds = new Set(
+        bookedRanges
+          .filter((range) => {
+            const bStart = new Date(`${range.checkIn}T00:00:00Z`);
+            const bEnd = new Date(`${range.checkOut}T00:00:00Z`);
+            return bStart < reqEnd && bEnd > reqStart;
+          })
+          .map((range) => range.roomId)
+      );
+      const availableCount = candidates.filter((room) => !bookedRoomIds.has(room.id)).length;
+      return {
+        type,
+        totalCount: candidates.length,
+        availableCount
+      };
     });
-  }, [rooms, roomTypes, bookedRanges, checkIn, checkOut, guests, selectedType]);
+  }, [rooms, roomTypes, bookedRanges, checkIn, checkOut]);
 
-  const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
+  // Types shown in Step 1 — only those that can fit the guest count
+  // and still have at least one free physical room for the window.
+  const availableRoomTypes = useMemo(
+    () =>
+      typeAvailability.filter(
+        (entry) => entry.type.maxCapacity >= guests && entry.availableCount > 0
+      ),
+    [typeAvailability, guests]
+  );
+
+  const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
+    ?? availableRoomTypes[0]?.type
+    ?? null;
   // Per W3.6 — pricing + max occupancy live on the room's type.
-  const selectedRoomRates = selectedRoom ? getRoomTypeRates(roomTypes, selectedRoom.type) : null;
+  const selectedRoomRates = selectedTypeEntry
+    ? getRoomTypeRates(roomTypes, selectedTypeEntry.value)
+    : null;
   const selectedMaxCapacity = selectedRoomRates?.maxCapacity ?? 0;
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
   // Calculate room total client-side, incorporating weekend rates (Saturdays and Sundays)
   const roomTotal = useMemo(() => {
-    if (!selectedRoom || !selectedRoomRates) return 0;
+    if (!selectedTypeEntry || !selectedRoomRates) return 0;
     let totalRate = 0;
     const start = new Date(`${checkIn}T00:00:00Z`);
     for (let i = 0; i < nights; i++) {
@@ -226,7 +248,7 @@ export function BookingPage() {
       }
     }
     return totalRate;
-  }, [selectedRoom, selectedRoomRates, checkIn, nights]);
+  }, [selectedTypeEntry, selectedRoomRates, checkIn, nights]);
 
   const discountPct = discountType === "none" ? 0 : 20;
   const breakfastTotal = hasBreakfast ? breakfastRate * guests * nights : 0;
@@ -240,7 +262,7 @@ export function BookingPage() {
     return voucherDiscountValue;
   }, [voucherApplied, voucherDiscountType, voucherDiscountValue, subtotal]);
 
-  const total = selectedRoom && selectedRoomRates
+  const total = selectedTypeEntry && selectedRoomRates
     ? calculateBookingTotal({
         ratePerNight: selectedRoomRates.pricePerNight,
         numNights: nights,
@@ -258,7 +280,7 @@ export function BookingPage() {
     checkIn,
     checkOut,
     guests: String(guests),
-    roomId: selectedRoom?.id ?? "",
+    roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no"
   });
   const reviewParams = new URLSearchParams(continueParams);
@@ -280,7 +302,7 @@ export function BookingPage() {
         : `Guest count must be between 1 and ${selectedMaxCapacity || guests}.`
   };
   const canContinueToReview =
-    Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedRoom);
+    Object.values(guestErrors).every((error) => !error) && guestDetails.consent && Boolean(selectedTypeEntry);
   const nightlyTotal = selectedRoomRates
     ? selectedRoomRates.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0)
     : 0;
@@ -431,22 +453,26 @@ export function BookingPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedRoomId && availableRooms[0]) {
-      setSelectedRoomId(availableRooms[0].id);
+    if (!selectedRoomType && availableRoomTypes[0]) {
+      setSelectedRoomType(availableRoomTypes[0].type.value);
       return;
     }
 
-    if (selectedRoomId && !availableRooms.some((room) => room.id === selectedRoomId) && availableRooms[0]) {
-      setSelectedRoomId(availableRooms[0].id);
+    if (
+      selectedRoomType
+      && !availableRoomTypes.some((entry) => entry.type.value === selectedRoomType)
+      && availableRoomTypes[0]
+    ) {
+      setSelectedRoomType(availableRoomTypes[0].type.value);
     }
-  }, [availableRooms, selectedRoomId]);
+  }, [availableRoomTypes, selectedRoomType]);
 
   function updateDateParams(nextCheckIn = checkIn, nextCheckOut = checkOut, nextGuests = guests) {
     const next = new URLSearchParams(searchParams);
     next.set("checkIn", nextCheckIn);
     next.set("checkOut", nextCheckOut);
     next.set("guests", String(nextGuests));
-    if (selectedRoomId) next.set("roomId", selectedRoomId);
+    if (selectedRoomType) next.set("roomType", selectedRoomType);
     setSearchParams(next, { replace: true });
   }
 
@@ -456,11 +482,11 @@ export function BookingPage() {
     updateDateParams(checkIn, checkOut, safeGuests);
   }
 
-  function selectRoom(roomId: string, nextRateChoice: RateChoice) {
-    setSelectedRoomId(roomId);
+  function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
+    setSelectedRoomType(typeValue);
     setRateChoice(nextRateChoice);
     const next = new URLSearchParams(searchParams);
-    next.set("roomId", roomId);
+    next.set("roomType", typeValue);
     next.set("checkIn", checkIn);
     next.set("checkOut", checkOut);
     next.set("guests", String(guests));
@@ -492,7 +518,7 @@ export function BookingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
-          roomType: selectedRoom?.type,
+          roomType: selectedTypeEntry?.value,
           turnstileToken: turnstileToken || "mock_token"
         })
       });
@@ -582,7 +608,7 @@ export function BookingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookingId,
-          roomId: selectedRoom?.id,
+          roomType: selectedTypeEntry?.value,
           checkIn,
           checkOut,
           guests,
@@ -617,7 +643,9 @@ export function BookingPage() {
       // Successful creation, redirect to confirmation page
       const confirmParams = new URLSearchParams({
         bookingRef: result.data.bookingRef,
-        roomId: selectedRoom?.id || "",
+        roomType: result.data.roomType || selectedTypeEntry?.value || "",
+        roomId: result.data.roomId || "",
+        roomNumber: result.data.roomNumber || "",
         checkIn,
         checkOut,
         guests: String(guests),
@@ -628,12 +656,12 @@ export function BookingPage() {
     } catch (err: any) {
       console.error("Confirm booking error:", err);
       if (err.message === "Room no longer available") {
-        setSubmitError("Sorry, this room is no longer available for your selected dates. Please go back and choose another room.");
+        setSubmitError("Sorry, no rooms of this type are available for your selected dates. Please go back and pick another room type.");
         // Auto redirect to Step 1 after 5 seconds
         setTimeout(() => {
           const nextParams = new URLSearchParams(searchParams);
           nextParams.delete("step");
-          nextParams.delete("roomId");
+          nextParams.delete("roomType");
           setSearchParams(nextParams);
           setSubmitError("");
           setIsSubmitting(false);
@@ -813,10 +841,10 @@ export function BookingPage() {
             guests={Number(guestDetails.guestCount) || guests}
             hasBreakfast={hasBreakfast}
             nights={nights}
-            room={selectedRoom}
-            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
+            typeLabel={selectedTypeEntry?.label ?? ""}
+            typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
-            typeDescription={selectedRoomRates ? roomTypes.find((t) => t.value === selectedRoom?.type)?.description : ""}
+            typeDescription={selectedTypeEntry?.description ?? ""}
             total={total}
             breakfastRate={breakfastRate}
             discountPct={discountPct}
@@ -854,7 +882,7 @@ export function BookingPage() {
   if (isReviewStep) {
     const isIdUploadRequired = discountType !== "none" && !discountIdUrl;
     const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUrl;
-    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedRoom);
+    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry);
 
     // Retrieve active payment method details from hotelConfig
     const activePaymentConfig = hotelConfig?.paymentMethods?.find((p: any) => p.method === paymentMethod);
@@ -1244,10 +1272,10 @@ export function BookingPage() {
             guests={guests}
             hasBreakfast={hasBreakfast}
             nights={nights}
-            room={selectedRoom}
-            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
+            typeLabel={selectedTypeEntry?.label ?? ""}
+            typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
-            typeDescription={selectedRoomRates ? roomTypes.find((t) => t.value === selectedRoom?.type)?.description : ""}
+            typeDescription={selectedTypeEntry?.description ?? ""}
             total={total}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
@@ -1357,31 +1385,9 @@ export function BookingPage() {
                 </div>
               </label>
 
-              <div>
-                <p className="text-sm font-medium text-gray-700">Room type</p>
-                <div className="mt-3 grid gap-2">
-                  {[{ value: "all", label: "All Types" }, ...DEFAULT_ROOM_TYPES].map((type) => (
-                    <button
-                      key={type.value}
-                      className={cn(
-                        "flex min-h-11 items-center justify-between rounded-lg border px-3 text-sm font-medium transition",
-                        selectedType === type.value
-                          ? "border-primary bg-primary-light text-primary"
-                          : "border-gray-200 bg-white text-gray-700 hover:border-primary"
-                      )}
-                      type="button"
-                      onClick={() => setSelectedType(type.value)}
-                    >
-                      {type.label}
-                      {selectedType === type.value ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               <div className="flex gap-3 rounded-lg bg-primary-light p-4 text-sm text-gray-700">
                 <Info size={18} className="mt-0.5 shrink-0 text-primary" />
-                <p>Prices are based on selected dates. Breakfast is a static add-on for this wireframe pass.</p>
+                <p>Pick a room type and we'll assign a specific room on confirmation. Prices are based on selected dates.</p>
               </div>
             </div>
           </div>
@@ -1389,39 +1395,41 @@ export function BookingPage() {
 
         <div>
           <div className="mb-5 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
-            <p className="font-semibold text-gray-950">{availableRooms.length} available rooms</p>
+            <p className="font-semibold text-gray-950">
+              {availableRoomTypes.length} {availableRoomTypes.length === 1 ? "room type" : "room types"} available
+            </p>
             <p className="text-sm text-gray-600">Select Room Only or Room + Breakfast to lock the Step 1 summary.</p>
           </div>
 
-          {availableRooms.length > 0 ? (
+          {availableRoomTypes.length > 0 ? (
             <motion.div
               animate="visible"
               className="grid gap-6"
               initial={shouldReduceMotion ? false : "hidden"}
               variants={staggerContainer}
             >
-              {availableRooms.map((room, index) => {
-                const isSelected = room.id === selectedRoom?.id;
-                // Per W3.6 — pricing lives on the room's type.
-                const roomRates = getRoomTypeRates(roomTypes, room.type);
-                const roomPricePerNight = roomRates?.pricePerNight ?? 0;
-                const roomMaxCapacity = roomRates?.maxCapacity ?? 0;
+              {availableRoomTypes.map((entry, index) => {
+                const type = entry.type;
+                const isSelected = type.value === selectedRoomType;
+                // Per W3.6 — pricing lives on the type.
+                const typePricePerNight = type.pricePerNight ?? 0;
+                const typeMaxCapacity = type.maxCapacity ?? 0;
+                const typeImageUrl = getRoomTypeImages(roomTypes, type.value)[0];
                 const roomOnlyTotal = calculateBookingTotal({
-                  ratePerNight: roomPricePerNight,
+                  ratePerNight: typePricePerNight,
                   numNights: nights
                 });
                 const breakfastTotal = calculateBookingTotal({
-                  ratePerNight: roomPricePerNight,
+                  ratePerNight: typePricePerNight,
                   numNights: nights,
                   numGuests: guests,
                   breakfastRate: breakfastRatePerPerson,
                   hasBreakfast: true
                 });
-                const typeLabel = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type)?.label ?? room.type;
 
                 return (
                   <motion.article
-                    key={room.id}
+                    key={type.value}
                     className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200"
                     variants={staggerChild}
                     whileHover={shouldReduceMotion ? undefined : { y: -4 }}
@@ -1429,25 +1437,30 @@ export function BookingPage() {
                   >
                     <div className="grid md:grid-cols-[280px_1fr]">
                       <div className="relative min-h-64 overflow-hidden bg-section-bg">
-                        <img src={getRoomTypeImages(roomTypes, room.type)[0]} alt={room.name} className="h-full w-full object-cover" />
+                        {typeImageUrl ? (
+                          <img src={typeImageUrl} alt={type.label} className="h-full w-full object-cover" />
+                        ) : null}
                         {index === 0 ? (
                           <span className="absolute left-4 top-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
                             Recommended
                           </span>
                         ) : null}
+                        <span className="absolute bottom-4 left-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
+                          {entry.availableCount} of {entry.totalCount} available for your dates
+                        </span>
                       </div>
                       <div className="p-5 sm:p-6">
                         <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
                           <div>
                             <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                              {typeLabel}
+                              {type.label}
                             </span>
-                            <h2 className="mt-3 text-2xl font-semibold text-gray-950">{room.name}</h2>
-                            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{roomTypes.find((t) => t.value === room.type)?.description || ""}</p>
+                            <h2 className="mt-3 text-2xl font-semibold text-gray-950">{type.label}</h2>
+                            <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{type.description || ""}</p>
                           </div>
                           <div className="sm:text-right">
                             <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-                            <p className="text-2xl font-semibold text-gray-950">{formatPrice(roomPricePerNight)}</p>
+                            <p className="text-2xl font-semibold text-gray-950">{formatPrice(typePricePerNight)}</p>
                             <p className="text-sm text-gray-500">per night</p>
                           </div>
                         </div>
@@ -1455,11 +1468,11 @@ export function BookingPage() {
                         <div className="mt-5 flex flex-wrap gap-4 text-sm text-gray-600">
                           <span className="flex items-center gap-2">
                             <BedDouble size={16} className="text-primary" />
-                            {roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}
+                            {type.bedDefinition || ""}
                           </span>
                           <span className="flex items-center gap-2">
                             <Users size={16} className="text-primary" />
-                            Up to {roomMaxCapacity}
+                            Up to {typeMaxCapacity}
                           </span>
                           <span className="flex items-center gap-2">
                             <CalendarDays size={16} className="text-primary" />
@@ -1472,18 +1485,18 @@ export function BookingPage() {
                             active={isSelected && rateChoice === "room-only"}
                             label="Room Only"
                             helper="Simple stay, flexible payment at the hotel"
-                            priceLabel={`${formatPrice(roomPricePerNight)} / night`}
+                            priceLabel={`${formatPrice(typePricePerNight)} / night`}
                             totalLabel={`${formatPrice(roomOnlyTotal)} total`}
-                            onSelect={() => selectRoom(room.id, "room-only")}
+                            onSelect={() => selectRoomType(type.value, "room-only")}
                           />
                           {breakfastEnabled ? (
                             <RateOption
                               active={isSelected && rateChoice === "room-breakfast"}
                               label="Room + Breakfast"
                               helper="Includes daily local breakfast for selected guests"
-                              priceLabel={`${formatPrice(roomPricePerNight + breakfastRatePerPerson * guests)} / night`}
+                              priceLabel={`${formatPrice(typePricePerNight + breakfastRatePerPerson * guests)} / night`}
                               totalLabel={`${formatPrice(breakfastTotal)} total`}
-                              onSelect={() => selectRoom(room.id, "room-breakfast")}
+                              onSelect={() => selectRoomType(type.value, "room-breakfast")}
                             />
                           ) : null}
                         </div>
@@ -1495,9 +1508,9 @@ export function BookingPage() {
             </motion.div>
           ) : (
             <div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200">
-              <h2 className="text-xl font-semibold text-gray-950">No available rooms match this stay</h2>
+              <h2 className="text-xl font-semibold text-gray-950">No room types available for these dates</h2>
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-600">
-                Try fewer guests or choose all room types to continue the wireframe flow.
+                Try fewer guests or different dates to see what's open.
               </p>
             </div>
           )}
@@ -1585,7 +1598,11 @@ interface BookingReviewAsideProps {
   guests: number;
   hasBreakfast: boolean;
   nights: number;
-  room: Room | undefined;
+  // Per the room-type booking refactor: the aside shows the chosen
+  // type label + (once assigned by the server) the physical room
+  // number. Pre-assignment, `assignedRoomNumber` is empty.
+  typeLabel: string;
+  assignedRoomNumber?: string;
   typeImageUrls?: string[];
   // Per W3.6 — pricing lives on the type.
   typeRates?: { maxCapacity: number; pricePerNight: number; weekendRate: number; corporateRate: number } | null;
@@ -1607,7 +1624,8 @@ function BookingReviewAside({
   guests,
   hasBreakfast,
   nights,
-  room,
+  typeLabel,
+  assignedRoomNumber = "",
   typeImageUrls = [],
   typeRates,
   typeDescription = "",
@@ -1620,7 +1638,7 @@ function BookingReviewAside({
   memberDiscountPct = 0,
   isMember = false
 }: BookingReviewAsideProps) {
-  if (!room) return null;
+  if (!typeLabel) return null;
 
   const roomTotal = useMemo(() => {
     if (!typeRates) return 0;
@@ -1638,7 +1656,7 @@ function BookingReviewAside({
       }
     }
     return totalRate;
-  }, [room, checkIn, nights]);
+  }, [typeRates, checkIn, nights]);
 
   const activeBreakfastRate = breakfastRate ?? 350;
   const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;
@@ -1651,9 +1669,12 @@ function BookingReviewAside({
   return (
     <aside className="lg:sticky lg:top-28 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-        <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
+        <img src={typeImageUrls[0]} alt={typeLabel} className="h-52 w-full object-cover" />
         <div className="p-5">
-          <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
+          <h2 className="text-xl font-semibold text-gray-950">{typeLabel}</h2>
+          {assignedRoomNumber ? (
+            <p className="mt-1 text-sm font-medium text-primary">Room {assignedRoomNumber}</p>
+          ) : null}
           <p className="mt-2 text-sm leading-6 text-gray-600">{typeDescription}</p>
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">
             <SummaryCell label="Check-in" value={formatStayDate(checkIn)} />

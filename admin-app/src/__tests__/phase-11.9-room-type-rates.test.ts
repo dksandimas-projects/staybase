@@ -226,7 +226,10 @@ describe("Phase 11.9 — Room type drives pricing + maxCapacity (W3.6)", () => {
 
   describe("guest-app/BookingPage + CorporateBookingPage", () => {
     it("BookingPage uses getRoomTypeRates for the rate calculation", () => {
-      expect(bookingPageSrc).toMatch(/getRoomTypeRates\(roomTypes,\s*selectedRoom\.type\)/);
+      // Per the room-type booking refactor: pricing resolves from
+      // the chosen room type entry (`selectedTypeEntry.value`),
+      // not from a per-physical-room field.
+      expect(bookingPageSrc).toMatch(/getRoomTypeRates\(roomTypes,\s*selectedTypeEntry\.value\)/);
       expect(bookingPageSrc).not.toMatch(/selectedRoom\.pricePerNight/);
       expect(bookingPageSrc).not.toMatch(/selectedRoom\.weekendRate/);
       expect(bookingPageSrc).not.toMatch(/selectedRoom\.maxCapacity/);

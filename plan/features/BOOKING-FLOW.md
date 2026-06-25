@@ -26,10 +26,10 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ### UI Checklist
 - [ ] Check-in / check-out date pickers — blocks past dates, min 1 night enforced
-- [ ] Guest count input — validated against room `maxCapacity`
-- [ ] Room type filter
-- [ ] Available rooms grid — same card layout as Rooms page
-- [ ] Each room card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
+- [ ] Guest count input — validated against the chosen room type's `maxCapacity`
+- [ ] **Available room types grid** — one card per room type defined in `settings/hotelConfig.roomTypes[]` (falling back to `DEFAULT_ROOM_TYPES`). Cards are grouped by type, not per physical room — see "Room type booking" below.
+- [ ] Each type card shows "X of Y available for your dates" so guests see live capacity without exposing specific room numbers
+- [ ] Each type card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
   - [ ] **Room Only** — standard rate per night
   - [ ] **Room + Breakfast** — combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` per night
 - [ ] Breakfast rate shown as combined nightly total — not broken out separately on the card
@@ -37,13 +37,15 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Rate per night + computed total displayed on each card
 - [ ] Pre-populated if navigating from Homepage checker or Rooms page CTA
 - [ ] Step indicator showing current step (1 of 4)
+- [ ] "No room types available for these dates" empty state with "try fewer guests or different dates" nudge
 
 ### Data & Logic Checklist
-- [ ] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings. Per W4.7: client calls `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` (rate-limited, 30/IP/min) which returns PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`). Client applies the overlap filter `bStart < reqEnd && bEnd > reqStart`. The actual double-booking safety is the Firestore transaction in `/api/bookings/create` — see `plan/features/AVAILABILITY-LOCKING.md`.
+- [ ] **Room type booking** — per the `feature/booking-by-room-type` refactor: the client posts `roomType` (not `roomId`). The server's transaction reads the type entry from `settings/hotelConfig.roomTypes[]`, queries all active physical rooms of that type, and auto-assigns the first non-conflicting one. `Booking.roomId` is still a real `rooms/{id}` reference; the assigned room is server-derived and surfaced to the client via the `/api/bookings/create` response payload.
+- [ ] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings. Per W4.7: client calls `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` (rate-limited, 30/IP/min) which returns PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`). Client joins with the type catalog to compute "X of Y available" per type. The actual double-booking safety is the Firestore transaction in `/api/bookings/create` — see `plan/features/AVAILABILITY-LOCKING.md`.
 - [ ] Weekend rate applied automatically when stay includes Saturday or Sunday nights
 - [ ] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
 - [ ] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
-- [ ] Selected room, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
+- [ ] Selected room type, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
 - [ ] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
 
 ---
