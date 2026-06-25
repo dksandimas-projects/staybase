@@ -11,36 +11,51 @@ import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { RoomCard } from "../components/RoomCard";
+import { RoomTypeCard } from "../components/RoomTypeCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { useRooms } from "../hooks/useRooms";
-import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
+import { useRoomAvailability } from "../hooks/useRoomAvailability";
+import { useRoomTypes } from "../hooks/useRoomTypes";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function tomorrowIso() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { rooms, loading } = useRooms();
   const { roomTypes } = useRoomTypes();
   const [selectedType, setSelectedType] = useState("all");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
-  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
-  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? "2026-06-14");
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? todayIso());
+  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? tomorrowIso());
+  const [selectedTypeValue, setSelectedTypeValue] = useState<string | null>(null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  const filteredRooms = useMemo(
+  const { byType, loading } = useRoomAvailability(checkIn, checkOut, guests);
+
+  const visibleTypes = useMemo(
     () =>
-      rooms.filter((room) => {
-        const typeMatches = selectedType === "all" || room.type === selectedType;
-        const typeRates = getRoomTypeRates(roomTypes, room.type);
-        return room.isActive && typeMatches && (typeRates?.maxCapacity ?? 0) >= guests;
+      roomTypes.filter((type) => {
+        const counts = byType[type.value];
+        const hasBookable = Boolean(counts && counts.total > 0);
+        if (!hasBookable) return false;
+        return selectedType === "all" || type.value === selectedType;
       }),
-    [rooms, roomTypes, guests, selectedType]
+    [roomTypes, byType, selectedType]
   );
-  const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null;
-  const selectedRoomType = selectedRoom ? roomTypes.find((t) => t.value === selectedRoom.type) : undefined;
+
+  const selectedTypeEntry = selectedTypeValue
+    ? roomTypes.find((t) => t.value === selectedTypeValue) ?? null
+    : null;
+  const selectedTypeCounts = selectedTypeEntry ? byType[selectedTypeEntry.value] : undefined;
   const bookingQuery = `&checkIn=${checkIn}&checkOut=${checkOut}`;
   const entranceProps = shouldReduceMotion
     ? {}
@@ -136,7 +151,7 @@ export function RoomsPage() {
 
         {showApplyButton ? (
           <PrimaryButton type="button" className="w-full" onClick={() => setIsFilterOpen(false)}>
-            Show {filteredRooms.length} rooms
+            Show {visibleTypes.length} types
           </PrimaryButton>
         ) : null}
       </div>
@@ -187,7 +202,9 @@ export function RoomsPage() {
             {...entranceProps}
           >
             <div>
-              <p className="font-semibold text-gray-950">{filteredRooms.length} rooms match your stay</p>
+              <p className="font-semibold text-gray-950">
+                {visibleTypes.length} {visibleTypes.length === 1 ? "room type" : "room types"} match your stay
+              </p>
               <p className="text-sm text-gray-600">Real-time room availability streamed from Firestore.</p>
             </div>
             <GhostButton type="button" className="lg:hidden" onClick={() => setIsFilterOpen(true)}>
@@ -217,31 +234,27 @@ export function RoomsPage() {
                 </div>
               ))}
             </div>
-          ) : filteredRooms.length > 0 ? (
+          ) : visibleTypes.length > 0 ? (
             <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
               <AnimatePresence mode="popLayout" initial={false}>
-                {filteredRooms.map((room) => {
-                  const rates = getRoomTypeRates(roomTypes, room.type);
-                  const typeDetails = roomTypes.find((t) => t.value === room.type);
+                {visibleTypes.map((type) => {
+                  const counts = byType[type.value];
                   return (
                     <motion.div
-                      key={room.id}
+                      key={type.value}
                       layout
                       initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
                       animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
                       exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
                       transition={{ duration: 0.25, ease: "easeOut" }}
                     >
-                      <RoomCard
-                        room={room}
-                        typeImageUrls={getRoomTypeImages(roomTypes, room.type)}
-                        typeMaxCapacity={rates?.maxCapacity}
-                        typePricePerNight={rates?.pricePerNight}
-                        typeBedDefinition={typeDetails?.bedDefinition}
-                        typeDescription={typeDetails?.description}
-                        typeAmenities={typeDetails?.amenities}
+                      <RoomTypeCard
+                        type={type}
+                        availableCount={counts?.available ?? 0}
+                        totalCount={counts?.total ?? 0}
+                        firstAvailableRoomId={counts?.firstAvailableRoomId ?? null}
                         bookingQuery={bookingQuery}
-                        onDetails={() => setSelectedRoomId(room.id)}
+                        onDetails={() => setSelectedTypeValue(type.value)}
                       />
                     </motion.div>
                   );
@@ -250,7 +263,7 @@ export function RoomsPage() {
             </div>
           ) : (
             <motion.div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200" variants={fadeUp} {...entranceProps}>
-              <h2 className="text-xl font-semibold text-gray-950">No rooms match your filters</h2>
+              <h2 className="text-xl font-semibold text-gray-950">No room types match your filters</h2>
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-600">
                 Try a smaller guest count or choose all room types to see more options.
               </p>
@@ -272,41 +285,56 @@ export function RoomsPage() {
         {renderFilters(true)}
       </Drawer>
 
-      <Modal title={selectedRoom?.name ?? "Room details"} open={Boolean(selectedRoom)} onClose={() => setSelectedRoomId(null)}>
-        {selectedRoom ? (
+      <Modal
+        title={selectedTypeEntry?.label ?? "Room type details"}
+        open={Boolean(selectedTypeEntry)}
+        onClose={() => setSelectedTypeValue(null)}
+      >
+        {selectedTypeEntry ? (
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
               <img
-                src={getRoomTypeImages(roomTypes, selectedRoom.type)[0]}
-                alt={selectedRoom.name}
+                src={selectedTypeEntry.imageUrls[0]}
+                alt={selectedTypeEntry.label}
                 className="h-72 w-full object-cover"
               />
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <StatusBadge label={selectedRoom.status === "available" ? "Available" : "Blocked"} status={selectedRoom.status} />
+              <StatusBadge
+                label={
+                  selectedTypeCounts && selectedTypeCounts.total > 0
+                    ? selectedTypeCounts.available === 0
+                      ? "Sold out for these dates"
+                      : `${selectedTypeCounts.available} of ${selectedTypeCounts.total} available`
+                    : "No rooms"
+                }
+                status={
+                  selectedTypeCounts && selectedTypeCounts.available > 0 ? "available" : "occupied"
+                }
+              />
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                {DEFAULT_ROOM_TYPES.find((type) => type.value === selectedRoom.type)?.label ?? selectedRoom.type}
+                {selectedTypeEntry.shortLabel}
               </span>
             </div>
-            <p className="leading-7 text-gray-600">{selectedRoomType?.description || "—"}</p>
+            <p className="leading-7 text-gray-600">{selectedTypeEntry.description || "—"}</p>
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Beds</p>
-                <p className="mt-1 font-semibold text-gray-950">{selectedRoomType?.bedDefinition || "—"}</p>
+                <p className="mt-1 font-semibold text-gray-950">{selectedTypeEntry.bedDefinition || "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Capacity</p>
-                <p className="mt-1 font-semibold text-gray-950">Up to {selectedRoomType?.maxCapacity ?? "—"}</p>
+                <p className="mt-1 font-semibold text-gray-950">Up to {selectedTypeEntry.maxCapacity ?? "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Weekend</p>
-                <p className="mt-1 font-semibold text-gray-950">{formatPrice(selectedRoomType?.weekendRate ?? 0)}</p>
+                <p className="mt-1 font-semibold text-gray-950">{formatPrice(selectedTypeEntry.weekendRate)}</p>
               </div>
             </div>
             <div>
               <h3 className="font-semibold text-gray-950">Amenities</h3>
               <div className="mt-3 flex flex-wrap gap-2">
-                {(selectedRoomType?.amenities ?? []).map((amenity) => (
+                {selectedTypeEntry.amenities.map((amenity) => (
                   <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
                     {amenity}
                   </span>
@@ -316,9 +344,17 @@ export function RoomsPage() {
             <div className="flex items-end justify-between gap-4 border-t border-gray-200 pt-5">
               <div>
                 <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
-                <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedRoomType?.pricePerNight ?? 0)}</p>
+                <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedTypeEntry.pricePerNight)}</p>
               </div>
-              <PrimaryButton to={`/book?roomId=${selectedRoom.id}${bookingQuery}`}>Book this room</PrimaryButton>
+              {selectedTypeCounts && selectedTypeCounts.available > 0 && selectedTypeCounts.firstAvailableRoomId ? (
+                <PrimaryButton to={`/book?roomId=${selectedTypeCounts.firstAvailableRoomId}${bookingQuery}`}>
+                  Book this type
+                </PrimaryButton>
+              ) : (
+                <PrimaryButton aria-disabled="true" className="pointer-events-none" tabIndex={-1} to="#">
+                  Sold out
+                </PrimaryButton>
+              )}
             </div>
           </div>
         ) : null}

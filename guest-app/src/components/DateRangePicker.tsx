@@ -20,7 +20,7 @@ export function DateRangePicker({ checkIn, checkOut, onCheckInChange, onCheckOut
   }, [checkIn]);
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-3">
       <label className="grid gap-2 text-sm font-medium text-gray-700">
         Check-in
         <input
