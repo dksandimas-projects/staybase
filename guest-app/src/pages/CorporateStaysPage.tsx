@@ -228,7 +228,10 @@ export function CorporateStaysPage() {
             <HeroSkeleton />
           )}
         </div>
-        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-transparent z-0" />
+        {/* Stronger gradient — opaque at the bottom, fading up so
+            the photo stays visible at the top and the text reads
+            well through the middle. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/40 via-gray-950/75 to-gray-950/90 z-0" />
 
         <motion.div
           animate="visible"
@@ -236,28 +239,28 @@ export function CorporateStaysPage() {
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <p className="font-heading text-lg italic text-primary-light sm:text-2xl tracking-wider">
+          <p className="font-heading text-lg italic text-primary-light sm:text-2xl tracking-wider drop-shadow-md">
             {corpHeroEyebrow}
           </p>
-          <h1 className="mt-4 font-heading text-4xl leading-tight text-white sm:text-6xl lg:text-7xl">
+          <h1 className="mt-4 font-heading text-4xl leading-tight text-white sm:text-6xl lg:text-7xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.7)]">
             {corpHeading}
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-300 sm:text-lg">
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-300 sm:text-lg drop-shadow-md">
             {corpSubtext}
           </p>
           <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row sm:items-center">
-            <PrimaryButton to="/corporate/book" className="min-w-[220px] shadow-lg">
+            <PrimaryButton to="/corporate/book" className="min-w-[220px] shadow-lg drop-shadow-md">
               Book with Corporate Rate
             </PrimaryButton>
             <GhostButton
               type="button"
-              className="min-w-[220px] border-white text-white hover:bg-white/10"
+              className="min-w-[220px] border-white text-white drop-shadow-sm hover:bg-white/10"
               onClick={() => scrollToForm()}
             >
               Submit an Inquiry
             </GhostButton>
           </div>
-          <div className="mt-6 text-sm text-gray-400">
+          <div className="mt-6 text-sm text-gray-400 drop-shadow-sm">
             Have a negotiated corporate access code?{" "}
             <Link to="/corporate/book" className="text-primary hover:underline font-medium">
               Validate here
