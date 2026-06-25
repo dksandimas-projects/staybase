@@ -9,10 +9,13 @@ import { useGuestAuth } from "../context/GuestAuthContext";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 const navItems = [
+  { label: "Home", to: "/" },
   { label: "Rooms", to: "/rooms" },
+  { label: "About", to: "/about" },
   { label: "Corporate", to: "/corporate" },
   { label: "Rewards", to: "/rewards" },
-  { label: "Contact", to: "/contact" }
+  { label: "Contact", to: "/contact" },
+  { label: "Manage", to: "/my-booking" }
 ];
 
 interface NavbarProps {
@@ -92,7 +95,7 @@ export function Navbar({ overHero = false }: NavbarProps) {
           <img src={logoSrc} alt={config.brandName} className="h-10 w-auto object-contain" />
         </Link>
 
-        <div className="hidden items-center gap-8 md:flex">
+        <div className="hidden items-center gap-5 lg:gap-6 md:flex">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
