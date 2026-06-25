@@ -99,8 +99,13 @@ describe("Phase 11.6 Batch 19 — Wave 3 batch 2 (chrome + wording)", () => {
       expect(hotelConfigSrc).toMatch(/rewardsName:\s*["']Spark Rewards["']/);
     });
 
-    it("RewardsLandingPage hero chip interpolates {config.rewardsName}", () => {
-      expect(rewardsLandingSrc).toMatch(/\{config\.rewardsName\}\s+Loyalty Program/);
+    it("RewardsLandingPage hero chip interpolates {config.rewardsName} + an editable suffix", () => {
+      // The program name is interpolated from config (per W3.10). The
+      // suffix is now a settings-driven value (rewards.heroEyebrow)
+      // so the admin can change the pill copy from Settings →
+      // Branding. Asserts the JSX interpolates `config.rewardsName`
+      // and at least one other expression in the same span.
+      expect(rewardsLandingSrc).toMatch(/\{config\.rewardsName\}\s+\{/);
     });
   });
 

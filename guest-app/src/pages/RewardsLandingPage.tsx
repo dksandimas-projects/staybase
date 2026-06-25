@@ -21,11 +21,17 @@ import { GhostButton } from "../components/GhostButton";
 import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { auth } from "../firebase/auth";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 export function RewardsLandingPage() {
   const shouldReduceMotion = useReducedMotion();
   const navigate = useNavigate();
   const { user, memberProfile, loading, refreshMemberProfile } = useGuestAuth();
+  const { rewards } = usePublicSiteContent();
+  const heroPhoto = rewards.heroPhotoUrl;
+  const heroEyebrow = rewards.heroEyebrow;
+  const heroHeading = rewards.heroHeading;
+  const heroSubtext = rewards.heroSubtext;
 
   // Real enroll state — per audit S2.4 / decision #49 this is now
   // wired to the server-side /api/members/register route. The
@@ -96,7 +102,7 @@ export function RewardsLandingPage() {
           <img
             className="w-full h-full object-cover"
             alt="Warm boutique hotel lobby interior at sunset"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxE3ob-vSO4zxT_VMu0OviqdIAMTOtgsJXzWeddVJ-6-QmLSHHkERJKmN_zfFFeGvMrFhzST6Xoc-MNtubwhDrYU3ZjBFSjACtuAwnlBaH4z6Ts-UB0kYlC38ol_42OAWXX2iUGuPhL2ZSvUac1bc6j0zvNGyAyCNMnyrg9X2dwyDXafz7n_EIfEX_xAI6S2D_XhfdiedtLyzdH-SxVWzm25SwLm9ovUul16TnLGbrr9fj2Jmezvw2N3x4T49eU2RDAchvC4pc-2UY"
+            src={heroPhoto}
           />
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/65 to-transparent z-0" />
@@ -108,13 +114,13 @@ export function RewardsLandingPage() {
           variants={fadeUp}
         >
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/20 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary-light mb-6 backdrop-blur-sm">
-            <Sparkles size={14} /> {config.rewardsName} Loyalty Program
+            <Sparkles size={14} /> {config.rewardsName} {heroEyebrow}
           </div>
           <h1 className="font-heading text-4xl leading-none text-white sm:text-7xl lg:text-8xl tracking-tight">
-            Earn Every Stay
+            {heroHeading}
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-200 sm:text-lg">
-            Join Spark Rewards and unlock a world of exclusive benefits and heartfelt hospitality. Experience the pinnacle of boutique comfort with personalized rewards tailored just for you.
+            {heroSubtext}
           </p>
 
           <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row sm:items-center">

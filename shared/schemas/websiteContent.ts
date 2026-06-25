@@ -1,0 +1,99 @@
+import { z } from "zod";
+
+// Per-page hero shape used by every public page (homepage, about,
+// corporate, rewards). All fields are optional — when empty the
+// guest app falls back to the deploy-time assets in
+// `guest-app/src/data/homepage.ts`. Consumed by Settings → Branding
+// in the admin app and surfaced through
+// `guest-app/src/hooks/usePublicSiteContent.ts`.
+export const PublicHeroSchema = z.object({
+  heroEyebrow: z.string().default(""),
+  heroHeading: z.string().default(""),
+  heroSubtext: z.string().default(""),
+  heroPhotoUrl: z.string().default("")
+});
+
+export const HomepageContentSchema = PublicHeroSchema.extend({
+  amenities: z.array(
+    z.object({
+      title: z.string(),
+      description: z.string(),
+      icon: z.string().optional(),
+      isEnabled: z.boolean().optional()
+    })
+  ),
+  featuredRoomIds: z.array(z.string()),
+  services: z.array(
+    z.object({
+      title: z.string(),
+      description: z.string(),
+      icon: z.string().optional(),
+      isEnabled: z.boolean().optional()
+    })
+  ),
+  sparkRewards: z.object({
+    heading: z.string(),
+    description: z.string(),
+    perks: z.array(
+      z.object({
+        title: z.string(),
+        description: z.string().optional(),
+        icon: z.string().optional(),
+        isEnabled: z.boolean().optional()
+      })
+    ),
+    isEnabled: z.boolean()
+  })
+});
+
+export const AboutContentSchema = z.object({
+  heroHeading: z.string().default(""),
+  heroPhotoUrl: z.string().default(""),
+  missionStatement: z.string().default(""),
+  visionStatement: z.string().default(""),
+  hotelStory: z.string().default("")
+});
+
+export const CorporateContentSchema = PublicHeroSchema.extend({
+  perks: z.array(
+    z.object({
+      title: z.string(),
+      description: z.string(),
+      icon: z.string().optional(),
+      isEnabled: z.boolean().optional()
+    })
+  )
+});
+
+export const RewardsContentSchema = PublicHeroSchema;
+
+// Runtime branding overrides (set by the admin from Settings →
+// Branding). All fields default to "" — the guest app falls back to
+// `hotel.config.ts → logos.*` via `resolveLogo()`. Logo selection for
+// the Navbar is also contextual: `logoNavbar` for the scrolled/solid
+// state, `logoNavbarOnDark` for the over-hero transparent state.
+export const BrandingConfigSchema = z.object({
+  logoNavbar: z.string().default(""),
+  logoNavbarOnDark: z.string().default(""),
+  logoFooter: z.string().default("")
+});
+
+export const WebsiteContentSchema = z.object({
+  homepage: HomepageContentSchema,
+  about: AboutContentSchema,
+  corporate: CorporateContentSchema,
+  rewards: RewardsContentSchema,
+  branding: BrandingConfigSchema,
+  privacyPolicyBody: z.string().optional(),
+  cancellationPolicy: z.string().optional(),
+  houseRules: z.string().optional(),
+  privacyPolicyLastUpdated: z.string().optional()
+});
+
+export type PublicHero = z.infer<typeof PublicHeroSchema>;
+export type HomepageContent = z.infer<typeof HomepageContentSchema>;
+export type AboutContent = z.infer<typeof AboutContentSchema>;
+export type CorporateContent = z.infer<typeof CorporateContentSchema>;
+export type RewardsContent = z.infer<typeof RewardsContentSchema>;
+export type BrandingConfig = z.infer<typeof BrandingConfigSchema>;
+export type WebsiteContent = z.infer<typeof WebsiteContentSchema>;

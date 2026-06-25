@@ -14,6 +14,28 @@ const singleImage =
 export const homepageHeroImage =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuCTef7Kgv1QtQkGMUF3IjkJC-VCn1qzPu4wpvFbsZfXP9IJv_dhrx4JJo34Kuxb5ka-hagWW7LvX18wbAck93GBqVBjEn24s5FzC7mAt28gar-1qQn34heG8ehz4jsBY1iBDf5G9vmLwEbivs1ATFikNbWpY6Gjd7_RerEeeiF0pEo1vNo_X_ZFlRPCy9mO_AMQf01x7s0a-pMAG15CWDWwHA_AFNAFp3UqpV-rcx8B6AZY0-2II8F4vAwYUzvd-52h1OJ_fKdE96h2";
 
+// Per-page hero fallbacks. Each is read by `usePublicSiteContent` when
+// the corresponding `settings/websiteContent.<section>.heroPhotoUrl` is
+// empty (i.e. the admin has not uploaded a custom image). Promoting
+// these from inline string literals in each page keeps a single source
+// of truth and matches the existing `homepageHeroImage` pattern.
+export const aboutHeroImage =
+  "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&q=80&w=1600&h=600";
+export const corporateHeroImage =
+  "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80";
+export const rewardsHeroImage =
+  "https://lh3.googleusercontent.com/aida-public/AB6AXuDxE3ob-vSO4zxT_VMu0OviqdIAMTOtgsJXzWeddVJ-6-QmLSHHkERJKmN_zfFFeGvMrFhzST6Xoc-MNtubwhDrYU3ZjBFSjACtuAwnlBaH4z6Ts-UB0kYlC38ol_42OAWXX2iUGuPhL2ZSvUac1bc6j0zvNGyAyCNMnyrg9X2dwyDXafz7n_EIfEX_xAI6S2D_XhfdiedtLyzdH-SxVWzm25SwLm9ovUul16TnLGbrr9fj2Jmezvw2N3x4T49eU2RDAchvC4pc-2UY";
+
+// Per-page hero text fallbacks. The admin can override any of these
+// from Settings → Branding; the constants below are the values that
+// were previously hardcoded in each page component.
+export const aboutHeroHeading = "about us";
+export const corporateHeroEyebrow = "Curated hospitality for executive comfort";
+export const rewardsHeroEyebrowSuffix = "Loyalty Program"; // used as "{config.rewardsName} {suffix}"
+export const rewardsHeroHeading = "Earn Every Stay";
+export const rewardsHeroSubtext =
+  "Join Spark Rewards and unlock a world of exclusive benefits and heartfelt hospitality. Experience the pinnacle of boutique comfort with personalized rewards tailored just for you.";
+
 // Per-room-type static fallback images. Consumed by
 // `getRoomTypeImages(roomTypes, room.type)` when the live `useRoomTypes`
 // hook has not yet returned a non-empty `imageUrls[]` for the type.
