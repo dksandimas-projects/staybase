@@ -110,23 +110,35 @@ export function HomePage() {
         ) : (
           <HeroSkeleton />
         )}
-        <div className="absolute inset-0 bg-gray-950/45" />
+        {/* Stronger, directional gradient: light at the top so the
+            photo + navbar read well, heavier through the middle
+            and bottom so the centered text always pops. The old
+            flat `bg-gray-950/45` was easy to read on dark photos
+            but disappeared on lighter / high-contrast uploads. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/55 to-black/70" />
         <motion.div
           animate="visible"
           className="relative z-10 mx-auto max-w-4xl pt-16"
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <p className="font-heading text-lg italic text-white/90 sm:text-2xl">{config.tagline}</p>
-          <h1 className="mt-6 font-heading text-5xl leading-tight text-white sm:text-7xl">{homepage.heroHeading}</h1>
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
+          {/* `drop-shadow-*` adds a soft glow behind the text so it
+              reads on any background. lg on the headline, md on
+              the supporting copy. */}
+          <p className="font-heading text-lg italic text-white/90 drop-shadow-md sm:text-2xl">
+            {config.tagline}
+          </p>
+          <h1 className="mt-6 font-heading text-5xl leading-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)] sm:text-7xl">
+            {homepage.heroHeading}
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/90 drop-shadow-md sm:text-lg">
             {homepage.heroSubtext}
           </p>
           <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
-            <PrimaryButton to="/book" className="shadow-lg">
+            <PrimaryButton to="/book" className="shadow-lg drop-shadow-md">
               Book your stay
             </PrimaryButton>
-            <GhostButton to="/rooms" className="border-white text-white hover:bg-white/10">
+            <GhostButton to="/rooms" className="border-white text-white drop-shadow-sm hover:bg-white/10">
               View rooms
             </GhostButton>
           </div>

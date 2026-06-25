@@ -494,3 +494,80 @@ describe("No hero fallback flash — initial state must not show the static imag
     }
   });
 });
+
+describe("Hero text legibility — darker overlay + drop-shadow on all 4 heroes", () => {
+  // Background: the original hero overlays (a flat
+  // `bg-gray-950/45` on Home/About and a thin
+  // `via-gray-950/65` gradient on Corporate/Rewards) failed on
+  // light / high-contrast admin uploads — the white text
+  // disappeared into the photo. The fix unifies all four
+  // heroes with a stronger directional gradient plus a
+  // `drop-shadow-*` glow on the text so it always reads.
+
+  const sources: Record<"homepage" | "about" | "corporate" | "rewards", string> = {
+    homepage: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/HomePage.tsx"), "utf8"),
+    about: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/AboutPage.tsx"), "utf8"),
+    corporate: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/CorporateStaysPage.tsx"), "utf8"),
+    rewards: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/RewardsLandingPage.tsx"), "utf8")
+  };
+
+  for (const [name, src] of Object.entries(sources)) {
+    it(`${name} uses a gradient overlay (not just a flat color)`, () => {
+      expect(src, `${name} must use bg-gradient-`).toMatch(/bg-gradient-to-[bt]\b/);
+    });
+
+    it(`${name}'s h1 has a drop-shadow for legibility`, () => {
+      // The h1 is the biggest text and most likely to collide
+      // with a bright patch in the photo. A custom
+      // drop-shadow blur keeps the headline readable without
+      // hiding the photo behind an opaque black bar.
+      expect(src, `${name}'s h1 must have a drop-shadow`).toMatch(/<h1[^>]*drop-shadow/);
+    });
+
+    it(`${name}'s hero text (subtext or eyebrow) has a drop-shadow-md or larger`, () => {
+      // The subtext / eyebrow is smaller and the white color
+      // tends to wash out on light photos. A `drop-shadow-md`
+      // or arbitrary drop-shadow utility on the supporting copy
+      // keeps it legible.
+      const hasDropShadow = /drop-shadow-md|drop-shadow-lg|drop-shadow-xl|drop-shadow-\[/.test(src);
+      expect(hasDropShadow, `${name} must have at least one drop-shadow-* utility on the hero text`).toBe(true);
+    });
+  }
+
+  it("HomePage uses a top-to-bottom gradient (light top, heavy bottom)", () => {
+    // The homepage text is centered, so a `to-b` gradient
+    // darkens the lower half (where the text sits) more than
+    // the upper half (where the navbar + photo read).
+    expect(sources.homepage).toMatch(/bg-gradient-to-b/);
+    expect(sources.homepage).toMatch(/from-black\/40[\s\S]*?via-black\/55[\s\S]*?to-black\/70/);
+  });
+
+  it("HomePage no longer uses the old flat bg-gray-950/45 overlay", () => {
+    // The old flat overlay was a 45% black blanket that hid
+    // the photo and still didn't help on light backgrounds.
+    // Replaced by the gradient. Strip comments so the
+    // migration note in the new code (which mentions the old
+    // value) doesn't trip the assertion.
+    const heroSection = sources.homepage
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+      .match(/<section[\s\S]*?<\/section>/);
+    expect(heroSection, "homepage must have a hero <section>").toBeTruthy();
+    expect(heroSection![0]).not.toMatch(/bg-gray-950\/45/);
+  });
+
+  it("CorporateStaysPage uses a stronger gradient (opaque at the bottom)", () => {
+    // The old gradient was `via-gray-950/70 to-transparent`,
+    // which kept the bottom too light on light photos. The
+    // fix uses `to-gray-950/90` (opaque at the bottom).
+    expect(sources.corporate).toMatch(/to-gray-950\/90/);
+  });
+
+  it("RewardsLandingPage uses a stronger gradient (opaque at the bottom)", () => {
+    expect(sources.rewards).toMatch(/to-gray-950\/90/);
+  });
+
+  it("AboutPage uses a top-to-bottom gradient (light top, heavy bottom)", () => {
+    expect(sources.about).toMatch(/bg-gradient-to-b/);
+  });
+});
