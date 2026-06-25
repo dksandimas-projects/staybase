@@ -3,6 +3,12 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import config from "@config";
 import {
+  PUBLIC_SITE_CONTENT_CACHE_KEY,
+  PUBLIC_SITE_CONTENT_CACHE_TTL_MS,
+  readCacheWithTtl,
+  writeCache
+} from "@spark-inn/shared";
+import {
   homepageHeroImage,
   aboutHeroImage,
   corporateHeroImage,
@@ -180,8 +186,15 @@ function buildSparkRewards(raw: unknown): SparkRewardsPromo {
 }
 
 function buildFallback(): PublicSiteContent {
+  // Used in two places:
+  //   1. As the *post-load* shape — i.e. what to render when
+  //      Firestore has no custom override. Image URLs are
+  //      pre-populated with the static `data/homepage.ts`
+  //      fallbacks so the page can render immediately.
+  //   2. As the source for individual section defaults during
+  //      the Firestore merge (see the `useEffect` body).
   return {
-    loading: true,
+    loading: false,
     homepage: {
       heroEyebrow: "",
       heroHeading: FALLBACK_HERO_HEADING,
@@ -230,6 +243,60 @@ function buildFallback(): PublicSiteContent {
   };
 }
 
+// Empty initial state — used when there's no localStorage cache
+// (first visit). All `heroPhotoUrl` fields are intentionally
+// empty so the page renders a skeleton / neutral background
+// instead of the static fallback while Firestore loads. This
+// fixes the "fallback image flashes before the custom upload
+// loads" bug observed on the homepage. Once Firestore resolves,
+// the hook populates the URLs (custom override or static
+// fallback) via the `pickString` merge in the `useEffect`.
+function buildEmptyState(): PublicSiteContent {
+  return {
+    loading: true,
+    homepage: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: "",
+      amenities: [],
+      featuredRoomIds: [],
+      services: [],
+      sparkRewards: {
+        heading: "",
+        description: "",
+        perks: [],
+        isEnabled: false
+      }
+    },
+    about: {
+      heroHeading: "",
+      heroPhotoUrl: "",
+      missionStatement: "",
+      visionStatement: "",
+      hotelStory: ""
+    },
+    corporate: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: "",
+      perks: []
+    },
+    rewards: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
+    },
+    branding: {
+      logoNavbar: "",
+      logoNavbarOnDark: "",
+      logoFooter: ""
+    }
+  };
+}
+
 let cachedPromise: Promise<{ websiteContent: Record<string, unknown> | null; hotelConfig: Record<string, unknown> | null }> | null = null;
 
 function loadFromFirestore() {
@@ -251,10 +318,29 @@ function loadFromFirestore() {
   return cachedPromise;
 }
 
+// What we cache in localStorage: the full state (with fallback
+// URLs applied) but without the transient `loading` flag. The
+// `loading` field is added back on read with `loading: false` —
+// a cached value is, by definition, a "loaded" value.
+type CachedContent = Omit<PublicSiteContent, "loading">;
+
 export function usePublicSiteContent(): PublicSiteContent {
+  // Initial state is either:
+  //   - the cached value (returning visitor, <5 min old) → instant
+  //     paint, no fallback flash, `loading: false` because the
+  //     cached value is already the loaded shape
+  //   - the empty state (first visit, no cache, or stale) → all
+  //     heroPhotoUrl fields are empty so the page renders a
+  //     skeleton until Firestore resolves
   const [content, setContent] = useState<PublicSiteContent>(() => {
-    const fb = buildFallback();
-    return { ...fb, loading: true };
+    const cached = readCacheWithTtl<CachedContent>(
+      PUBLIC_SITE_CONTENT_CACHE_KEY,
+      PUBLIC_SITE_CONTENT_CACHE_TTL_MS
+    );
+    if (cached) {
+      return { ...cached, loading: false };
+    }
+    return buildEmptyState();
   });
 
   useEffect(() => {
@@ -299,7 +385,7 @@ export function usePublicSiteContent(): PublicSiteContent {
           ? (raw[key] as string)
           : fallback;
 
-      setContent({
+      const next: PublicSiteContent = {
         loading: false,
         homepage: {
           heroEyebrow: "", // homepage eyebrow remains hardcoded (uses config.tagline)
@@ -345,7 +431,16 @@ export function usePublicSiteContent(): PublicSiteContent {
           logoNavbarOnDark: pickString(brandingRaw, "logoNavbarOnDark", ""),
           logoFooter: pickString(brandingRaw, "logoFooter", "")
         }
-      });
+      };
+
+      setContent(next);
+      // Write the resolved shape to localStorage so the next
+      // mount is instant. We strip `loading` (transient) and
+      // write the full resolved content (with fallback URLs
+      // applied) so the cached value is renderable as-is.
+      const { loading: _loading, ...toCache } = next;
+      void _loading;
+      writeCache(PUBLIC_SITE_CONTENT_CACHE_KEY, toCache);
     });
     return () => {
       cancelled = true;
