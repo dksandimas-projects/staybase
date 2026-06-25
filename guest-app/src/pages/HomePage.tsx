@@ -193,6 +193,7 @@ export function HomePage() {
               checkOut={checkOut}
               onCheckInChange={setCheckIn}
               onCheckOutChange={setCheckOut}
+              orientation="horizontal"
             />
             <label className="grid gap-2 text-sm font-medium text-gray-700 lg:min-w-36">
               Guests
