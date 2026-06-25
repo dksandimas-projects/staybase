@@ -408,6 +408,19 @@ export interface AdminContextType {
   uploadRoomTypePhoto: (typeValue: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
   removeRoomTypePhoto: (typeValue: string, url: string) => Promise<{ success: boolean; error?: string }>;
   reorderRoomTypePhotos: (typeValue: string, imageUrls: string[]) => Promise<{ success: boolean; error?: string }>;
+
+  // Branding assets (per-page hero photos + logo overrides). The
+  // `key` is a dot-path inside `settings/websiteContent`, e.g.
+  // "homepage.heroPhotoUrl" or "branding.logoNavbarOnDark". Each
+  // upload overwrites the Firestore URL; `resetBrandingAsset` clears
+  // it back to the empty default (so the guest app falls back to
+  // the deploy-time `public/brand/` asset or the static fallback in
+  // `guest-app/src/data/homepage.ts`).
+  uploadBrandingAsset: (
+    key: string,
+    file: File
+  ) => Promise<{ success: boolean; error?: string; url?: string }>;
+  resetBrandingAsset: (key: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -1887,14 +1900,29 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       heroPhotoUrl: ""
     },
     about: {
+      heroHeading: "about us",
       heroPhotoUrl: ""
     },
     corporate: {
+      heroEyebrow: "Curated hospitality for executive comfort",
       heroHeading: "Corporate Boardrooms",
       heroSubtext: "Flexible spaces.",
+      heroPhotoUrl: "",
       perks: [
         { title: "Negotitated Rates", description: "Discounted room charges.", icon: "percent" }
       ]
+    },
+    rewards: {
+      heroEyebrow: "Loyalty Program",
+      heroHeading: "Earn Every Stay",
+      heroSubtext:
+        "Join Spark Rewards and unlock a world of exclusive benefits and heartfelt hospitality. Experience the pinnacle of boutique comfort with personalized rewards tailored just for you.",
+      heroPhotoUrl: ""
+    },
+    branding: {
+      logoNavbar: "",
+      logoNavbarOnDark: "",
+      logoFooter: ""
     }
   });
 
@@ -2155,6 +2183,101 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Per `plan/features/SETTINGS.md §Branding`: upload (or reset) a
+  // single branding asset (per-page hero photo or logo override).
+  // The `key` is a dot-path inside `settings/websiteContent` — e.g.
+  // "homepage.heroPhotoUrl", "about.heroPhotoUrl",
+  // "corporate.heroPhotoUrl", "rewards.heroPhotoUrl",
+  // "branding.logoNavbar", "branding.logoNavbarOnDark",
+  // "branding.logoFooter". Uploaded to Firebase Storage at
+  // `assets/branding/{key-as-path}/{timestamp}-{safeName}` (the
+  // `match /assets/branding/{fileName}` rule already exists with
+  // public read + staff write — see `firebase/storage.rules`).
+  // The download URL is written back to Firestore via a merged
+  // `setDoc` on the `settings/websiteContent` document so the
+  // existing `onSnapshot` listener updates the admin UI in place.
+  const BRANDING_KEY_RE = /^(homepage|about|corporate|rewards)\.hero(PhotoUrl|Heading|Subtext|Eyebrow)$|^branding\.(logoNavbar|logoNavbarOnDark|logoFooter)$/;
+
+  function parseBrandingKey(key: string): { section: string; field: string } | null {
+    if (!BRANDING_KEY_RE.test(key)) return null;
+    const [section, ...rest] = key.split(".");
+    return { section, field: rest.join(".") };
+  }
+
+  const uploadBrandingAsset = async (
+    key: string,
+    file: File
+  ): Promise<{ success: boolean; error?: string; url?: string }> => {
+    const parsed = parseBrandingKey(key);
+    if (!parsed) {
+      const err = `Invalid branding key: ${key}`;
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      // `key` is safe (BRANDING_KEY_RE restricts it to known paths) so
+      // it can be embedded directly in the storage path.
+      const path = `assets/branding/${key.replace(/\./g, "/")}/${Date.now()}-${safeName}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      await setDoc(
+        doc(db, "settings", "websiteContent"),
+        { [parsed.section]: { [parsed.field]: url } },
+        { merge: true }
+      );
+      notify.success("Uploaded", `${key} updated.`);
+      return { success: true, url };
+    } catch (error) {
+      console.error(`Error uploading branding asset ${key}:`, error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to upload", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Reset a branding asset: write an empty string so the guest app
+  // falls back to the deploy-time static logo (from
+  // `hotel.config.ts → logos.*`) or the static image fallback in
+  // `guest-app/src/data/homepage.ts`. Best-effort deletes the
+  // underlying Storage object — failures here are non-fatal since
+  // the URL is no longer referenced.
+  const resetBrandingAsset = async (key: string): Promise<{ success: boolean; error?: string }> => {
+    const parsed = parseBrandingKey(key);
+    if (!parsed) {
+      const err = `Invalid branding key: ${key}`;
+      notify.error("Reset failed", err);
+      return { success: false, error: err };
+    }
+    try {
+      const current = (websiteContent as Record<string, unknown>)?.[parsed.section] as
+        | Record<string, unknown>
+        | undefined;
+      const previousUrl = typeof current?.[parsed.field] === "string" ? (current?.[parsed.field] as string) : "";
+      await setDoc(
+        doc(db, "settings", "websiteContent"),
+        { [parsed.section]: { [parsed.field]: "" } },
+        { merge: true }
+      );
+      if (previousUrl) {
+        try {
+          const fileRef = storageRef(storage, previousUrl);
+          await deleteObject(fileRef);
+        } catch (storageErr) {
+          console.warn(`Storage delete for ${previousUrl} skipped:`, storageErr);
+        }
+      }
+      notify.success("Reset", `${key} reverted to default.`);
+      return { success: true };
+    } catch (error) {
+      console.error(`Error resetting branding asset ${key}:`, error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to reset", message);
+      return { success: false, error: message };
+    }
+  };
+
   // Staff Accounts — live from `guests/{uid}` where role is staff (front-desk | admin).
   // Per SETTINGS.md §4 + audit S5.2: this is the source of truth for the Staff
   // Accounts tab. The /api/admin/create-staff and /api/admin/disable-staff
@@ -2340,6 +2463,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         uploadRoomTypePhoto,
         removeRoomTypePhoto,
         reorderRoomTypePhotos,
+        uploadBrandingAsset,
+        resetBrandingAsset,
         staff,
         createStaff,
         disableStaff

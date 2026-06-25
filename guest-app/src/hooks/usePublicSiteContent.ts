@@ -2,7 +2,20 @@ import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import config from "@config";
-import { homepageHeroImage, amenities as fallbackAmenities, services as fallbackServices, rewardPerks as fallbackRewardPerks } from "../data/homepage";
+import {
+  homepageHeroImage,
+  aboutHeroImage,
+  corporateHeroImage,
+  rewardsHeroImage,
+  aboutHeroHeading,
+  corporateHeroEyebrow,
+  rewardsHeroEyebrowSuffix,
+  rewardsHeroHeading,
+  rewardsHeroSubtext,
+  amenities as fallbackAmenities,
+  services as fallbackServices,
+  rewardPerks as fallbackRewardPerks
+} from "../data/homepage";
 
 export interface ContentItem {
   title: string;
@@ -18,10 +31,18 @@ export interface SparkRewardsPromo {
   isEnabled: boolean;
 }
 
-export interface PublicHomepageContent {
+// Per-page hero shape used by every public page (homepage, about,
+// corporate, rewards). All fields default to the values in
+// `data/homepage.ts` when empty in Firestore. Keeps a single fallback
+// chain: admin override > static data > hardcoded UI copy.
+export interface PublicHeroContent {
+  heroEyebrow: string;
   heroHeading: string;
   heroSubtext: string;
   heroPhotoUrl: string;
+}
+
+export interface PublicHomepageContent extends PublicHeroContent {
   amenities: ContentItem[];
   featuredRoomIds: string[];
   services: ContentItem[];
@@ -29,17 +50,28 @@ export interface PublicHomepageContent {
 }
 
 export interface PublicAboutContent {
+  heroHeading: string;
   heroPhotoUrl: string;
   missionStatement: string;
   visionStatement: string;
   hotelStory: string;
 }
 
-export interface PublicCorporateContent {
-  heroHeading: string;
-  heroSubtext: string;
-  heroPhotoUrl: string;
+export interface PublicCorporateContent extends PublicHeroContent {
   perks: ContentItem[];
+}
+
+export interface PublicRewardsContent extends PublicHeroContent {}
+
+// Runtime branding overrides (set by the admin from Settings →
+// Branding). All fields default to "" — the guest app falls back to
+// `hotel.config.ts → logos.*` via `resolveLogo()`. Logo selection for
+// the Navbar is also contextual: `logoNavbar` for the scrolled/solid
+// state, `logoNavbarOnDark` for the over-hero transparent state.
+export interface PublicBranding {
+  logoNavbar: string;
+  logoNavbarOnDark: string;
+  logoFooter: string;
 }
 
 export interface PublicSiteContent {
@@ -47,6 +79,8 @@ export interface PublicSiteContent {
   homepage: PublicHomepageContent;
   about: PublicAboutContent;
   corporate: PublicCorporateContent;
+  rewards: PublicRewardsContent;
+  branding: PublicBranding;
 }
 
 const FALLBACK_HERO_HEADING = "Your sanctuary in Bohol";
@@ -67,10 +101,6 @@ const FALLBACK_SPARK_REWARDS = {
 const FALLBACK_CORPORATE_HERO_HEADING = "Elevated Stays for Modern Business";
 const FALLBACK_CORPORATE_HERO_SUBTEXT =
   "Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol.";
-const FALLBACK_ABOUT_HERO =
-  "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&q=80&w=1600&h=600";
-const FALLBACK_CORPORATE_HERO =
-  "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80";
 const FALLBACK_ABOUT_MISSION =
   "To deliver peaceful, consistent stays shaped by genuine, intentional hospitality. We believe that hospitality is not merely a service, but a philosophy of care where every detail is deliberate and every guest feels deeply valued.";
 const FALLBACK_ABOUT_VISION = (brand: string) =>
@@ -153,6 +183,7 @@ function buildFallback(): PublicSiteContent {
   return {
     loading: true,
     homepage: {
+      heroEyebrow: "",
       heroHeading: FALLBACK_HERO_HEADING,
       heroSubtext: FALLBACK_HERO_SUBTEXT,
       heroPhotoUrl: homepageHeroImage,
@@ -172,16 +203,29 @@ function buildFallback(): PublicSiteContent {
       sparkRewards: FALLBACK_SPARK_REWARDS
     },
     about: {
-      heroPhotoUrl: FALLBACK_ABOUT_HERO,
+      heroHeading: aboutHeroHeading,
+      heroPhotoUrl: aboutHeroImage,
       missionStatement: FALLBACK_ABOUT_MISSION,
       visionStatement: FALLBACK_ABOUT_VISION(config.brandName),
       hotelStory: FALLBACK_ABOUT_STORY(config.brandName)
     },
     corporate: {
+      heroEyebrow: corporateHeroEyebrow,
       heroHeading: FALLBACK_CORPORATE_HERO_HEADING,
       heroSubtext: FALLBACK_CORPORATE_HERO_SUBTEXT,
-      heroPhotoUrl: FALLBACK_CORPORATE_HERO,
+      heroPhotoUrl: corporateHeroImage,
       perks: FALLBACK_CORPORATE_PERKS
+    },
+    rewards: {
+      heroEyebrow: rewardsHeroEyebrowSuffix,
+      heroHeading: rewardsHeroHeading,
+      heroSubtext: rewardsHeroSubtext,
+      heroPhotoUrl: rewardsHeroImage
+    },
+    branding: {
+      logoNavbar: "",
+      logoNavbarOnDark: "",
+      logoFooter: ""
     }
   };
 }
@@ -231,6 +275,14 @@ export function usePublicSiteContent(): PublicSiteContent {
         websiteContent && typeof websiteContent.corporate === "object" && websiteContent.corporate !== null
           ? (websiteContent.corporate as Record<string, unknown>)
           : null;
+      const rewardsRaw =
+        websiteContent && typeof websiteContent.rewards === "object" && websiteContent.rewards !== null
+          ? (websiteContent.rewards as Record<string, unknown>)
+          : null;
+      const brandingRaw =
+        websiteContent && typeof websiteContent.branding === "object" && websiteContent.branding !== null
+          ? (websiteContent.branding as Record<string, unknown>)
+          : null;
 
       const rawAmenities = homepageRaw ? toContentItemArray(homepageRaw.amenities) : [];
       const rawServices = homepageRaw ? toContentItemArray(homepageRaw.services) : [];
@@ -242,31 +294,26 @@ export function usePublicSiteContent(): PublicSiteContent {
       const hc = (hotelConfig ?? {}) as Record<string, unknown>;
       const brandName = typeof hc.hotelName === "string" && hc.hotelName.length > 0 ? hc.hotelName : config.brandName;
 
+      const pickString = (raw: Record<string, unknown> | null, key: string, fallback: string) =>
+        typeof raw?.[key] === "string" && (raw[key] as string).length > 0
+          ? (raw[key] as string)
+          : fallback;
+
       setContent({
         loading: false,
         homepage: {
-          heroHeading:
-            (typeof homepageRaw?.heroHeading === "string" && homepageRaw.heroHeading.length > 0
-              ? homepageRaw.heroHeading
-              : fb.homepage.heroHeading),
-          heroSubtext:
-            (typeof homepageRaw?.heroSubtext === "string" && homepageRaw.heroSubtext.length > 0
-              ? homepageRaw.heroSubtext
-              : fb.homepage.heroSubtext),
-          heroPhotoUrl:
-            (typeof homepageRaw?.heroPhotoUrl === "string" && homepageRaw.heroPhotoUrl.length > 0
-              ? homepageRaw.heroPhotoUrl
-              : fb.homepage.heroPhotoUrl),
+          heroEyebrow: "", // homepage eyebrow remains hardcoded (uses config.tagline)
+          heroHeading: pickString(homepageRaw, "heroHeading", fb.homepage.heroHeading),
+          heroSubtext: pickString(homepageRaw, "heroSubtext", fb.homepage.heroSubtext),
+          heroPhotoUrl: pickString(homepageRaw, "heroPhotoUrl", fb.homepage.heroPhotoUrl),
           amenities: rawAmenities.length > 0 ? rawAmenities : fb.homepage.amenities,
           featuredRoomIds: rawFeatured.length > 0 ? rawFeatured : fb.homepage.featuredRoomIds,
           services: rawServices.length > 0 ? rawServices : fb.homepage.services,
           sparkRewards: homepageRaw ? buildSparkRewards(homepageRaw.sparkRewards) : fb.homepage.sparkRewards
         },
         about: {
-          heroPhotoUrl:
-            (typeof aboutRaw?.heroPhotoUrl === "string" && aboutRaw.heroPhotoUrl.length > 0
-              ? aboutRaw.heroPhotoUrl
-              : fb.about.heroPhotoUrl),
+          heroHeading: pickString(aboutRaw, "heroHeading", fb.about.heroHeading),
+          heroPhotoUrl: pickString(aboutRaw, "heroPhotoUrl", fb.about.heroPhotoUrl),
           missionStatement:
             (typeof hc.missionStatement === "string" && hc.missionStatement.length > 0
               ? hc.missionStatement
@@ -281,19 +328,22 @@ export function usePublicSiteContent(): PublicSiteContent {
               : FALLBACK_ABOUT_STORY(brandName))
         },
         corporate: {
-          heroHeading:
-            (typeof corporateRaw?.heroHeading === "string" && corporateRaw.heroHeading.length > 0
-              ? corporateRaw.heroHeading
-              : fb.corporate.heroHeading),
-          heroSubtext:
-            (typeof corporateRaw?.heroSubtext === "string" && corporateRaw.heroSubtext.length > 0
-              ? corporateRaw.heroSubtext
-              : fb.corporate.heroSubtext),
-          heroPhotoUrl:
-            (typeof corporateRaw?.heroPhotoUrl === "string" && corporateRaw.heroPhotoUrl.length > 0
-              ? corporateRaw.heroPhotoUrl
-              : fb.corporate.heroPhotoUrl),
+          heroEyebrow: pickString(corporateRaw, "heroEyebrow", fb.corporate.heroEyebrow),
+          heroHeading: pickString(corporateRaw, "heroHeading", fb.corporate.heroHeading),
+          heroSubtext: pickString(corporateRaw, "heroSubtext", fb.corporate.heroSubtext),
+          heroPhotoUrl: pickString(corporateRaw, "heroPhotoUrl", fb.corporate.heroPhotoUrl),
           perks: rawPerks.length > 0 ? rawPerks : fb.corporate.perks
+        },
+        rewards: {
+          heroEyebrow: pickString(rewardsRaw, "heroEyebrow", fb.rewards.heroEyebrow),
+          heroHeading: pickString(rewardsRaw, "heroHeading", fb.rewards.heroHeading),
+          heroSubtext: pickString(rewardsRaw, "heroSubtext", fb.rewards.heroSubtext),
+          heroPhotoUrl: pickString(rewardsRaw, "heroPhotoUrl", fb.rewards.heroPhotoUrl)
+        },
+        branding: {
+          logoNavbar: pickString(brandingRaw, "logoNavbar", ""),
+          logoNavbarOnDark: pickString(brandingRaw, "logoNavbarOnDark", ""),
+          logoFooter: pickString(brandingRaw, "logoFooter", "")
         }
       });
     });

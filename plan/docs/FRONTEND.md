@@ -176,9 +176,12 @@ Logo file paths come from `hotel.config.ts → logos.*`. Never hardcode logo fil
 |---|---|---|
 | Full Lockup — Standard | `logos.standard` | Default — light backgrounds, documents, receipts |
 | Full Lockup — White | `logos.white` | Dark backgrounds, hero overlays, footer, sidebar |
-| Navbar Horizontal | `logos.navbar` | Navigation bar ONLY |
+| Navbar Horizontal | `logos.navbar` | Navigation bar ONLY — scrolled/solid state and non-hero pages |
+| Navbar (over dark) | `branding.logoNavbarOnDark` (runtime) or `logos.navbar` (fallback) | Navigation bar transparent over a dark hero. Use a light/white variant for visibility. See `plan/docs/WHITE-LABEL.md §Runtime Branding Overrides`. |
 | Icon Only | `logos.icon` | Favicons, loading states, small formats |
 | Wordmark Only | `logos.wordmark` | Email headers, letterheads |
+
+**Logo overrides** — the three navbar/footer variants (`logoNavbar`, `logoNavbarOnDark`, `logoFooter`) can be uploaded from Settings → Branding. Each override wins over its `config.logos.*` counterpart; if only one navbar variant is set, it is mirrored across both states. See `plan/docs/WHITE-LABEL.md §Runtime Branding Overrides`.
 
 **Logo rules:** Never stretch, distort, recolor, or add effects. Min size (full lockup): 120px height. Navbar: 40px height. Brand icon color must always match `colors.primary`.
 

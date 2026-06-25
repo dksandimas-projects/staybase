@@ -186,7 +186,7 @@ Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl
 
 Single document. Stores editable public page content.
 
-Sections: `homepage` (hero, amenities, featuredRoomIds, services, sparkRewards), `about` (heroPhotoUrl), `corporate` (hero, perks)
+Sections: `homepage` (hero, amenities, featuredRoomIds, services, sparkRewards), `about` (heroHeading, heroPhotoUrl), `corporate` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl, perks), `rewards` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl), `branding` (logoNavbar, logoNavbarOnDark, logoFooter)
 
 **`homepage.services`** — array of service cards shown in the Services section:
 ```
@@ -199,6 +199,31 @@ Default items: Tour Packages, Car Rentals. CTA always links to `/contact`. Hide 
 { heading, description, perks, isEnabled }
 ```
 `perks` uses the same editable card shape as services: `{ title, description, icon, isEnabled }[]`. Hide section entirely if `isEnabled: false`; hide disabled perks within the section.
+
+**Per-page hero fields** (homepage / about / corporate / rewards) — every page with a hero has the same four-string shape: `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl`. All default to empty string. The guest app falls back to `data/homepage.ts` constants when the field is empty:
+
+| Section | Field | Fallback constant in `guest-app/src/data/homepage.ts` |
+|---|---|---|
+| `homepage` | `heroHeading` / `heroSubtext` | "Your sanctuary in Bohol" / "A warm, minimalist stay..." (defined in `usePublicSiteContent.ts`) |
+| `homepage` | `heroPhotoUrl` | `homepageHeroImage` |
+| `about` | `heroHeading` | `aboutHeroHeading` ("about us") |
+| `about` | `heroPhotoUrl` | `aboutHeroImage` |
+| `corporate` | `heroEyebrow` | `corporateHeroEyebrow` |
+| `corporate` | `heroPhotoUrl` | `corporateHeroImage` |
+| `rewards` | `heroEyebrow` | `rewardsHeroEyebrowSuffix` ("Loyalty Program") — rendered as `"{config.rewardsName} {rewards.heroEyebrow}"` |
+| `rewards` | `heroPhotoUrl` | `rewardsHeroImage` |
+
+**`branding`** — runtime logo overrides (set by the admin from Settings → Branding). All default to empty string. The guest app falls back to `hotel.config.ts → logos.*` via `resolveLogo()`:
+
+```
+branding: {
+  logoNavbar: string         // colored version — used in scrolled/solid state and on non-hero pages
+  logoNavbarOnDark: string   // light/white version — used over the dark hero (transparent navbar state)
+  logoFooter: string         // white version for the dark sidebar footer
+}
+```
+
+Logo selection in the Navbar is contextual: when `solid === true` (scrolled, non-hero page) use `logoNavbar`; when `solid === false` (over hero, transparent) use `logoNavbarOnDark`. If only one variant has been uploaded by the admin it is mirrored across both states. Uploads go to Firebase Storage at `assets/branding/branding/{fieldName}/{filename}`; download URL is written to `settings/websiteContent.branding.{fieldName}`. Public read + staff write — see `firebase/storage.rules` `match /assets/branding/{fileName}`.
 
 Additional legal/policy fields (editable by hotel admin from Settings):
 - `privacyPolicyBody` — full privacy policy text (plain text or light markdown)
