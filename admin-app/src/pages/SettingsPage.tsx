@@ -43,6 +43,17 @@ const storeCategories: { value: StoreCategory; label: string }[] = [
 // component shows the live preview (uploaded URL or fallback),
 // exposes an upload button + a reset button when an override exists,
 // and surfaces upload errors inline.
+//
+// `loading` (default `false`) — when `true`, the preview pane
+// renders an animated skeleton instead of the value/fallback. This
+// is the fix for the "fallback image flashes before the custom
+// upload loads" bug on mobile: until the first
+// `settings/websiteContent` snapshot arrives the live `value` is
+// the empty string, which would otherwise resolve to the static
+// `fallback` (logos) or the "No asset yet" placeholder (hero
+// photos). Skeletoning the preview until the snapshot lands is
+// consistent with the guest app's `usePublicSiteContent` pattern
+// (see `buildEmptyState` in that file for the same idea).
 interface BrandingAssetRowProps {
   label: string;
   helper: string;
@@ -52,6 +63,7 @@ interface BrandingAssetRowProps {
   onUpload: (file: File) => Promise<{ success: boolean; error?: string }>;
   onReset: () => Promise<{ success: boolean; error?: string }>;
   previewClassName?: string;
+  loading?: boolean;
 }
 
 function BrandingAssetRow({
@@ -62,7 +74,8 @@ function BrandingAssetRow({
   fallbackLabel,
   onUpload,
   onReset,
-  previewClassName
+  previewClassName,
+  loading = false
 }: BrandingAssetRowProps) {
   const [status, setStatus] = useState<"idle" | "uploading" | "resetting">("idle");
   const [error, setError] = useState("");
@@ -97,7 +110,14 @@ function BrandingAssetRow({
   return (
     <div className="grid gap-4 sm:grid-cols-[120px_1fr] sm:items-start">
       <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-section-bg sm:h-20 sm:w-28">
-        {previewSrc ? (
+        {loading ? (
+          // Skeleton covers the exact same dimensions as the
+          // image / placeholder so the row doesn't shift when
+          // the snapshot lands. `animate-pulse` is a Tailwind
+          // utility — same one used by the rooms page skeletons
+          // elsewhere in the app.
+          <div className="h-full w-full animate-pulse bg-gradient-to-br from-gray-200 to-gray-300" />
+        ) : previewSrc ? (
           <img
             src={previewSrc}
             alt={`${label} preview`}
@@ -163,6 +183,7 @@ export function SettingsPage() {
   const {
     hotelConfig,
     websiteContent,
+    websiteContentLoading,
     rewardsConfig,
     breakfastConfig,
     storeConfig,
@@ -933,6 +954,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("homepage.heroPhotoUrl", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("homepage.heroPhotoUrl")}
+                  loading={websiteContentLoading}
                 />
 
                 <BrandingAssetRow
@@ -945,6 +967,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("about.heroPhotoUrl", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("about.heroPhotoUrl")}
+                  loading={websiteContentLoading}
                 />
 
                 <BrandingAssetRow
@@ -957,6 +980,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("corporate.heroPhotoUrl", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("corporate.heroPhotoUrl")}
+                  loading={websiteContentLoading}
                 />
 
                 <BrandingAssetRow
@@ -969,6 +993,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("rewards.heroPhotoUrl", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("rewards.heroPhotoUrl")}
+                  loading={websiteContentLoading}
                 />
               </div>
 
@@ -1116,6 +1141,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("branding.logoNavbar", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("branding.logoNavbar")}
+                  loading={websiteContentLoading}
                 />
 
                 <BrandingAssetRow
@@ -1132,6 +1158,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("branding.logoNavbarOnDark", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("branding.logoNavbarOnDark")}
+                  loading={websiteContentLoading}
                 />
 
                 <BrandingAssetRow
@@ -1148,6 +1175,7 @@ export function SettingsPage() {
                     return uploadBrandingAsset("branding.logoFooter", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("branding.logoFooter")}
+                  loading={websiteContentLoading}
                 />
               </div>
 
