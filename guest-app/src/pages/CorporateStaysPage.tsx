@@ -760,7 +760,7 @@ export function CorporateStaysPage() {
 
                 <div
                   ref={turnstileContainerRef}
-                  className="cf-turnstile flex justify-center"
+                  className="flex justify-center"
                 ></div>
 
                 <div className="pt-2">
