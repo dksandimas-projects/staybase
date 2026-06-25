@@ -228,10 +228,14 @@ export function CorporateStaysPage() {
             <HeroSkeleton />
           )}
         </div>
-        {/* Stronger gradient — opaque at the bottom, fading up so
-            the photo stays visible at the top and the text reads
-            well through the middle. */}
-        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/40 via-gray-950/75 to-gray-950/90 z-0" />
+        {/* Lighter gradient than the home / about / rewards heroes
+            because the corporate page already sits on a
+            `bg-gray-950` section — the photo only needs a
+            modest dark wash to read, not a 90% black blanket.
+            The drop-shadow on the text (added in
+            `feat/hero-text-legibility`) carries the rest of the
+            legibility load. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/20 via-gray-950/40 to-gray-950/60 z-0" />
 
         <motion.div
           animate="visible"

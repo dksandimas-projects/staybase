@@ -591,14 +591,24 @@ describe("Hero text legibility — darker overlay + drop-shadow on all 4 heroes"
     expect(heroSection![0]).not.toMatch(/bg-gray-950\/45/);
   });
 
-  it("CorporateStaysPage uses a stronger gradient (opaque at the bottom)", () => {
-    // The old gradient was `via-gray-950/70 to-transparent`,
-    // which kept the bottom too light on light photos. The
-    // fix uses `to-gray-950/90` (opaque at the bottom).
-    expect(sources.corporate).toMatch(/to-gray-950\/90/);
+  it("CorporateStaysPage uses a lighter gradient than the home / about / rewards heroes", () => {
+    // The corporate page sits on a `bg-gray-950` section, so
+    // the photo only needs a modest dark wash to read — not
+    // the heavier 40/75/90 gradient used on the other heroes.
+    // Drop-shadow on the text carries the rest of the legibility
+    // load (see `feat/hero-text-legibility`). Eased from
+    // `to-gray-950/90` to `to-gray-950/60` after the user
+    // reported the page was too dark.
+    expect(sources.corporate).toMatch(/bg-gradient-to-b from-gray-950\/20 via-gray-950\/40 to-gray-950\/60/);
+    expect(sources.corporate).not.toMatch(/to-gray-950\/90/);
   });
 
-  it("RewardsLandingPage uses a stronger gradient (opaque at the bottom)", () => {
+  it("RewardsLandingPage keeps the stronger gradient (asymmetric to corporate)", () => {
+    // The rewards page has a different visual brief from
+    // corporate (a hospitality hero vs a corporate B2B hero)
+    // and still uses the heavier gradient. The asymmetry is
+    // intentional — if rewards also ends up too dark, mirror
+    // the corporate easing.
     expect(sources.rewards).toMatch(/to-gray-950\/90/);
   });
 
