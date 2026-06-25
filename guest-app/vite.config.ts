@@ -83,6 +83,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
         navigateFallback: "/offline.html",
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
