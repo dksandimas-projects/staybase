@@ -48,7 +48,17 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
-    match /assets/branding/{fileName} {
+    // Per `plan/features/SETTINGS.md §Branding`: hero photos, hero
+    // copy, and logo overrides are uploaded to Firebase Storage at
+    // `assets/branding/{key-as-path}/{timestamp}-{filename}`. The
+    // `{allPaths=**}` recursive wildcard is required because the
+    // upload path is dynamic: each branding key (e.g. "homepage.
+    // heroPhotoUrl") becomes a nested folder, so the rule must
+    // match the full subtree, not just a single `fileName` segment.
+    // Public read — the guest app already serves these URLs via
+    // `usePublicSiteContent`. Staff-only write — the admin uploads
+    // from Settings → Branding.
+    match /assets/branding/{allPaths=**} {
       allow read: if true;
       allow write: if isStaff();
     }

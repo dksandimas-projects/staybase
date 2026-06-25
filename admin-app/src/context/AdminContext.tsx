@@ -1897,7 +1897,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     homepage: {
       heroHeading: "Boutique Comfort in Bohol",
       heroSubtext: "Peaceful stays near tourist landmarks.",
-      heroPhotoUrl: ""
+      heroPhotoUrl: "",
+      amenities: [
+        { title: "Consistent comfort", description: "Quiet rooms, crisp linens, and the essentials guests expect every time.", icon: "bed", isEnabled: true },
+        { title: "Easy city access", description: "A practical Tagbilaran base for tours, meetings, errands, and onward travel.", icon: "map", isEnabled: true },
+        { title: "Warm front desk care", description: "Helpful support for arrivals, local questions, and small travel details.", icon: "users", isEnabled: true }
+      ],
+      featuredRoomIds: ["room-201", "room-204", "room-301"],
+      services: [
+        { title: "Tour Packages", description: "Ask our team for help arranging Bohol countryside tours, island plans, and local experiences.", icon: "palmtree", isEnabled: true },
+        { title: "Car Rentals", description: "Coordinate simple transportation support for business trips, family errands, or day tours.", icon: "car", isEnabled: true }
+      ],
+      sparkRewards: {
+        isEnabled: true,
+        heading: "Stay often, feel known",
+        description: "Join the loyalty program built for repeat guests, corporate travelers, and anyone who wants a smoother next stay.",
+        perks: [
+          { title: "Earn points on completed stays", description: "", icon: "sparkles", isEnabled: true },
+          { title: "Member-only stay offers", description: "", icon: "tag", isEnabled: true },
+          { title: "Request early check-in", description: "", icon: "clock", isEnabled: true }
+        ]
+      }
     },
     about: {
       heroHeading: "about us",
@@ -1909,7 +1929,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       heroSubtext: "Flexible spaces.",
       heroPhotoUrl: "",
       perks: [
-        { title: "Negotitated Rates", description: "Discounted room charges.", icon: "percent" }
+        { title: "Negotiated Rates", description: "Discounted room charges.", icon: "coins", isEnabled: true }
       ]
     },
     rewards: {
@@ -1939,7 +1959,27 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       homepage: {
         heroHeading: "Boutique Comfort in Bohol",
         heroSubtext: "Peaceful stays near tourist landmarks.",
-        heroPhotoUrl: ""
+        heroPhotoUrl: "",
+        amenities: [
+          { title: "Consistent comfort", description: "Quiet rooms, crisp linens, and the essentials guests expect every time.", icon: "bed", isEnabled: true },
+          { title: "Easy city access", description: "A practical Tagbilaran base for tours, meetings, errands, and onward travel.", icon: "map", isEnabled: true },
+          { title: "Warm front desk care", description: "Helpful support for arrivals, local questions, and small travel details.", icon: "users", isEnabled: true }
+        ],
+        featuredRoomIds: ["room-201", "room-204", "room-301"],
+        services: [
+          { title: "Tour Packages", description: "Ask our team for help arranging Bohol countryside tours, island plans, and local experiences.", icon: "palmtree", isEnabled: true },
+          { title: "Car Rentals", description: "Coordinate simple transportation support for business trips, family errands, or day tours.", icon: "car", isEnabled: true }
+        ],
+        sparkRewards: {
+          isEnabled: true,
+          heading: "Stay often, feel known",
+          description: "Join the loyalty program built for repeat guests, corporate travelers, and anyone who wants a smoother next stay.",
+          perks: [
+            { title: "Earn points on completed stays", description: "", icon: "sparkles", isEnabled: true },
+            { title: "Member-only stay offers", description: "", icon: "tag", isEnabled: true },
+            { title: "Request early check-in", description: "", icon: "clock", isEnabled: true }
+          ]
+        }
       },
       about: {
         heroHeading: "about us",
@@ -1951,7 +1991,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         heroSubtext: "Flexible spaces.",
         heroPhotoUrl: "",
         perks: [
-          { title: "Negotitated Rates", description: "Discounted room charges.", icon: "percent" }
+          { title: "Negotiated Rates", description: "Discounted room charges.", icon: "coins", isEnabled: true }
         ]
       },
       rewards: {
@@ -1969,8 +2009,32 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     };
     if (!raw || typeof raw !== "object") return seed;
     const r = raw as Record<string, Record<string, unknown>>;
+    const homepageRaw = (r.homepage as Record<string, unknown>) || {};
+    const sparkRewardsRaw =
+      homepageRaw.sparkRewards && typeof homepageRaw.sparkRewards === "object"
+        ? (homepageRaw.sparkRewards as Record<string, unknown>)
+        : null;
     return {
-      homepage: { ...seed.homepage, ...(r.homepage || {}) },
+      homepage: {
+        ...seed.homepage,
+        ...homepageRaw,
+        amenities: Array.isArray(homepageRaw.amenities)
+          ? (homepageRaw.amenities as typeof seed.homepage.amenities)
+          : seed.homepage.amenities,
+        services: Array.isArray(homepageRaw.services)
+          ? (homepageRaw.services as typeof seed.homepage.services)
+          : seed.homepage.services,
+        featuredRoomIds: Array.isArray(homepageRaw.featuredRoomIds)
+          ? (homepageRaw.featuredRoomIds as string[])
+          : seed.homepage.featuredRoomIds,
+        sparkRewards: {
+          ...seed.homepage.sparkRewards,
+          ...(sparkRewardsRaw || {}),
+          perks: Array.isArray(sparkRewardsRaw?.perks)
+            ? (sparkRewardsRaw!.perks as typeof seed.homepage.sparkRewards.perks)
+            : seed.homepage.sparkRewards.perks
+        }
+      },
       about: { ...seed.about, ...(r.about || {}) },
       corporate: {
         ...seed.corporate,

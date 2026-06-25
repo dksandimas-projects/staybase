@@ -49,3 +49,46 @@ export type RoomTypeEntry = {
 };
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
+
+// Icon names usable on the public site's amenities / services /
+// perks / corporate-perks cards. The string key is what gets stored
+// in Firestore; the admin app renders a dropdown picker, the guest
+// app maps each name to a `lucide-react` component via the per-page
+// `resolveIcon` helper. Names are kebab-case strings so they survive
+// JSON round-trips and are easy to type in tests.
+export const KNOWN_CONTENT_ICONS = [
+  "bed",
+  "map",
+  "pin",
+  "users",
+  "people",
+  "sparkles",
+  "star",
+  "wifi",
+  "coffee",
+  "car",
+  "palmtree",
+  "gift",
+  "tag",
+  "clock",
+  "shield",
+  "briefcase",
+  "coins",
+  "percent",
+  "calendar",
+  "help",
+  "network",
+  "money",
+  "support",
+  "group",
+  "date",
+  "flexible",
+  "security"
+] as const;
+
+export type ContentIconName = (typeof KNOWN_CONTENT_ICONS)[number];
+
+// Number of featured rooms displayed on the homepage. The guest app
+// falls back to the first 3 active rooms when this list is empty.
+export const MAX_FEATURED_ROOMS = 3;
+
