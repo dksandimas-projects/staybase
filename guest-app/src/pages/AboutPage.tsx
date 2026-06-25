@@ -43,17 +43,19 @@ export function AboutPage() {
           ) : (
             <HeroSkeleton />
           )}
-          <div className="absolute inset-0 bg-gray-950/45 backdrop-blur-[1px]" />
-          
+          {/* Heavier top-to-bottom gradient + a touch of backdrop
+              blur so the centered hero text reads on any photo. */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/55 to-black/70 backdrop-blur-[1px]" />
+
           <div className="relative z-10 space-y-4">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-xs font-semibold uppercase tracking-wider text-white backdrop-blur-sm">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-xs font-semibold uppercase tracking-wider text-white backdrop-blur-sm drop-shadow-md">
               <Sparkles size={12} className="text-primary" />
               Our Story
             </span>
-            <h1 className="font-heading text-5xl sm:text-6xl text-white tracking-wide lowercase">
+            <h1 className="font-heading text-5xl sm:text-6xl text-white tracking-wide lowercase drop-shadow-[0_2px_10px_rgba(0,0,0,0.6)]">
               {aboutHeroHeading}
             </h1>
-            <p className="mx-auto max-w-lg text-sm sm:text-base text-gray-200 font-medium">
+            <p className="mx-auto max-w-lg text-sm sm:text-base text-gray-200 font-medium drop-shadow-md">
               Discover the vision and heart behind {config.brandName}'s intentional hospitality in Bohol.
             </p>
           </div>
