@@ -112,6 +112,7 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 - Read: public (needed for guest site content)
 - Write: admin only
 - **Note:** `intercomQuickRequests` and `notificationSoundUrl` are in `hotelConfig` — public read is acceptable as these are non-sensitive
+- **Note:** `websiteContent.{homepage,about,corporate,rewards,branding}` carry hero copy + photo URLs + logo URLs. Public read is acceptable — all data is non-sensitive marketing material. The `branding` sub-object enables the navbar logo override and the fix for the dark-on-dark logo visibility bug; URLs are public-read anyway because the guest site already serves them via `usePublicSiteContent`.
 
 ### `corporateInquiries`
 - Read/Write: staff/admin only

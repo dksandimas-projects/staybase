@@ -233,7 +233,7 @@ supportEmail: "sparkinn.dev@gmail.com"
 - **Tailwind** — `tailwind.config.ts` reads colors and fonts from config at build time
 - **CSS variables** — config colors injected on `:root` for non-Tailwind use
 - **Font loading** — heading font loaded via `@font-face` in `index.html`; body font loaded via Google Fonts link if `source: "google"`
-- **Logos** — all components reference `config.logos.*` — never hardcoded filenames
+- **Logos** — components use `resolveLogo(overrideUrl, config.logos.*)` to pick a runtime Firestore override (set from Settings → Branding) with the deploy-time static file as fallback. See `Runtime Branding Overrides` below. Never hardcode logo filenames.
 - **Brand name** — all UI copy uses `config.brandName` — never hardcoded strings
 - **Room types** — dropdowns, filters, and rate tables built dynamically from context state (prefilled from `config.roomTypes[]` initially)
 - **Currency** — all price displays use `config.currencySymbol` + `config.locale` for number formatting
@@ -255,6 +255,44 @@ These fields are editable by the hotel admin from Settings — no redeploy neede
 - `privacyPolicyBody` — full privacy policy text (plain text or light markdown)
 - `cancellationPolicy` — displayed at booking Step 3 and in confirmation emails
 - `houseRules` — used in guest registration PDF at check-in
+
+---
+
+## Runtime Branding Overrides (Firestore `settings/websiteContent`)
+
+In addition to the legal fields above, the hotel admin can override logos and per-page hero content from Settings → Branding — no redeploy needed. This is the runtime-equivalent of the `config.logos.*` deploy-time fields plus the per-page hero text/photo fallbacks in `guest-app/src/data/homepage.ts`.
+
+**Override fields** (all under `settings/websiteContent`, all default to empty string):
+
+- `homepage.heroPhotoUrl`, `homepage.heroHeading`, `homepage.heroSubtext`
+- `about.heroPhotoUrl`, `about.heroHeading`
+- `corporate.heroPhotoUrl`, `corporate.heroHeading`, `corporate.heroSubtext`, `corporate.heroEyebrow`
+- `rewards.heroPhotoUrl`, `rewards.heroHeading`, `rewards.heroSubtext`, `rewards.heroEyebrow`
+- `branding.logoNavbar` — colored version, used in the scrolled/solid navbar state and on non-hero pages
+- `branding.logoNavbarOnDark` — light/white version, used when the navbar sits transparent over a dark hero. Fixes the dark-on-dark logo visibility bug.
+- `branding.logoFooter` — white version, used in the dark sidebar footer
+
+**Fallback chain** — when the Firestore field is empty, the guest app falls back to the deploy-time asset in this order:
+
+| Field | Empty → fallback to |
+|---|---|
+| `branding.logoNavbar` | `config.logos.navbar` (deploy-time file in `public/brand/`) |
+| `branding.logoNavbarOnDark` | `config.logos.navbar` — if the admin only uploaded one variant, it is mirrored across both navbar states |
+| `branding.logoFooter` | `config.logos.white` |
+| `homepage.heroPhotoUrl` | `homepageHeroImage` (in `guest-app/src/data/homepage.ts`) |
+| `about.heroPhotoUrl` | `aboutHeroImage` |
+| `corporate.heroPhotoUrl` | `corporateHeroImage` |
+| `rewards.heroPhotoUrl` | `rewardsHeroImage` |
+| `about.heroHeading` | `aboutHeroHeading` ("about us") |
+| `corporate.heroEyebrow` | `corporateHeroEyebrow` |
+| `rewards.heroEyebrow` | `rewardsHeroEyebrowSuffix` ("Loyalty Program") |
+| Any other hero field | constants in `usePublicSiteContent.ts` |
+
+**Helper** — `resolveLogo(overrideUrl, fallbackFileName)` in `guest-app/src/utils/brand.ts` encapsulates the logo fallback chain. The Navbar additionally uses `solid` (scrolled vs over-hero) to pick between `logoNavbar` and `logoNavbarOnDark`; if only one variant is set, the Navbar mirrors it across both states.
+
+**Storage** — branding assets upload to Firebase Storage at `assets/branding/{key-as-path}/{timestamp}-{filename}`. Public read + staff write — see `firebase/storage.rules` `match /assets/branding/{fileName}`.
+
+**Why this matters for white-label** — clients that never touch Settings → Branding keep the deploy-time assets shipped in `public/brand/` (no behavior change). Clients that want per-page hero customization (and a dark-on-dark logo fix) can do it from the admin app with no DK involvement.
 
 ---
 
@@ -317,6 +355,8 @@ Create `settings/hotelConfig`, `settings/websiteContent` (with privacy policy, c
 - [ ] Booking reference prefix (2–4 letters)
 - [ ] Member number prefix (2–4 letters, e.g. "SR")
 - [ ] Store name (e.g. "Spark Essentials", "Blue Sky Store")
+
+> **Runtime overrides (optional):** all of the per-page hero content (photos + heading + subtext) and the three logo overrides (navbar / navbar on dark / footer) can be set from Settings → Branding after deployment. See *Runtime Branding Overrides* above.
 
 ---
 
