@@ -1025,11 +1025,22 @@ export function SettingsPage() {
 
                 <BrandingAssetRow
                   label="Navbar logo (solid background)"
-                  helper="Used in the sticky/scrolled state and on every non-hero page. Colored version on a light background."
+                  helper="Used in the sticky/scrolled state and on every non-hero page. Colored version on a light background. Transparent PNGs are preserved as-is."
                   value={websiteContent.branding?.logoNavbar ?? ""}
                   fallback={`/brand/${config.logos.navbar}`}
                   onUpload={async (file) => {
-                    const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
+                    // Logos need their alpha channel preserved. PNG
+                    // is lossless + supports transparency; the
+                    // previous default (JPEG) flattened the canvas
+                    // to white, which is why a transparent logo
+                    // showed up with a white box. The `quality`
+                    // knob is meaningless for PNG and is silently
+                    // ignored by canvas.toBlob.
+                    const compressed = await compressImageFile(file, {
+                      maxWidth: 600,
+                      maxHeight: 200,
+                      mimeType: "image/png"
+                    });
                     return uploadBrandingAsset("branding.logoNavbar", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("branding.logoNavbar")}
@@ -1037,11 +1048,15 @@ export function SettingsPage() {
 
                 <BrandingAssetRow
                   label="Navbar logo (over hero, dark background)"
-                  helper="Use a light/white version for visibility over the dark hero photo. This is the variant that fixes the dark-on-dark logo bug in the over-hero state."
+                  helper="Use a light/white version for visibility over the dark hero photo. This is the variant that fixes the dark-on-dark logo bug in the over-hero state. Transparent PNGs are preserved as-is."
                   value={websiteContent.branding?.logoNavbarOnDark ?? ""}
                   fallback={`/brand/${config.logos.navbar}`}
                   onUpload={async (file) => {
-                    const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
+                    const compressed = await compressImageFile(file, {
+                      maxWidth: 600,
+                      maxHeight: 200,
+                      mimeType: "image/png"
+                    });
                     return uploadBrandingAsset("branding.logoNavbarOnDark", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("branding.logoNavbarOnDark")}
@@ -1049,11 +1064,15 @@ export function SettingsPage() {
 
                 <BrandingAssetRow
                   label="Footer logo"
-                  helper="White version for the dark sidebar footer."
+                  helper="White version for the dark sidebar footer. Transparent PNGs are preserved as-is."
                   value={websiteContent.branding?.logoFooter ?? ""}
                   fallback={`/brand/${config.logos.white}`}
                   onUpload={async (file) => {
-                    const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
+                    const compressed = await compressImageFile(file, {
+                      maxWidth: 600,
+                      maxHeight: 200,
+                      mimeType: "image/png"
+                    });
                     return uploadBrandingAsset("branding.logoFooter", compressed.file);
                   }}
                   onReset={() => resetBrandingAsset("branding.logoFooter")}
