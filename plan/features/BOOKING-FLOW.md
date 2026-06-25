@@ -39,8 +39,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Step indicator showing current step (1 of 4)
 
 ### Data & Logic Checklist
-- [ ] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings
-- [ ] Availability query: `checkIn < booking.checkOut && checkOut > booking.checkIn` for active bookings
+- [ ] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings. Per W4.7: client calls `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` (rate-limited, 30/IP/min) which returns PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`). Client applies the overlap filter `bStart < reqEnd && bEnd > reqStart`. The actual double-booking safety is the Firestore transaction in `/api/bookings/create` — see `plan/features/AVAILABILITY-LOCKING.md`.
 - [ ] Weekend rate applied automatically when stay includes Saturday or Sunday nights
 - [ ] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
 - [ ] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
