@@ -2,10 +2,11 @@ import { Menu, X, User, ChevronDown, LogOut, Award, History, UserCircle } from "
 import { useEffect, useState, useRef } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import config from "@config";
-import { brandAsset } from "../utils/brand";
+import { resolveLogo } from "../utils/brand";
 import { cn } from "../utils/cn";
 import { PrimaryButton } from "./PrimaryButton";
 import { useGuestAuth } from "../context/GuestAuthContext";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 const navItems = [
   { label: "Rooms", to: "/rooms" },
@@ -21,11 +22,31 @@ interface NavbarProps {
 export function Navbar({ overHero = false }: NavbarProps) {
   const location = useLocation();
   const { user, memberProfile, signOut } = useGuestAuth();
+  const { branding } = usePublicSiteContent();
   const [isOpen, setIsOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(!overHero);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const solid = !overHero || isScrolled || isOpen;
+
+  // Logo selection: when the navbar sits over a dark hero (transparent
+  // background), use the dedicated `logoNavbarOnDark` variant so the
+  // mark stays visible — the same dark `config.logos.navbar` is near
+  // invisible against a dark hero. When the navbar is on a solid
+  // background (scrolled, or any non-hero page), use the regular
+  // `logoNavbar`. If only one variant has been uploaded by the admin
+  // we fall back to that one in both states (the per-user "mirror
+  // across both states" choice), then finally to the deploy-time
+  // static file from `hotel.config.ts`.
+  const darkLogoSrc = resolveLogo(
+    branding.logoNavbarOnDark || branding.logoNavbar,
+    config.logos.navbar
+  );
+  const lightLogoSrc = resolveLogo(
+    branding.logoNavbar,
+    config.logos.navbar
+  );
+  const logoSrc = solid ? lightLogoSrc : darkLogoSrc;
 
   useEffect(() => {
     if (!overHero) return;
@@ -68,7 +89,7 @@ export function Navbar({ overHero = false }: NavbarProps) {
     >
       <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center">
-          <img src={brandAsset(config.logos.navbar)} alt={config.brandName} className="h-10 w-auto object-contain" />
+          <img src={logoSrc} alt={config.brandName} className="h-10 w-auto object-contain" />
         </Link>
 
         <div className="hidden items-center gap-8 md:flex">

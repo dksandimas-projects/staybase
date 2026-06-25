@@ -348,6 +348,7 @@ SparkRewardsPromo {
 
 WebsiteContent {
   homepage: {
+    heroEyebrow: string         // unused on homepage — config.tagline is used
     heroHeading: string
     heroSubtext: string
     heroPhotoUrl: string
@@ -357,19 +358,34 @@ WebsiteContent {
     sparkRewards: SparkRewardsPromo
   }
   about: {
+    heroHeading: string
     heroPhotoUrl: string
   }
   corporate: {
+    heroEyebrow: string
     heroHeading: string
     heroSubtext: string
     heroPhotoUrl: string
     perks: WebsiteContentItem[]
+  }
+  rewards: {
+    heroEyebrow: string        // rendered as "{config.rewardsName} {rewards.heroEyebrow}"
+    heroHeading: string
+    heroSubtext: string
+    heroPhotoUrl: string
+  }
+  branding: {
+    logoNavbar: string         // colored logo — scrolled/solid state + non-hero pages
+    logoNavbarOnDark: string   // light/white logo — over-hero transparent state
+    logoFooter: string         // white logo — dark footer
   }
   privacyPolicyBody: string
   cancellationPolicy: string
   houseRules: string
 }
 ```
+
+**Zod schemas** for the public content shape live in `shared/schemas/websiteContent.ts` (`PublicHeroSchema`, `HomepageContentSchema`, `AboutContentSchema`, `CorporateContentSchema`, `RewardsContentSchema`, `BrandingConfigSchema`, `WebsiteContentSchema`). All fields default to empty string so partial Firestore docs validate cleanly.
 
 ---
 

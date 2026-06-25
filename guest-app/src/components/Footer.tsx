@@ -2,7 +2,8 @@ import { VERSION } from "@spark-inn/shared";
 import { Facebook, Instagram, Mail, MapPin, Phone } from "lucide-react";
 import { Link } from "react-router-dom";
 import config from "@config";
-import { brandAsset } from "../utils/brand";
+import { resolveLogo } from "../utils/brand";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 const footerLinks = [
   { label: "About", to: "/about" },
@@ -16,15 +17,17 @@ const footerLinks = [
 ];
 
 export function Footer() {
+  const { branding } = usePublicSiteContent();
   const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
   const phoneHref = `tel:${config.frontDeskPhone.replace(/[^\d+]/g, "")}`;
+  const footerLogoSrc = resolveLogo(branding.logoFooter, config.logos.white);
 
   return (
     <footer className="bg-sidebar text-white">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr] lg:px-8">
         <div>
-          <img src={brandAsset(config.logos.white)} alt={config.brandName} className="h-16 w-auto object-contain" />
+          <img src={footerLogoSrc} alt={config.brandName} className="h-16 w-auto object-contain" />
           <p className="mt-5 max-w-md text-sm leading-6 text-gray-300">{config.brandPromise}</p>
           <p className="mt-5 text-xs text-gray-400">{config.brandName} v{VERSION}</p>
         </div>

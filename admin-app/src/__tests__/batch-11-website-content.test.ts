@@ -26,6 +26,18 @@ const corpSrc = readFileSync(
   resolve(__dirname, "../../../guest-app/src/pages/CorporateStaysPage.tsx"),
   "utf8"
 );
+const rewardsSrc = readFileSync(
+  resolve(__dirname, "../../../guest-app/src/pages/RewardsLandingPage.tsx"),
+  "utf8"
+);
+const navbarSrc = readFileSync(
+  resolve(__dirname, "../../../guest-app/src/components/Navbar.tsx"),
+  "utf8"
+);
+const footerSrc = readFileSync(
+  resolve(__dirname, "../../../guest-app/src/components/Footer.tsx"),
+  "utf8"
+);
 const hookSrc = readFileSync(
   resolve(__dirname, "../../../guest-app/src/hooks/usePublicSiteContent.ts"),
   "utf8"
@@ -42,10 +54,12 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(hookSrc).toMatch(/getDoc\(doc\(db,\s*["']settings["'],\s*["']hotelConfig["']\)/);
     });
 
-    it("exposes homepage, about, and corporate sections", () => {
+    it("exposes homepage, about, corporate, rewards, and branding sections", () => {
       expect(hookSrc).toMatch(/homepage\s*:\s*PublicHomepageContent/);
       expect(hookSrc).toMatch(/about\s*:\s*PublicAboutContent/);
       expect(hookSrc).toMatch(/corporate\s*:\s*PublicCorporateContent/);
+      expect(hookSrc).toMatch(/rewards\s*:\s*PublicRewardsContent/);
+      expect(hookSrc).toMatch(/branding\s*:\s*PublicBranding/);
     });
 
     it("hides services when all entries are disabled (filter on isEnabled)", () => {
@@ -121,13 +135,15 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(corpSrc).toMatch(/import\s*\{\s*usePublicSiteContent\b[^}]*\}\s*from\s*["']\.\.\/hooks\/usePublicSiteContent["']/);
     });
 
-    it("uses dynamic corporate hero photo, heading, and subtext from settings", () => {
+    it("uses dynamic corporate hero photo, heading, subtext, and eyebrow from settings", () => {
       expect(corpSrc).toMatch(/corporate\.heroPhotoUrl/);
       expect(corpSrc).toMatch(/corporate\.heroHeading/);
       expect(corpSrc).toMatch(/corporate\.heroSubtext/);
+      expect(corpSrc).toMatch(/corporate\.heroEyebrow/);
       // Hard-coded Unsplash URL and copy must be gone.
       expect(corpSrc).not.toMatch(/photo-1497366216548-37526070297c/);
       expect(corpSrc).not.toMatch(/>Elevated Stays for Modern Business</);
+      expect(corpSrc).not.toMatch(/Curated hospitality for executive comfort/);
     });
 
     it("renders perks from corporate.perks (not 6 hard-coded <motion.div> blocks)", () => {
@@ -140,5 +156,86 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(corpSrc).not.toMatch(/Group Bookings/);
       expect(corpSrc).not.toMatch(/Premium Security/);
     });
+  });
+
+  describe("S6.2 — RewardsLandingPage consumes websiteContent.rewards", () => {
+    it("imports usePublicSiteContent", () => {
+      expect(rewardsSrc).toMatch(/import\s*\{\s*usePublicSiteContent\b[^}]*\}\s*from\s*["']\.\.\/hooks\/usePublicSiteContent["']/);
+    });
+
+    it("reads hero photo, eyebrow, heading, and subtext from settings", () => {
+      expect(rewardsSrc).toMatch(/rewards\.heroPhotoUrl/);
+      expect(rewardsSrc).toMatch(/rewards\.heroEyebrow/);
+      expect(rewardsSrc).toMatch(/rewards\.heroHeading/);
+      expect(rewardsSrc).toMatch(/rewards\.heroSubtext/);
+    });
+
+    it("the hard-coded Google image URL is gone", () => {
+      expect(rewardsSrc).not.toMatch(/AB6AXuDxE3ob-vSO4zxT_VMu0OviqdIAMTOtgsJXzWeddVJ-6-QmLSHHkERJKmN_zfFFeGvMrFhzST6Xoc-MNtubwhDrYU3ZjBFSjACtuAwnlBaH4z6Ts-UB0kYlC38ol_42OAWXX2iUGuPhL2ZSvUac1bc6j0zvNGyAyCNMnyrg9X2dwyDXafz7n_EIfEX_xAI6S2D_XhfdiedtLyzdH-SxVWzm25SwLm9ovUul16TnLGbrr9fj2Jmezvw2N3x4T49eU2RDAchvC4pc-2UY/);
+    });
+
+    it("the hard-coded 'Earn Every Stay' heading is gone", () => {
+      expect(rewardsSrc).not.toMatch(/>Earn Every Stay</);
+    });
+  });
+
+  describe("S6.2 — AboutPage consumes about.heroHeading", () => {
+    it("reads about.heroHeading from settings (not hard-coded 'about us')", () => {
+      expect(aboutSrc).toMatch(/about\.heroHeading/);
+      expect(aboutSrc).not.toMatch(/>\s*about us\s*</);
+    });
+  });
+
+  describe("S6.2 — Navbar swaps logo by over-hero vs scrolled state", () => {
+    it("imports resolveLogo and usePublicSiteContent", () => {
+      expect(navbarSrc).toMatch(/import\s*\{\s*resolveLogo\s*\}\s*from\s*["']\.\.\/utils\/brand["']/);
+      expect(navbarSrc).toMatch(/import\s*\{\s*usePublicSiteContent\s*\}\s*from\s*["']\.\.\/hooks\/usePublicSiteContent["']/);
+    });
+
+    it("derives a darkLogoSrc that uses logoNavbarOnDark when available", () => {
+      expect(navbarSrc).toMatch(/logoNavbarOnDark/);
+      // The `solid` state picks the light logo; non-solid picks the
+      // dark-background variant.
+      expect(navbarSrc).toMatch(/solid\s*\?\s*lightLogoSrc\s*:\s*darkLogoSrc/);
+    });
+  });
+
+  describe("S6.2 — Footer uses branding.logoFooter override", () => {
+    it("imports resolveLogo and usePublicSiteContent", () => {
+      expect(footerSrc).toMatch(/import\s*\{\s*resolveLogo\s*\}\s*from\s*["']\.\.\/utils\/brand["']/);
+      expect(footerSrc).toMatch(/import\s*\{\s*usePublicSiteContent\s*\}\s*from\s*["']\.\.\/hooks\/usePublicSiteContent["']/);
+    });
+
+    it("resolves logoFooter via resolveLogo (not brandAsset directly)", () => {
+      expect(footerSrc).toMatch(/resolveLogo\(branding\.logoFooter/);
+      expect(footerSrc).not.toMatch(/brandAsset\(config\.logos\.white\)/);
+    });
+  });
+});
+
+describe("Branding — admin app normalizes partial websiteContent docs", () => {
+  const adminCtxSrc = readFileSync(
+    resolve(__dirname, "../../src/context/AdminContext.tsx"),
+    "utf8"
+  );
+  const settingsPageSrc = readFileSync(
+    resolve(__dirname, "../../src/pages/SettingsPage.tsx"),
+    "utf8"
+  );
+
+  it("AdminContext defines a mergeWebsiteContent helper for partial Firestore docs", () => {
+    expect(adminCtxSrc).toMatch(/function\s+mergeWebsiteContent/);
+    expect(adminCtxSrc).toMatch(/setWebsiteContent\(mergeWebsiteContent/);
+  });
+
+  it("SettingsPage defends every websiteContent.X.Y read with optional chaining", () => {
+    // Bug: a partial doc that pre-dates the Branding feature would
+    // set websiteContent = { homepage: {…}, corporate: {…} } without
+    // the new `rewards` / `branding` / `about.heroHeading` /
+    // `corporate.heroEyebrow` sub-fields, crashing any consumer that
+    // reaches into them. The fix: every reach-in uses optional
+    // chaining, and AdminContext normalizes the snapshot upstream.
+    const reachInReads = settingsPageSrc.match(/websiteContent\.[a-zA-Z]+\.[a-zA-Z]+(?!\?)/g) || [];
+    expect(reachInReads.length, "expected every websiteContent.X.Y read to use ?. (optional chaining)").toBe(0);
   });
 });

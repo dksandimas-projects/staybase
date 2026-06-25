@@ -6,7 +6,7 @@
 
 ## Overview
 
-Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Privacy Policy, Terms of Service, and 404. About and Corporate hero/content are editable from admin Settings → Website Content. Contact details are shared with `settings/hotelConfig`.
+Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Privacy Policy, Terms of Service, and 404. About and Corporate hero/content are editable from admin Settings → Branding (photos + copy) — the Website Content tab links into the Branding tab. Contact details are shared with `settings/hotelConfig`.
 
 ---
 
@@ -25,7 +25,7 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 ## About Us (`/about`)
 
 ### UI Checklist
-- [ ] Hero section — banner photo (editable from Settings), Apollo heading "about us"
+- [ ] Hero section — banner photo + heading, both editable from Settings → Branding
 - [ ] Mission statement section
 - [ ] Vision statement section
 - [ ] Hotel story section — multi-paragraph text
@@ -34,19 +34,26 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 
 ### Data & Logic Checklist
 - [ ] Fetch `settings/hotelConfig` for `missionStatement`, `visionStatement`, `hotelStory`
-- [ ] Fetch `settings/websiteContent.about` for `heroPhotoUrl`
+- [ ] Fetch `settings/websiteContent.about` for `heroPhotoUrl` and `heroHeading` (both editable from Settings → Branding)
+- [ ] Hero heading falls back to `data/homepage.ts → aboutHeroHeading` ("about us") when `about.heroHeading` is empty
+- [ ] Hero photo falls back to `data/homepage.ts → aboutHeroImage` (Unsplash) when `about.heroPhotoUrl` is empty
 
 ---
 
 ## Corporate Stays (`/corporate`) — Marketing Page
 
 ### UI Checklist
-- [ ] Dark hero section — background photo (editable from Settings), Apollo heading, subtext
+- [ ] Dark hero section — eyebrow, background photo, Apollo heading, subtext — all editable from Settings → Branding
 - [ ] Perks section — grid of perk items (title, description, icon) — editable from Settings
 - [ ] Rooms overview — room type cards with photos, bed definition, capacity — NO prices shown
 - [ ] Corporate inquiry form — company name, contact person, email, phone, number of rooms, preferred dates, special requirements, Submit button
 - [ ] CTA to corporate booking: "Have a negotiated rate? Book directly at `/corporate/book`" — Spark Orange button
 - [ ] Footer
+
+### Data & Logic Checklist
+- [ ] Fetch `settings/websiteContent.corporate` for `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl`, and `perks[]` — all editable from Settings → Branding
+- [ ] Hero eyebrow falls back to `data/homepage.ts → corporateHeroEyebrow` when `corporate.heroEyebrow` is empty
+- [ ] Hero photo falls back to `data/homepage.ts → corporateHeroImage` (Unsplash) when `corporate.heroPhotoUrl` is empty
 
 ### Data & Logic Checklist
 - [ ] Fetch `settings/websiteContent.corporate` for hero content and perks

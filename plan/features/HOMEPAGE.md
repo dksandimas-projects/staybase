@@ -53,6 +53,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 - [ ] Featured rooms show real-time availability badge based on current bookings
 - [ ] Handle case where `featuredRoomIds` is empty — fall back to first 3 active rooms
 - [ ] Spark Rewards section: check auth state — show "Join" CTA if not logged in or not a member; show "Welcome back" if logged-in member
+- [ ] Hero photo falls back to `data/homepage.ts → homepageHeroImage` when `homepage.heroPhotoUrl` is empty — see `plan/features/SETTINGS.md §Branding` for the upload UI
 
 ## Edge Cases & States
 
