@@ -1,5 +1,4 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
   "headers": [
     {
       "source": "/(.*)",
@@ -27,10 +26,9 @@
       ]
     }
   ],
-  "crons": [
-    {
-      "path": "/api/email/checkin-reminder",
-      "schedule": "0 0 * * *"
-    }
+  "rewrites": [
+    { "source": "/assets/:path*", "destination": "/assets/:path*" },
+    { "source": "/brand/:path*", "destination": "/brand/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
