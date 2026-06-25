@@ -8,6 +8,12 @@
 
 Prevents double-booking by using Firestore transactions for all booking creation. This is a critical safety feature — the client's prior Excel-based system had documented overbooking incidents. Every booking creation (online, walk-in, corporate) must go through a transaction-based API route. Never write bookings directly to Firestore from the client.
 
+### Guest-side availability UX query (per W4.7)
+
+The booking page shows date-aware availability in Step 1 (rooms hidden when they have an overlapping active booking). Because Firestore rules deny guest reads on `bookings` (`allow read: if isStaff()`), the client cannot subscribe to active bookings directly. Instead, the public endpoint `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` returns a PII-stripped list of active booked date ranges (`{ roomId, checkIn, checkOut, status }`) for rooms whose stay overlaps the requested window. The client applies the overlap filter locally and hides those rooms.
+
+This endpoint is rate-limited (30 requests / IP / minute) and is a UX optimization only — the authoritative double-booking prevention is the Firestore transaction in `/api/bookings/create` and `/api/bookings/create-walkin` described below. Never weaken Firestore rules to allow guest reads on `bookings`; the endpoint is the only sanctioned path.
+
 ---
 
 ## How It Works

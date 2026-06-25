@@ -83,6 +83,16 @@ Existing booking documents may still receive authenticated staff/admin operation
 
 ---
 
+### Room Routes (`/api/rooms/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/rooms/availability` | GET | None (public, rate-limited) | Return PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`) for active bookings (`pending`, `payment-uploaded`, `confirmed`, `checked-in`) that overlap the requested `checkIn` / `checkOut` window. The guest booking page uses this to hide already-booked rooms in Step 1. Rate-limited to 30/IP/min. The actual double-booking prevention is the Firestore transaction in `/api/bookings/create` — this endpoint is a UX optimization only. See `plan/features/AVAILABILITY-LOCKING.md §Guest-side availability UX query`. |
+
+Never expose full `bookings` documents or any PII (guest name, email, phone, payment fields) in this response — the contract is a PII-stripped date range only.
+
+---
+
 ### Corporate Routes (`/api/corporate/*`)
 
 | Route | Method | Auth | Purpose |
@@ -194,6 +204,7 @@ API route checks for a `_hp` field in the request body (the honeypot field name)
 | `/api/validate/voucher` | 20 requests / IP / minute |
 | `/api/validate/corporate-code` | 10 requests / IP / minute |
 | `/api/bookings/lookup` | 10 requests / IP / minute |
+| `/api/rooms/availability` | 30 requests / IP / minute |
 | `/api/email/*` | 3 requests / booking ref / hour |
 
 Use Vercel Edge middleware for IP-based rate limiting. Simple in-memory map is sufficient for Phase 1 at this traffic scale.
