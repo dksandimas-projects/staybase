@@ -153,8 +153,8 @@ export interface ContentItem {
   isEnabled?: boolean;
 }
 
-// Default copy + image for the entire /corporate page. Single source
-// of truth shared by:
+// Default copy for the entire /corporate page. Single source of
+// truth shared by:
 //   - the guest app: used as the fallback chain in
 //     `usePublicSiteContent.buildFallback` (Firestore override → this
 //     constant → hardcoded UI string) and as the `|| "..."` fallback
@@ -166,18 +166,23 @@ export interface ContentItem {
 //     value is empty, so the admin sees the current text in the
 //     inputs instead of blank fields.
 //   - the one-time Firestore backfill in `AdminContext`: writes these
-//     values to any empty `corporate.*` field the first time an admin
-//     loads the app, so the guest app's empty-string fallback never
-//     trips for a property that has had an admin open the dashboard.
+//     values to any empty `corporate.*` TEXT field the first time an
+//     admin loads the app, so the guest app's empty-string fallback
+//     never trips for a property that has had an admin open the
+//     dashboard.
 //
 // Mirror values: these strings must stay byte-identical with the
 // hardcoded copy previously inlined in `CorporateStaysPage.tsx` and
 // the `FALLBACK_CORPORATE_HERO_*` constants in
-// `usePublicSiteContent.ts`. The hero photo URL also matches the
-// `corporateHeroImage` static fallback in
-// `guest-app/src/data/homepage.ts` — backfilling the URL into
-// Firestore locks the page to that image even if the deploy-time
-// fallback file ever changes.
+// `usePublicSiteContent.ts`.
+//
+// `hero.photoUrl` is preserved here as a reference value (it matches
+// the `corporateHeroImage` static fallback in
+// `guest-app/src/data/homepage.ts`) but is NOT written to Firestore
+// by the one-time backfill. Persisting it would pin the page to that
+// URL and undo the admin's Reset action on the next dashboard load;
+// the guest app's `pickString` already provides the static fallback
+// when `corporate.heroPhotoUrl` is empty.
 export const DEFAULT_CORPORATE_PAGE_CONTENT = {
   hero: {
     eyebrow: "Curated hospitality for executive comfort",

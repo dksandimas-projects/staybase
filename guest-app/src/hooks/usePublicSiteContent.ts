@@ -203,6 +203,14 @@ function buildFallback(): PublicSiteContent {
       heroEyebrow: corporateHeroEyebrow,
       heroHeading: FALLBACK_CORPORATE_HERO_HEADING,
       heroSubtext: FALLBACK_CORPORATE_HERO_SUBTEXT,
+      // The corporate hero photo is sourced from the static
+      // `corporateHeroImage` in `data/homepage.ts` directly. The
+      // one-time Firestore backfill in `AdminContext` does NOT
+      // write `corporate.heroPhotoUrl` — leaving the field empty
+      // means "use the static fallback", which is also the value
+      // the admin's Reset action writes. The guest app's
+      // `pickString` chain (Firestore override → static fallback)
+      // applies at read time.
       heroPhotoUrl: corporateHeroImage,
       perks: FALLBACK_CORPORATE_PERKS,
       // Rooms overview + retreat CTA — sourced from
