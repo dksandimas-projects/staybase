@@ -370,6 +370,15 @@ export interface AdminContextType {
   rewardsConfig: any;
   breakfastConfig: any;
   storeConfig: any;
+  // `true` until the first `settings/websiteContent` snapshot
+  // arrives from Firestore. The Branding tab's asset previews
+  // need this to avoid flashing the static fallback logo /
+  // placeholder photo before the admin's custom upload is known
+  // — see `usePublicSiteContent` for the same pattern in the
+  // guest app's empty initial state. Set to `false` the first
+  // time the `websiteContent` case fires in the settings
+  // `onSnapshot` listener below.
+  websiteContentLoading: boolean;
   updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<void>;
 
   // Staff Accounts
@@ -1901,6 +1910,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     ]
   });
 
+  // Tracks whether the first `settings/websiteContent` snapshot
+  // has been delivered. Used by the Branding tab to render a
+  // skeleton for the asset previews instead of the static
+  // fallback logo / "no asset yet" placeholder, which would
+  // otherwise flash before the admin's custom upload is known
+  // (more pronounced on mobile where the snapshot delivery
+  // is slower). Set to `false` inside the `onSnapshot` callback
+  // the first time the `websiteContent` case fires.
+  const [websiteContentLoading, setWebsiteContentLoading] = useState(true);
+
   const [websiteContent, setWebsiteContent] = useState({
     homepage: {
       heroHeading: "Boutique Comfort in Bohol",
@@ -2156,6 +2175,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
+              setWebsiteContentLoading(false);
               break;
             case "rewardsConfig":
               setRewardsConfig(data as typeof rewardsConfig);
@@ -2682,6 +2702,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         deleteStoreItem,
         hotelConfig,
         websiteContent,
+        websiteContentLoading,
         rewardsConfig,
         breakfastConfig,
         storeConfig,
