@@ -156,8 +156,11 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
     });
 
     it("BookingPage uses type images in the room list and the review aside", () => {
-      expect(bookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*room\.type\)/);
-      expect(bookingPageSrc).toMatch(/typeImageUrls=\{selectedRoom\s*\?\s*getRoomTypeImages/);
+      // Per the room-type booking refactor: the Step 1 grid and the
+      // review aside resolve the hero image from the chosen room
+      // type entry, not from an individual `room.type` field.
+      expect(bookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*type\.value\)/);
+      expect(bookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*selectedTypeEntry\.value\)/);
     });
 
     it("CorporateStaysPage falls back to ROOM_TYPE_IMAGES when no live type is found", () => {
@@ -166,8 +169,11 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
     });
 
     it("CorporateBookingPage uses type images in both the room list and the review aside", () => {
-      expect(corporateBookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*selectedRoom\.type\)/);
-      expect(corporateBookingPageSrc).toMatch(/typeImageUrls=/);
+      // Per the room-type booking refactor: the Step 1 grid and the
+      // review aside resolve the hero image from the chosen room
+      // type entry.
+      expect(corporateBookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*type\.value\)/);
+      expect(corporateBookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*selectedTypeEntry\.value\)/);
     });
 
     it("no consumer reads room.imageUrls or selectedRoom.imageUrls anymore", () => {

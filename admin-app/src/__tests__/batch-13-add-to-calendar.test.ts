@@ -110,7 +110,10 @@ describe("Phase 11.6 Batch 13 — Add to Calendar is wired to real ICS + Google 
       const body = handleMatch![0];
       expect(body).toMatch(/title:\s*`Stay at \$\{config\.brandName\}\s*\(/);
       expect(body).toMatch(/Booking reference:\s*\$\{bookingRef\}/);
-      expect(body).toMatch(/Room:\s*\$\{selectedRoom\.name\}/);
+      // Per the room-type booking refactor: the confirmation page
+      // shows the type label (+ assigned room number when known)
+      // rather than the legacy `selectedRoom.name` field.
+      expect(body).toMatch(/Room:\s*\$\{roomLine\}/);
       expect(body).toMatch(/location:\s*address/);
     });
   });

@@ -38,8 +38,9 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 
 - [ ] Access code validation calls `/api/validate/corporate-code` — server-side only
 - [ ] Valid code response returns: `companyName`, `ratePerRoomType` map
-- [ ] Rate applied to room cards in Step 1 — overrides standard and weekend rates
-- [ ] Flat corporate rate (no code) pulled from `room.corporateRate` field
+- [ ] Rate applied to room type cards in Step 1 — overrides standard and weekend rates
+- [ ] **Room type booking** — per the `feature/booking-by-room-type` refactor: Step 1 shows one card per room type, "X of Y available for your dates" copy. The client posts `roomType` (not `roomId`); the server auto-assigns a physical room of the chosen type inside the availability transaction. `Booking.roomId` is still a real `rooms/{id}` reference.
+- [ ] Flat corporate rate (no code) pulled from the room type's `corporateRate` field in `settings/hotelConfig.roomTypes[]` — no longer from the per-room `room.corporateRate` (per W3.6, pricing lives on the type)
 - [ ] `isCorporate: true` always set on bookings from this route — set server-side
 - [ ] `corporateCode` stored on booking only if a code was used — set server-side
 - [ ] `companyName` stored on booking — sourced from code validation response or entered by guest
