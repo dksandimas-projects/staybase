@@ -1,62 +1,32 @@
-import { Filter, SlidersHorizontal, Users } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { fadeUp, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
-import config from "@config";
-import { DateRangePicker } from "../components/DateRangePicker";
-import { Drawer } from "../components/Drawer";
+import { motion, useReducedMotion } from "framer-motion";
+import { useState } from "react";
+import { fadeUp, staggerContainer } from "@spark-inn/shared";
 import { Footer } from "../components/Footer";
-import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomTypeCard } from "../components/RoomTypeCard";
-import { StatusBadge } from "../components/StatusBadge";
-import { useRoomAvailability } from "../hooks/useRoomAvailability";
 import { useRoomTypes } from "../hooks/useRoomTypes";
-import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function tomorrowIso() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
+// Catalog-only rooms page. Renders one card per room type from
+// `settings/hotelConfig.roomTypes[]` (with the `DEFAULT_ROOM_TYPES`
+// fallback from `@spark-inn/shared`). No filters, no availability
+// surface, no date handling — that's all the booking flow's job now.
+// Per `plan/features/ROOMS-PAGE.md`.
+//
+// The homepage availability checker's "Search" button now navigates
+// straight to `/book` (see `HomePage.tsx`), so this page is the
+// "browse all our types" entry point from the navbar / footer.
 export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { roomTypes } = useRoomTypes();
-  const [selectedType, setSelectedType] = useState("all");
-  const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
-  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? todayIso());
-  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? tomorrowIso());
+  const { roomTypes, loading } = useRoomTypes();
   const [selectedTypeValue, setSelectedTypeValue] = useState<string | null>(null);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-
-  const { byType, loading } = useRoomAvailability(checkIn, checkOut, guests);
-
-  const visibleTypes = useMemo(
-    () =>
-      roomTypes.filter((type) => {
-        const counts = byType[type.value];
-        const hasBookable = Boolean(counts && counts.total > 0);
-        if (!hasBookable) return false;
-        return selectedType === "all" || type.value === selectedType;
-      }),
-    [roomTypes, byType, selectedType]
-  );
 
   const selectedTypeEntry = selectedTypeValue
     ? roomTypes.find((t) => t.value === selectedTypeValue) ?? null
     : null;
-  const selectedTypeCounts = selectedTypeEntry ? byType[selectedTypeEntry.value] : undefined;
-  const bookingQuery = `&checkIn=${checkIn}&checkOut=${checkOut}`;
+
   const entranceProps = shouldReduceMotion
     ? {}
     : {
@@ -65,225 +35,70 @@ export function RoomsPage() {
         viewport: { once: true, margin: "-80px" }
       };
 
-  function updateDateParams(nextCheckIn = checkIn, nextCheckOut = checkOut, nextGuests = guests) {
-    setSearchParams({
-      checkIn: nextCheckIn,
-      checkOut: nextCheckOut,
-      guests: String(nextGuests)
-    });
-  }
-
-  function resetFilters() {
-    setSelectedType("all");
-    setGuests(1);
-    updateDateParams(checkIn, checkOut, 1);
-  }
-
-  function renderFilters(showApplyButton = false) {
-    return (
-      <div className="space-y-6">
-        <DateRangePicker
-          checkIn={checkIn}
-          checkOut={checkOut}
-          onCheckInChange={(value) => {
-            setCheckIn(value);
-            updateDateParams(value, checkOut, guests);
-          }}
-          onCheckOutChange={(value) => {
-            setCheckOut(value);
-            updateDateParams(checkIn, value, guests);
-          }}
-        />
-
-        <label className="grid gap-2 text-sm font-medium text-gray-700">
-          Guests
-          <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-            <button
-              className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-              type="button"
-              onClick={() => {
-                const next = Math.max(1, guests - 1);
-                setGuests(next);
-                updateDateParams(checkIn, checkOut, next);
-              }}
-            >
-              -
-            </button>
-            <span className="flex items-center gap-2 text-sm text-gray-700">
-              <Users size={16} className="text-primary" />
-              {guests} {guests === 1 ? "guest" : "guests"}
-            </span>
-            <button
-              className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-              type="button"
-              onClick={() => {
-                const next = Math.min(6, guests + 1);
-                setGuests(next);
-                updateDateParams(checkIn, checkOut, next);
-              }}
-            >
-              +
-            </button>
-          </div>
-        </label>
-
-        <div>
-          <p className="text-sm font-medium text-gray-700">Room type</p>
-          <div className="mt-3 grid gap-2">
-            {[{ value: "all", label: "All Types" }, ...DEFAULT_ROOM_TYPES].map((type) => (
-              <button
-                key={type.value}
-                className={cn(
-                  "flex min-h-11 items-center justify-between rounded-lg border px-3 text-sm font-medium transition",
-                  selectedType === type.value
-                    ? "border-primary bg-primary-light text-primary"
-                    : "border-gray-200 bg-white text-gray-700 hover:border-primary"
-                )}
-                type="button"
-                onClick={() => setSelectedType(type.value)}
-              >
-                {type.label}
-                {selectedType === type.value ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {showApplyButton ? (
-          <PrimaryButton type="button" className="w-full" onClick={() => setIsFilterOpen(false)}>
-            Show {visibleTypes.length} types
-          </PrimaryButton>
-        ) : null}
-      </div>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-gray-50 font-body text-gray-900">
       <Navbar />
+
       <section className="mx-auto max-w-7xl px-4 pb-10 pt-12 sm:px-6 lg:px-8">
         <motion.div
           animate="visible"
-          className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end"
+          className="grid gap-3"
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Rooms & rates</p>
-            <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Our rooms</h1>
-            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
-              Browse comfortable rooms for solo stays, business trips, family visits, and easy Bohol weekends.
-            </p>
-          </div>
-          <PrimaryButton to={`/book?checkIn=${checkIn}&checkOut=${checkOut}`}>Book selected dates</PrimaryButton>
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary">Rooms & rates</p>
+          <h1 className="font-heading text-4xl text-gray-950 sm:text-5xl">Our rooms</h1>
+          <p className="max-w-2xl leading-7 text-gray-600">
+            Browse every room type we offer, then pick your dates in the next step.
+          </p>
         </motion.div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[280px_1fr] lg:px-8">
-        <aside className="hidden lg:sticky lg:top-24 lg:block lg:self-start">
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-lg font-semibold text-gray-950">
-                <Filter size={18} className="text-primary" />
-                Filter by
-              </h2>
-              <button className="text-sm font-semibold text-primary" type="button" onClick={resetFilters}>
-                Reset
-              </button>
-            </div>
-            <div className="mt-5">{renderFilters()}</div>
-          </div>
-        </aside>
-
-        <div>
-          <motion.div
-            className="mb-5 flex flex-col gap-3 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:justify-between"
-            variants={fadeUp}
-            {...entranceProps}
-          >
-            <div>
-              <p className="font-semibold text-gray-950">
-                {visibleTypes.length} {visibleTypes.length === 1 ? "room type" : "room types"} match your stay
-              </p>
-              <p className="text-sm text-gray-600">Real-time room availability streamed from Firestore.</p>
-            </div>
-            <GhostButton type="button" className="lg:hidden" onClick={() => setIsFilterOpen(true)}>
-              <SlidersHorizontal size={16} />
-              Filters
-            </GhostButton>
-          </motion.div>
-
-          {loading ? (
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="animate-pulse overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-                  <div className="aspect-[4/3] bg-gray-200" />
-                  <div className="p-5 space-y-4">
-                    <div className="h-4 bg-gray-200 rounded w-1/4" />
-                    <div className="h-6 bg-gray-200 rounded w-3/4" />
-                    <div className="space-y-2">
-                      <div className="h-4 bg-gray-200 rounded w-full" />
-                      <div className="h-4 bg-gray-200 rounded w-5/6" />
-                    </div>
-                    <div className="h-4 bg-gray-200 rounded w-1/2" />
-                    <div className="flex justify-between items-center pt-2">
-                      <div className="h-6 bg-gray-200 rounded w-1/4" />
-                      <div className="h-10 bg-gray-200 rounded w-1/3" />
-                    </div>
+      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+        {loading ? (
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="animate-pulse overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
+                <div className="aspect-[4/3] bg-gray-200" />
+                <div className="p-5 space-y-4">
+                  <div className="h-4 bg-gray-200 rounded w-1/4" />
+                  <div className="h-6 bg-gray-200 rounded w-3/4" />
+                  <div className="space-y-2">
+                    <div className="h-4 bg-gray-200 rounded w-full" />
+                    <div className="h-4 bg-gray-200 rounded w-5/6" />
+                  </div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2" />
+                  <div className="flex justify-between items-center pt-2">
+                    <div className="h-6 bg-gray-200 rounded w-1/4" />
+                    <div className="h-10 bg-gray-200 rounded w-1/3" />
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : visibleTypes.length > 0 ? (
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-              <AnimatePresence mode="popLayout" initial={false}>
-                {visibleTypes.map((type) => {
-                  const counts = byType[type.value];
-                  return (
-                    <motion.div
-                      key={type.value}
-                      layout
-                      initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
-                      animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                      exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-                      transition={{ duration: 0.25, ease: "easeOut" }}
-                    >
-                      <RoomTypeCard
-                        type={type}
-                        availableCount={counts?.available ?? 0}
-                        totalCount={counts?.total ?? 0}
-                        firstAvailableRoomId={counts?.firstAvailableRoomId ?? null}
-                        bookingQuery={bookingQuery}
-                        onDetails={() => setSelectedTypeValue(type.value)}
-                      />
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <motion.div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200" variants={fadeUp} {...entranceProps}>
-              <h2 className="text-xl font-semibold text-gray-950">No room types match your filters</h2>
-              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-600">
-                Try a smaller guest count or choose all room types to see more options.
-              </p>
-              <PrimaryButton type="button" className="mt-6" onClick={resetFilters}>
-                Reset filters
-              </PrimaryButton>
-            </motion.div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        ) : roomTypes.length > 0 ? (
+          <motion.div
+            className="grid gap-6 md:grid-cols-2 xl:grid-cols-3"
+            variants={staggerContainer}
+            {...entranceProps}
+          >
+            {roomTypes.map((type) => (
+              <RoomTypeCard
+                key={type.value}
+                type={type}
+                onDetails={() => setSelectedTypeValue(type.value)}
+              />
+            ))}
+          </motion.div>
+        ) : (
+          <div className="rounded-card bg-white p-8 text-center shadow-sm ring-1 ring-gray-200">
+            <h2 className="text-xl font-semibold text-gray-950">No room types available right now</h2>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-gray-600">
+              Our room catalog is being updated. Please check back in a few minutes, or contact us for help.
+            </p>
+          </div>
+        )}
       </section>
-
-      <Drawer title="Filter rooms" open={isFilterOpen} onClose={() => setIsFilterOpen(false)}>
-        <div className="mb-5 flex items-center justify-between">
-          <p className="text-sm font-medium text-gray-600">Adjust dates, guests, and room type.</p>
-          <button className="text-sm font-semibold text-primary" type="button" onClick={resetFilters}>
-            Reset
-          </button>
-        </div>
-        {renderFilters(true)}
-      </Drawer>
 
       <Modal
         title={selectedTypeEntry?.label ?? "Room type details"}
@@ -300,18 +115,6 @@ export function RoomsPage() {
               />
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <StatusBadge
-                label={
-                  selectedTypeCounts && selectedTypeCounts.total > 0
-                    ? selectedTypeCounts.available === 0
-                      ? "Sold out for these dates"
-                      : `${selectedTypeCounts.available} of ${selectedTypeCounts.total} available`
-                    : "No rooms"
-                }
-                status={
-                  selectedTypeCounts && selectedTypeCounts.available > 0 ? "available" : "occupied"
-                }
-              />
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
                 {selectedTypeEntry.shortLabel}
               </span>
@@ -346,15 +149,7 @@ export function RoomsPage() {
                 <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
                 <p className="text-2xl font-semibold text-gray-950">{formatPrice(selectedTypeEntry.pricePerNight)}</p>
               </div>
-              {selectedTypeCounts && selectedTypeCounts.available > 0 && selectedTypeCounts.firstAvailableRoomId ? (
-                <PrimaryButton to={`/book?roomId=${selectedTypeCounts.firstAvailableRoomId}${bookingQuery}`}>
-                  Book this type
-                </PrimaryButton>
-              ) : (
-                <PrimaryButton aria-disabled="true" className="pointer-events-none" tabIndex={-1} to="#">
-                  Sold out
-                </PrimaryButton>
-              )}
+              <PrimaryButton to="/book">Book this type</PrimaryButton>
             </div>
           </div>
         ) : null}
