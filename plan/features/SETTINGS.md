@@ -138,14 +138,44 @@ Source: `settings/websiteContent` — `setDoc` on save (copy fields) or per-uplo
 
 ### 9. Website Content
 
-List-based editable content for public pages. The hero copy + photos were moved to the Branding tab.
+List-shaped editable content for the public homepage. Hero copy + photos were moved to the Branding tab. This tab is organized into four sub-sections, each with its own editor and a single "Save Content" button at the bottom that persists all four at once.
 
-> **Note:** This tab is currently a stub pointing to Branding. It will own the list-based content (amenities, services, featured rooms, Spark Rewards promo) once those editors are built.
+**Homepage Amenities** (four-up grid)
+- [ ] Add / remove / reorder the amenity cards. Each row: title, description, icon name (dropdown of `KNOWN_CONTENT_ICONS` from `shared/constants`), isEnabled toggle
+- [ ] Disabled items are hidden from the guest site but stay in the data so the order is preserved
+- [ ] Default items pre-seeded: "Consistent comfort", "Easy city access", "Warm front desk care"
+- [ ] Source: `settings/websiteContent.homepage.amenities`
+
+**Featured Rooms** (up to 3 on the "Stay with us" section)
+- [ ] Two-pane selector: available active rooms on the left, featured on the right
+- [ ] Each row in the right pane: room name, room number, type, position number badge
+- [ ] Add / remove / reorder (up/down) the picked list; capped at `MAX_FEATURED_ROOMS = 3`
+- [ ] When the picked list is empty the guest site falls back to the first 3 active rooms
+- [ ] Type-image thumbnails pulled from `roomTypes[room.type].imageUrls[0]`
+- [ ] Source: `settings/websiteContent.homepage.featuredRoomIds`
+
+**Homepage Services** (two-up service cards)
+- [ ] Add / remove / reorder the service cards. Each row: title, description, icon, isEnabled toggle
+- [ ] CTA is always "Contact us" → `/contact` and is not editable
+- [ ] Default items pre-seeded: "Tour Packages", "Car Rentals"
+- [ ] Source: `settings/websiteContent.homepage.services`
+
+**Spark Rewards Promo** (the dark promo block on the homepage)
+- [ ] Enable / disable the entire block — global toggle. Block hides entirely when disabled
+- [ ] Heading + description (one-line marketing copy)
+- [ ] Perks list — add / remove / reorder perks. Each row: title, description, icon, isEnabled toggle. Disabled perks stay in the data so the order is preserved
+- [ ] Default items pre-seeded: "Earn points on completed stays", "Member-only stay offers", "Request early check-in"
+- [ ] Source: `settings/websiteContent.homepage.sparkRewards`
 
 **Our Rooms / Contact Us:**
 - [ ] Note: "Room content managed in Room Management. Contact details managed in Hotel Info."
 
-Source: `settings/websiteContent` — `setDoc` on save per section (future).
+**Implementation notes:**
+- The four editors use two reusable components: `ListEditor` (amenities, services, perks) and `RoomPicker` (featured rooms). Both live in `admin-app/src/components/`
+- All four sub-objects are persisted together via `setDoc(settings, "websiteContent", { homepage: {…} }, { merge: true })` on a single "Save Content" button
+- `KNOWN_CONTENT_ICONS` is a kebab-case string union exported from `shared/constants/index.ts` — the admin app renders a dropdown, the guest app's per-page `resolveIcon` helper maps each name to a `lucide-react` component
+
+Source: `settings/websiteContent` — `setDoc` on save per section.
 
 **Room Type Photos** *(per W3.5 — type-driven gallery, cross-reference)* — lives on the **Room Types** tab. The room type entry owns its `imageUrls[]` plus rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. Photos are stored at `room-types/{typeValue}/{filename}` in Storage (public read, staff write). Maximum `MAX_ROOM_TYPE_PHOTOS` (currently 10) per type — enforced in the upload UI. Source: `settings/hotelConfig.roomTypes[].imageUrls`.
 
