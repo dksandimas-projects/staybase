@@ -8,7 +8,15 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut
 } from "firebase/auth";
-import { ACTIVE_BOOKING_STATUSES, CreateRoomInput, DEFAULT_ROOM_TYPES, MAX_ROOM_TYPE_PHOTOS, type RoomTypeEntry } from "@spark-inn/shared";
+import {
+  ACTIVE_BOOKING_STATUSES,
+  CreateRoomInput,
+  DEFAULT_CORPORATE_PERKS,
+  DEFAULT_CORPORATE_PAGE_CONTENT,
+  DEFAULT_ROOM_TYPES,
+  MAX_ROOM_TYPE_PHOTOS,
+  type RoomTypeEntry
+} from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
 import { collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
@@ -362,6 +370,15 @@ export interface AdminContextType {
   rewardsConfig: any;
   breakfastConfig: any;
   storeConfig: any;
+  // `true` until the first `settings/websiteContent` snapshot
+  // arrives from Firestore. The Branding tab's asset previews
+  // need this to avoid flashing the static fallback logo /
+  // placeholder photo before the admin's custom upload is known
+  // — see `usePublicSiteContent` for the same pattern in the
+  // guest app's empty initial state. Set to `false` the first
+  // time the `websiteContent` case fires in the settings
+  // `onSnapshot` listener below.
+  websiteContentLoading: boolean;
   updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<void>;
 
   // Staff Accounts
@@ -1893,6 +1910,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     ]
   });
 
+  // Tracks whether the first `settings/websiteContent` snapshot
+  // has been delivered. Used by the Branding tab to render a
+  // skeleton for the asset previews instead of the static
+  // fallback logo / "no asset yet" placeholder, which would
+  // otherwise flash before the admin's custom upload is known
+  // (more pronounced on mobile where the snapshot delivery
+  // is slower). Set to `false` inside the `onSnapshot` callback
+  // the first time the `websiteContent` case fires.
+  const [websiteContentLoading, setWebsiteContentLoading] = useState(true);
+
   const [websiteContent, setWebsiteContent] = useState({
     homepage: {
       heroHeading: "Boutique Comfort in Bohol",
@@ -1903,7 +1930,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         { title: "Easy city access", description: "A practical Tagbilaran base for tours, meetings, errands, and onward travel.", icon: "map", isEnabled: true },
         { title: "Warm front desk care", description: "Helpful support for arrivals, local questions, and small travel details.", icon: "users", isEnabled: true }
       ],
-      featuredRoomIds: ["room-201", "room-204", "room-301"],
+      featuredTypeValues: ["executive", "standard-double", "family"],
       services: [
         { title: "Tour Packages", description: "Ask our team for help arranging Bohol countryside tours, island plans, and local experiences.", icon: "palmtree", isEnabled: true },
         { title: "Car Rentals", description: "Coordinate simple transportation support for business trips, family errands, or day tours.", icon: "car", isEnabled: true }
@@ -1930,7 +1957,18 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       heroPhotoUrl: "",
       perks: [
         { title: "Negotiated Rates", description: "Discounted room charges.", icon: "coins", isEnabled: true }
-      ]
+      ],
+      // Rooms overview + retreat CTA copy. Empty strings in
+      // the initial useState shape mean "use the shared
+      // `DEFAULT_CORPORATE_PAGE_CONTENT` fallback" — populated
+      // by the Settings editor on mount and by the one-time
+      // Firestore backfill below.
+      roomsOverviewEyebrow: "",
+      roomsOverviewHeading: "",
+      roomsOverviewDescription: "",
+      retreatHeading: "",
+      retreatDescription: "",
+      retreatCtaLabel: ""
     },
     rewards: {
       heroEyebrow: "Loyalty Program",
@@ -1965,7 +2003,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           { title: "Easy city access", description: "A practical Tagbilaran base for tours, meetings, errands, and onward travel.", icon: "map", isEnabled: true },
           { title: "Warm front desk care", description: "Helpful support for arrivals, local questions, and small travel details.", icon: "users", isEnabled: true }
         ],
-        featuredRoomIds: ["room-201", "room-204", "room-301"],
+      featuredTypeValues: ["executive", "standard-double", "family"],
         services: [
           { title: "Tour Packages", description: "Ask our team for help arranging Bohol countryside tours, island plans, and local experiences.", icon: "palmtree", isEnabled: true },
           { title: "Car Rentals", description: "Coordinate simple transportation support for business trips, family errands, or day tours.", icon: "car", isEnabled: true }
@@ -1985,15 +2023,35 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         heroHeading: "about us",
         heroPhotoUrl: ""
       },
-      corporate: {
-        heroEyebrow: "Curated hospitality for executive comfort",
-        heroHeading: "Corporate Boardrooms",
-        heroSubtext: "Flexible spaces.",
-        heroPhotoUrl: "",
-        perks: [
-          { title: "Negotiated Rates", description: "Discounted room charges.", icon: "coins", isEnabled: true }
-        ]
-      },
+    corporate: {
+      heroEyebrow: "Curated hospitality for executive comfort",
+      heroHeading: "Corporate Boardrooms",
+      heroSubtext: "Flexible spaces.",
+      heroPhotoUrl: "",
+      // Seed the full set of perks (sourced from the shared
+      // `DEFAULT_CORPORATE_PERKS` constant) so the Website
+      // Content → Corporate page editor shows the same set
+      // guests see on a fresh deploy. If a Firestore doc
+      // already carries a `corporate.perks[]` it overrides
+      // this seed below in the merge.
+      perks: DEFAULT_CORPORATE_PERKS.map((p) => ({
+        title: p.title,
+        description: p.description,
+        icon: p.icon,
+        isEnabled: p.isEnabled !== false
+      })),
+      // Rooms overview + retreat CTA copy. Empty strings in
+      // the initial useState shape mean "use the shared
+      // `DEFAULT_CORPORATE_PAGE_CONTENT` fallback" — populated
+      // by the Settings editor on mount and by the one-time
+      // Firestore backfill below.
+      roomsOverviewEyebrow: "",
+      roomsOverviewHeading: "",
+      roomsOverviewDescription: "",
+      retreatHeading: "",
+      retreatDescription: "",
+      retreatCtaLabel: ""
+    },
       rewards: {
         heroEyebrow: "Loyalty Program",
         heroHeading: "Earn Every Stay",
@@ -2024,9 +2082,33 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         services: Array.isArray(homepageRaw.services)
           ? (homepageRaw.services as typeof seed.homepage.services)
           : seed.homepage.services,
-        featuredRoomIds: Array.isArray(homepageRaw.featuredRoomIds)
-          ? (homepageRaw.featuredRoomIds as string[])
-          : seed.homepage.featuredRoomIds,
+        featuredTypeValues: (() => {
+          // Prefer the new `featuredTypeValues` field. If absent
+          // and the doc still carries the legacy
+          // `featuredRoomIds` (pre-migration), map each id to its
+          // room type via the `roomTypes` already loaded into
+          // context, dedupe, and seed the new field. This is a
+          // one-time migration — the next admin save writes the
+          // new field and the old one is dropped.
+          if (Array.isArray(homepageRaw.featuredTypeValues)) {
+            return homepageRaw.featuredTypeValues as string[];
+          }
+          if (Array.isArray(homepageRaw.featuredRoomIds) && roomTypes.length > 0) {
+            const typeByValue = new Map(roomTypes.map((t) => [t.value, t.value]));
+            const derived: string[] = [];
+            for (const id of homepageRaw.featuredRoomIds as unknown[]) {
+              if (typeof id !== "string") continue;
+              const matched = rooms.find((r) => r.id === id);
+              if (!matched) continue;
+              const typeValue = typeByValue.get(matched.type);
+              if (typeValue && !derived.includes(typeValue)) {
+                derived.push(typeValue);
+              }
+            }
+            if (derived.length > 0) return derived;
+          }
+          return seed.homepage.featuredTypeValues;
+        })(),
         sparkRewards: {
           ...seed.homepage.sparkRewards,
           ...(sparkRewardsRaw || {}),
@@ -2093,6 +2175,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
+              setWebsiteContentLoading(false);
               break;
             case "rewardsConfig":
               setRewardsConfig(data as typeof rewardsConfig);
@@ -2122,6 +2205,53 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       notify.error("Failed to save settings", error instanceof Error ? error.message : "Unknown error");
     }
   };
+
+  // One-time corporate backfill. Runs once per admin session
+  // (gated by a ref) after the initial Firestore snapshot delivers
+  // `websiteContent`. For each of the 10 corporate fields that is
+  // empty (`""` or missing), write the corresponding value from
+  // `DEFAULT_CORPORATE_PAGE_CONTENT` to
+  // `settings/websiteContent.corporate` via the existing
+  // `updateSettings` (which uses `setDoc(..., { merge: true })`).
+  //
+  // Why: the new fields added in `feat/corporate-content-editable`
+  // would otherwise rely on the guest app's `||` fallback forever.
+  // Backfilling once on first admin load locks the page to the
+  // same copy + image the deploy-time fallback provides, so the
+  // admin editor and the guest site agree without a manual save.
+  // Idempotent — subsequent loads see the backfilled values and
+  // the `if (!corporate.X)` check short-circuits, so no extra
+  // writes happen. The ref prevents re-runs when `websiteContent`
+  // updates for unrelated reasons (e.g. any other settings doc
+  // changes).
+  const hasBackfilledCorporateRef = useRef(false);
+  useEffect(() => {
+    if (hasBackfilledCorporateRef.current) return;
+    // Wait until the initial Firestore snapshot has delivered
+    // `websiteContent` with at least the homepage sub-object
+    // (the seed guarantees this is always present).
+    if (!websiteContent || !websiteContent.homepage) return;
+    const corporate = websiteContent.corporate;
+    if (!corporate) {
+      hasBackfilledCorporateRef.current = true;
+      return;
+    }
+    const updates: Record<string, string> = {};
+    if (!corporate.heroEyebrow) updates.heroEyebrow = DEFAULT_CORPORATE_PAGE_CONTENT.hero.eyebrow;
+    if (!corporate.heroHeading) updates.heroHeading = DEFAULT_CORPORATE_PAGE_CONTENT.hero.heading;
+    if (!corporate.heroSubtext) updates.heroSubtext = DEFAULT_CORPORATE_PAGE_CONTENT.hero.subtext;
+    if (!corporate.heroPhotoUrl) updates.heroPhotoUrl = DEFAULT_CORPORATE_PAGE_CONTENT.hero.photoUrl;
+    if (!corporate.roomsOverviewEyebrow) updates.roomsOverviewEyebrow = DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow;
+    if (!corporate.roomsOverviewHeading) updates.roomsOverviewHeading = DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading;
+    if (!corporate.roomsOverviewDescription) updates.roomsOverviewDescription = DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description;
+    if (!corporate.retreatHeading) updates.retreatHeading = DEFAULT_CORPORATE_PAGE_CONTENT.retreat.heading;
+    if (!corporate.retreatDescription) updates.retreatDescription = DEFAULT_CORPORATE_PAGE_CONTENT.retreat.description;
+    if (!corporate.retreatCtaLabel) updates.retreatCtaLabel = DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel;
+    hasBackfilledCorporateRef.current = true;
+    if (Object.keys(updates).length > 0) {
+      void updateSettings("websiteContent", { corporate: updates });
+    }
+  }, [websiteContent, updateSettings]);
 
   // Room Types State — sourced from settings/hotelConfig.roomTypes
   // (per W3.3). The hotelConfig onSnapshot writes to the local
@@ -2572,6 +2702,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         deleteStoreItem,
         hotelConfig,
         websiteContent,
+        websiteContentLoading,
         rewardsConfig,
         breakfastConfig,
         storeConfig,

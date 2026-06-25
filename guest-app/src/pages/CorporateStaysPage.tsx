@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import {
@@ -25,13 +25,15 @@ import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
-import { rooms } from "../data/rooms";
 import { ROOM_TYPE_IMAGES } from "../data/homepage";
-import { useRoomTypes, getRoomTypeImages, getRoomTypeRates } from "../hooks/useRoomTypes";
+import { useRooms } from "../hooks/useRooms";
+import { useRoomTypes } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
 import { cn } from "../utils/cn";
-import { fadeUp, staggerContainer, staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
-import { usePublicSiteContent, type ContentItem } from "../hooks/usePublicSiteContent";
+import { fadeUp, staggerContainer, staggerChild, DEFAULT_CORPORATE_PAGE_CONTENT, type RoomTypeEntry } from "@spark-inn/shared";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import type { ContentItem } from "@spark-inn/shared";
+import { HeroSkeleton } from "../components/HeroSkeleton";
 
 const PERK_ICON_MAP: Record<string, LucideIcon> = {
   coins: Coins,
@@ -79,18 +81,28 @@ export function CorporateStaysPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [formError, setFormError] = useState("");
 
-  // Room details modal
-  const [selectedRoom, setSelectedRoom] = useState<typeof rooms[0] | null>(null);
+  // Type details modal — holds a `RoomTypeEntry` directly (no per-room
+  // indirection). See the `accommodationTypes` derivation below for why
+  // the rooms-overview section is now type-driven.
+  const [selectedType, setSelectedType] = useState<RoomTypeEntry | null>(null);
 
-  // Unique rooms by type to show in the overview
-  const uniqueRooms = rooms.reduce((acc: typeof rooms, current) => {
-    const x = acc.find(item => item.type === current.type);
-    if (!x && current.isActive) {
-      return acc.concat([current]);
-    } else {
-      return acc;
-    }
-  }, []);
+  // Live data sources: rooms (for the "has at least one active room"
+  // filter) + room types (canonical for the overview cards).
+  const { rooms } = useRooms();
+  const { roomTypes } = useRoomTypes();
+
+  // Room types for the public rooms overview section. Previously this
+  // was derived from a hardcoded `data/rooms.ts` fallback via
+  // `uniqueRooms = rooms.reduce(...)`, which meant any new type the
+  // admin added via Settings → Room Types would silently fail to
+  // appear on the corporate page. Now sourced directly from
+  // `useRoomTypes()` (already live on Firestore) and filtered to
+  // types that have at least one active room — same end condition as
+  // the old `current.isActive` check, but type-driven.
+  const accommodationTypes = useMemo(
+    () => roomTypes.filter((type) => rooms.some((r) => r.isActive && r.type === type.value)),
+    [roomTypes, rooms]
+  );
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -101,19 +113,8 @@ export function CorporateStaysPage() {
       };
 
   const { corporate } = usePublicSiteContent();
-  const { roomTypes } = useRoomTypes();
   const corpHeroPhoto = corporate.heroPhotoUrl;
   const corpHeroEyebrow = corporate.heroEyebrow;
-
-  const resolveTypeImages = (typeValue: string): string[] => {
-    const live = getRoomTypeImages(roomTypes, typeValue);
-    if (live.length > 0) return live;
-    return ROOM_TYPE_IMAGES[typeValue] ?? [];
-  };
-
-  const resolveTypeMaxCapacity = (typeValue: string): number => {
-    return getRoomTypeRates(roomTypes, typeValue)?.maxCapacity ?? 0;
-  };
   const corpHeading = corporate.heroHeading;
   const corpSubtext = corporate.heroSubtext;
   const perkFallbacks: LucideIcon[] = [Coins, Users, Briefcase, Wifi, ShieldCheck, HelpCircle];
@@ -217,13 +218,24 @@ export function CorporateStaysPage() {
       {/* Dark Hero Section */}
       <section className="relative -mt-20 flex min-h-[85vh] items-center justify-center overflow-hidden bg-gray-950 pt-20 px-4">
         <div className="absolute inset-0 z-0 opacity-30">
-          <img
-            className="w-full h-full object-cover"
-            alt="Sophisticated corporate meeting room and lounge"
-            src={corpHeroPhoto}
-          />
+          {corpHeroPhoto ? (
+            <img
+              className="w-full h-full object-cover"
+              alt="Sophisticated corporate meeting room and lounge"
+              src={corpHeroPhoto}
+            />
+          ) : (
+            <HeroSkeleton />
+          )}
         </div>
-        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/70 to-transparent z-0" />
+        {/* Lighter gradient than the home / about / rewards heroes
+            because the corporate page already sits on a
+            `bg-gray-950` section — the photo only needs a
+            modest dark wash to read, not a 90% black blanket.
+            The drop-shadow on the text (added in
+            `feat/hero-text-legibility`) carries the rest of the
+            legibility load. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/20 via-gray-950/40 to-gray-950/60 z-0" />
 
         <motion.div
           animate="visible"
@@ -231,28 +243,28 @@ export function CorporateStaysPage() {
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <p className="font-heading text-lg italic text-primary-light sm:text-2xl tracking-wider">
+          <p className="font-heading text-lg italic text-primary-light sm:text-2xl tracking-wider drop-shadow-md">
             {corpHeroEyebrow}
           </p>
-          <h1 className="mt-4 font-heading text-4xl leading-tight text-white sm:text-6xl lg:text-7xl">
+          <h1 className="mt-4 font-heading text-4xl leading-tight text-white sm:text-6xl lg:text-7xl drop-shadow-[0_2px_12px_rgba(0,0,0,0.7)]">
             {corpHeading}
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-300 sm:text-lg">
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-gray-300 sm:text-lg drop-shadow-md">
             {corpSubtext}
           </p>
           <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row sm:items-center">
-            <PrimaryButton to="/corporate/book" className="min-w-[220px] shadow-lg">
+            <PrimaryButton to="/corporate/book" className="min-w-[220px] shadow-lg drop-shadow-md">
               Book with Corporate Rate
             </PrimaryButton>
             <GhostButton
               type="button"
-              className="min-w-[220px] border-white text-white hover:bg-white/10"
+              className="min-w-[220px] border-white text-white drop-shadow-sm hover:bg-white/10"
               onClick={() => scrollToForm()}
             >
               Submit an Inquiry
             </GhostButton>
           </div>
-          <div className="mt-6 text-sm text-gray-400">
+          <div className="mt-6 text-sm text-gray-400 drop-shadow-sm">
             Have a negotiated corporate access code?{" "}
             <Link to="/corporate/book" className="text-primary hover:underline font-medium">
               Validate here
@@ -382,90 +394,104 @@ export function CorporateStaysPage() {
       {/* Rooms Overview Grid (NO PRICES) */}
       <section className="py-24 bg-gray-50 border-t border-gray-200">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <motion.div 
+          <motion.div
             className="text-center mb-16"
             variants={fadeUp}
             {...entranceProps}
           >
-            <p className="text-xs font-semibold uppercase tracking-widest text-primary">Accommodation Types</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+              {corporate.roomsOverviewEyebrow || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow}
+            </p>
             <h2 className="mt-3 font-heading text-3xl text-gray-950 sm:text-4xl">
-              Rooms Built for Productivity & Rest
+              {corporate.roomsOverviewHeading || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading}
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-sm text-gray-600 leading-relaxed">
-              Explore our range of boutique rooms. All rooms feature workspaces, high-speed Wi-Fi, air conditioning, and premium linens. No prices are shown below; corporate rates are negotiated based on contract terms.
+              {corporate.roomsOverviewDescription || DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description}
             </p>
             <div className="mt-4 mx-auto w-16 h-1 bg-primary rounded" />
           </motion.div>
 
-          <motion.div 
-            className="grid gap-8 md:grid-cols-2 lg:grid-cols-3" 
-            variants={staggerContainer} 
+          <motion.div
+            className="grid gap-8 md:grid-cols-2 lg:grid-cols-3"
+            variants={staggerContainer}
             {...entranceProps}
           >
-            {uniqueRooms.map((room) => {
-              const typeLabel = DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.shortLabel ?? room.type;
+            {accommodationTypes.map((type) => {
+              // Image fallback chain: live `type.imageUrls[0]` from
+              // `useRoomTypes` → static `ROOM_TYPE_IMAGES` map from
+              // `data/homepage.ts` for types that haven't been given
+              // an upload yet. Same pattern as `resolveTypeImages`
+              // but inlined since we already have the `RoomTypeEntry`
+              // — no need to look it up by string key.
+              const heroImage = type.imageUrls[0] || ROOM_TYPE_IMAGES[type.value]?.[0];
               return (
                 <motion.article
-                  key={room.id}
+                  key={type.value}
                   className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200 flex flex-col h-full hover:shadow-md transition"
                   variants={staggerChild}
                   whileHover={shouldReduceMotion ? undefined : { y: -4 }}
                 >
                   <div className="aspect-[4/3] overflow-hidden bg-section-bg relative">
-                    <img
-                      src={resolveTypeImages(room.type)[0]}
-                      alt={room.name}
-                      className="h-full w-full object-cover transition duration-300 hover:scale-105"
-                    />
+                    {heroImage ? (
+                      <img
+                        src={heroImage}
+                        alt={type.label}
+                        className="h-full w-full object-cover transition duration-300 hover:scale-105"
+                      />
+                    ) : (
+                      <div
+                        className="flex h-full w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400"
+                        aria-label={`No photo for ${type.label}`}
+                      >
+                        Photo coming soon
+                      </div>
+                    )}
                     <div className="absolute top-3 left-3">
                       <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary shadow-sm">
-                        {typeLabel}
+                        {type.shortLabel}
                       </span>
                     </div>
                   </div>
 
                   <div className="p-6 flex flex-col flex-1">
-                    <h3 className="text-lg font-semibold text-gray-950">{room.name}</h3>
+                    <h3 className="text-lg font-semibold text-gray-950">{type.label}</h3>
                     <p className="mt-3 text-sm leading-6 text-gray-600 flex-1 line-clamp-3">
-                      {roomTypes.find((t) => t.value === room.type)?.description || ""}
+                      {type.description}
                     </p>
 
                     <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between gap-3 text-xs text-gray-500">
                       <span className="flex items-center gap-1.5">
                         <Users size={14} className="text-primary" />
-                        {(() => {
-                          const cap = resolveTypeMaxCapacity(room.type);
-                          return <>Up to {cap} {cap === 1 ? "guest" : "guests"}</>;
-                        })()}
+                        Up to {type.maxCapacity} {type.maxCapacity === 1 ? "guest" : "guests"}
                       </span>
-                      <span>{roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}</span>
+                      <span>{type.bedDefinition}</span>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-1.5">
-                      {(roomTypes.find((t) => t.value === room.type)?.amenities ?? []).slice(0, 3).map((amenity) => (
+                      {type.amenities.slice(0, 3).map((amenity) => (
                         <span key={amenity} className="rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-600">
                           {amenity}
                         </span>
                       ))}
-                      {(roomTypes.find((t) => t.value === room.type)?.amenities ?? []).length > 3 && (
+                      {type.amenities.length > 3 && (
                         <span className="rounded-full bg-gray-50 px-2.5 py-1 text-[11px] font-medium text-gray-500">
-                          +{(roomTypes.find((t) => t.value === room.type)?.amenities ?? []).length - 3} more
+                          +{type.amenities.length - 3} more
                         </span>
                       )}
                     </div>
 
                     <div className="mt-6 grid grid-cols-2 gap-2 pt-2">
-                      <GhostButton 
-                        type="button" 
-                        className="text-xs h-[40px] min-h-[40px]"
-                        onClick={() => setSelectedRoom(room)}
-                      >
-                        Room Details
-                      </GhostButton>
-                      <PrimaryButton 
+                      <GhostButton
                         type="button"
-                        className="text-xs h-[40px] min-h-[40px]" 
-                        onClick={() => scrollToForm(room.name)}
+                        className="text-xs h-[40px] min-h-[40px]"
+                        onClick={() => setSelectedType(type)}
+                      >
+                        Type Details
+                      </GhostButton>
+                      <PrimaryButton
+                        type="button"
+                        className="text-xs h-[40px] min-h-[40px]"
+                        onClick={() => scrollToForm(type.label)}
                       >
                         Inquire
                       </PrimaryButton>
@@ -484,16 +510,16 @@ export function CorporateStaysPage() {
           <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full -ml-24 -mb-24 pointer-events-none" />
           <h2 className="font-heading text-3xl md:text-4xl text-white mb-4 relative z-10">
-            Partner with us for your next team retreat.
+            {corporate.retreatHeading || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.heading}
           </h2>
           <p className="font-body text-base md:text-lg text-white/90 mb-8 max-w-2xl mx-auto relative z-10">
-            Experience the perfect blend of Bohol's natural charm and the high-efficiency environment your business demands. Fully catered planning options are available.
+            {corporate.retreatDescription || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.description}
           </p>
-          <button 
+          <button
             className="bg-white text-primary px-8 py-3 rounded-lg font-semibold hover:bg-primary-light transition active:scale-95 relative z-10 min-h-11 shadow-sm"
             onClick={() => scrollToForm()}
           >
-            Get in Touch
+            {corporate.retreatCtaLabel || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel}
           </button>
         </div>
       </section>
@@ -697,48 +723,61 @@ export function CorporateStaysPage() {
         </div>
       </section>
 
-      {/* Room Details Modal */}
-      <Modal 
-        title={selectedRoom?.name ?? "Room Details"} 
-        open={Boolean(selectedRoom)} 
-        onClose={() => setSelectedRoom(null)}
+      {/* Type Details Modal — opens with a `RoomTypeEntry` directly
+          (no per-room indirection). Mirrors the card layout: hero
+          image, type label, full description, beds, max occupancy,
+          amenity list, and an "Inquire About" CTA that scrolls to
+          the inquiry form with the type label pre-filled. */}
+      <Modal
+        title={selectedType?.label ?? "Room Type Details"}
+        open={Boolean(selectedType)}
+        onClose={() => setSelectedType(null)}
       >
-        {selectedRoom ? (
+        {selectedType ? (
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
-              <img 
-                src={resolveTypeImages(selectedRoom.type)[0]}
-                alt={selectedRoom.name} 
-                className="h-72 w-full object-cover" 
-              />
+              {(() => {
+                const heroImage = selectedType.imageUrls[0] || ROOM_TYPE_IMAGES[selectedType.value]?.[0];
+                return heroImage ? (
+                  <img
+                    src={heroImage}
+                    alt={selectedType.label}
+                    className="h-72 w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-72 w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400">
+                    Photo coming soon
+                  </div>
+                );
+              })()}
             </div>
-            
+
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                {DEFAULT_ROOM_TYPES.find((t) => t.value === selectedRoom.type)?.label ?? selectedRoom.type}
+                {selectedType.shortLabel}
               </span>
               <span className="text-xs text-gray-500 font-medium">
                 Corporate Rates Negotiable
               </span>
             </div>
 
-            <p className="leading-7 text-gray-600">{roomTypes.find((t) => t.value === selectedRoom.type)?.description || ""}</p>
+            <p className="leading-7 text-gray-600">{selectedType.description}</p>
 
             <div className="grid gap-3 grid-cols-2">
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Beds</p>
-                <p className="mt-1 font-semibold text-gray-950">{roomTypes.find((t) => t.value === selectedRoom.type)?.bedDefinition || "—"}</p>
+                <p className="mt-1 font-semibold text-gray-950">{selectedType.bedDefinition || "—"}</p>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <p className="text-xs uppercase tracking-wide text-gray-500">Max Occupancy</p>
-                <p className="mt-1 font-semibold text-gray-950">Up to {resolveTypeMaxCapacity(selectedRoom.type)} Guests</p>
+                <p className="mt-1 font-semibold text-gray-950">Up to {selectedType.maxCapacity} Guests</p>
               </div>
             </div>
 
             <div>
               <h3 className="font-semibold text-gray-950">Included Amenities</h3>
               <div className="mt-3 flex flex-wrap gap-2">
-                {(roomTypes.find((t) => t.value === selectedRoom.type)?.amenities ?? []).map((amenity) => (
+                {selectedType.amenities.map((amenity) => (
                   <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-600">
                     {amenity}
                   </span>
@@ -750,15 +789,15 @@ export function CorporateStaysPage() {
               <p className="text-xs text-gray-500">
                 Submit an inquiry to receive a contract custom rate proposal for your company.
               </p>
-              <PrimaryButton 
-                type="button" 
+              <PrimaryButton
+                type="button"
                 onClick={() => {
-                  const rName = selectedRoom.name;
-                  setSelectedRoom(null);
-                  scrollToForm(rName);
+                  const label = selectedType.label;
+                  setSelectedType(null);
+                  scrollToForm(label);
                 }}
               >
-                Inquire About Room
+                Inquire About This Type
               </PrimaryButton>
             </div>
           </div>
