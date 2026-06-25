@@ -88,7 +88,10 @@ describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomT
       );
       expect(corpBranch, "expected to find the corporate branch with else fallback").toBeTruthy();
       // The else branch must set the rate to the standard price
-      expect(corpBranch![0]).toMatch(/activeRoomRate\s*=\s*roomData\.pricePerNight/);
+      // (per the room-type booking refactor: the standard rate
+      // now comes from the `roomType` entry in settings/hotelConfig,
+      // not from the physical room doc).
+      expect(corpBranch![0]).toMatch(/activeRoomRate\s*=\s*typeBaseRate/);
     });
 
     it("BookingPage (standard online flow) no longer sends isCorporate: false", () => {
@@ -125,7 +128,7 @@ describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomT
         /const\s+negotiatedRate\s*=[\s\S]*?;\s*const\s+baseRate\s*=\s*negotiatedRate/
       );
       expect(baseRateBlock, "expected the baseRate calculation block").toBeTruthy();
-      expect(baseRateBlock![0]).toMatch(/ratePerRoomType\[selectedRoom\.type\]/);
+      expect(baseRateBlock![0]).toMatch(/ratePerRoomType\[selectedTypeEntry\.value\]/);
       expect(baseRateBlock![0]).toMatch(/selectedRoomRates\?\.corporateRate/);
     });
 

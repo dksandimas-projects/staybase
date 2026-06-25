@@ -68,7 +68,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock) |
+| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` for the confirmation page. |
 | `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
 | `/api/bookings/lookup` | POST | None (owner by ref+email) | Look up a single booking by `bookingRef` + `guestEmail` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}` |
@@ -80,6 +80,16 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 Booking creation MUST use a Firestore transaction to prevent double-booking. Public online and corporate bookings use `/api/bookings/create`; staff walk-in/manual bookings use `/api/bookings/create-walkin`. Both routes must perform room active/blocked checks, overlapping booking checks, and booking reference generation inside the transaction. Public online and corporate clients preallocate the Firestore booking document ID before Storage uploads and pass that ID to `/api/bookings/create`; the API creates the document at that exact ID while generating only the guest-facing booking reference inside the transaction. See `plan/features/AVAILABILITY-LOCKING.md`.
 
 Existing booking documents may still receive authenticated staff/admin operational updates directly from the admin app where Firestore rules allow it. Use booking API routes when the mutation creates a booking, appends audit/payment records, sends email, validates guest ownership, or changes money/member balances.
+
+---
+
+### Room Routes (`/api/rooms/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/rooms/availability` | GET | None (public, rate-limited) | Return PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`) for active bookings (`pending`, `payment-uploaded`, `confirmed`, `checked-in`) that overlap the requested `checkIn` / `checkOut` window. The guest booking page uses this to hide already-booked rooms in Step 1. Rate-limited to 30/IP/min. The actual double-booking prevention is the Firestore transaction in `/api/bookings/create` — this endpoint is a UX optimization only. See `plan/features/AVAILABILITY-LOCKING.md §Guest-side availability UX query`. |
+
+Never expose full `bookings` documents or any PII (guest name, email, phone, payment fields) in this response — the contract is a PII-stripped date range only.
 
 ---
 
@@ -194,6 +204,7 @@ API route checks for a `_hp` field in the request body (the honeypot field name)
 | `/api/validate/voucher` | 20 requests / IP / minute |
 | `/api/validate/corporate-code` | 10 requests / IP / minute |
 | `/api/bookings/lookup` | 10 requests / IP / minute |
+| `/api/rooms/availability` | 30 requests / IP / minute |
 | `/api/email/*` | 3 requests / booking ref / hour |
 
 Use Vercel Edge middleware for IP-based rate limiting. Simple in-memory map is sufficient for Phase 1 at this traffic scale.

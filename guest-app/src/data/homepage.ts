@@ -1,4 +1,61 @@
 import type { Room } from "@spark-inn/shared";
+import config from "@config";
+
+// LQIP (low-quality image placeholder) for the hero photos. The
+// `HeroImage` component renders this as a heavily-blurred background
+// underneath the real image, so the hero appears to "develop" into
+// focus rather than pop in. We use a brand-tinted SVG gradient
+// instead of a tiny JPEG so:
+//   - no per-image build step is required
+//   - white-label clients automatically get a placeholder that
+//     matches their brand palette
+//   - the data URL is ~200 bytes, not a few-KB JPEG
+// Each variant is the same warm vertical gradient that mirrors the
+// kind of light/sky-to-ground falloff a real hotel hero photo has.
+function buildHeroLqip(top: string, bottom: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bottom}"/></linearGradient></defs><rect width="16" height="9" fill="url(%23g)"/></svg>`;
+  return `data:image/svg+xml;utf8,${svg}`;
+}
+
+// Default LQIP palette: warm sky → earth. Used when the page does
+// not pass a custom placeholder. Tied to the brand tokens so a
+// white-label client sees its own primary tint behind the photo.
+export const DEFAULT_HERO_LQIP = buildHeroLqip(
+  lighten(config.colors.primary, 0.55),
+  config.colors.sectionBg
+);
+
+// Per-page LQIPs (slight palette shifts so each hero has its own
+// "mood" during the brief moment between the placeholder and the
+// real image).
+const heroLqipHome = buildHeroLqip(
+  lighten(config.colors.primary, 0.6),
+  config.colors.sectionBg
+);
+const heroLqipAbout = buildHeroLqip("#f3e7d3", config.colors.sectionBg);
+const heroLqipCorporate = buildHeroLqip("#dfe5ec", config.colors.sectionBg);
+const heroLqipRewards = buildHeroLqip(
+  lighten(config.colors.primary, 0.5),
+  config.colors.sectionBg
+);
+
+export const HOMEPAGE_HERO_LQIP = heroLqipHome;
+export const ABOUT_HERO_LQIP = heroLqipAbout;
+export const CORPORATE_HERO_LQIP = heroLqipCorporate;
+export const REWARDS_HERO_LQIP = heroLqipRewards;
+
+// Lighten a hex color toward white by `amount` (0..1). Used to build
+// the LQIP gradient stops. Not exported — internal to this file.
+function lighten(hex: string, amount: number): string {
+  const cleaned = hex.replace("#", "");
+  const r = parseInt(cleaned.substring(0, 2), 16);
+  const g = parseInt(cleaned.substring(2, 4), 16);
+  const b = parseInt(cleaned.substring(4, 6), 16);
+  const blend = (channel: number) =>
+    Math.round(channel + (255 - channel) * amount);
+  const out = (n: number) => n.toString(16).padStart(2, "0");
+  return `#${out(blend(r))}${out(blend(g))}${out(blend(b))}`;
+}
 
 const roomImageOne =
   "https://lh3.googleusercontent.com/aida-public/AB6AXuBfjCo0RxeTYwZIMHRi7nG4GiJzWWSaFP6aDG7pKc1U8YkjM9IakMjV5fNeQFbNWyKCvMBKoM4q5RGBEOmXJailrnJnTXhzqrDu8fV8RlrSs2w_z0pxfmGCIRRhBt1Pp8HkSwJOSIqtEe0Yxcs8y913fU-vkG1qGWqDr757P8jjva2Yh8dXPH4jtrrKT6rkkm92BhP0C-DCv7QzBlabxrwPtL1_6ZCFzvo2HTe_F0LzkTdr22ANSc5QcNDpX2Gbuk-JB7aFWDlfBA_r";

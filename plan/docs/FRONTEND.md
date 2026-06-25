@@ -542,6 +542,28 @@ Room type dropdowns, filters, rate tables, and badges are always built dynamical
 
 ---
 
+## Image Performance
+
+The hero photo on every public page is the LCP element. All hero images **must** render via the `HeroImage` component (`guest-app/src/components/HeroImage.tsx`), never a raw `<img>`. See `plan/features/HOMEPAGE.md §Hero Image Loading` for the full rationale.
+
+**For any other large above-the-fold image** (marketing banners, full-bleed sections, hero of new pages), the same rules apply:
+
+- `loading="eager"` + `decoding="async"` + `fetchPriority="high"` for LCP images
+- `loading="lazy"` for everything below the fold
+- Preload the LCP image with `<link rel="preload" as="image" fetchpriority="high">` — the `HeroImage` component does this automatically; for non-hero LCPs use the same pattern manually
+- Always pass a `placeholder` (LQIP) so the photo develops into focus, not pops in
+- Preconnect to whatever CDN hosts the image (`<link rel="preconnect" href="..." crossorigin>` in `index.html`)
+- Never block the first paint on an image — if the URL isn't known yet, render a skeleton sized to the image's aspect ratio
+
+**Forbidden patterns:**
+
+- Raw `<img>` for the hero or any other LCP image
+- `loading="lazy"` on above-the-fold imagery
+- Synchronous `await fetch(imageUrl)` in the render path
+- Hardcoding image CDN hostnames in components — use `usePublicSiteContent` / `useStorageUrl` so white-label clients can swap CDNs without code changes
+
+---
+
 ## Page Titles & SEO
 
 ### Meta Tags (all public pages)

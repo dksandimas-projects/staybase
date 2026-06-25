@@ -18,6 +18,7 @@ import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsR
 import { handleEmailTrigger } from "../server/handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
 import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
+import { handleRoomAvailability } from "../server/handlers/rooms";
 import { adminAuth } from "../server/lib/firebase-admin";
 import config from "@config";
 
@@ -326,6 +327,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many lookup attempts. Please try again in a minute." });
     }
     return await handleLookupBooking(req, res);
+  }
+
+  if (domain === "rooms" && action === "availability" && req.method === "GET") {
+    // Per W4.7: public guest-side availability query, PII-stripped. Bumped
+    // above the per-IP booking limit so browsing dates on the booking page
+    // does not collide with the booking-create limit.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`rooms-availability:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many availability requests. Please try again in a minute." });
+    }
+    return await handleRoomAvailability(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {

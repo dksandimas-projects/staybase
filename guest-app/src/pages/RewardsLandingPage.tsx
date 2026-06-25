@@ -18,11 +18,13 @@ import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
+import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { auth } from "../firebase/auth";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { REWARDS_HERO_LQIP } from "../data/homepage";
 
 export function RewardsLandingPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -101,10 +103,11 @@ export function RewardsLandingPage() {
       <section className="relative -mt-20 flex min-h-[90vh] items-center justify-center overflow-hidden bg-gray-950 pt-20 px-4">
         <div className="absolute inset-0 z-0 opacity-40">
           {heroPhoto ? (
-            <img
+            <HeroImage
               className="w-full h-full object-cover"
               alt="Warm boutique hotel lobby interior at sunset"
               src={heroPhoto}
+              placeholder={REWARDS_HERO_LQIP}
             />
           ) : (
             <HeroSkeleton />
