@@ -32,5 +32,16 @@
       "path": "/api/email/checkin-reminder",
       "schedule": "0 0 * * *"
     }
+  ],
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/:path*" },
+    { "source": "/assets/:path*", "destination": "/assets/:path*" },
+    { "source": "/brand/:path*", "destination": "/brand/:path*" },
+    { "source": "/offline.html", "destination": "/offline.html" },
+    { "source": "/sw.js", "destination": "/sw.js" },
+    { "source": "/registerSW.js", "destination": "/registerSW.js" },
+    { "source": "/workbox-:hash.js", "destination": "/workbox-:hash.js" },
+    { "source": "/manifest.webmanifest", "destination": "/manifest.webmanifest" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
