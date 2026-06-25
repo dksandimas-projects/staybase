@@ -129,25 +129,87 @@ export function CorporateStaysPage() {
     formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  // Mount the Turnstile widget explicitly via `turnstile.render()` rather
+  // than relying on the implicit auto-render triggered by the
+  // `cf-turnstile` class. Explicit render lets us:
+  //   - Pass `expired-callback` / `error-callback` so the form degrades
+  //     gracefully when the widget fails or the token expires.
+  //   - Capture the returned widget id and `turnstile.remove()` it on
+  //     unmount — without this, React re-renders of the form (e.g. after
+  //     "Submit Another Inquiry") leave stale widget instances attached
+  //     to detached DOM nodes, which is what produced the 400 / 110200
+  //     storms in production.
+  //   - Avoid the global `window.onCorporateInquiryTurnstileSuccess`
+  //     callback that races with React state updates.
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const scriptId = "turnstile-script";
-    if (!document.getElementById(scriptId)) {
+    if (isSubmitted) return;
+
+    const container = turnstileContainerRef.current;
+    if (!container) return;
+
+    const siteKey =
+      import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA";
+    let cancelled = false;
+    let widgetId: string | null = null;
+    let pollHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const ensureScript = (): void => {
+      const scriptId = "turnstile-script";
+      if (document.getElementById(scriptId)) return;
       const script = document.createElement("script");
       script.id = scriptId;
       script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
       script.async = true;
       script.defer = true;
       document.body.appendChild(script);
-    }
-
-    (window as any).onCorporateInquiryTurnstileSuccess = (token: string) => {
-      setTurnstileToken(token);
     };
+
+    const renderWidget = (): void => {
+      if (cancelled || !window.turnstile || !container.isConnected) return;
+      widgetId = window.turnstile.render(container, {
+        sitekey: siteKey,
+        callback: (token) => setTurnstileToken(token),
+        "expired-callback": () => setTurnstileToken(""),
+        "error-callback": () => {
+          // Widget failed to render (network blip, site-key mismatch,
+          // etc). Clear the token so the submit handler can decide
+          // whether to allow the request through or surface an error.
+          setTurnstileToken("");
+        }
+      });
+      turnstileWidgetIdRef.current = widgetId;
+    };
+
+    const tryRender = (): void => {
+      if (cancelled) return;
+      if (window.turnstile) {
+        renderWidget();
+      } else {
+        pollHandle = setTimeout(tryRender, 100);
+      }
+    };
+
+    ensureScript();
+    tryRender();
 
     return () => {
-      delete (window as any).onCorporateInquiryTurnstileSuccess;
+      cancelled = true;
+      if (pollHandle !== null) clearTimeout(pollHandle);
+      const id = turnstileWidgetIdRef.current;
+      if (id && window.turnstile) {
+        try {
+          window.turnstile.remove(id);
+        } catch {
+          // Widget may already be gone (e.g. parent reloaded). Safe to
+          // ignore — the next mount will allocate a fresh id.
+        }
+      }
+      turnstileWidgetIdRef.current = null;
     };
-  }, []);
+  }, [isSubmitted]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -696,9 +758,8 @@ export function CorporateStaysPage() {
                 </label>
 
                 <div
+                  ref={turnstileContainerRef}
                   className="cf-turnstile flex justify-center"
-                  data-sitekey={import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"}
-                  data-callback="onCorporateInquiryTurnstileSuccess"
                 ></div>
 
                 <div className="pt-2">
