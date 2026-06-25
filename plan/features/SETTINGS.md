@@ -96,60 +96,66 @@ Admin-only page at `/settings`. Organized into tabs. Covers hotel information, e
 
 ---
 
-### 8. Website Content
+### 8. Branding
 
-Editable copy and photos for public pages. Changes reflect on the guest site in real-time (Firestore listener or on-load fetch).
+The single edit surface for everything the guest sees at the top of every public page: per-page hero photos, per-page hero copy, and the three logo overrides (navbar solid, navbar over hero, footer). Changes reflect on the guest site in real-time via the `usePublicSiteContent` listener.
 
-**Homepage:**
-- [ ] Hero heading (text)
-- [ ] Hero subtext (text)
-- [ ] Hero background photo (upload)
-- [ ] Amenities section — list of items (title, description, icon name); add/remove/reorder
-- [ ] Featured rooms selector — pick 3 rooms from a dropdown of active rooms
+**Hero Photos** (upload + preview + reset-to-default per page):
+- [ ] **Homepage hero photo** — full-bleed background for `/`. Recommended 1920x1080.
+- [ ] **About hero photo** — top of `/about`. Recommended 1920x600.
+- [ ] **Corporate hero photo** — top of `/corporate`. Recommended 1920x1080.
+- [ ] **Rewards hero photo** — top of `/rewards`. Recommended 1920x1080.
+- [ ] Per row: thumbnail preview (custom override or deploy-time fallback), "Upload" / "Replace" button, "Reset to default" button (only when an override is set), and a status pill ("Custom override" / "Using default").
+- [ ] Compressed client-side via `compressImageFile` (max 1920x1080 for full-bleed, 1920x600 for about, 600x200 for logos; JPEG @ 0.85 quality).
+- [ ] Uploaded to Firebase Storage at `assets/branding/<key-as-path>/<timestamp>-<filename>` (e.g. `assets/branding/homepage/heroPhotoUrl/...`).
+- [ ] Download URL written to `settings/websiteContent` via merged `setDoc`.
 
-**Room Type Photos** *(per W3.5 — type-driven gallery)*:
+**Hero Copy** (text inputs grouped by page, one "Save Hero Copy" button at the bottom):
+- [ ] Homepage — heading + subtext
+- [ ] About — heading
+- [ ] Corporate — eyebrow + heading + subtext
+- [ ] Rewards — eyebrow pill (e.g. "Loyalty Program") + heading + subtext
+- [ ] Helper text under the rewards eyebrow: "Renders as '{config.rewardsName} {rewards.heroEyebrow}' in the pill."
 
-> **W3.6 + W3.7 update:** The room type entry owns the rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. The **Rates** tab still exists for bulk rate review but rates can also be edited per-type from Settings. Rooms created against a type inherit all of these properties by joining `Room.type` at read time.
-- [ ] Each row in the **Room Layout Classifications** table shows a **Photos** column with `{count} / {MAX_ROOM_TYPE_PHOTOS}` and three actions: **Edit**, **Photos**, **Delete**
-- [ ] **Edit modal** — exposes all 9 type-level fields: label, shortLabel, bedDefinition (required), description (textarea), amenities (comma-separated, parsed to a string array on save), maxCapacity, pricePerNight, weekendRate, corporateRate. The identifier key (`value`) is shown read-only at the top — to rename a type, delete and re-add. Save calls `updateRoomType` with the diff.
-- [ ] **Add modal** — same 9 fields, plus `value` (kebab-case unique key) + `imageUrls: []` (the type's gallery starts empty; photos are added via the Photos modal). `bedDefinition` is required and validated.
-- [ ] Clicking **Photos** opens a Modal with a thumbnail grid of the type's current images
-- [ ] Modal footer has an **Add photos** button (multiple file input, image-only, compressed client-side) and a **Close** button
-- [ ] Each photo card shows the image preview, a "Hero" badge on the first photo, and three actions: **move to first** (set as hero), **move to next** (reorder right), and **Delete**
-- [ ] Photos are stored at `room-types/{typeValue}/{filename}` in Storage (public read, staff write)
-- [ ] The hero image is the first element of the array; reorder is persisted via `updateRoomType({ imageUrls })`
-- [ ] Maximum `MAX_ROOM_TYPE_PHOTOS` (currently 10) per type — enforced in the upload UI with a friendly warning
-- [ ] Source: `settings/hotelConfig.roomTypes[].imageUrls` — read at `useRoomTypes` and joined on the `Room.type` field by the guest app
+**Logo Overrides** (upload + preview + reset-to-default per variant):
+- [ ] **Navbar logo (solid background)** — used in the sticky/scrolled state and on every non-hero page. Colored version on a light background.
+- [ ] **Navbar logo (over hero, dark background)** — use a light/white version for visibility over the dark hero photo. This is the variant that fixes the dark-on-dark logo bug in the over-hero state.
+- [ ] **Footer logo** — white version for the dark sidebar footer.
+- [ ] Helper text: "If you only upload one variant it's mirrored across both states."
+- [ ] Fallback chain: custom URL → `hotel.config.ts → logos.*` (deploy-time static file in `public/brand/`).
+- [ ] Navbar selection: when `solid === true` (scrolled, non-hero page) use `logoNavbar`; when `solid === false` (over hero, transparent) use `logoNavbarOnDark` — or fall back to whichever variant the admin uploaded.
 
-**About Us:**
-- [ ] Hero / banner photo (upload)
-- [ ] Mission, vision, hotel story fields (also in Hotel Info tab — link or sync)
+**Edge cases & behaviors:**
+- [ ] Photo upload fails — show error inline under the uploader, leave existing override intact
+- [ ] Reset button only visible when an override is set
+- [ ] Reset writes empty string to Firestore + best-effort deletes the Storage object
+- [ ] Hero eyebrow on homepage is not editable — it remains the deploy-time `config.tagline` (preserves W3.10 design intent)
+- [ ] All uploads require Admin role (Storage rule `match /assets/branding/{fileName}` is `isStaff`; the page itself is admin-only by the sidebar guard)
 
-**Corporate:**
-- [ ] Hero heading (text)
-- [ ] Hero subtext (text)
-- [ ] Hero background photo (upload)
-- [ ] Perks section — list of items (title, description, icon name); add/remove/reorder
+Source: `settings/websiteContent` — `setDoc` on save (copy fields) or per-upload merged `setDoc` (photos + logos).
 
-**Services (Tour Packages & Car Rentals):**
-- [ ] Services section enable/disable toggle
-- [ ] List of service cards — title, description, icon name; add/remove/reorder
-- [ ] Default items pre-seeded: "Tour Packages", "Car Rentals"
-- [ ] CTA is always "Contact Us" → `/contact` — not editable
+---
 
-**Spark Rewards Promo (Homepage):**
-- [ ] Enable/disable Spark Rewards homepage section toggle
-- [ ] Heading text
-- [ ] Description text (key perks to highlight)
+### 9. Website Content
+
+List-based editable content for public pages. The hero copy + photos were moved to the Branding tab.
+
+> **Note:** This tab is currently a stub pointing to Branding. It will own the list-based content (amenities, services, featured rooms, Spark Rewards promo) once those editors are built.
 
 **Our Rooms / Contact Us:**
 - [ ] Note: "Room content managed in Room Management. Contact details managed in Hotel Info."
 
-Source: `settings/websiteContent` — `setDoc` on save per section.
+Source: `settings/websiteContent` — `setDoc` on save per section (future).
+
+**Room Type Photos** *(per W3.5 — type-driven gallery, cross-reference)* — lives on the **Room Types** tab. The room type entry owns its `imageUrls[]` plus rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. Photos are stored at `room-types/{typeValue}/{filename}` in Storage (public read, staff write). Maximum `MAX_ROOM_TYPE_PHOTOS` (currently 10) per type — enforced in the upload UI. Source: `settings/hotelConfig.roomTypes[].imageUrls`.
+
+**Room Type Photos** *(per W3.5 — type-driven gallery)* — note: lives on the **Room Types** tab, not here. Documented for cross-reference only.
+
+> **W3.6 + W3.7 update:** The room type entry owns the rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. The **Rates** tab still exists for bulk rate review but rates can also be edited per-type from Settings. Rooms created against a type inherit all of these properties by joining `Room.type` at read time.
 
 ---
 
-### 9. Breakfast
+### 10. Breakfast
 
 - [ ] Enable/disable breakfast add-on globally — toggle
 - [ ] Silog menu management — list of items with edit/delete per item
@@ -161,7 +167,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 ---
 
-### 10. Store (`config.storeName` — "Spark Essentials" for Spark Inn)
+### 11. Store (`config.storeName` — "Spark Essentials" for Spark Inn)
 
 - [ ] Enable/disable store globally — toggle
 - [ ] Product catalog management — see `plan/features/STORE-MANAGEMENT.md §Catalog Management` for full checklist
@@ -172,7 +178,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 ---
 
-### 11. Spark Rewards
+### 12. Spark Rewards
 
 Admin-only tab. Controls all configurable loyalty program settings.
 
@@ -208,7 +214,7 @@ Admin-only tab. Controls all configurable loyalty program settings.
 
 ---
 
-### 12. Legal Content
+### 13. Legal Content
 
 Editable by hotel admin — no redeploy required. Changes reflect on guest site immediately.
 
