@@ -329,3 +329,65 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(adminCtxSrc).toMatch(/sparkRewards:\s*\{[\s\S]*?Earn points on completed stays/);
   });
 });
+
+describe("Branding — logo uploads preserve transparency (W3.13)", () => {
+  const settingsPageSrc = readFileSync(
+    resolve(__dirname, "../../src/pages/SettingsPage.tsx"),
+    "utf8"
+  );
+  const imagesSrc = readFileSync(
+    resolve(__dirname, "../../../shared/utils/images.ts"),
+    "utf8"
+  );
+
+  it("shared/compressImageFile accepts image/png in the mimeType union", () => {
+    expect(imagesSrc).toMatch(/mimeType\?:\s*["']image\/jpeg["']\s*\|\s*["']image\/webp["']\s*\|\s*["']image\/png["']/);
+  });
+
+  it("shared/compressImageFile has a MIME-to-extension map that includes PNG", () => {
+    expect(imagesSrc).toMatch(/MIME_TO_EXTENSION/);
+    expect(imagesSrc).toMatch(/["']image\/png["']\s*:\s*["']png["']/);
+  });
+
+  it("shared/compressImageFile does NOT paint a white background for PNG output", () => {
+    // The original bug: a transparent PNG drawn onto a 2D canvas
+    // and then JPEG-encoded produced a non-deterministic white
+    // box. The fix: only paint a white background when the target
+    // format has no alpha channel. PNG output must skip the fill.
+    expect(imagesSrc).toMatch(/outputSupportsAlpha\s*=\s*settings\.mimeType\s*!==\s*["']image\/jpeg["']/);
+    expect(imagesSrc).toMatch(/if\s*\(!outputSupportsAlpha\)\s*\{[\s\S]*?fillRect/);
+  });
+
+  it("shared/compressImageFile renames the output to match the mime type, not always .jpg", () => {
+    // The original bug: every output file was renamed to .jpg
+    // regardless of the actual mime type. Now it should match.
+    expect(imagesSrc).toMatch(/MIME_TO_EXTENSION\[settings\.mimeType\]/);
+    expect(imagesSrc).not.toMatch(/file\.name\.replace\(\/\\\.\[\^\\.\]\+\$\/,?\s*["']\.jpg["']/);
+  });
+
+  it("All three logo uploaders in SettingsPage pass mimeType: 'image/png'", () => {
+    // The bug: a transparent logo uploaded through the Branding
+    // tab was JPEG-encoded, losing the alpha channel and showing
+    // up with a white box. The three logo rows (navbar solid,
+    // navbar over hero, footer) must opt into PNG.
+    const settingsFile = readFileSync(
+      resolve(__dirname, "../../src/pages/SettingsPage.tsx"),
+      "utf8"
+    );
+    const pngUploads = settingsFile.match(/mimeType:\s*["']image\/png["']/g) || [];
+    expect(pngUploads.length, "expected the three logo uploaders to pass mimeType: 'image/png'").toBeGreaterThanOrEqual(3);
+  });
+
+  it("Hero photo uploaders still default to JPEG (alpha not needed)", () => {
+    // Hero photos cover the whole viewport and need smaller file
+    // sizes — JPEG is the right default. The four hero photo
+    // uploaders in the Branding tab (homepage, about, corporate,
+    // rewards) should not pass mimeType: 'image/png' so they
+    // keep the JPEG default.
+    const heroUploaders = settingsPageSrc.match(
+      /compressImageFile\(file, \{ maxWidth: 1920, maxHeight: (?:1080|600), quality: 0\.85 \}\)/g
+    );
+    expect(heroUploaders, "expected the four hero photo uploaders to keep the default JPEG mime type").not.toBeNull();
+    expect(heroUploaders?.length ?? 0).toBeGreaterThanOrEqual(4);
+  });
+});
