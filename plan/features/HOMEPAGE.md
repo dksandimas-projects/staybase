@@ -28,7 +28,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 
 - [ ] Hero section — full-viewport, background photo, Apollo heading, tagline in Apollo Italic, single CTA button (Spark Orange)
 - [ ] Availability checker — check-in / check-out date pickers + guest count + Search button, rendered above the fold within or directly below the hero
-- [ ] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredRoomIds` — image, name, bed description, key amenities, price per night, Book Now CTA. Photos come from the room's **type** via `useRoomTypes` (per `plan/features/SETTINGS.md §Room Type Photos`) — `roomType.imageUrls[0]` is the hero image. Pricing + max guests come from the type via `getRoomTypeRates(roomTypes, room.type)` (per W3.6). Bed description + amenities come from the type via `roomTypes.find(t => t.value === room.type)?.X` (per W3.7).
+- [ ] 3 featured room cards — pulled from `settings/websiteContent.homepage.featuredTypeValues` (a list of room TYPE values, not physical room IDs). The page resolves each type to its first *active* room of that type. Card content — image, name, bed description, key amenities, price per night, Book Now CTA — all comes from the room's **type** via `useRoomTypes` (per `plan/features/SETTINGS.md §Room Type Photos`) — `roomType.imageUrls[0]` is the hero image, pricing + max guests come from the type via `getRoomTypeRates(roomTypes, room.type)` (per W3.6), bed description + amenities come from the type via `roomTypes.find(t => t.value === room.type)?.X` (per W3.7). The resolved physical room is only used for the `key` and the Book Now deep link. Capped at `MAX_FEATURED_TYPES = 3`.
 - [ ] Amenities grid — icon + title + description per item, content from `settings/websiteContent.homepage.amenities`
 - [ ] Services section — displays Tour Packages and Car Rentals as two service cards
   - [ ] Each card: icon, service name, short description, "Contact Us" CTA button → links to `/contact`
@@ -47,11 +47,11 @@ The public homepage at `/`. First impression for all guests — must emotionally
 
 ## Data & Logic Checklist
 
-- [ ] Fetch `settings/websiteContent` on load for hero content, amenities, featuredRoomIds, services section, and Spark Rewards section
-- [ ] Fetch 3 featured rooms from Firestore by IDs in `featuredRoomIds`
+- [ ] Fetch `settings/websiteContent` on load for hero content, amenities, featuredTypeValues, services section, and Spark Rewards section
+- [ ] Resolve `featuredTypeValues` to physical rooms — for each type value, find the first *active* room of that type; skip types with no active rooms; cap the resolved list at `MAX_FEATURED_TYPES = 3` from `shared/constants`
 - [ ] Availability checker submits to `/rooms` with date + guest count as query params
 - [ ] Featured rooms show real-time availability badge based on current bookings
-- [ ] Handle case where `featuredRoomIds` is empty — fall back to first 3 active rooms
+- [ ] Handle case where `featuredTypeValues` is empty — fall back to the first `MAX_FEATURED_TYPES` *distinct* types that have at least one active room (NOT raw room IDs — that was the bug the type-driven model fixes)
 - [ ] Spark Rewards section: check auth state — show "Join" CTA if not logged in or not a member; show "Welcome back" if logged-in member
 - [ ] Hero photo falls back to `data/homepage.ts → homepageHeroImage` when `homepage.heroPhotoUrl` is empty — see `plan/features/SETTINGS.md §Branding` for the upload UI
 

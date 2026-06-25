@@ -88,16 +88,35 @@ export const KNOWN_CONTENT_ICONS = [
 
 export type ContentIconName = (typeof KNOWN_CONTENT_ICONS)[number];
 
-// Number of featured rooms displayed on the homepage. The guest app
-// falls back to the first 3 active rooms when this list is empty.
-export const MAX_FEATURED_ROOMS = 3;
+// Number of featured types displayed on the homepage. The guest
+// app resolves each type to its first active room and renders one
+// card per type. When the list is empty, the guest app falls back
+// to the first MAX_FEATURED_TYPES distinct types that have at
+// least one active room (not raw room IDs — see the homepage
+// spec for why the type-driven model is correct).
+//
+// Migration: this constant used to be called `MAX_FEATURED_ROOMS`
+// and the homepage used `featuredRoomIds: string[]` (a list of
+// physical room doc IDs). That model was wrong because every
+// rendered card field (image, price, bed, description, amenities)
+// comes from the room TYPE, not the individual room — picking
+// "Room 201" vs "Room 202" (both `executive`) rendered
+// identically. The old constant is kept as a deprecated alias
+// for the one-time migration in `AdminContext.mergeWebsiteContent`.
+export const MAX_FEATURED_TYPES = 3;
+export const MAX_FEATURED_ROOMS = MAX_FEATURED_TYPES;
 
 // localStorage cache key + TTL for the public site content
 // (`usePublicSiteContent`). Returning visitors get an instant
 // render from the cache while Firestore validates in the
 // background — no "fallback-image flash" while waiting for the
-// custom upload to load. Bump the `:v1` suffix if the cached
-// shape ever changes.
-export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v1";
+// custom upload to load. Bump the `:vN` suffix if the cached
+// shape ever changes — a v1 cache will fail type-shape
+// validation against the v2 schema and be ignored.
+//
+// v2 — `homepage.featuredRoomIds` renamed to
+// `homepage.featuredTypeValues`. Old cached entries are now
+// shape-incompatible and fall through to the empty state.
+export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v2";
 export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
