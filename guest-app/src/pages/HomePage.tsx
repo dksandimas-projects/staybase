@@ -7,6 +7,7 @@ import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
+import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -15,6 +16,7 @@ import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { MAX_FEATURED_TYPES } from "@spark-inn/shared";
+import { HOMEPAGE_HERO_LQIP } from "../data/homepage";
 
 const amenityIcons = [BedDouble, MapPin, Users, Sparkles, Wifi, Coffee];
 
@@ -142,10 +144,10 @@ export function HomePage() {
 
       <section className="relative -mt-20 flex min-h-screen items-center justify-center overflow-hidden px-4 pt-20 text-center">
         {heroPhoto ? (
-          <img
+          <HeroImage
             src={heroPhoto}
             alt="Warm boutique hotel pool surrounded by calm tropical greenery"
-            className="absolute inset-0 h-full w-full object-cover"
+            placeholder={HOMEPAGE_HERO_LQIP}
           />
         ) : (
           <HeroSkeleton />
