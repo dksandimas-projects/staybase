@@ -5,8 +5,11 @@ import config from "@config";
 import {
   PUBLIC_SITE_CONTENT_CACHE_KEY,
   PUBLIC_SITE_CONTENT_CACHE_TTL_MS,
+  DEFAULT_CORPORATE_PERKS,
+  DEFAULT_CORPORATE_PAGE_CONTENT,
   readCacheWithTtl,
-  writeCache
+  writeCache,
+  type ContentItem
 } from "@spark-inn/shared";
 import {
   homepageHeroImage,
@@ -22,13 +25,6 @@ import {
   services as fallbackServices,
   rewardPerks as fallbackRewardPerks
 } from "../data/homepage";
-
-export interface ContentItem {
-  title: string;
-  description: string;
-  icon?: string;
-  isEnabled?: boolean;
-}
 
 export interface SparkRewardsPromo {
   heading: string;
@@ -72,6 +68,16 @@ export interface PublicAboutContent {
 
 export interface PublicCorporateContent extends PublicHeroContent {
   perks: ContentItem[];
+  // Rooms overview section on /corporate. All fields fall back
+  // to the hardcoded copy in `CorporateStaysPage` when empty.
+  roomsOverviewEyebrow: string;
+  roomsOverviewHeading: string;
+  roomsOverviewDescription: string;
+  // Retreat CTA banner at the bottom of the rooms section.
+  // Same empty-string-fallback behavior as the rooms overview.
+  retreatHeading: string;
+  retreatDescription: string;
+  retreatCtaLabel: string;
 }
 
 export interface PublicRewardsContent extends PublicHeroContent {}
@@ -111,9 +117,8 @@ const FALLBACK_SPARK_REWARDS = {
   })),
   isEnabled: true
 };
-const FALLBACK_CORPORATE_HERO_HEADING = "Elevated Stays for Modern Business";
-const FALLBACK_CORPORATE_HERO_SUBTEXT =
-  "Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol.";
+const FALLBACK_CORPORATE_HERO_HEADING = DEFAULT_CORPORATE_PAGE_CONTENT.hero.heading;
+const FALLBACK_CORPORATE_HERO_SUBTEXT = DEFAULT_CORPORATE_PAGE_CONTENT.hero.subtext;
 const FALLBACK_ABOUT_MISSION =
   "To deliver peaceful, consistent stays shaped by genuine, intentional hospitality. We believe that hospitality is not merely a service, but a philosophy of care where every detail is deliberate and every guest feels deeply valued.";
 const FALLBACK_ABOUT_VISION = (brand: string) =>
@@ -121,50 +126,12 @@ const FALLBACK_ABOUT_VISION = (brand: string) =>
 const FALLBACK_ABOUT_STORY = (brand: string) =>
   `Founded in the heart of Tagbilaran City, Bohol, ${brand} was born out of a desire to redefine the boutique hotel experience. We observed that while travelers appreciated the unique characters of boutique stays, they often missed the reliability and consistency of global chains. We set out to bridge this gap, creating a sanctuary where style meets structure, and comfort is guaranteed.\n\nOur location was chosen with care—providing our guests with a peaceful retreat that is simultaneously connected to the rich historical landmarks, business districts, and natural wonders of Bohol. From the sandy beaches of Panglao to the famous Chocolate Hills, ${brand} serves as the perfect home base for both leisure explorers and corporate stay travelers.\n\nEvery element of ${brand} is curated. Our rooms are engineered for quiet comfort, featuring premium soundproofing, custom orthopedic beds, and optimized layouts. We combine these physical comforts with a service team that is trained to anticipate guest needs, offering a warm and authentic Filipino welcome that feels like family.\n\nAs we continue to grow and welcome guests from around the world, our promise remains steadfast: to provide peaceful, consistent stays shaped by genuine, intentional hospitality. We invite you to experience the spark that makes our hospitality warm and our lodging exceptional.`;
 
-const FALLBACK_CORPORATE_PERKS: ContentItem[] = [
-  {
-    title: "Negotiated Rates",
-    description:
-      "Unlock exclusive fixed-rate packages tailored to your company's annual travel volume. Control and predict your hospitality budget with ease.",
-    icon: "coins",
-    isEnabled: true
-  },
-  {
-    title: "Group Bookings",
-    description:
-      "Coordinated logistics for team building retreats, board meetings, and product launches. Keep your organization unified and fully refreshed.",
-    icon: "users",
-    isEnabled: true
-  },
-  {
-    title: "Dedicated Support",
-    description:
-      "A personal account manager handles reservations, customized invoices, and check-in assistance, giving your team peace of mind.",
-    icon: "briefcase",
-    isEnabled: true
-  },
-  {
-    title: "High-Speed Wi-Fi",
-    description:
-      "Dedicated high-bandwidth networks are active throughout our property. Perform remote work, host video calls, and stay in touch without delays.",
-    icon: "wifi",
-    isEnabled: true
-  },
-  {
-    title: "Premium Security",
-    description:
-      "Enjoy a peaceful, secure stay with 24/7 staff, encrypted access locks, and strict privacy protocols for high-profile business visitors.",
-    icon: "shield",
-    isEnabled: true
-  },
-  {
-    title: "Flexible Bookings",
-    description:
-      "Business plans change. Corporate agreements enjoy reduced cancellation fees, priority rescheduling, and same-day room re-allocations.",
-    icon: "calendar",
-    isEnabled: true
-  }
-];
+const FALLBACK_CORPORATE_PERKS: ContentItem[] = DEFAULT_CORPORATE_PERKS.map((perk) => ({
+  title: perk.title,
+  description: perk.description,
+  icon: perk.icon,
+  isEnabled: perk.isEnabled !== false
+}));
 
 function toContentItemArray(value: unknown): ContentItem[] {
   if (!Array.isArray(value)) return [];
@@ -237,7 +204,17 @@ function buildFallback(): PublicSiteContent {
       heroHeading: FALLBACK_CORPORATE_HERO_HEADING,
       heroSubtext: FALLBACK_CORPORATE_HERO_SUBTEXT,
       heroPhotoUrl: corporateHeroImage,
-      perks: FALLBACK_CORPORATE_PERKS
+      perks: FALLBACK_CORPORATE_PERKS,
+      // Rooms overview + retreat CTA — sourced from
+      // `DEFAULT_CORPORATE_PAGE_CONTENT` so the guest app, the
+      // admin editor's pre-population, and the one-time Firestore
+      // backfill in `AdminContext` all agree on the same copy.
+      roomsOverviewEyebrow: DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow,
+      roomsOverviewHeading: DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading,
+      roomsOverviewDescription: DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description,
+      retreatHeading: DEFAULT_CORPORATE_PAGE_CONTENT.retreat.heading,
+      retreatDescription: DEFAULT_CORPORATE_PAGE_CONTENT.retreat.description,
+      retreatCtaLabel: DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel
     },
     rewards: {
       heroEyebrow: rewardsHeroEyebrowSuffix,
@@ -291,7 +268,13 @@ function buildEmptyState(): PublicSiteContent {
       heroHeading: "",
       heroSubtext: "",
       heroPhotoUrl: "",
-      perks: []
+      perks: [],
+      roomsOverviewEyebrow: "",
+      roomsOverviewHeading: "",
+      roomsOverviewDescription: "",
+      retreatHeading: "",
+      retreatDescription: "",
+      retreatCtaLabel: ""
     },
     rewards: {
       heroEyebrow: "",
@@ -439,7 +422,13 @@ export function usePublicSiteContent(): PublicSiteContent {
           heroHeading: pickString(corporateRaw, "heroHeading", fb.corporate.heroHeading),
           heroSubtext: pickString(corporateRaw, "heroSubtext", fb.corporate.heroSubtext),
           heroPhotoUrl: pickString(corporateRaw, "heroPhotoUrl", fb.corporate.heroPhotoUrl),
-          perks: rawPerks.length > 0 ? rawPerks : fb.corporate.perks
+          perks: rawPerks.length > 0 ? rawPerks : fb.corporate.perks,
+          roomsOverviewEyebrow: pickString(corporateRaw, "roomsOverviewEyebrow", fb.corporate.roomsOverviewEyebrow),
+          roomsOverviewHeading: pickString(corporateRaw, "roomsOverviewHeading", fb.corporate.roomsOverviewHeading),
+          roomsOverviewDescription: pickString(corporateRaw, "roomsOverviewDescription", fb.corporate.roomsOverviewDescription),
+          retreatHeading: pickString(corporateRaw, "retreatHeading", fb.corporate.retreatHeading),
+          retreatDescription: pickString(corporateRaw, "retreatDescription", fb.corporate.retreatDescription),
+          retreatCtaLabel: pickString(corporateRaw, "retreatCtaLabel", fb.corporate.retreatCtaLabel)
         },
         rewards: {
           heroEyebrow: pickString(rewardsRaw, "heroEyebrow", fb.rewards.heroEyebrow),
