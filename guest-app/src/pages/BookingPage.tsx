@@ -22,7 +22,7 @@ import {
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
-import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import {
@@ -109,7 +109,9 @@ export function BookingPage() {
   const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
   const [websiteContent, setWebsiteContent] = useState<any>(null);
-  const [allBookings, setAllBookings] = useState<any[]>([]);
+  const [bookedRanges, setBookedRanges] = useState<
+    Array<{ roomId: string; checkIn: string; checkOut: string; status: string }>
+  >([]);
   const [settingsLoading, setSettingsLoading] = useState(true);
 
   // Spark Rewards member discount (client-side display mirror).
@@ -181,7 +183,6 @@ export function BookingPage() {
     const reqStart = new Date(`${checkIn}T00:00:00Z`);
     const reqEnd = new Date(`${checkOut}T00:00:00Z`);
 
-
     return rooms.filter((room) => {
       const typeMatches = selectedType === "all" || room.type === selectedType;
       const cap = getRoomTypeRates(roomTypes, room.type)?.maxCapacity ?? 0;
@@ -190,16 +191,16 @@ export function BookingPage() {
       }
 
       // Check if there is an overlapping active booking
-      const hasOverlap = allBookings.some((booking) => {
-        if (booking.roomId !== room.id) return false;
-        const bStart = booking.checkIn;
-        const bEnd = booking.checkOut;
+      const hasOverlap = bookedRanges.some((range) => {
+        if (range.roomId !== room.id) return false;
+        const bStart = new Date(`${range.checkIn}T00:00:00Z`);
+        const bEnd = new Date(`${range.checkOut}T00:00:00Z`);
         return bStart < reqEnd && bEnd > reqStart;
       });
 
       return !hasOverlap;
     });
-  }, [rooms, roomTypes, allBookings, checkIn, checkOut, guests, selectedType]);
+  }, [rooms, roomTypes, bookedRanges, checkIn, checkOut, guests, selectedType]);
 
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
   // Per W3.6 — pricing + max occupancy live on the room's type.
@@ -312,26 +313,40 @@ export function BookingPage() {
     }
 
     fetchConfigs();
-
-    // Subscribe to bookings to track real-time occupancy and prevent client-side double booking selection
-    const q = query(
-      collection(db, "bookings"),
-      where("status", "!=", "cancelled")
-    );
-    const unsubscribeBookings = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        checkIn: (d.data().checkIn as any)?.toDate(),
-        checkOut: (d.data().checkOut as any)?.toDate()
-      }));
-      setAllBookings(list);
-    }, (err) => {
-      console.error("Bookings subscription error:", err);
-    });
-
-    return unsubscribeBookings;
   }, []);
+
+  // Per W4.7: fetch PII-stripped booked date ranges for the requested
+  // window from the public availability endpoint. Firestore rules deny
+  // guest reads on `bookings`, so the client cannot subscribe directly.
+  // The server transaction in `/api/bookings/create` is the authoritative
+  // double-booking safety net — this fetch is purely for UX filtering.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchAvailability() {
+      try {
+        const params = new URLSearchParams({ checkIn, checkOut });
+        const response = await fetch(`/api/rooms/availability?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(`Availability request failed: ${response.status}`);
+        }
+        const json = await response.json();
+        if (cancelled) return;
+        if (json?.success && Array.isArray(json.data?.bookedRanges)) {
+          setBookedRanges(json.data.bookedRanges);
+        } else {
+          setBookedRanges([]);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Room availability fetch error:", err);
+        setBookedRanges([]);
+      }
+    }
+    fetchAvailability();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkIn, checkOut]);
 
   // Mount the Turnstile widget explicitly via `turnstile.render()` rather
   // than relying on the implicit auto-render triggered by the
