@@ -33,9 +33,7 @@ import {
   getNumNights,
   staggerChild,
   staggerContainer,
-  DEFAULT_ROOM_TYPES,
-  VERSION,
-  type Room
+  VERSION
 } from "@spark-inn/shared";
 import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
 import config from "@config";
@@ -100,14 +98,24 @@ export function CorporateBookingPage() {
   const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? "2026-06-12");
   const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? "2026-06-14");
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
-  const [selectedType, setSelectedType] = useState("all");
-  const [selectedRoomId, setSelectedRoomId] = useState(searchParams.get("roomId") ?? "");
+  // Per the room-type booking refactor: Step 1 now shows one card
+  // per room type (not per physical room). The guest picks a type;
+  // the server auto-assigns a physical room of that type inside
+  // the availability transaction.
+  const [selectedRoomType, setSelectedRoomType] = useState(searchParams.get("roomType") ?? "");
   const [rateChoice, setRateChoice] = useState<RateChoice>(
     searchParams.get("breakfast") === "yes" ? "room-breakfast" : "room-only"
   );
 
   // Breakfast config fetched from Firestore
   const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
+
+  // Per W4.7 — PII-stripped booked date ranges for the requested
+  // window. Mirrors the public booking page so the corporate flow
+  // can show "X of Y available for your dates" per type.
+  const [bookedRanges, setBookedRanges] = useState<
+    Array<{ roomId: string; checkIn: string; checkOut: string; status: string }>
+  >([]);
 
   // Live rooms from Firestore
   const { rooms, loading: roomsLoading } = useRooms();
@@ -178,22 +186,82 @@ export function CorporateBookingPage() {
     });
   }, []);
 
+  // Per the room-type booking refactor: Step 1 shows one card
+  // per room type. The corporate flow was previously date-blind
+  // (no `bookedRanges` query) — bring it to parity with the public
+  // booking page so the "X of Y available" copy is accurate.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchAvailability() {
+      try {
+        const params = new URLSearchParams({ checkIn, checkOut });
+        const response = await fetch(`/api/rooms/availability?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(`Availability request failed: ${response.status}`);
+        }
+        const json = await response.json();
+        if (cancelled) return;
+        if (json?.success && Array.isArray(json.data?.bookedRanges)) {
+          setBookedRanges(json.data.bookedRanges);
+        } else {
+          setBookedRanges([]);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Corporate room availability fetch error:", err);
+        setBookedRanges([]);
+      }
+    }
+    fetchAvailability();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkIn, checkOut]);
+
   const nights = Math.max(getNumNights(checkIn, checkOut), 1);
 
-  // Rooms list
-  const availableRooms = useMemo(
+  // Per the room-type booking refactor: Step 1 shows one card
+  // per room type. For each type, count the candidate physical
+  // rooms (active, capacity-ok) and subtract the ones with an
+  // overlapping active booking.
+  const typeAvailability = useMemo(() => {
+    const reqStart = new Date(`${checkIn}T00:00:00Z`);
+    const reqEnd = new Date(`${checkOut}T00:00:00Z`);
+    return roomTypes.map((type) => {
+      const candidates = rooms.filter(
+        (room) => room.type === type.value && room.isActive && room.status !== "blocked"
+      );
+      const bookedRoomIds = new Set(
+        bookedRanges
+          .filter((range) => {
+            const bStart = new Date(`${range.checkIn}T00:00:00Z`);
+            const bEnd = new Date(`${range.checkOut}T00:00:00Z`);
+            return bStart < reqEnd && bEnd > reqStart;
+          })
+          .map((range) => range.roomId)
+      );
+      const availableCount = candidates.filter((room) => !bookedRoomIds.has(room.id)).length;
+      return {
+        type,
+        totalCount: candidates.length,
+        availableCount
+      };
+    });
+  }, [rooms, roomTypes, bookedRanges, checkIn, checkOut]);
+
+  const availableRoomTypes = useMemo(
     () =>
-      rooms.filter((room) => {
-        const typeMatches = selectedType === "all" || room.type === selectedType;
-        const cap = getRoomTypeRates(roomTypes, room.type)?.maxCapacity ?? 0;
-        return room.isActive && cap >= guests && typeMatches;
-      }),
-    [guests, selectedType]
+      typeAvailability.filter(
+        (entry) => entry.type.maxCapacity >= guests && entry.availableCount > 0
+      ),
+    [typeAvailability, guests]
   );
 
-  const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? availableRooms[0];
+  const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
+    ?? availableRoomTypes[0]?.type
+    ?? null;
   // Per W3.6 — pricing + max occupancy live on the room's type.
-  const selectedRoomRates = selectedRoom ? getRoomTypeRates(roomTypes, selectedRoom.type) : null;
+  const selectedRoomRates = selectedTypeEntry ? getRoomTypeRates(roomTypes, selectedTypeEntry.value) : null;
   const selectedMaxCapacity = selectedRoomRates?.maxCapacity ?? 0;
   const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
   const breakfastRatePerPerson = breakfastConfig.ratePerPersonPerNight;
@@ -203,8 +271,8 @@ export function CorporateBookingPage() {
   // the chosen room type from the corporateCodes/{code} doc. Fall
   // back to the type's flat corporateRate only when the negotiated
   // map has no entry for this room type.
-  const negotiatedRate = selectedRoom && ratePerRoomType && ratePerRoomType[selectedRoom.type] !== undefined
-    ? ratePerRoomType[selectedRoom.type]
+  const negotiatedRate = selectedTypeEntry && ratePerRoomType && ratePerRoomType[selectedTypeEntry.value] !== undefined
+    ? ratePerRoomType[selectedTypeEntry.value]
     : (selectedRoomRates?.corporateRate ?? 0);
   const baseRate = negotiatedRate;
   // Apply additional code discount if active
@@ -252,7 +320,7 @@ export function CorporateBookingPage() {
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) &&
     guestDetails.consent &&
-    Boolean(selectedRoom) &&
+    Boolean(selectedTypeEntry) &&
     (isFlatRate ? guestDetails.companyName.trim().length > 0 : true);
 
   // State transitions
@@ -261,7 +329,7 @@ export function CorporateBookingPage() {
     next.set("checkIn", nextCheckIn);
     next.set("checkOut", nextCheckOut);
     next.set("guests", String(nextGuests));
-    if (selectedRoomId) next.set("roomId", selectedRoomId);
+    if (selectedRoomType) next.set("roomType", selectedRoomType);
     setSearchParams(next, { replace: true });
   }
 
@@ -271,11 +339,11 @@ export function CorporateBookingPage() {
     updateDateParams(checkIn, checkOut, safeGuests);
   }
 
-  function selectRoom(roomId: string, nextRateChoice: RateChoice) {
-    setSelectedRoomId(roomId);
+  function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
+    setSelectedRoomType(typeValue);
     setRateChoice(nextRateChoice);
     const next = new URLSearchParams(searchParams);
-    next.set("roomId", roomId);
+    next.set("roomType", typeValue);
     next.set("checkIn", checkIn);
     next.set("checkOut", checkOut);
     next.set("guests", String(guests));
@@ -378,7 +446,7 @@ export function CorporateBookingPage() {
     checkIn,
     checkOut,
     guests: String(guests),
-    roomId: selectedRoom?.id ?? "",
+    roomType: selectedTypeEntry?.value ?? "",
     breakfast: hasBreakfast ? "yes" : "no"
   });
 
@@ -420,7 +488,7 @@ export function CorporateBookingPage() {
     try {
       const body = {
         bookingId,
-        roomId: selectedRoom?.id ?? "",
+        roomType: selectedTypeEntry?.value ?? "",
         checkIn,
         checkOut,
         guests: Number(guestDetails.guestCount) || guests,
@@ -462,7 +530,9 @@ export function CorporateBookingPage() {
         const params = new URLSearchParams({
           step: "confirm",
           bookingRef: result.data.bookingRef,
-          roomId: selectedRoom?.id ?? "",
+          roomType: result.data.roomType || selectedTypeEntry?.value || "",
+          roomId: result.data.roomId || "",
+          roomNumber: result.data.roomNumber || "",
           checkIn,
           checkOut,
           guests: String(guests),
@@ -715,38 +785,18 @@ export function CorporateBookingPage() {
                     </button>
                   </div>
                 </label>
-
-                <div>
-                  <p className="text-sm font-medium text-gray-700">Room type filter</p>
-                  <div className="mt-3 grid gap-2">
-                    {[{ value: "all", label: "All Types" }, ...DEFAULT_ROOM_TYPES].map((type) => (
-                      <button
-                        key={type.value}
-                        className={cn(
-                          "flex min-h-11 items-center justify-between rounded-lg border px-3 text-sm font-medium transition",
-                          selectedType === type.value
-                            ? "border-primary bg-primary-light text-primary"
-                            : "border-gray-200 bg-white text-gray-700 hover:border-primary"
-                        )}
-                        type="button"
-                        onClick={() => setSelectedType(type.value)}
-                      >
-                        {type.label}
-                        {selectedType === type.value ? <span className="h-2 w-2 rounded-full bg-primary" /> : null}
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
           </aside>
 
-          {/* Right panel rooms selection list */}
+          {/* Right panel rooms selection list — per the room-type booking
+              refactor, one card per room type. The server auto-assigns
+              a physical room of the chosen type at booking creation. */}
           <div>
             <div className="mb-5 flex flex-col gap-3 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="font-semibold text-gray-950">
-                  {roomsLoading ? "Loading rooms..." : `${availableRooms.length} corporate options found`}
+                  {roomsLoading ? "Loading room types..." : `${availableRoomTypes.length} ${availableRoomTypes.length === 1 ? "room type" : "room types"} available`}
                 </p>
                 <p className="text-xs text-gray-600">Locked to company contract terms.</p>
               </div>
@@ -772,21 +822,23 @@ export function CorporateBookingPage() {
               initial={shouldReduceMotion ? false : "hidden"}
               animate="visible"
             >
-              {availableRooms.map((room) => {
-                const isSelected = selectedRoomId === room.id;
-                const typeLabel = DEFAULT_ROOM_TYPES.find((t) => t.value === room.type)?.shortLabel ?? room.type;
+              {availableRoomTypes.map((entry) => {
+                const type = entry.type;
+                const isSelected = selectedRoomType === type.value;
+                const typeImageUrl = getRoomTypeImages(roomTypes, type.value)[0];
+                const typeMaxCapacity = type.maxCapacity ?? 0;
 
-                // Per W3.6 — pricing lives on the type.
-                const roomRates = getRoomTypeRates(roomTypes, room.type);
-                const roomMaxCapacity = roomRates?.maxCapacity ?? 0;
-
-                // Price calculations
-                const baseCorp = roomRates?.corporateRate ?? 0;
+                // Per W3.6 — pricing lives on the type. Apply the
+                // negotiated map override first (S4.1 / decision
+                // #101) then the additional code discount.
+                const baseCorp = (ratePerRoomType && ratePerRoomType[type.value] !== undefined)
+                  ? ratePerRoomType[type.value]
+                  : (type.corporateRate ?? 0);
                 const discountedCorp = Math.round(baseCorp * (1 - discountPercent / 100));
 
                 return (
                   <motion.article
-                    key={room.id}
+                    key={type.value}
                     className={cn(
                       "overflow-hidden rounded-card bg-white shadow-sm ring-1 transition flex flex-col h-full",
                       isSelected ? "ring-2 ring-primary" : "ring-gray-200"
@@ -794,26 +846,31 @@ export function CorporateBookingPage() {
                     variants={staggerChild}
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-section-bg relative">
-                      <img src={getRoomTypeImages(roomTypes, room.type)[0]} alt={room.name} className="h-full w-full object-cover" />
+                      {typeImageUrl ? (
+                        <img src={typeImageUrl} alt={type.label} className="h-full w-full object-cover" />
+                      ) : null}
                       <div className="absolute top-3 left-3 flex gap-2">
                         <span className="rounded bg-primary-light px-2.5 py-1 text-xs font-semibold text-primary">
-                          {typeLabel}
+                          {type.shortLabel}
                         </span>
                       </div>
+                      <span className="absolute bottom-3 right-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-semibold text-primary shadow-sm">
+                        {entry.availableCount} of {entry.totalCount} available
+                      </span>
                     </div>
 
                     <div className="p-5 flex flex-col flex-1">
-                      <h3 className="text-lg font-semibold text-gray-950">{room.name}</h3>
+                      <h3 className="text-lg font-semibold text-gray-950">{type.label}</h3>
                       <p className="mt-2 text-xs text-gray-500 leading-normal flex-1 line-clamp-2">
-                        {roomTypes.find((t) => t.value === room.type)?.description || ""}
+                        {type.description || ""}
                       </p>
 
                       <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
                         <span className="flex items-center gap-1.5">
                           <Users size={14} className="text-primary" />
-                          Capacity: Up to {roomMaxCapacity}
+                          Capacity: Up to {typeMaxCapacity}
                         </span>
-                        <span>{roomTypes.find((t) => t.value === room.type)?.bedDefinition || ""}</span>
+                        <span>{type.bedDefinition || ""}</span>
                       </div>
 
                       {/* Corporate Rate Display */}
@@ -824,7 +881,7 @@ export function CorporateBookingPage() {
                             <span className="text-lg font-bold text-gray-950">
                               {formatPrice(discountedCorp)}
                             </span>
-                            {activeCode && (
+                            {activeCode && baseCorp !== discountedCorp && (
                               <span className="text-xs text-gray-400 line-through">
                                 {formatPrice(baseCorp)}
                               </span>
@@ -848,7 +905,7 @@ export function CorporateBookingPage() {
                               ? "bg-primary-light border-primary text-primary"
                               : "border-gray-200 hover:border-gray-300 text-gray-700"
                           )}
-                          onClick={() => selectRoom(room.id, "room-only")}
+                          onClick={() => selectRoomType(type.value, "room-only")}
                         >
                           Room Only
                         </button>
@@ -860,7 +917,7 @@ export function CorporateBookingPage() {
                               ? "bg-primary-light border-primary text-primary"
                               : "border-gray-200 hover:border-gray-300 text-gray-700"
                           )}
-                          onClick={() => selectRoom(room.id, "room-breakfast")}
+                          onClick={() => selectRoomType(type.value, "room-breakfast")}
                         >
                           Room + Breakfast
                         </button>
@@ -1124,8 +1181,8 @@ export function CorporateBookingPage() {
             guests={Number(guestDetails.guestCount) || guests}
             hasBreakfast={hasBreakfast}
             nights={nights}
-            room={selectedRoom}
-            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
+            typeLabel={selectedTypeEntry?.label ?? ""}
+            typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             total={total}
             ratePerNight={ratePerNight}
             breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
@@ -1165,7 +1222,7 @@ export function CorporateBookingPage() {
     // filename was stored in state). The file picker has been replaced
     // with a note; staff tracks receipt via the louReceived boolean on
     // the booking drawer.
-    const canConfirm = termsConsent && Boolean(selectedRoom);
+    const canConfirm = termsConsent && Boolean(selectedTypeEntry);
 
     return bookingShell(
       <>
@@ -1337,8 +1394,8 @@ export function CorporateBookingPage() {
             guests={Number(guestDetails.guestCount) || guests}
             hasBreakfast={hasBreakfast}
             nights={nights}
-            room={selectedRoom}
-            typeImageUrls={selectedRoom ? getRoomTypeImages(roomTypes, selectedRoom.type) : []}
+            typeLabel={selectedTypeEntry?.label ?? ""}
+            typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             total={total}
             ratePerNight={ratePerNight}
             breakfastRatePerPerson={breakfastConfig.ratePerPersonPerNight}
@@ -1525,7 +1582,11 @@ interface BookingReviewAsideProps {
   guests: number;
   hasBreakfast: boolean;
   nights: number;
-  room: Room | undefined;
+  // Per the room-type booking refactor: the aside shows the chosen
+  // type label + (once assigned by the server) the physical room
+  // number. Pre-assignment, `assignedRoomNumber` is empty.
+  typeLabel: string;
+  assignedRoomNumber?: string;
   typeImageUrls?: string[];
   total: number;
   ratePerNight: number;
@@ -1538,13 +1599,14 @@ function BookingReviewAside({
   guests,
   hasBreakfast,
   nights,
-  room,
+  typeLabel,
+  assignedRoomNumber = "",
   typeImageUrls = [],
   total,
   ratePerNight,
   breakfastRatePerPerson = 250
 }: BookingReviewAsideProps) {
-  if (!room) return null;
+  if (!typeLabel) return null;
 
   const roomTotal = ratePerNight * nights;
   const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
@@ -1552,9 +1614,12 @@ function BookingReviewAside({
   return (
     <aside className="lg:sticky lg:top-36 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
-        <img src={typeImageUrls[0]} alt={room.name} className="h-52 w-full object-cover" />
+        <img src={typeImageUrls[0]} alt={typeLabel} className="h-52 w-full object-cover" />
         <div className="p-5">
-          <h2 className="text-xl font-semibold text-gray-950">{room.name}</h2>
+          <h2 className="text-xl font-semibold text-gray-950">{typeLabel}</h2>
+          {assignedRoomNumber ? (
+            <p className="mt-1 text-sm font-medium text-primary">Room {assignedRoomNumber}</p>
+          ) : null}
           <div className="mt-5 grid grid-cols-2 gap-3 border-y border-gray-200 py-4 text-sm">
             <SummaryCell label="Check-in" value={formatStayDate(checkIn)} />
             <SummaryCell alignEnd label="Check-out" value={formatStayDate(checkOut)} />

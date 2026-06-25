@@ -55,6 +55,46 @@ The public homepage at `/`. First impression for all guests — must emotionally
 - [ ] Spark Rewards section: check auth state — show "Join" CTA if not logged in or not a member; show "Welcome back" if logged-in member
 - [ ] Hero photo falls back to `data/homepage.ts → homepageHeroImage` when `homepage.heroPhotoUrl` is empty — see `plan/features/SETTINGS.md §Branding` for the upload UI
 
+---
+
+## Hero Image Loading
+
+The hero photo is the LCP element on every public page. Performance budget: under 2.5s LCP on simulated 4G mobile. All four hero-bearing pages (Home, About, Corporate, Rewards) **must** render the hero via the shared `HeroImage` component (`guest-app/src/components/HeroImage.tsx`), not a raw `<img>`.
+
+### What `HeroImage` does
+
+1. **Preloads the resolved URL** — on mount, injects `<link rel="preload" as="image" href={src} fetchpriority="high">` into `<head>` so the browser starts the download in parallel with the JS bundle. Removed on unmount or when the URL changes (e.g. admin swaps the photo). The tag is keyed with `data-hero-image-preload="true"` so multiple heroes on the same page don't stack preload tags.
+2. **Marks the `<img>` as the LCP** — `loading="eager"`, `decoding="async"`, `fetchPriority="high"`. `priority={false}` opts out of all three for non-LCP reuse.
+3. **Blur-up LQIP** — when a `placeholder` data URL is passed, renders it as a heavily-blurred `background-image` underneath the real image. The real image fades in on `onLoad` (420ms ease-out) so the photo appears to develop into focus, not pop in. Layout stays steady — the LQIP fills the same absolute container the real image will.
+4. **No layout shift** — the component always renders into the same `absolute inset-0` slot the `<img>` would have used. The skeleton-to-image transition has no reflow.
+
+### LQIP generation
+
+LQIPs are inline-SVG data URLs in `guest-app/src/data/homepage.ts` — not real image files. Each one is a tiny vertical gradient tinted to the brand palette (`lighten(config.colors.primary, 0.55)` → `config.colors.sectionBg`). Per-page variants are exported as `HOMEPAGE_HERO_LQIP`, `ABOUT_HERO_LQIP`, `CORPORATE_HERO_LQIP`, `REWARDS_HERO_LQIP`. White-label clients automatically get a placeholder that matches their palette — no per-client asset step.
+
+The trade-off vs a per-photo JPEG LQIP is that the placeholder is a generic color block, not a blurred preview of the actual photo. For hero photos this is fine — the brand gradient is more cohesive than a 20px JPEG of a hotel pool.
+
+### Static CDN preconnects
+
+`guest-app/index.html` preconnects to the three image CDNs the guest app can load from:
+
+- `https://lh3.googleusercontent.com` (static fallbacks)
+- `https://firebasestorage.googleapis.com` (admin uploads)
+- `https://images.unsplash.com` (some static fallbacks)
+
+`crossorigin` is set on the Google and Firebase hosts (they return CORS-bearing responses) and omitted on Unsplash (it doesn't, and adding it would break the preconnect).
+
+### Edge cases
+
+- **`src` is empty** — `HeroImage` is not rendered at all; the page falls back to `HeroSkeleton` (the neutral `bg-section-bg animate-pulse` block). This is the same behavior as before the `HeroImage` wrapper was introduced.
+- **Admin swaps the hero photo while the page is open** — the `<link rel=preload>` tag is removed and re-injected with the new URL. The `<img>` `src` changes, `loaded` resets to `false`, and the fade-in plays for the new image.
+- **Custom upload uses a CDN that doesn't support `crossorigin`** — the preconnect may not save the full TLS handshake, but the `<link rel=preload>` will still work for the LCP image fetch itself.
+
+### Future work
+
+- **Responsive `srcSet` + `sizes`** — the wrapper already accepts `srcSet` and `sizes` props; the static fallback URLs (Unsplash `?w=`, Firebase Storage `=w`) support it. Wire up responsive variants when the admin upload pipeline starts emitting multiple sizes.
+- **AVIF / WebP transcoding** — biggest size win for the photo. Either via Firebase Storage's image extension or a one-shot Vercel API route at upload time. Not blocking LCP < 2.5s but cuts payload ~30% for JPEG and ~50% for PNG sources.
+
 ## Edge Cases & States
 
 - [ ] Loading state — skeleton for featured room cards and hero photo

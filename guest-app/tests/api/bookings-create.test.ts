@@ -60,37 +60,56 @@ vi.mock("../../server/lib/firebase-admin", () => {
     };
   };
 
-  const mockCollection = (collName: string) => ({
-    isQuery: collName === "bookings",
-    path: collName,
-    where: function () { return this; },
-    limit: function () { return this; },
-    doc: (docId: string) => {
-      return createDocRef(`${collName}/${docId}`);
-    },
-    get: async function () {
-      const docs = mockBookings.map(b => ({
-        data: () => b,
-        exists: true,
-        id: b.id || b.bookingId || "mock_id",
-        ref: createDocRef(`bookings/${b.id || b.bookingId || b.bookingRef}`)
-      }));
-      return {
-        empty: docs.length === 0,
-        docs
-      };
-    }
-  });
+  // Build a query object for a given collection with the supplied
+  // where-filters. The mock transaction below honors the filters
+  // when returning docs — needed for the new room-type booking
+  // refactor where the transaction queries `rooms where type == X
+  // and isActive == true` to pick a candidate.
+  const buildQuery = (collName: string, filters: Array<{ field: string; op: string; value: any }> = []) => {
+    const q: any = {
+      isQuery: true,
+      collectionName: collName,
+      filters: filters.slice(),
+      path: collName,
+      where: (field: string, op: string, value: any) => buildQuery(collName, [...filters, { field, op, value }]),
+      limit: () => q,
+      doc: (docId: string) => createDocRef(`${collName}/${docId}`),
+      get: async () => {
+        let pool: any[] = [];
+        if (collName === "rooms") {
+          pool = Object.entries(mockRooms).map(([id, data]) => ({ id, ...data }));
+        } else if (collName === "bookings") {
+          pool = mockBookings.map((b: any) => ({ id: b.id || b.bookingId || b.bookingRef, ...b }));
+        }
+        let filtered = pool;
+        for (const f of filters) {
+          filtered = filtered.filter((doc: any) => {
+            if (f.op === "==") return doc[f.field] === f.value;
+            if (f.op === "!=") return doc[f.field] !== f.value;
+            if (f.op === "in") return Array.isArray(f.value) && f.value.includes(doc[f.field]);
+            return true;
+          });
+        }
+        return {
+          empty: filtered.length === 0,
+          docs: filtered.map((doc: any) => ({
+            id: doc.id,
+            data: () => doc,
+            exists: true,
+            ref: createDocRef(`${collName}/${doc.id}`)
+          }))
+        };
+      }
+    };
+    return q;
+  };
+
+  const mockCollection = (collName: string) => buildQuery(collName);
 
   const mockTransaction = {
     get: vi.fn().mockImplementation(async (ref: any) => {
       if (ref && ref.isQuery) {
-        const docs = mockBookings.map(b => ({
-          data: () => b,
-          exists: true,
-          id: b.bookingId || "mock_id"
-        }));
-        return { docs };
+        return ref.get();
       }
 
       if (!ref || typeof ref.path !== "string") {
@@ -217,12 +236,44 @@ describe("/api/bookings/create", () => {
         type: "standard-double",
         name: "Room 101 — Standard Double",
         roomNumber: "101"
+      },
+      "room_102": {
+        isActive: true,
+        status: "available",
+        maxCapacity: 4,
+        pricePerNight: 2000,
+        weekendRate: 2500,
+        type: "standard-double",
+        name: "Room 102 — Standard Double",
+        roomNumber: "102"
       }
     };
     mockSettings = {
       "breakfastConfig": {
         isEnabled: true,
         ratePerPersonPerNight: 250
+      },
+      // Per the room-type booking refactor: the new
+      // /api/bookings/create transaction reads the room type
+      // entry from `settings/hotelConfig.roomTypes[]` and finds
+      // candidate physical rooms of that type. The mock must
+      // expose the same shape the real Firestore doc has.
+      "hotelConfig": {
+        roomTypes: [
+          {
+            value: "standard-double",
+            label: "Standard Double",
+            shortLabel: "Std Double",
+            imageUrls: [],
+            bedDefinition: "1 double bed",
+            description: "Simple comfort for couples or business travelers.",
+            amenities: ["WiFi", "AC"],
+            maxCapacity: 4,
+            pricePerNight: 2000,
+            weekendRate: 2500,
+            corporateRate: 1800
+          }
+        ]
       }
     };
     mockVouchers = {};
@@ -234,9 +285,15 @@ describe("/api/bookings/create", () => {
   });
 
   test("allows only one of two simultaneous bookings for the same room and dates", async () => {
+    // Per the room-type booking refactor: the safety net is
+    // per-physical-room, not per-type. Limit this test to a
+    // single candidate of the requested type so we can verify
+    // the transaction rejects a second overlapping booking.
+    mockRooms["room_102"].isActive = false;
+
     const validBookingBody = {
       bookingId: "booking_abc",
-      roomId: "room_101",
+      roomType: "standard-double",
       checkIn: "2026-06-15",
       checkOut: "2026-06-18",
       guests: 2,
@@ -301,13 +358,15 @@ describe("/api/bookings/create", () => {
     expect(setCalls.length).toBe(0); // No document written
   });
 
-  test("rejects booking creation when a room is blocked mid-flow", async () => {
-    // Block the room
+  test("rejects booking creation when all rooms of a type are blocked mid-flow", async () => {
+    // Block every physical room of the requested type so the
+    // transaction has no candidate to assign.
     mockRooms["room_101"].status = "blocked";
+    mockRooms["room_102"].status = "blocked";
 
     const body = {
       bookingId: "booking_xyz",
-      roomId: "room_101",
+      roomType: "standard-double",
       checkIn: "2026-06-15",
       checkOut: "2026-06-18",
       guests: 2,
@@ -342,10 +401,10 @@ describe("/api/bookings/create", () => {
     // Room count exceeds capacity - should throw and fail transaction before writing
     const invalidCapacityBody = {
       bookingId: "booking_err",
-      roomId: "room_101",
+      roomType: "standard-double",
       checkIn: "2026-06-15",
       checkOut: "2026-06-18",
-      guests: 10, // Exceeds maxCapacity (4)
+      guests: 10, // Exceeds type maxCapacity (4)
       hasBreakfast: false,
       guestDetails: {
         firstName: "Jane",
@@ -379,7 +438,7 @@ describe("/api/bookings/create", () => {
   test("honeypot triggering skips database write and returns silent success", async () => {
     const honeypotBody = {
       bookingId: "booking_hp",
-      roomId: "room_101",
+      roomType: "standard-double",
       checkIn: "2026-06-15",
       checkOut: "2026-06-18",
       guests: 2,
@@ -418,7 +477,7 @@ describe("/api/bookings/create", () => {
   test("Turnstile token validation blocks invalid inputs", async () => {
     const invalidTurnstileBody = {
       bookingId: "booking_turnstile",
-      roomId: "room_101",
+      roomType: "standard-double",
       checkIn: "2026-06-15",
       checkOut: "2026-06-18",
       guests: 2,
@@ -458,6 +517,168 @@ describe("/api/bookings/create", () => {
       error: "Bot verification token is missing."
     });
     expect(setCalls.length).toBe(0);
+  });
+
+  describe("room-type booking (auto-assign first free physical room of type)", () => {
+    test("picks the first free room of the requested type", async () => {
+      const body = {
+        bookingId: "booking_type_first",
+        roomType: "standard-double",
+        checkIn: "2026-07-01",
+        checkOut: "2026-07-03",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Type",
+          lastName: "Picking",
+          email: "type@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const created = setCalls.find((c) => c.path === "bookings/booking_type_first")?.data;
+      expect(created).toBeDefined();
+      // Should auto-assign one of the two standard-double rooms.
+      expect(["room_101", "room_102"]).toContain(created.roomId);
+      expect(created.roomType).toBe("standard-double");
+      expect(created.roomNumber).toBeTruthy();
+    });
+
+    test("skips a candidate room with an overlapping booking and assigns the next free one of the same type", async () => {
+      // Pre-existing booking on room_101 for the same window.
+      mockBookings.push({
+        id: "existing_booking",
+        bookingId: "existing_booking",
+        roomId: "room_101",
+        status: "confirmed",
+        checkIn: { toDate: () => new Date("2026-07-02T00:00:00Z") },
+        checkOut: { toDate: () => new Date("2026-07-04T00:00:00Z") }
+      });
+
+      const body = {
+        bookingId: "booking_pick_second",
+        roomType: "standard-double",
+        checkIn: "2026-07-01",
+        checkOut: "2026-07-05",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Second",
+          lastName: "Choice",
+          email: "second@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const created = setCalls.find((c) => c.path === "bookings/booking_pick_second")?.data;
+      expect(created).toBeDefined();
+      // room_101 is occupied; transaction should auto-pick room_102.
+      expect(created.roomId).toBe("room_102");
+    });
+
+    test("returns 'Room no longer available' when every room of the type is booked", async () => {
+      // Block every room of standard-double with overlapping bookings.
+      mockBookings.push({
+        id: "occupy_101",
+        bookingId: "occupy_101",
+        roomId: "room_101",
+        status: "confirmed",
+        checkIn: { toDate: () => new Date("2026-08-01T00:00:00Z") },
+        checkOut: { toDate: () => new Date("2026-08-05T00:00:00Z") }
+      });
+      mockBookings.push({
+        id: "occupy_102",
+        bookingId: "occupy_102",
+        roomId: "room_102",
+        status: "confirmed",
+        checkIn: { toDate: () => new Date("2026-08-01T00:00:00Z") },
+        checkOut: { toDate: () => new Date("2026-08-05T00:00:00Z") }
+      });
+
+      const body = {
+        bookingId: "booking_no_room",
+        roomType: "standard-double",
+        checkIn: "2026-08-02",
+        checkOut: "2026-08-04",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Empty",
+          lastName: "House",
+          email: "empty@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "Room no longer available"
+      });
+      expect(setCalls.find((c) => c.path === "bookings/booking_no_room")).toBeUndefined();
+    });
+
+    test("rejects an unknown roomType with a user-facing error", async () => {
+      const body = {
+        bookingId: "booking_bad_type",
+        roomType: "penthouse-suite",
+        checkIn: "2026-07-01",
+        checkOut: "2026-07-03",
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Bad",
+          lastName: "Type",
+          email: "bad@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: "Selected room type is not available."
+      }));
+      expect(setCalls.find((c) => c.path === "bookings/booking_bad_type")).toBeUndefined();
+    });
   });
 
   describe("staff actions (walk-ins, payments, discount rejections, cancellations)", () => {

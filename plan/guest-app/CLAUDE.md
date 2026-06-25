@@ -128,3 +128,24 @@ guest-app is a Progressive Web App. This must be wired up during Phase 0 scaffol
 - `RoomCard.tsx` — image first, name, amenities, then price — never price first
 - `DateRangePicker.tsx` — blocks past dates, enforces min 1 night stay
 - `BookingSummary.tsx` — readonly recap used in Steps 3 and 4
+
+---
+
+## Local Development
+
+The booking page (`BookingPage.tsx`) calls `GET /api/rooms/availability` to filter out rooms that overlap existing active bookings. That endpoint is a Vercel serverless function (the catch-all in `guest-app/api/[...route].ts`) — it is **not** reachable from a plain `vite` dev server, which falls back to serving `index.html` for any unknown route and produces the cryptic `Unexpected token '<', "<!doctype "… is not valid JSON` console error.
+
+Use the workspace dev script, which runs `vercel dev` so the API is reachable:
+
+- `npm run dev:guest` (or `npm run dev -w guest-app`) — boots `vercel dev --listen 3000` and serves both the Vite SPA and the `/api/*` functions. This is the script every contributor should use.
+- `npm run dev:vite -w guest-app` — bare `vite` only. Use this only when you intentionally don't need the API (e.g. UI work on a page that doesn't fetch `/api/*`).
+- `npm run preview:guest` (or `npm run preview -w guest-app`) — `vercel preview` for production-build smoke tests.
+
+First-time setup: `cd guest-app && vercel link` to bind the local dev environment to a Vercel project, then `vercel env pull .env.local` if you want Vercel-managed env vars to take precedence over the committed `guest-app/.env`.
+
+If the dev console still shows a JSON parse error against `/api/rooms/availability` after starting `npm run dev:guest`, check that:
+1. `vercel dev` is actually serving on `:3000` (not Vite).
+2. The env file has `FIREBASE_PRIVATE_KEY` (required by the handler).
+3. The Vercel project is linked (`vercel link`) and pointing at the same Firebase project as the client.
+
+See `plan/docs/ENV-SETUP.md §Local Development` for the canonical list.
