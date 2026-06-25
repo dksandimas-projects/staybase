@@ -9,21 +9,31 @@ import { StatusBadge } from "./StatusBadge";
 
 interface RoomTypeCardProps {
   type: RoomTypeEntry;
-  availableCount: number;
-  totalCount: number;
-  firstAvailableRoomId: string | null;
+  // Optional date-aware availability. When all three are provided, the
+  // card shows the per-type availability StatusBadge ("X of Y available"
+  // / "Sold out for these dates") and the Book CTA is disabled when no
+  // room of the type is available. When omitted (catalog context), the
+  // StatusBadge is hidden and the Book CTA always links to /book.
+  availableCount?: number;
+  totalCount?: number;
+  firstAvailableRoomId?: string | null;
   bookingQuery?: string;
   onDetails?: () => void;
 }
 
-// Card used on the public rooms page after the type-driven refactor
-// (per `plan/features/ROOMS-PAGE.md`). Mirrors the visual language
-// of `RoomCard` (12px rounded card, 4:3 hero, status pill,
-// description, beds, capacity, amenity chips, From ₱X, Details +
-// Book CTAs) but the source of truth is the room TYPE, not an
-// individual room. Availability is shown as "X of Y available" and
-// the Book CTA is disabled when no room of this type is available
-// for the selected dates.
+// Card used on the public rooms page (per `plan/features/ROOMS-PAGE.md`).
+// Mirrors the visual language of `RoomCard` (12px rounded card, 4:3 hero,
+// short-label pill, description, beds, capacity, amenity chips, From ₱X,
+// Details + Book CTAs). The source of truth is the room TYPE, not an
+// individual room.
+//
+// The same component supports two contexts:
+//   1. Catalog (no availability props) — /rooms page: static card, Book
+//      CTA always links to /book. Used since the catalog no longer
+//      shows date-aware availability.
+//   2. Date-aware availability (all three props passed) — disabled
+//      "Sold out" CTA when 0 rooms of the type are available. Reserved
+//      for any future surface that needs the variant.
 export function RoomTypeCard({
   type,
   availableCount,
@@ -34,13 +44,22 @@ export function RoomTypeCard({
 }: RoomTypeCardProps) {
   const shouldReduceMotion = useReducedMotion();
   const heroImage = type.imageUrls[0];
-  const hasAvailability = availableCount > 0 && Boolean(firstAvailableRoomId);
-  const availabilityLabel =
-    totalCount === 0
+  const hasAvailabilityData =
+    availableCount !== undefined && totalCount !== undefined && firstAvailableRoomId !== undefined;
+  const isAvailable = hasAvailabilityData
+    ? availableCount > 0 && Boolean(firstAvailableRoomId)
+    : true;
+  const availabilityLabel = hasAvailabilityData
+    ? totalCount === 0
       ? "No rooms"
       : availableCount === 0
         ? "Sold out for these dates"
-        : `${availableCount} of ${totalCount} available`;
+        : `${availableCount} of ${totalCount} available`
+    : null;
+
+  const bookTo = hasAvailabilityData
+    ? `/book?roomId=${firstAvailableRoomId ?? ""}${bookingQuery}`
+    : "/book";
 
   return (
     <motion.article
@@ -75,10 +94,12 @@ export function RoomTypeCard({
             </span>
             <h3 className="mt-3 text-lg font-semibold text-gray-950">{type.label}</h3>
           </div>
-          <StatusBadge
-            label={availabilityLabel}
-            status={availableCount === 0 ? "occupied" : "available"}
-          />
+          {availabilityLabel ? (
+            <StatusBadge
+              label={availabilityLabel}
+              status={availableCount === 0 ? "occupied" : "available"}
+            />
+          ) : null}
         </div>
         <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{type.description}</p>
         <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
@@ -106,10 +127,8 @@ export function RoomTypeCard({
                 Details
               </GhostButton>
             ) : null}
-            {hasAvailability ? (
-              <PrimaryButton to={`/book?roomId=${firstAvailableRoomId}${bookingQuery}`}>
-                Book
-              </PrimaryButton>
+            {isAvailable ? (
+              <PrimaryButton to={bookTo}>Book</PrimaryButton>
             ) : (
               <PrimaryButton
                 aria-disabled="true"
