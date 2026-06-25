@@ -391,3 +391,106 @@ describe("Branding — logo uploads preserve transparency (W3.13)", () => {
     expect(heroUploaders?.length ?? 0).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe("No hero fallback flash — initial state must not show the static image", () => {
+  // Bug: a returning visitor who had the admin's custom hero image
+  // would briefly see the static `homepageHeroImage` fallback
+  // before the Firestore fetch resolved and the custom image
+  // appeared. The fix: the hook seeds empty `heroPhotoUrl` fields
+  // in the initial state, so the page renders a skeleton instead
+  // of the fallback. After Firestore resolves, the hook applies
+  // either the custom URL or the static fallback via `pickString`.
+
+  const homeSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/HomePage.tsx"),
+    "utf8"
+  );
+  const aboutSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/AboutPage.tsx"),
+    "utf8"
+  );
+  const corpSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/CorporateStaysPage.tsx"),
+    "utf8"
+  );
+  const rewardsSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/RewardsLandingPage.tsx"),
+    "utf8"
+  );
+  const hookSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/hooks/usePublicSiteContent.ts"),
+    "utf8"
+  );
+  const heroSkeletonSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/components/HeroSkeleton.tsx"),
+    "utf8"
+  );
+  const sharedCacheSrc = readFileSync(
+    resolve(__dirname, "../../../shared/utils/cache.ts"),
+    "utf8"
+  );
+  const sharedConstantsSrc = readFileSync(
+    resolve(__dirname, "../../../shared/constants/index.ts"),
+    "utf8"
+  );
+
+  it("shared/utils/cache.ts exports readCacheWithTtl + writeCache", () => {
+    expect(sharedCacheSrc).toMatch(/export function readCacheWithTtl/);
+    expect(sharedCacheSrc).toMatch(/export function writeCache/);
+    expect(sharedCacheSrc).toMatch(/export function clearCache/);
+  });
+
+  it("shared/constants exports the cache key + 5-minute TTL", () => {
+    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_KEY\s*=\s*["']publicSiteContent:v1["']/);
+    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
+  });
+
+  it("usePublicSiteContent reads the cache synchronously on mount", () => {
+    // The call site uses a generic (readCacheWithTtl<CachedContent>...)
+    // so the regex allows the optional generic in the source.
+    expect(hookSrc).toMatch(/readCacheWithTtl(?:<[^>]+>)?\(\s*PUBLIC_SITE_CONTENT_CACHE_KEY,\s*PUBLIC_SITE_CONTENT_CACHE_TTL_MS/);
+  });
+
+  it("usePublicSiteContent writes to the cache after Firestore resolves", () => {
+    expect(hookSrc).toMatch(/writeCache\(\s*PUBLIC_SITE_CONTENT_CACHE_KEY,\s*toCache/);
+  });
+
+  it("usePublicSiteContent seeds an EMPTY initial state (not the static fallback)", () => {
+    // The fix: initial state must have empty heroPhotoUrl fields
+    // so the page renders a skeleton instead of the static
+    // fallback. Previously the initial state included
+    // homepageHeroImage / aboutHeroImage / etc. — visible flash.
+    expect(hookSrc).toMatch(/function buildEmptyState\s*\(/);
+    expect(hookSrc).toMatch(/heroPhotoUrl:\s*""/);
+  });
+
+  it("All four hero pages render a HeroSkeleton when heroPhotoUrl is empty", () => {
+    // Each hero site wraps the <img> in a ternary that falls
+    // back to <HeroSkeleton /> when the URL is missing.
+    for (const src of [homeSrc, aboutSrc, corpSrc, rewardsSrc]) {
+      expect(src, "expected a HeroSkeleton fallback in the hero render").toMatch(/\{[a-zA-Z]+Photo \? \([\s\S]*?\) : \(\s*<HeroSkeleton\s*\/>\s*\)\}/);
+    }
+  });
+
+  it("All four hero pages import HeroSkeleton", () => {
+    for (const src of [homeSrc, aboutSrc, corpSrc, rewardsSrc]) {
+      expect(src, "expected HeroSkeleton import").toMatch(/import\s*\{\s*HeroSkeleton\s*\}\s*from\s*["']\.\.\/components\/HeroSkeleton["']/);
+    }
+  });
+
+  it("HeroSkeleton renders a neutral animate-pulse placeholder", () => {
+    expect(heroSkeletonSrc).toMatch(/bg-section-bg/);
+    expect(heroSkeletonSrc).toMatch(/animate-pulse/);
+    expect(heroSkeletonSrc).toMatch(/aria-hidden="true"/);
+  });
+
+  it("None of the four hero pages do `homepage\\.heroPhotoUrl || homepageHeroImage` anymore", () => {
+    // The OR-with-fallback was the source of the flash. The
+    // hook now applies the fallback internally; pages just
+    // read the value directly.
+    for (const src of [homeSrc, aboutSrc, corpSrc, rewardsSrc]) {
+      expect(src, "page must not OR the hero URL with a fallback constant").not.toMatch(/heroPhotoUrl\s*\|\|\s*homepageHeroImage/);
+      expect(src, "page must not OR with any `homepage` fallback constant").not.toMatch(/heroPhotoUrl\s*\|\|\s*\w*HeroImage/);
+    }
+  });
+});
