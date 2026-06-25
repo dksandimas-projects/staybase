@@ -20,7 +20,7 @@ import {
   Wallet
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -333,24 +333,73 @@ export function BookingPage() {
     return unsubscribeBookings;
   }, []);
 
-  // Inject Turnstile script and register token callback
+  // Mount the Turnstile widget explicitly via `turnstile.render()` rather
+  // than relying on the implicit auto-render triggered by the
+  // `cf-turnstile` class. Mirrors the CorporateStaysPage pattern: explicit
+  // render lets us pass `expired-callback` / `error-callback` and
+  // `turnstile.remove()` the widget on unmount. The previous auto-render
+  // path also registered a global `window.onTurnstileSuccess` that raced
+  // with React state updates and could fire on stale widget instances.
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const scriptId = "turnstile-script";
-    if (!document.getElementById(scriptId)) {
+    const container = turnstileContainerRef.current;
+    if (!container) return;
+
+    const siteKey =
+      import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA";
+    let cancelled = false;
+    let widgetId: string | null = null;
+    let pollHandle: ReturnType<typeof setTimeout> | null = null;
+
+    const ensureScript = (): void => {
+      const scriptId = "turnstile-script";
+      if (document.getElementById(scriptId)) return;
       const script = document.createElement("script");
       script.id = scriptId;
       script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
       script.async = true;
       script.defer = true;
       document.body.appendChild(script);
-    }
-
-    (window as any).onTurnstileSuccess = (token: string) => {
-      setTurnstileToken(token);
     };
 
+    const renderWidget = (): void => {
+      if (cancelled || !window.turnstile || !container.isConnected) return;
+      widgetId = window.turnstile.render(container, {
+        sitekey: siteKey,
+        callback: (token) => setTurnstileToken(token),
+        "expired-callback": () => setTurnstileToken(""),
+        "error-callback": () => setTurnstileToken("")
+      });
+      turnstileWidgetIdRef.current = widgetId;
+    };
+
+    const tryRender = (): void => {
+      if (cancelled) return;
+      if (window.turnstile) {
+        renderWidget();
+      } else {
+        pollHandle = setTimeout(tryRender, 100);
+      }
+    };
+
+    ensureScript();
+    tryRender();
+
     return () => {
-      delete (window as any).onTurnstileSuccess;
+      cancelled = true;
+      if (pollHandle !== null) clearTimeout(pollHandle);
+      const id = turnstileWidgetIdRef.current;
+      if (id && window.turnstile) {
+        try {
+          window.turnstile.remove(id);
+        } catch {
+          // Widget may already be gone. Safe to ignore — the next mount
+          // will allocate a fresh id.
+        }
+      }
+      turnstileWidgetIdRef.current = null;
     };
   }, []);
 
@@ -1150,9 +1199,8 @@ export function BookingPage() {
 
             {/* Cloudflare Turnstile Challenge */}
             <div
+              ref={turnstileContainerRef}
               className="cf-turnstile mt-6 flex justify-center"
-              data-sitekey={import.meta.env.VITE_TURNSTILE_SITE_KEY || "1x00000000000000000000AA"}
-              data-callback="onTurnstileSuccess"
             ></div>
 
             {submitError && (
