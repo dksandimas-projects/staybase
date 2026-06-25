@@ -146,13 +146,17 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 - [ ] Default items pre-seeded: "Consistent comfort", "Easy city access", "Warm front desk care"
 - [ ] Source: `settings/websiteContent.homepage.amenities`
 
-**Featured Rooms** (up to 3 on the "Stay with us" section)
-- [ ] Two-pane selector: available active rooms on the left, featured on the right
-- [ ] Each row in the right pane: room name, room number, type, position number badge
-- [ ] Add / remove / reorder (up/down) the picked list; capped at `MAX_FEATURED_ROOMS = 3`
-- [ ] When the picked list is empty the guest site falls back to the first 3 active rooms
-- [ ] Type-image thumbnails pulled from `roomTypes[room.type].imageUrls[0]`
-- [ ] Source: `settings/websiteContent.homepage.featuredRoomIds`
+**Featured Room Types** (up to 3 on the "Stay with us" section)
+- [ ] Two-pane selector: available room types on the left, featured types on the right
+- [ ] Each row in the left pane shows the type label + the count of *active* rooms of that type. Types with zero active rooms are grayed out and can't be added (no card would render anyway)
+- [ ] Each row in the right pane shows the type label + active-room count + a position number badge (the order here is the render order on the public site)
+- [ ] Add / remove / reorder (up/down) the picked list; capped at `MAX_FEATURED_TYPES = 3` (renamed from the old `MAX_FEATURED_ROOMS = 3` alias which is kept for the migration window)
+- [ ] When the picked list is empty the guest site falls back to the first `MAX_FEATURED_TYPES` *distinct* types that have at least one active room (NOT raw room IDs — that was the bug the type-driven model fixes)
+- [ ] The card content (image, bed, amenities, capacity, price, description) all comes from the room TYPE via `roomTypes[value]` — the picked physical room is only used for the `key` and the Book Now deep link
+- [ ] A picked type that has no active rooms is silently skipped (no empty card)
+- [ ] Source: `settings/websiteContent.homepage.featuredTypeValues`
+
+**Migration from the old per-room picker** — the previous model was `featuredRoomIds: string[]` (a list of physical room doc IDs). That was wrong: every card field is type-driven, so picking "Room 201" vs "Room 202" (both `executive`) rendered identically. `AdminContext.mergeWebsiteContent` does a one-time migration on read: if the doc still carries the old `featuredRoomIds` and no new `featuredTypeValues`, it maps each id to its room type via the `roomTypes` already in context, dedupes, and returns the new field. The next admin save writes the new field and the old one is dropped. localStorage cache key bumped from `publicSiteContent:v1` to `v2` so old cached entries are ignored.
 
 **Homepage Services** (two-up service cards)
 - [ ] Add / remove / reorder the service cards. Each row: title, description, icon, isEnabled toggle
@@ -167,13 +171,22 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 - [ ] Default items pre-seeded: "Earn points on completed stays", "Member-only stay offers", "Request early check-in"
 - [ ] Source: `settings/websiteContent.homepage.sparkRewards`
 
+**Corporate page** (everything on `/corporate` other than the hero, which lives on the Branding tab)
+- [ ] **Perks grid** — add / remove / reorder perks shown in the three-up grid on the corporate page. Each row: title, description, icon (from `KNOWN_CONTENT_ICONS`), isEnabled toggle. Disabled perks stay in the data so the order is preserved
+- [ ] Default perks pre-seeded from `DEFAULT_CORPORATE_PERKS` in `@spark-inn/shared` (6 entries: Negotiated Rates, Group Bookings, Dedicated Support, High-Speed Wi-Fi, Premium Security, Flexible Bookings) — same source as the guest-app fallback
+- [ ] **Rooms overview** — eyebrow + heading + subtext shown above the room type cards. Empty fields fall back to `DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview` in `@spark-inn/shared`
+- [ ] **Retreat CTA banner** — heading + description + button label for the orange banner between the rooms overview and the inquiry form. Empty fields fall back to `DEFAULT_CORPORATE_PAGE_CONTENT.retreat`. Button target (the inquiry form) is not editable
+- [ ] **Auto-population** — the admin editor's state is pre-populated from `DEFAULT_CORPORATE_PAGE_CONTENT` whenever the corresponding Firestore field is empty, so the admin sees the current text in the inputs (no need to retype). On first admin load, a one-time backfill in `AdminContext` writes any empty `corporate.*` field to Firestore so the public site locks to the same copy + image the deploy-time fallback provides. The backfill is gated by a `useRef` so it runs at most once per session, and it is idempotent — subsequent loads short-circuit because every field is already populated
+- [ ] Source: `settings/websiteContent.corporate.{perks[], roomsOverview{Eyebrow,Heading,Description}, retreat{Heading,Description,CtaLabel}}`
+
 **Our Rooms / Contact Us:**
 - [ ] Note: "Room content managed in Room Management. Contact details managed in Hotel Info."
 
 **Implementation notes:**
-- The four editors use two reusable components: `ListEditor` (amenities, services, perks) and `RoomPicker` (featured rooms). Both live in `admin-app/src/components/`
-- All four sub-objects are persisted together via `setDoc(settings, "websiteContent", { homepage: {…} }, { merge: true })` on a single "Save Content" button
+- The editors use two reusable components: `ListEditor` (homepage amenities, homepage services, Spark Rewards perks, corporate perks) and `TypePicker` (featured room types). Both live in `admin-app/src/components/`
+- All sub-objects are persisted together via `setDoc(settings, "websiteContent", { homepage: {…}, corporate: {…} }, { merge: true })` on a single "Save Content" button
 - `KNOWN_CONTENT_ICONS` is a kebab-case string union exported from `shared/constants/index.ts` — the admin app renders a dropdown, the guest app's per-page `resolveIcon` helper maps each name to a `lucide-react` component
+- `ContentItem` (the shape used by all four list editors) is exported from `shared/constants/index.ts` and used by both `ListEditorItem` in the admin and `usePublicSiteContent` in the guest app
 
 Source: `settings/websiteContent` — `setDoc` on save per section.
 

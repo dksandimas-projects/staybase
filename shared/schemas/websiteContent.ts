@@ -22,7 +22,17 @@ export const HomepageContentSchema = PublicHeroSchema.extend({
       isEnabled: z.boolean().optional()
     })
   ),
-  featuredRoomIds: z.array(z.string()),
+  // Type values featured on the homepage "Stay with us" section.
+  // Each value resolves to its first active room — see
+  // `HomePage` and the `TypePicker` admin component. Capped at
+  // `MAX_FEATURED_TYPES` (3) at the editor and at the renderer.
+  //
+  // Migration note: the previous field was `featuredRoomIds`
+  // (a list of physical room doc IDs). That model was wrong —
+  // see `MAX_FEATURED_TYPES` in `shared/constants/index.ts` for
+  // the full rationale. `AdminContext.mergeWebsiteContent` does
+  // a one-time mapping from the old field to the new one.
+  featuredTypeValues: z.array(z.string()),
   services: z.array(
     z.object({
       title: z.string(),
@@ -62,7 +72,20 @@ export const CorporateContentSchema = PublicHeroSchema.extend({
       icon: z.string().optional(),
       isEnabled: z.boolean().optional()
     })
-  )
+  ),
+  // Rooms overview section on /corporate (eyebrow + heading + subtext).
+  // All optional — the guest app falls back to hardcoded copy in
+  // `CorporateStaysPage` when empty. Edited from Settings → Website
+  // Content → Corporate page.
+  roomsOverviewEyebrow: z.string().default(""),
+  roomsOverviewHeading: z.string().default(""),
+  roomsOverviewDescription: z.string().default(""),
+  // Retreat CTA banner at the bottom of the "rooms" section
+  // (heading + description + button label). All optional with the
+  // same fallback behavior as the rooms overview block above.
+  retreatHeading: z.string().default(""),
+  retreatDescription: z.string().default(""),
+  retreatCtaLabel: z.string().default("")
 });
 
 export const RewardsContentSchema = PublicHeroSchema;

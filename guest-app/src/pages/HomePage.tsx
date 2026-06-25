@@ -7,13 +7,14 @@ import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
+import { HeroSkeleton } from "../components/HeroSkeleton";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
-import { homepageHeroImage } from "../data/homepage";
+import { MAX_FEATURED_TYPES } from "@spark-inn/shared";
 
 const amenityIcons = [BedDouble, MapPin, Users, Sparkles, Wifi, Coffee];
 
@@ -56,14 +57,55 @@ export function HomePage() {
   const [checkOut, setCheckOut] = useState("2026-06-14");
   const [guests, setGuests] = useState(2);
 
+  // Resolve `featuredTypeValues` to a list of physical rooms
+  // for the "Stay with us" section. Each type value is matched
+  // against the first *active* room of that type — the card
+  // content (image, price, bed, amenities, description) all
+  // comes from the type via `RoomCard` props, so the room ID is
+  // only used for the `key` and the Book-Now deep link.
+  //
+  // - A type that has no active rooms is skipped silently (we
+  //   don't render an empty card).
+  // - An empty `featuredTypeValues` falls back to the first
+  //   `MAX_FEATURED_TYPES` distinct types that have at least
+  //   one active room. The previous model fell back to
+  //   `rooms.slice(0, 3)` which could pick multiple rooms of
+  //   the same type and miss others entirely.
   const featured = useMemo(() => {
-    const ids = homepage.featuredRoomIds;
-    const matched = rooms.filter((r) => ids.includes(r.id));
-    if (matched.length > 0) return matched;
-    return rooms.slice(0, 3);
-  }, [rooms, homepage.featuredRoomIds]);
+    const typeValues = homepage.featuredTypeValues;
+    const orderedTypes: string[] =
+      typeValues.length > 0
+        ? typeValues
+        : (() => {
+            const seen = new Set<string>();
+            const out: string[] = [];
+            for (const r of rooms) {
+              if (r.isActive && !seen.has(r.type)) {
+                seen.add(r.type);
+                out.push(r.type);
+                if (out.length >= MAX_FEATURED_TYPES) break;
+              }
+            }
+            return out;
+          })();
 
-  const heroPhoto = homepage.heroPhotoUrl || homepageHeroImage;
+    const resolved: typeof rooms = [];
+    for (const typeValue of orderedTypes) {
+      if (resolved.length >= MAX_FEATURED_TYPES) break;
+      const candidate = rooms.find((r) => r.type === typeValue && r.isActive);
+      if (candidate) resolved.push(candidate);
+    }
+    return resolved;
+  }, [rooms, homepage.featuredTypeValues]);
+
+  // `homepage.heroPhotoUrl` is empty during the initial Firestore
+  // load (skeleton shown below) and resolves to either the
+  // admin's custom upload or the static `homepageHeroImage`
+  // fallback once the hook finishes. The OR was previously
+  // needed for the loading phase, but the hook now leaves the
+  // field empty during load so the page never flashes the
+  // fallback before the custom image arrives.
+  const heroPhoto = homepage.heroPhotoUrl;
   const visibleServices = homepage.services.filter((s) => s.isEnabled !== false);
   const sparkRewardsVisible = homepage.sparkRewards.isEnabled !== false;
   const visibleRewards = sparkRewardsVisible
@@ -94,28 +136,44 @@ export function HomePage() {
       <Navbar overHero />
 
       <section className="relative -mt-20 flex min-h-screen items-center justify-center overflow-hidden px-4 pt-20 text-center">
-        <img
-          src={heroPhoto}
-          alt="Warm boutique hotel pool surrounded by calm tropical greenery"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        <div className="absolute inset-0 bg-gray-950/45" />
+        {heroPhoto ? (
+          <img
+            src={heroPhoto}
+            alt="Warm boutique hotel pool surrounded by calm tropical greenery"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <HeroSkeleton />
+        )}
+        {/* Stronger, directional gradient: light at the top so the
+            photo + navbar read well, heavier through the middle
+            and bottom so the centered text always pops. The old
+            flat `bg-gray-950/45` was easy to read on dark photos
+            but disappeared on lighter / high-contrast uploads. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/55 to-black/70" />
         <motion.div
           animate="visible"
           className="relative z-10 mx-auto max-w-4xl pt-16"
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <p className="font-heading text-lg italic text-white/90 sm:text-2xl">{config.tagline}</p>
-          <h1 className="mt-6 font-heading text-5xl leading-tight text-white sm:text-7xl">{homepage.heroHeading}</h1>
-          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/90 sm:text-lg">
+          {/* `drop-shadow-*` adds a soft glow behind the text so it
+              reads on any background. lg on the headline, md on
+              the supporting copy. */}
+          <p className="font-heading text-lg italic text-white/90 drop-shadow-md sm:text-2xl">
+            {config.tagline}
+          </p>
+          <h1 className="mt-6 font-heading text-5xl leading-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)] sm:text-7xl">
+            {homepage.heroHeading}
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/90 drop-shadow-md sm:text-lg">
             {homepage.heroSubtext}
           </p>
           <div className="mt-10 flex flex-col justify-center gap-3 sm:flex-row">
-            <PrimaryButton to="/book" className="shadow-lg">
+            <PrimaryButton to="/book" className="shadow-lg drop-shadow-md">
               Book your stay
             </PrimaryButton>
-            <GhostButton to="/rooms" className="border-white text-white hover:bg-white/10">
+            <GhostButton to="/rooms" className="border-white text-white drop-shadow-sm hover:bg-white/10">
               View rooms
             </GhostButton>
           </div>

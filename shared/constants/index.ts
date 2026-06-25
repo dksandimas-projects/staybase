@@ -50,6 +50,58 @@ export type RoomTypeEntry = {
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
 
+// Default perks shown on the public /corporate page (under the hero).
+// Shared between the guest app (Firestore override → this fallback)
+// and the admin app (seeded into `mergeWebsiteContent` when the
+// settings doc has no `corporate.perks[]`). Each entry is editable
+// from Settings → Website Content → Corporate page → Perks; the
+// admin's editor preserves this shape (title, description, icon,
+// isEnabled) via the shared `ListEditor` component.
+export const DEFAULT_CORPORATE_PERKS: readonly ContentItem[] = [
+  {
+    title: "Negotiated Rates",
+    description:
+      "Unlock exclusive fixed-rate packages tailored to your company's annual travel volume. Control and predict your hospitality budget with ease.",
+    icon: "coins",
+    isEnabled: true
+  },
+  {
+    title: "Group Bookings",
+    description:
+      "Coordinated logistics for team building retreats, board meetings, and product launches. Keep your organization unified and fully refreshed.",
+    icon: "users",
+    isEnabled: true
+  },
+  {
+    title: "Dedicated Support",
+    description:
+      "A personal account manager handles reservations, customized invoices, and check-in assistance, giving your team peace of mind.",
+    icon: "briefcase",
+    isEnabled: true
+  },
+  {
+    title: "High-Speed Wi-Fi",
+    description:
+      "Dedicated high-bandwidth networks are active throughout our property. Perform remote work, host video calls, and stay in touch without delays.",
+    icon: "wifi",
+    isEnabled: true
+  },
+  {
+    title: "Premium Security",
+    description:
+      "Enjoy a peaceful, secure stay with 24/7 staff, encrypted access locks, and strict privacy protocols for high-profile business visitors.",
+    icon: "shield",
+    isEnabled: true
+  },
+  {
+    title: "Flexible Bookings",
+    description:
+      "Business plans change. Corporate agreements enjoy reduced cancellation fees, priority rescheduling, and same-day room re-allocations.",
+    icon: "calendar",
+    isEnabled: true
+  }
+];
+
 // Icon names usable on the public site's amenities / services /
 // perks / corporate-perks cards. The string key is what gets stored
 // in Firestore; the admin app renders a dropdown picker, the guest
@@ -88,7 +140,96 @@ export const KNOWN_CONTENT_ICONS = [
 
 export type ContentIconName = (typeof KNOWN_CONTENT_ICONS)[number];
 
-// Number of featured rooms displayed on the homepage. The guest app
-// falls back to the first 3 active rooms when this list is empty.
-export const MAX_FEATURED_ROOMS = 3;
+// Single source of truth for the list-shaped content item used on
+// the public site (homepage amenities / services, Spark Rewards
+// perks, corporate perks). Shared between the admin app's
+// `ListEditor` and the guest app's per-page renderers. `icon` and
+// `isEnabled` are optional on the data side because legacy Firestore
+// docs may not have written them.
+export interface ContentItem {
+  title: string;
+  description: string;
+  icon?: string;
+  isEnabled?: boolean;
+}
+
+// Default copy + image for the entire /corporate page. Single source
+// of truth shared by:
+//   - the guest app: used as the fallback chain in
+//     `usePublicSiteContent.buildFallback` (Firestore override → this
+//     constant → hardcoded UI string) and as the `|| "..."` fallback
+//     inside `CorporateStaysPage` for any field the admin hasn't
+//     overridden yet.
+//   - the admin app: Settings → Branding (hero block) and Settings →
+//     Website Content → Corporate page (rooms overview + retreat CTA)
+//     hydrate the editor state from this constant when the Firestore
+//     value is empty, so the admin sees the current text in the
+//     inputs instead of blank fields.
+//   - the one-time Firestore backfill in `AdminContext`: writes these
+//     values to any empty `corporate.*` field the first time an admin
+//     loads the app, so the guest app's empty-string fallback never
+//     trips for a property that has had an admin open the dashboard.
+//
+// Mirror values: these strings must stay byte-identical with the
+// hardcoded copy previously inlined in `CorporateStaysPage.tsx` and
+// the `FALLBACK_CORPORATE_HERO_*` constants in
+// `usePublicSiteContent.ts`. The hero photo URL also matches the
+// `corporateHeroImage` static fallback in
+// `guest-app/src/data/homepage.ts` — backfilling the URL into
+// Firestore locks the page to that image even if the deploy-time
+// fallback file ever changes.
+export const DEFAULT_CORPORATE_PAGE_CONTENT = {
+  hero: {
+    eyebrow: "Curated hospitality for executive comfort",
+    heading: "Elevated Stays for Modern Business",
+    subtext:
+      "Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol.",
+    photoUrl:
+      "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80"
+  },
+  roomsOverview: {
+    eyebrow: "Accommodation Types",
+    heading: "Rooms Built for Productivity & Rest",
+    description:
+      "Explore our range of boutique rooms. All rooms feature workspaces, high-speed Wi-Fi, air conditioning, and premium linens. No prices are shown below; corporate rates are negotiated based on contract terms."
+  },
+  retreat: {
+    heading: "Partner with us for your next team retreat.",
+    description:
+      "Experience the perfect blend of Bohol's natural charm and the high-efficiency environment your business demands. Fully catered planning options are available.",
+    ctaLabel: "Get in Touch"
+  }
+} as const;
+
+// Number of featured types displayed on the homepage. The guest
+// app resolves each type to its first active room and renders one
+// card per type. When the list is empty, the guest app falls back
+// to the first MAX_FEATURED_TYPES distinct types that have at
+// least one active room (not raw room IDs — see the homepage
+// spec for why the type-driven model is correct).
+//
+// Migration: this constant used to be called `MAX_FEATURED_ROOMS`
+// and the homepage used `featuredRoomIds: string[]` (a list of
+// physical room doc IDs). That model was wrong because every
+// rendered card field (image, price, bed, description, amenities)
+// comes from the room TYPE, not the individual room — picking
+// "Room 201" vs "Room 202" (both `executive`) rendered
+// identically. The old constant is kept as a deprecated alias
+// for the one-time migration in `AdminContext.mergeWebsiteContent`.
+export const MAX_FEATURED_TYPES = 3;
+export const MAX_FEATURED_ROOMS = MAX_FEATURED_TYPES;
+
+// localStorage cache key + TTL for the public site content
+// (`usePublicSiteContent`). Returning visitors get an instant
+// render from the cache while Firestore validates in the
+// background — no "fallback-image flash" while waiting for the
+// custom upload to load. Bump the `:vN` suffix if the cached
+// shape ever changes — a v1 cache will fail type-shape
+// validation against the v2 schema and be ignored.
+//
+// v2 — `homepage.featuredRoomIds` renamed to
+// `homepage.featuredTypeValues`. Old cached entries are now
+// shape-incompatible and fall through to the empty state.
+export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v2";
+export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 

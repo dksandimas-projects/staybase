@@ -87,8 +87,13 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(homeSrc).not.toMatch(/import\s*\{[^}]*\bamenities\b[^}]*\}\s*from\s*["']\.\.\/data\/homepage["']/);
     });
 
-    it("derives featured rooms from settings.featuredRoomIds (not hard-coded ids)", () => {
-      expect(homeSrc).toMatch(/homepage\.featuredRoomIds/);
+    it("derives featured rooms from settings.featuredTypeValues (not hard-coded ids)", () => {
+      // The new model is type-driven (featuredTypeValues) — see
+      // `MAX_FEATURED_TYPES` in `shared/constants/index.ts` for
+      // the full rationale.
+      expect(homeSrc).toMatch(/homepage\.featuredTypeValues/);
+      // The old per-room field must be gone from the page.
+      expect(homeSrc).not.toMatch(/homepage\.featuredRoomIds/);
       // The hard-coded `const ids = ["room-201", "room-204", "room-301"]`
       // block must be gone.
       expect(homeSrc).not.toMatch(/const\s+ids\s*=\s*\[\s*["']room-201["']/);
@@ -249,8 +254,8 @@ describe("Website Content editors — list-shaped homepage content", () => {
     resolve(__dirname, "../../src/components/ListEditor.tsx"),
     "utf8"
   );
-  const roomPickerSrc = readFileSync(
-    resolve(__dirname, "../../src/components/RoomPicker.tsx"),
+  const typePickerSrc = readFileSync(
+    resolve(__dirname, "../../src/components/TypePicker.tsx"),
     "utf8"
   );
   const sharedConstantsSrc = readFileSync(
@@ -269,16 +274,19 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(settingsPageSrc).toMatch(/<ListEditor[\s\S]*?value=\{sparkRewardsPerks\}[\s\S]*?\/>/);
   });
 
-  it("SettingsPage uses RoomPicker for featuredRoomIds", () => {
-    expect(settingsPageSrc).toMatch(/import\s*\{[^}]*RoomPicker[^}]*\}\s*from\s*["']\.\.\/components\/RoomPicker["']/);
-    expect(settingsPageSrc).toMatch(/<RoomPicker[\s\S]*?value=\{homepageFeaturedRoomIds\}[\s\S]*?\/>/);
+  it("SettingsPage uses TypePicker for featuredTypeValues (replaces RoomPicker)", () => {
+    expect(settingsPageSrc).toMatch(/import\s*\{[^}]*TypePicker[^}]*\}\s*from\s*["']\.\.\/components\/TypePicker["']/);
+    expect(settingsPageSrc).toMatch(/<TypePicker[\s\S]*?value=\{homepageFeaturedTypeValues\}[\s\S]*?\/>/);
+    // The old RoomPicker must be gone.
+    expect(settingsPageSrc).not.toMatch(/<RoomPicker/);
+    expect(settingsPageSrc).not.toMatch(/from\s*["']\.\.\/components\/RoomPicker["']/);
   });
 
   it("SettingsPage persists all four sub-objects via a single handleSaveWebsiteContent", () => {
     expect(settingsPageSrc).toMatch(/handleSaveWebsiteContent\s*=\s*async/);
     expect(settingsPageSrc).toMatch(/amenities:\s*homepageAmenities/);
     expect(settingsPageSrc).toMatch(/services:\s*homepageServices/);
-    expect(settingsPageSrc).toMatch(/featuredRoomIds:\s*homepageFeaturedRoomIds/);
+    expect(settingsPageSrc).toMatch(/featuredTypeValues:\s*homepageFeaturedTypeValues/);
     expect(settingsPageSrc).toMatch(/isEnabled:\s*sparkRewardsEnabled/);
   });
 
@@ -305,18 +313,27 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(listEditorSrc).toMatch(/KNOWN_CONTENT_ICONS\.map\(/);
   });
 
-  it("RoomPicker caps selection at MAX_FEATURED_ROOMS and emits the new array", () => {
-    expect(roomPickerSrc).toMatch(/MAX_FEATURED_ROOMS/);
-    expect(roomPickerSrc).toMatch(/onChange\(next\)/);
+  it("TypePicker caps selection at MAX_FEATURED_TYPES and emits the new array", () => {
+    expect(typePickerSrc).toMatch(/MAX_FEATURED_TYPES/);
+    expect(typePickerSrc).toMatch(/onChange\(next\)/);
   });
 
-  it("RoomPicker filters to active rooms only", () => {
-    expect(roomPickerSrc).toMatch(/rooms\.filter\(\(r\)\s*=>\s*r\.isActive\)/);
+  it("TypePicker filters to types with at least one active room", () => {
+    // The picker shows the count of active rooms per type and
+    // disables the Add button when the count is zero. The new
+    // model is type-driven, not room-driven.
+    expect(typePickerSrc).toMatch(/activeCount/);
+    expect(typePickerSrc).toMatch(/activeRoomCounts/);
+    // The Add button is disabled when the type has no active
+    // rooms OR the cap has been reached.
+    expect(typePickerSrc).toMatch(/disabled=\{disabled \|\| value\.length >= maxItems\}/);
   });
 
-  it("shared/constants exports KNOWN_CONTENT_ICONS + MAX_FEATURED_ROOMS", () => {
+  it("shared/constants exports KNOWN_CONTENT_ICONS + MAX_FEATURED_TYPES", () => {
     expect(sharedConstantsSrc).toMatch(/export const KNOWN_CONTENT_ICONS/);
-    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_ROOMS\s*=\s*3/);
+    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_TYPES\s*=\s*3/);
+    // Backward-compat alias for the migration window.
+    expect(sharedConstantsSrc).toMatch(/export const MAX_FEATURED_ROOMS\s*=\s*MAX_FEATURED_TYPES/);
   });
 
   it("AdminContext seed includes the four list-based sub-objects", () => {
@@ -325,8 +342,22 @@ describe("Website Content editors — list-shaped homepage content", () => {
     // with example content instead of empty placeholders.
     expect(adminCtxSrc).toMatch(/amenities:\s*\[\s*\{[^}]*Consistent comfort/);
     expect(adminCtxSrc).toMatch(/services:\s*\[\s*\{[^}]*Tour Packages/);
-    expect(adminCtxSrc).toMatch(/featuredRoomIds:\s*\["room-201"/);
+    // The featured field is now type-driven (was `featuredRoomIds`).
+    expect(adminCtxSrc).toMatch(/featuredTypeValues:\s*\["executive"/);
+    expect(adminCtxSrc).not.toMatch(/featuredRoomIds:\s*\["room-201"/);
     expect(adminCtxSrc).toMatch(/sparkRewards:\s*\{[\s\S]*?Earn points on completed stays/);
+  });
+
+  it("AdminContext migrates the old featuredRoomIds to featuredTypeValues on read", () => {
+    // Migration step in `mergeWebsiteContent`: if the doc still
+    // carries the old `featuredRoomIds` array and no new
+    // `featuredTypeValues`, derive the new field by mapping
+    // each id to its room type via the `roomTypes` already in
+    // context, dedupe, and return. The canonical migration
+    // happens on the next admin save.
+    expect(adminCtxSrc).toMatch(/homepageRaw\.featuredTypeValues/);
+    expect(adminCtxSrc).toMatch(/homepageRaw\.featuredRoomIds/);
+    expect(adminCtxSrc).toMatch(/derived\.push\(typeValue\)/);
   });
 });
 
@@ -389,5 +420,199 @@ describe("Branding — logo uploads preserve transparency (W3.13)", () => {
     );
     expect(heroUploaders, "expected the four hero photo uploaders to keep the default JPEG mime type").not.toBeNull();
     expect(heroUploaders?.length ?? 0).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("No hero fallback flash — initial state must not show the static image", () => {
+  // Bug: a returning visitor who had the admin's custom hero image
+  // would briefly see the static `homepageHeroImage` fallback
+  // before the Firestore fetch resolved and the custom image
+  // appeared. The fix: the hook seeds empty `heroPhotoUrl` fields
+  // in the initial state, so the page renders a skeleton instead
+  // of the fallback. After Firestore resolves, the hook applies
+  // either the custom URL or the static fallback via `pickString`.
+
+  const homeSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/HomePage.tsx"),
+    "utf8"
+  );
+  const aboutSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/AboutPage.tsx"),
+    "utf8"
+  );
+  const corpSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/CorporateStaysPage.tsx"),
+    "utf8"
+  );
+  const rewardsSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/pages/RewardsLandingPage.tsx"),
+    "utf8"
+  );
+  const hookSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/hooks/usePublicSiteContent.ts"),
+    "utf8"
+  );
+  const heroSkeletonSrc = readFileSync(
+    resolve(__dirname, "../../../guest-app/src/components/HeroSkeleton.tsx"),
+    "utf8"
+  );
+  const sharedCacheSrc = readFileSync(
+    resolve(__dirname, "../../../shared/utils/cache.ts"),
+    "utf8"
+  );
+  const sharedConstantsSrc = readFileSync(
+    resolve(__dirname, "../../../shared/constants/index.ts"),
+    "utf8"
+  );
+
+  it("shared/utils/cache.ts exports readCacheWithTtl + writeCache", () => {
+    expect(sharedCacheSrc).toMatch(/export function readCacheWithTtl/);
+    expect(sharedCacheSrc).toMatch(/export function writeCache/);
+    expect(sharedCacheSrc).toMatch(/export function clearCache/);
+  });
+
+  it("shared/constants exports the cache key + 5-minute TTL", () => {
+    // v2 — bumped from v1 because `homepage.featuredRoomIds`
+    // was renamed to `homepage.featuredTypeValues`. v1 entries
+    // are now shape-incompatible and fall through to the empty
+    // state.
+    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_KEY\s*=\s*["']publicSiteContent:v2["']/);
+    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
+  });
+
+  it("usePublicSiteContent reads the cache synchronously on mount", () => {
+    // The call site uses a generic (readCacheWithTtl<CachedContent>...)
+    // so the regex allows the optional generic in the source.
+    expect(hookSrc).toMatch(/readCacheWithTtl(?:<[^>]+>)?\(\s*PUBLIC_SITE_CONTENT_CACHE_KEY,\s*PUBLIC_SITE_CONTENT_CACHE_TTL_MS/);
+  });
+
+  it("usePublicSiteContent writes to the cache after Firestore resolves", () => {
+    expect(hookSrc).toMatch(/writeCache\(\s*PUBLIC_SITE_CONTENT_CACHE_KEY,\s*toCache/);
+  });
+
+  it("usePublicSiteContent seeds an EMPTY initial state (not the static fallback)", () => {
+    // The fix: initial state must have empty heroPhotoUrl fields
+    // so the page renders a skeleton instead of the static
+    // fallback. Previously the initial state included
+    // homepageHeroImage / aboutHeroImage / etc. — visible flash.
+    expect(hookSrc).toMatch(/function buildEmptyState\s*\(/);
+    expect(hookSrc).toMatch(/heroPhotoUrl:\s*""/);
+  });
+
+  it("All four hero pages render a HeroSkeleton when heroPhotoUrl is empty", () => {
+    // Each hero site wraps the <img> in a ternary that falls
+    // back to <HeroSkeleton /> when the URL is missing.
+    for (const src of [homeSrc, aboutSrc, corpSrc, rewardsSrc]) {
+      expect(src, "expected a HeroSkeleton fallback in the hero render").toMatch(/\{[a-zA-Z]+Photo \? \([\s\S]*?\) : \(\s*<HeroSkeleton\s*\/>\s*\)\}/);
+    }
+  });
+
+  it("All four hero pages import HeroSkeleton", () => {
+    for (const src of [homeSrc, aboutSrc, corpSrc, rewardsSrc]) {
+      expect(src, "expected HeroSkeleton import").toMatch(/import\s*\{\s*HeroSkeleton\s*\}\s*from\s*["']\.\.\/components\/HeroSkeleton["']/);
+    }
+  });
+
+  it("HeroSkeleton renders a neutral animate-pulse placeholder", () => {
+    expect(heroSkeletonSrc).toMatch(/bg-section-bg/);
+    expect(heroSkeletonSrc).toMatch(/animate-pulse/);
+    expect(heroSkeletonSrc).toMatch(/aria-hidden="true"/);
+  });
+
+  it("None of the four hero pages do `homepage\\.heroPhotoUrl || homepageHeroImage` anymore", () => {
+    // The OR-with-fallback was the source of the flash. The
+    // hook now applies the fallback internally; pages just
+    // read the value directly.
+    for (const src of [homeSrc, aboutSrc, corpSrc, rewardsSrc]) {
+      expect(src, "page must not OR the hero URL with a fallback constant").not.toMatch(/heroPhotoUrl\s*\|\|\s*homepageHeroImage/);
+      expect(src, "page must not OR with any `homepage` fallback constant").not.toMatch(/heroPhotoUrl\s*\|\|\s*\w*HeroImage/);
+    }
+  });
+});
+
+describe("Hero text legibility — darker overlay + drop-shadow on all 4 heroes", () => {
+  // Background: the original hero overlays (a flat
+  // `bg-gray-950/45` on Home/About and a thin
+  // `via-gray-950/65` gradient on Corporate/Rewards) failed on
+  // light / high-contrast admin uploads — the white text
+  // disappeared into the photo. The fix unifies all four
+  // heroes with a stronger directional gradient plus a
+  // `drop-shadow-*` glow on the text so it always reads.
+
+  const sources: Record<"homepage" | "about" | "corporate" | "rewards", string> = {
+    homepage: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/HomePage.tsx"), "utf8"),
+    about: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/AboutPage.tsx"), "utf8"),
+    corporate: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/CorporateStaysPage.tsx"), "utf8"),
+    rewards: readFileSync(resolve(__dirname, "../../../guest-app/src/pages/RewardsLandingPage.tsx"), "utf8")
+  };
+
+  for (const [name, src] of Object.entries(sources)) {
+    it(`${name} uses a gradient overlay (not just a flat color)`, () => {
+      expect(src, `${name} must use bg-gradient-`).toMatch(/bg-gradient-to-[bt]\b/);
+    });
+
+    it(`${name}'s h1 has a drop-shadow for legibility`, () => {
+      // The h1 is the biggest text and most likely to collide
+      // with a bright patch in the photo. A custom
+      // drop-shadow blur keeps the headline readable without
+      // hiding the photo behind an opaque black bar.
+      expect(src, `${name}'s h1 must have a drop-shadow`).toMatch(/<h1[^>]*drop-shadow/);
+    });
+
+    it(`${name}'s hero text (subtext or eyebrow) has a drop-shadow-md or larger`, () => {
+      // The subtext / eyebrow is smaller and the white color
+      // tends to wash out on light photos. A `drop-shadow-md`
+      // or arbitrary drop-shadow utility on the supporting copy
+      // keeps it legible.
+      const hasDropShadow = /drop-shadow-md|drop-shadow-lg|drop-shadow-xl|drop-shadow-\[/.test(src);
+      expect(hasDropShadow, `${name} must have at least one drop-shadow-* utility on the hero text`).toBe(true);
+    });
+  }
+
+  it("HomePage uses a top-to-bottom gradient (light top, heavy bottom)", () => {
+    // The homepage text is centered, so a `to-b` gradient
+    // darkens the lower half (where the text sits) more than
+    // the upper half (where the navbar + photo read).
+    expect(sources.homepage).toMatch(/bg-gradient-to-b/);
+    expect(sources.homepage).toMatch(/from-black\/40[\s\S]*?via-black\/55[\s\S]*?to-black\/70/);
+  });
+
+  it("HomePage no longer uses the old flat bg-gray-950/45 overlay", () => {
+    // The old flat overlay was a 45% black blanket that hid
+    // the photo and still didn't help on light backgrounds.
+    // Replaced by the gradient. Strip comments so the
+    // migration note in the new code (which mentions the old
+    // value) doesn't trip the assertion.
+    const heroSection = sources.homepage
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+      .match(/<section[\s\S]*?<\/section>/);
+    expect(heroSection, "homepage must have a hero <section>").toBeTruthy();
+    expect(heroSection![0]).not.toMatch(/bg-gray-950\/45/);
+  });
+
+  it("CorporateStaysPage uses a lighter gradient than the home / about / rewards heroes", () => {
+    // The corporate page sits on a `bg-gray-950` section, so
+    // the photo only needs a modest dark wash to read — not
+    // the heavier 40/75/90 gradient used on the other heroes.
+    // Drop-shadow on the text carries the rest of the legibility
+    // load (see `feat/hero-text-legibility`). Eased from
+    // `to-gray-950/90` to `to-gray-950/60` after the user
+    // reported the page was too dark.
+    expect(sources.corporate).toMatch(/bg-gradient-to-b from-gray-950\/20 via-gray-950\/40 to-gray-950\/60/);
+    expect(sources.corporate).not.toMatch(/to-gray-950\/90/);
+  });
+
+  it("RewardsLandingPage keeps the stronger gradient (asymmetric to corporate)", () => {
+    // The rewards page has a different visual brief from
+    // corporate (a hospitality hero vs a corporate B2B hero)
+    // and still uses the heavier gradient. The asymmetry is
+    // intentional — if rewards also ends up too dark, mirror
+    // the corporate easing.
+    expect(sources.rewards).toMatch(/to-gray-950\/90/);
+  });
+
+  it("AboutPage uses a top-to-bottom gradient (light top, heavy bottom)", () => {
+    expect(sources.about).toMatch(/bg-gradient-to-b/);
   });
 });

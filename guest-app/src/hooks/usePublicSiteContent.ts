@@ -3,6 +3,15 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import config from "@config";
 import {
+  PUBLIC_SITE_CONTENT_CACHE_KEY,
+  PUBLIC_SITE_CONTENT_CACHE_TTL_MS,
+  DEFAULT_CORPORATE_PERKS,
+  DEFAULT_CORPORATE_PAGE_CONTENT,
+  readCacheWithTtl,
+  writeCache,
+  type ContentItem
+} from "@spark-inn/shared";
+import {
   homepageHeroImage,
   aboutHeroImage,
   corporateHeroImage,
@@ -16,13 +25,6 @@ import {
   services as fallbackServices,
   rewardPerks as fallbackRewardPerks
 } from "../data/homepage";
-
-export interface ContentItem {
-  title: string;
-  description: string;
-  icon?: string;
-  isEnabled?: boolean;
-}
 
 export interface SparkRewardsPromo {
   heading: string;
@@ -44,7 +46,14 @@ export interface PublicHeroContent {
 
 export interface PublicHomepageContent extends PublicHeroContent {
   amenities: ContentItem[];
-  featuredRoomIds: string[];
+  // Type values featured on the homepage "Stay with us" section.
+  // Each value resolves to its first active room at render time.
+  // Previously `featuredRoomIds: string[]` (per-room IDs) — that
+  // model was wrong because the card content all comes from the
+  // room TYPE, not the individual room. See
+  // `shared/constants/index.ts → MAX_FEATURED_TYPES` for the
+  // full rationale.
+  featuredTypeValues: string[];
   services: ContentItem[];
   sparkRewards: SparkRewardsPromo;
 }
@@ -59,6 +68,16 @@ export interface PublicAboutContent {
 
 export interface PublicCorporateContent extends PublicHeroContent {
   perks: ContentItem[];
+  // Rooms overview section on /corporate. All fields fall back
+  // to the hardcoded copy in `CorporateStaysPage` when empty.
+  roomsOverviewEyebrow: string;
+  roomsOverviewHeading: string;
+  roomsOverviewDescription: string;
+  // Retreat CTA banner at the bottom of the rooms section.
+  // Same empty-string-fallback behavior as the rooms overview.
+  retreatHeading: string;
+  retreatDescription: string;
+  retreatCtaLabel: string;
 }
 
 export interface PublicRewardsContent extends PublicHeroContent {}
@@ -98,9 +117,8 @@ const FALLBACK_SPARK_REWARDS = {
   })),
   isEnabled: true
 };
-const FALLBACK_CORPORATE_HERO_HEADING = "Elevated Stays for Modern Business";
-const FALLBACK_CORPORATE_HERO_SUBTEXT =
-  "Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol.";
+const FALLBACK_CORPORATE_HERO_HEADING = DEFAULT_CORPORATE_PAGE_CONTENT.hero.heading;
+const FALLBACK_CORPORATE_HERO_SUBTEXT = DEFAULT_CORPORATE_PAGE_CONTENT.hero.subtext;
 const FALLBACK_ABOUT_MISSION =
   "To deliver peaceful, consistent stays shaped by genuine, intentional hospitality. We believe that hospitality is not merely a service, but a philosophy of care where every detail is deliberate and every guest feels deeply valued.";
 const FALLBACK_ABOUT_VISION = (brand: string) =>
@@ -108,50 +126,12 @@ const FALLBACK_ABOUT_VISION = (brand: string) =>
 const FALLBACK_ABOUT_STORY = (brand: string) =>
   `Founded in the heart of Tagbilaran City, Bohol, ${brand} was born out of a desire to redefine the boutique hotel experience. We observed that while travelers appreciated the unique characters of boutique stays, they often missed the reliability and consistency of global chains. We set out to bridge this gap, creating a sanctuary where style meets structure, and comfort is guaranteed.\n\nOur location was chosen with care—providing our guests with a peaceful retreat that is simultaneously connected to the rich historical landmarks, business districts, and natural wonders of Bohol. From the sandy beaches of Panglao to the famous Chocolate Hills, ${brand} serves as the perfect home base for both leisure explorers and corporate stay travelers.\n\nEvery element of ${brand} is curated. Our rooms are engineered for quiet comfort, featuring premium soundproofing, custom orthopedic beds, and optimized layouts. We combine these physical comforts with a service team that is trained to anticipate guest needs, offering a warm and authentic Filipino welcome that feels like family.\n\nAs we continue to grow and welcome guests from around the world, our promise remains steadfast: to provide peaceful, consistent stays shaped by genuine, intentional hospitality. We invite you to experience the spark that makes our hospitality warm and our lodging exceptional.`;
 
-const FALLBACK_CORPORATE_PERKS: ContentItem[] = [
-  {
-    title: "Negotiated Rates",
-    description:
-      "Unlock exclusive fixed-rate packages tailored to your company's annual travel volume. Control and predict your hospitality budget with ease.",
-    icon: "coins",
-    isEnabled: true
-  },
-  {
-    title: "Group Bookings",
-    description:
-      "Coordinated logistics for team building retreats, board meetings, and product launches. Keep your organization unified and fully refreshed.",
-    icon: "users",
-    isEnabled: true
-  },
-  {
-    title: "Dedicated Support",
-    description:
-      "A personal account manager handles reservations, customized invoices, and check-in assistance, giving your team peace of mind.",
-    icon: "briefcase",
-    isEnabled: true
-  },
-  {
-    title: "High-Speed Wi-Fi",
-    description:
-      "Dedicated high-bandwidth networks are active throughout our property. Perform remote work, host video calls, and stay in touch without delays.",
-    icon: "wifi",
-    isEnabled: true
-  },
-  {
-    title: "Premium Security",
-    description:
-      "Enjoy a peaceful, secure stay with 24/7 staff, encrypted access locks, and strict privacy protocols for high-profile business visitors.",
-    icon: "shield",
-    isEnabled: true
-  },
-  {
-    title: "Flexible Bookings",
-    description:
-      "Business plans change. Corporate agreements enjoy reduced cancellation fees, priority rescheduling, and same-day room re-allocations.",
-    icon: "calendar",
-    isEnabled: true
-  }
-];
+const FALLBACK_CORPORATE_PERKS: ContentItem[] = DEFAULT_CORPORATE_PERKS.map((perk) => ({
+  title: perk.title,
+  description: perk.description,
+  icon: perk.icon,
+  isEnabled: perk.isEnabled !== false
+}));
 
 function toContentItemArray(value: unknown): ContentItem[] {
   if (!Array.isArray(value)) return [];
@@ -180,8 +160,15 @@ function buildSparkRewards(raw: unknown): SparkRewardsPromo {
 }
 
 function buildFallback(): PublicSiteContent {
+  // Used in two places:
+  //   1. As the *post-load* shape — i.e. what to render when
+  //      Firestore has no custom override. Image URLs are
+  //      pre-populated with the static `data/homepage.ts`
+  //      fallbacks so the page can render immediately.
+  //   2. As the source for individual section defaults during
+  //      the Firestore merge (see the `useEffect` body).
   return {
-    loading: true,
+    loading: false,
     homepage: {
       heroEyebrow: "",
       heroHeading: FALLBACK_HERO_HEADING,
@@ -193,7 +180,10 @@ function buildFallback(): PublicSiteContent {
         icon: "",
         isEnabled: true
       })),
-      featuredRoomIds: ["room-201", "room-204", "room-301"],
+      // Defaults to three canonical Spark Inn types so the homepage
+      // shows a representative room card on first visit. The page
+      // resolves each to its first active room.
+      featuredTypeValues: ["executive", "standard-double", "family"],
       services: fallbackServices.map((entry) => ({
         title: entry.title,
         description: entry.description,
@@ -214,13 +204,83 @@ function buildFallback(): PublicSiteContent {
       heroHeading: FALLBACK_CORPORATE_HERO_HEADING,
       heroSubtext: FALLBACK_CORPORATE_HERO_SUBTEXT,
       heroPhotoUrl: corporateHeroImage,
-      perks: FALLBACK_CORPORATE_PERKS
+      perks: FALLBACK_CORPORATE_PERKS,
+      // Rooms overview + retreat CTA — sourced from
+      // `DEFAULT_CORPORATE_PAGE_CONTENT` so the guest app, the
+      // admin editor's pre-population, and the one-time Firestore
+      // backfill in `AdminContext` all agree on the same copy.
+      roomsOverviewEyebrow: DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.eyebrow,
+      roomsOverviewHeading: DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.heading,
+      roomsOverviewDescription: DEFAULT_CORPORATE_PAGE_CONTENT.roomsOverview.description,
+      retreatHeading: DEFAULT_CORPORATE_PAGE_CONTENT.retreat.heading,
+      retreatDescription: DEFAULT_CORPORATE_PAGE_CONTENT.retreat.description,
+      retreatCtaLabel: DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel
     },
     rewards: {
       heroEyebrow: rewardsHeroEyebrowSuffix,
       heroHeading: rewardsHeroHeading,
       heroSubtext: rewardsHeroSubtext,
       heroPhotoUrl: rewardsHeroImage
+    },
+    branding: {
+      logoNavbar: "",
+      logoNavbarOnDark: "",
+      logoFooter: ""
+    }
+  };
+}
+
+// Empty initial state — used when there's no localStorage cache
+// (first visit). All `heroPhotoUrl` fields are intentionally
+// empty so the page renders a skeleton / neutral background
+// instead of the static fallback while Firestore loads. This
+// fixes the "fallback image flashes before the custom upload
+// loads" bug observed on the homepage. Once Firestore resolves,
+// the hook populates the URLs (custom override or static
+// fallback) via the `pickString` merge in the `useEffect`.
+function buildEmptyState(): PublicSiteContent {
+  return {
+    loading: true,
+    homepage: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: "",
+      amenities: [],
+      featuredTypeValues: [],
+      services: [],
+      sparkRewards: {
+        heading: "",
+        description: "",
+        perks: [],
+        isEnabled: false
+      }
+    },
+    about: {
+      heroHeading: "",
+      heroPhotoUrl: "",
+      missionStatement: "",
+      visionStatement: "",
+      hotelStory: ""
+    },
+    corporate: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: "",
+      perks: [],
+      roomsOverviewEyebrow: "",
+      roomsOverviewHeading: "",
+      roomsOverviewDescription: "",
+      retreatHeading: "",
+      retreatDescription: "",
+      retreatCtaLabel: ""
+    },
+    rewards: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
     },
     branding: {
       logoNavbar: "",
@@ -251,10 +311,29 @@ function loadFromFirestore() {
   return cachedPromise;
 }
 
+// What we cache in localStorage: the full state (with fallback
+// URLs applied) but without the transient `loading` flag. The
+// `loading` field is added back on read with `loading: false` —
+// a cached value is, by definition, a "loaded" value.
+type CachedContent = Omit<PublicSiteContent, "loading">;
+
 export function usePublicSiteContent(): PublicSiteContent {
+  // Initial state is either:
+  //   - the cached value (returning visitor, <5 min old) → instant
+  //     paint, no fallback flash, `loading: false` because the
+  //     cached value is already the loaded shape
+  //   - the empty state (first visit, no cache, or stale) → all
+  //     heroPhotoUrl fields are empty so the page renders a
+  //     skeleton until Firestore resolves
   const [content, setContent] = useState<PublicSiteContent>(() => {
-    const fb = buildFallback();
-    return { ...fb, loading: true };
+    const cached = readCacheWithTtl<CachedContent>(
+      PUBLIC_SITE_CONTENT_CACHE_KEY,
+      PUBLIC_SITE_CONTENT_CACHE_TTL_MS
+    );
+    if (cached) {
+      return { ...cached, loading: false };
+    }
+    return buildEmptyState();
   });
 
   useEffect(() => {
@@ -287,9 +366,20 @@ export function usePublicSiteContent(): PublicSiteContent {
       const rawAmenities = homepageRaw ? toContentItemArray(homepageRaw.amenities) : [];
       const rawServices = homepageRaw ? toContentItemArray(homepageRaw.services) : [];
       const rawPerks = corporateRaw ? toContentItemArray(corporateRaw.perks) : [];
-      const rawFeatured = Array.isArray(homepageRaw?.featuredRoomIds)
-        ? (homepageRaw!.featuredRoomIds as unknown[]).filter((v): v is string => typeof v === "string")
-        : [];
+      // Per the type-driven featured-types model: read the new
+      // `featuredTypeValues` array. If a doc still carries the
+      // old `featuredRoomIds` (pre-migration) and no new field,
+      // we pass it through as-is; the page will treat unknown
+      // entries as type values, which is fine — old entries that
+      // match room type values (e.g. "executive") will be treated
+      // as types, others will be skipped. AdminContext's
+      // `mergeWebsiteContent` does the canonical migration on
+      // save.
+      const rawFeatured: string[] = Array.isArray(homepageRaw?.featuredTypeValues)
+        ? (homepageRaw!.featuredTypeValues as unknown[]).filter((v): v is string => typeof v === "string")
+        : Array.isArray(homepageRaw?.featuredRoomIds)
+          ? (homepageRaw!.featuredRoomIds as unknown[]).filter((v): v is string => typeof v === "string")
+          : [];
 
       const hc = (hotelConfig ?? {}) as Record<string, unknown>;
       const brandName = typeof hc.hotelName === "string" && hc.hotelName.length > 0 ? hc.hotelName : config.brandName;
@@ -299,7 +389,7 @@ export function usePublicSiteContent(): PublicSiteContent {
           ? (raw[key] as string)
           : fallback;
 
-      setContent({
+      const next: PublicSiteContent = {
         loading: false,
         homepage: {
           heroEyebrow: "", // homepage eyebrow remains hardcoded (uses config.tagline)
@@ -307,7 +397,7 @@ export function usePublicSiteContent(): PublicSiteContent {
           heroSubtext: pickString(homepageRaw, "heroSubtext", fb.homepage.heroSubtext),
           heroPhotoUrl: pickString(homepageRaw, "heroPhotoUrl", fb.homepage.heroPhotoUrl),
           amenities: rawAmenities.length > 0 ? rawAmenities : fb.homepage.amenities,
-          featuredRoomIds: rawFeatured.length > 0 ? rawFeatured : fb.homepage.featuredRoomIds,
+          featuredTypeValues: rawFeatured.length > 0 ? rawFeatured : fb.homepage.featuredTypeValues,
           services: rawServices.length > 0 ? rawServices : fb.homepage.services,
           sparkRewards: homepageRaw ? buildSparkRewards(homepageRaw.sparkRewards) : fb.homepage.sparkRewards
         },
@@ -332,7 +422,13 @@ export function usePublicSiteContent(): PublicSiteContent {
           heroHeading: pickString(corporateRaw, "heroHeading", fb.corporate.heroHeading),
           heroSubtext: pickString(corporateRaw, "heroSubtext", fb.corporate.heroSubtext),
           heroPhotoUrl: pickString(corporateRaw, "heroPhotoUrl", fb.corporate.heroPhotoUrl),
-          perks: rawPerks.length > 0 ? rawPerks : fb.corporate.perks
+          perks: rawPerks.length > 0 ? rawPerks : fb.corporate.perks,
+          roomsOverviewEyebrow: pickString(corporateRaw, "roomsOverviewEyebrow", fb.corporate.roomsOverviewEyebrow),
+          roomsOverviewHeading: pickString(corporateRaw, "roomsOverviewHeading", fb.corporate.roomsOverviewHeading),
+          roomsOverviewDescription: pickString(corporateRaw, "roomsOverviewDescription", fb.corporate.roomsOverviewDescription),
+          retreatHeading: pickString(corporateRaw, "retreatHeading", fb.corporate.retreatHeading),
+          retreatDescription: pickString(corporateRaw, "retreatDescription", fb.corporate.retreatDescription),
+          retreatCtaLabel: pickString(corporateRaw, "retreatCtaLabel", fb.corporate.retreatCtaLabel)
         },
         rewards: {
           heroEyebrow: pickString(rewardsRaw, "heroEyebrow", fb.rewards.heroEyebrow),
@@ -345,7 +441,16 @@ export function usePublicSiteContent(): PublicSiteContent {
           logoNavbarOnDark: pickString(brandingRaw, "logoNavbarOnDark", ""),
           logoFooter: pickString(brandingRaw, "logoFooter", "")
         }
-      });
+      };
+
+      setContent(next);
+      // Write the resolved shape to localStorage so the next
+      // mount is instant. We strip `loading` (transient) and
+      // write the full resolved content (with fallback URLs
+      // applied) so the cached value is renderable as-is.
+      const { loading: _loading, ...toCache } = next;
+      void _loading;
+      writeCache(PUBLIC_SITE_CONTENT_CACHE_KEY, toCache);
     });
     return () => {
       cancelled = true;

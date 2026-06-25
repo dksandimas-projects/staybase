@@ -186,7 +186,7 @@ Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl
 
 Single document. Stores editable public page content.
 
-Sections: `homepage` (hero, amenities, featuredRoomIds, services, sparkRewards), `about` (heroHeading, heroPhotoUrl), `corporate` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl, perks), `rewards` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl), `branding` (logoNavbar, logoNavbarOnDark, logoFooter)
+Sections: `homepage` (hero, amenities, featuredTypeValues, services, sparkRewards), `about` (heroHeading, heroPhotoUrl), `corporate` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl, perks), `rewards` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl), `branding` (logoNavbar, logoNavbarOnDark, logoFooter)
 
 **`homepage.services`** — array of service cards shown in the Services section:
 ```
