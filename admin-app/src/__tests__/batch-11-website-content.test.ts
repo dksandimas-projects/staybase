@@ -212,3 +212,30 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
     });
   });
 });
+
+describe("Branding — admin app normalizes partial websiteContent docs", () => {
+  const adminCtxSrc = readFileSync(
+    resolve(__dirname, "../../src/context/AdminContext.tsx"),
+    "utf8"
+  );
+  const settingsPageSrc = readFileSync(
+    resolve(__dirname, "../../src/pages/SettingsPage.tsx"),
+    "utf8"
+  );
+
+  it("AdminContext defines a mergeWebsiteContent helper for partial Firestore docs", () => {
+    expect(adminCtxSrc).toMatch(/function\s+mergeWebsiteContent/);
+    expect(adminCtxSrc).toMatch(/setWebsiteContent\(mergeWebsiteContent/);
+  });
+
+  it("SettingsPage defends every websiteContent.X.Y read with optional chaining", () => {
+    // Bug: a partial doc that pre-dates the Branding feature would
+    // set websiteContent = { homepage: {…}, corporate: {…} } without
+    // the new `rewards` / `branding` / `about.heroHeading` /
+    // `corporate.heroEyebrow` sub-fields, crashing any consumer that
+    // reaches into them. The fix: every reach-in uses optional
+    // chaining, and AdminContext normalizes the snapshot upstream.
+    const reachInReads = settingsPageSrc.match(/websiteContent\.[a-zA-Z]+\.[a-zA-Z]+(?!\?)/g) || [];
+    expect(reachInReads.length, "expected every websiteContent.X.Y read to use ?. (optional chaining)").toBe(0);
+  });
+});

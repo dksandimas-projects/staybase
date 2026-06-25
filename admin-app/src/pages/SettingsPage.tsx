@@ -218,15 +218,18 @@ export function SettingsPage() {
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
   // no longer owns any hero copy — see `handleSaveBranding` below.
-  const [homepageHeroHeading, setHomepageHeroHeading] = useState(websiteContent.homepage.heroHeading);
-  const [homepageHeroSubtext, setHomepageHeroSubtext] = useState(websiteContent.homepage.heroSubtext);
-  const [aboutHeroHeading, setAboutHeroHeading] = useState(websiteContent.about.heroHeading);
-  const [corporateHeroEyebrow, setCorporateHeroEyebrow] = useState(websiteContent.corporate.heroEyebrow);
-  const [corporateHeroHeading, setCorporateHeroHeading] = useState(websiteContent.corporate.heroHeading);
-  const [corporateHeroSubtext, setCorporateHeroSubtext] = useState(websiteContent.corporate.heroSubtext);
-  const [rewardsHeroEyebrow, setRewardsHeroEyebrow] = useState(websiteContent.rewards.heroEyebrow);
-  const [rewardsHeroHeading, setRewardsHeroHeading] = useState(websiteContent.rewards.heroHeading);
-  const [rewardsHeroSubtext, setRewardsHeroSubtext] = useState(websiteContent.rewards.heroSubtext);
+  // The `?? ""` guards are belt-and-suspenders: AdminContext already
+  // normalizes partial Firestore documents to the full shape, but
+  // any regression there should not crash this page.
+  const [homepageHeroHeading, setHomepageHeroHeading] = useState(websiteContent.homepage?.heroHeading ?? "");
+  const [homepageHeroSubtext, setHomepageHeroSubtext] = useState(websiteContent.homepage?.heroSubtext ?? "");
+  const [aboutHeroHeading, setAboutHeroHeading] = useState(websiteContent.about?.heroHeading ?? "");
+  const [corporateHeroEyebrow, setCorporateHeroEyebrow] = useState(websiteContent.corporate?.heroEyebrow ?? "");
+  const [corporateHeroHeading, setCorporateHeroHeading] = useState(websiteContent.corporate?.heroHeading ?? "");
+  const [corporateHeroSubtext, setCorporateHeroSubtext] = useState(websiteContent.corporate?.heroSubtext ?? "");
+  const [rewardsHeroEyebrow, setRewardsHeroEyebrow] = useState(websiteContent.rewards?.heroEyebrow ?? "");
+  const [rewardsHeroHeading, setRewardsHeroHeading] = useState(websiteContent.rewards?.heroHeading ?? "");
+  const [rewardsHeroSubtext, setRewardsHeroSubtext] = useState(websiteContent.rewards?.heroSubtext ?? "");
 
 
 
@@ -332,15 +335,15 @@ export function SettingsPage() {
     setMemberDiscountPct(String(rewardsConfig.memberDiscountPct ?? 10));
     setRewardsName(rewardsConfig.rewardsName || "Spark Rewards");
     setRewardsTagline(rewardsConfig.rewardsTagline || "");
-    setHomepageHeroHeading(websiteContent.homepage.heroHeading || "");
-    setHomepageHeroSubtext(websiteContent.homepage.heroSubtext || "");
-    setAboutHeroHeading(websiteContent.about.heroHeading || "");
-    setCorporateHeroEyebrow(websiteContent.corporate.heroEyebrow || "");
-    setCorporateHeroHeading(websiteContent.corporate.heroHeading || "");
-    setCorporateHeroSubtext(websiteContent.corporate.heroSubtext || "");
-    setRewardsHeroEyebrow(websiteContent.rewards.heroEyebrow || "");
-    setRewardsHeroHeading(websiteContent.rewards.heroHeading || "");
-    setRewardsHeroSubtext(websiteContent.rewards.heroSubtext || "");
+    setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
+    setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
+    setAboutHeroHeading(websiteContent.about?.heroHeading || "");
+    setCorporateHeroEyebrow(websiteContent.corporate?.heroEyebrow || "");
+    setCorporateHeroHeading(websiteContent.corporate?.heroHeading || "");
+    setCorporateHeroSubtext(websiteContent.corporate?.heroSubtext || "");
+    setRewardsHeroEyebrow(websiteContent.rewards?.heroEyebrow || "");
+    setRewardsHeroHeading(websiteContent.rewards?.heroHeading || "");
+    setRewardsHeroSubtext(websiteContent.rewards?.heroSubtext || "");
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
@@ -369,22 +372,22 @@ export function SettingsPage() {
     e.preventDefault();
     await updateSettings("websiteContent", {
       homepage: {
-        ...websiteContent.homepage,
+        ...(websiteContent.homepage || {}),
         heroHeading: homepageHeroHeading,
         heroSubtext: homepageHeroSubtext
       },
       about: {
-        ...websiteContent.about,
+        ...(websiteContent.about || {}),
         heroHeading: aboutHeroHeading
       },
       corporate: {
-        ...websiteContent.corporate,
+        ...(websiteContent.corporate || {}),
         heroEyebrow: corporateHeroEyebrow,
         heroHeading: corporateHeroHeading,
         heroSubtext: corporateHeroSubtext
       },
       rewards: {
-        ...websiteContent.rewards,
+        ...(websiteContent.rewards || {}),
         heroEyebrow: rewardsHeroEyebrow,
         heroHeading: rewardsHeroHeading,
         heroSubtext: rewardsHeroSubtext
@@ -791,7 +794,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="Homepage hero photo"
                   helper="Full-bleed background for /. Recommended 1920x1080. Shows behind the headline and the Book / View rooms buttons."
-                  value={websiteContent.homepage.heroPhotoUrl}
+                  value={websiteContent.homepage?.heroPhotoUrl ?? ""}
                   fallbackLabel="Default: hotel pool photo"
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 1080, quality: 0.85 });
@@ -803,7 +806,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="About hero photo"
                   helper="Top of /about. Recommended 1920x600."
-                  value={websiteContent.about.heroPhotoUrl}
+                  value={websiteContent.about?.heroPhotoUrl ?? ""}
                   fallbackLabel="Default: boutique hotel photo"
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 600, quality: 0.85 });
@@ -815,7 +818,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="Corporate hero photo"
                   helper="Top of /corporate. Recommended 1920x1080."
-                  value={websiteContent.corporate.heroPhotoUrl}
+                  value={websiteContent.corporate?.heroPhotoUrl ?? ""}
                   fallbackLabel="Default: corporate boardroom photo"
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 1080, quality: 0.85 });
@@ -827,7 +830,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="Rewards hero photo"
                   helper="Top of /rewards. Recommended 1920x1080."
-                  value={websiteContent.rewards.heroPhotoUrl}
+                  value={websiteContent.rewards?.heroPhotoUrl ?? ""}
                   fallbackLabel="Default: warm lobby interior"
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 1920, maxHeight: 1080, quality: 0.85 });
@@ -963,7 +966,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="Navbar logo (solid background)"
                   helper="Used in the sticky/scrolled state and on every non-hero page. Colored version on a light background."
-                  value={websiteContent.branding.logoNavbar}
+                  value={websiteContent.branding?.logoNavbar ?? ""}
                   fallback={`/brand/${config.logos.navbar}`}
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
@@ -975,7 +978,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="Navbar logo (over hero, dark background)"
                   helper="Use a light/white version for visibility over the dark hero photo. This is the variant that fixes the dark-on-dark logo bug in the over-hero state."
-                  value={websiteContent.branding.logoNavbarOnDark}
+                  value={websiteContent.branding?.logoNavbarOnDark ?? ""}
                   fallback={`/brand/${config.logos.navbar}`}
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });
@@ -987,7 +990,7 @@ export function SettingsPage() {
                 <BrandingAssetRow
                   label="Footer logo"
                   helper="White version for the dark sidebar footer."
-                  value={websiteContent.branding.logoFooter}
+                  value={websiteContent.branding?.logoFooter ?? ""}
                   fallback={`/brand/${config.logos.white}`}
                   onUpload={async (file) => {
                     const compressed = await compressImageFile(file, { maxWidth: 600, maxHeight: 200, quality: 0.9 });

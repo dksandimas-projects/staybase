@@ -1926,6 +1926,62 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   });
 
+  // Normalize a websiteContent snapshot from Firestore into the
+  // complete shape consumers expect. Older documents that pre-date
+  // the Branding feature (no `rewards` / `branding` / `about.heroHeading`
+  // / `corporate.heroEyebrow` sub-objects) would otherwise replace
+  // the full state with a partial object and crash every consumer
+  // that reaches into `websiteContent.rewards.heroEyebrow`. Each
+  // missing sub-object falls back to the seed value used above so
+  // the Settings page renders and the guest app keeps its fallbacks.
+  function mergeWebsiteContent(raw: Record<string, unknown> | null | undefined) {
+    const seed = {
+      homepage: {
+        heroHeading: "Boutique Comfort in Bohol",
+        heroSubtext: "Peaceful stays near tourist landmarks.",
+        heroPhotoUrl: ""
+      },
+      about: {
+        heroHeading: "about us",
+        heroPhotoUrl: ""
+      },
+      corporate: {
+        heroEyebrow: "Curated hospitality for executive comfort",
+        heroHeading: "Corporate Boardrooms",
+        heroSubtext: "Flexible spaces.",
+        heroPhotoUrl: "",
+        perks: [
+          { title: "Negotitated Rates", description: "Discounted room charges.", icon: "percent" }
+        ]
+      },
+      rewards: {
+        heroEyebrow: "Loyalty Program",
+        heroHeading: "Earn Every Stay",
+        heroSubtext:
+          "Join Spark Rewards and unlock a world of exclusive benefits and heartfelt hospitality. Experience the pinnacle of boutique comfort with personalized rewards tailored just for you.",
+        heroPhotoUrl: ""
+      },
+      branding: {
+        logoNavbar: "",
+        logoNavbarOnDark: "",
+        logoFooter: ""
+      }
+    };
+    if (!raw || typeof raw !== "object") return seed;
+    const r = raw as Record<string, Record<string, unknown>>;
+    return {
+      homepage: { ...seed.homepage, ...(r.homepage || {}) },
+      about: { ...seed.about, ...(r.about || {}) },
+      corporate: {
+        ...seed.corporate,
+        ...(r.corporate || {}),
+        perks: Array.isArray(r.corporate?.perks) ? r.corporate!.perks : seed.corporate.perks
+      },
+      rewards: { ...seed.rewards, ...(r.rewards || {}) },
+      branding: { ...seed.branding, ...(r.branding || {}) }
+    };
+  }
+
   const [rewardsConfig, setRewardsConfig] = useState({
     pointsEnabled: true,
     earningMode: "per-spend",
@@ -1972,7 +2028,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               setHotelConfig(data as typeof hotelConfig);
               break;
             case "websiteContent":
-              setWebsiteContent(data as typeof websiteContent);
+              setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
               break;
             case "rewardsConfig":
               setRewardsConfig(data as typeof rewardsConfig);
