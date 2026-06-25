@@ -3,9 +3,11 @@ import { Sparkles, Award, Heart, CheckCircle2 } from "lucide-react";
 import config from "@config";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
+import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 import { fadeUp, staggerContainer, scaleIn } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { ABOUT_HERO_LQIP } from "../data/homepage";
 
 export function AboutPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -35,10 +37,10 @@ export function AboutPage() {
         {/* Hero Section */}
         <section className="relative -mt-20 flex h-[45vh] min-h-[320px] items-center justify-center overflow-hidden px-4 pt-20 text-center">
           {aboutHeroPhoto ? (
-            <img
+            <HeroImage
               src={aboutHeroPhoto}
               alt="Boutique hotel pool and lobby facade in Bohol"
-              className="absolute inset-0 h-full w-full object-cover"
+              placeholder={ABOUT_HERO_LQIP}
             />
           ) : (
             <HeroSkeleton />
