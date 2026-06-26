@@ -145,3 +145,29 @@ export async function sweepBookingsStorage(
     durationMs: now() - startedAt
   };
 }
+
+// Per H5 (hardening batch 2026-06-26): a small ring buffer
+// of the last 50 sweep results in module memory so the
+// `GET /api/janitor/stats` endpoint can surface them for
+// ops dashboards without needing an external metrics store.
+// In serverless deployments the buffer lives only for the
+// lifetime of the warm instance, which is fine for "did
+// the cron actually run?" debugging.
+
+const MAX_HISTORY = 50;
+const sweepHistory: Array<SweepResult & { at: number }> = [];
+
+export function recordSweepResult(result: SweepResult): void {
+  sweepHistory.unshift({ ...result, at: Date.now() });
+  if (sweepHistory.length > MAX_HISTORY) {
+    sweepHistory.length = MAX_HISTORY;
+  }
+}
+
+export function getSweepHistory(): ReadonlyArray<SweepResult & { at: number }> {
+  return sweepHistory;
+}
+
+export function clearSweepHistory(): void {
+  sweepHistory.length = 0;
+}

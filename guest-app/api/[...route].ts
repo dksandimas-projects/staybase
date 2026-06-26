@@ -19,7 +19,7 @@ import { handleEmailTrigger } from "../server/handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
 import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
 import { handleRoomAvailability } from "../server/handlers/rooms";
-import { handleJanitorStorageSweep } from "../server/handlers/janitor";
+import { handleJanitorStorageSweep, handleJanitorStats } from "../server/handlers/janitor";
 import { adminAuth } from "../server/lib/firebase-admin";
 import config from "@config";
 
@@ -385,6 +385,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
     (req as any).staff = authResult.success ? authResult : null;
+
+    // Per H1 (hardening batch 2026-06-26): gate the
+    // guest-self-service cancel path behind Turnstile so
+    // a bot can't iterate bookingRef guesses. Staff
+    // requests bypass (they're already authenticated).
+    if (!(req as any).staff) {
+      const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+      if (!verification.success) {
+        return res.status(400).json({ success: false, error: verification.error });
+      }
+    }
+
     return await handleCancelBooking(req, res);
   }
 
@@ -392,6 +404,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 60000)) {
       return res.status(429).json({ success: false, error: "Too many lookup attempts. Please try again in a minute." });
     }
+
+    // Per H1 (hardening batch 2026-06-26): the lookup
+    // endpoint is a ref+email oracle — without Turnstile,
+    // a bot can probe the 99,999-key daily namespace
+    // (5-digit post-H3) within the 10/min rate limit and
+    // learn which refs are real via the 200 vs 404 timing
+    // channel. Turnstile closes that.
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
     return await handleLookupBooking(req, res);
   }
 
@@ -639,6 +663,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // form). Auth-gated by `CRON_SECRET`.
   if (domain === "janitor" && action === "storage-sweep" && (req.method === "POST" || req.method === "GET")) {
     return await handleJanitorStorageSweep(req, res);
+  }
+
+  // Per H5 (hardening batch 2026-06-26): ops endpoint that
+  // returns the in-memory sweep history (last 50 runs).
+  // Same CRON_SECRET auth as the sweep itself.
+  if (domain === "janitor" && action === "stats" && req.method === "GET") {
+    return await handleJanitorStats(req, res);
   }
 
   // Fallback 404

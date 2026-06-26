@@ -12,7 +12,7 @@
 // on every cron invocation.
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sweepBookingsStorage } from "@spark-inn/shared";
+import { sweepBookingsStorage, recordSweepResult, getSweepHistory } from "@spark-inn/shared";
 import { adminDb, adminStorage } from "../lib/firebase-admin";
 
 function getDefaultBucket(): string | undefined {
@@ -87,6 +87,14 @@ export async function handleJanitorStorageSweep(
       pageToken
     });
 
+    // Per H5 (hardening batch 2026-06-26): record + log
+    // telemetry so ops can see the sweep actually ran and
+    // roughly how much orphan data it's chewing through.
+    recordSweepResult(result);
+    console.log(
+      `[janitor] storage-sweep scanned=${result.scanned} deleted=${result.deleted} kept=${result.kept} errors=${result.errors.length} durationMs=${result.durationMs} dryRun=${result.dryRun}`
+    );
+
     return res.status(200).json({ success: true, data: result });
   } catch (err) {
     console.error("Storage janitor sweep failed:", err);
@@ -94,4 +102,43 @@ export async function handleJanitorStorageSweep(
       .status(500)
       .json({ success: false, error: "Storage sweep failed." });
   }
+}
+
+export async function handleJanitorStats(
+  req: VercelRequest,
+  res: VercelResponse
+) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  if (!process.env.CRON_SECRET) {
+    return res.status(500).json({
+      success: false,
+      error: "CRON_SECRET is not configured on the server."
+    });
+  }
+
+  if (!isAuthorizedCronRequest(req)) {
+    return res
+      .status(401)
+      .json({ success: false, error: "Unauthorized cron request." });
+  }
+
+  const history = getSweepHistory();
+  const totalDeleted = history.reduce((acc, h) => acc + h.deleted, 0);
+  const totalScanned = history.reduce((acc, h) => acc + h.scanned, 0);
+  const totalErrors = history.reduce((acc, h) => acc + h.errors.length, 0);
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      runs: history.length,
+      totalScanned,
+      totalDeleted,
+      totalErrors,
+      lastRunAt: history[0]?.at ?? null,
+      history
+    }
+  });
 }

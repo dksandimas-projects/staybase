@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
 import { sendCorporateInquiryTrigger, sendBookingTrigger } from "./email";
-import { toDateOrNull, getManilaDateInfo } from "@spark-inn/shared";
+import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 const inquirySchema = z.object({
@@ -244,7 +244,10 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       } else {
         transaction.set(counterRef, { count: 1 });
       }
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(3, "0")}`;
+      // Per H3 (hardening batch 2026-06-26): sequence
+      // width is now 5 digits. Mirrors the shared
+      // `generateBookingRef` helper.
+      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
 
       // 7. Totals
@@ -278,6 +281,11 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
         ratePerNight,
         totalPrice: finalTotalPrice,
         originalTotalPrice: finalTotalPrice,
+        // Per H2 (hardening batch 2026-06-26): the
+        // corporate convert flow writes a token too so
+        // the inquiry-to-booking email can carry the
+        // lookup deep-link.
+        lookupToken: generateLookupToken(),
         discountType: "",
         discountPct: 0,
         discountIdPhotoUrl: null,

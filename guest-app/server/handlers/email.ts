@@ -53,6 +53,20 @@ function adminUrl(path = "") {
   return `https://${config.adminDomain}${path}`;
 }
 
+// Per H2 (hardening batch 2026-06-26): the public
+// lookup deep-link carries the per-booking `lookupToken`
+// instead of the raw `guestEmail`. The token is random,
+// unguessable, and unique per booking so the email
+// magic link can authenticate the recipient without
+// leaking PII into URLs / browser history / Vercel
+// access logs.
+function lookupUrl(booking: any) {
+  const ref = encodeURIComponent(booking.bookingRef || "");
+  const token = encodeURIComponent(booking.lookupToken || "");
+  if (!ref || !token) return siteUrl("/my-booking");
+  return siteUrl(`/my-booking?ref=${ref}&token=${token}`);
+}
+
 function addressLine() {
   return `${config.address.street}, ${config.address.city}, ${config.address.region}, ${config.address.postalCode}`;
 }
@@ -290,7 +304,7 @@ function bookingSubmittedEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">You can check the latest status any time using your booking reference and email address.</p>
     `,
     ctaLabel: "Check booking status",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -305,7 +319,7 @@ function paymentConfirmedEmail(booking: any) {
       ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
     `,
     ctaLabel: "View booking",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -320,7 +334,7 @@ function bookingConfirmedEmail(booking: any) {
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Review booking details",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -335,7 +349,7 @@ function checkinReminderEmail(booking: any) {
       ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
     `,
     ctaLabel: "Open booking lookup",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -369,7 +383,7 @@ function discountRejectedEmail(booking: any) {
       ${card("Updated booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "View my booking",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 

@@ -12,6 +12,11 @@ import { useGuestAuth } from "../context/GuestAuthContext";
 interface StayRecord {
   id: string;
   bookingRef: string;
+  // Per H2 (hardening batch 2026-06-26): the lookup
+  // deep-link URL param. See `BookingLookupPage` +
+  // `handleLookupBooking` for the matching server
+  // changes.
+  lookupToken: string;
   roomNumber: string;
   roomType: string;
   checkIn: string;
@@ -55,6 +60,7 @@ export function StaysPage() {
           return {
             id: docSnap.id,
             bookingRef: data.bookingRef || "",
+            lookupToken: data.lookupToken || "",
             roomNumber: data.roomNumber || "",
             roomType: data.roomType || "",
             checkIn: toDateStr(data.checkIn),
@@ -168,7 +174,14 @@ function StayCard({ stay }: { stay: StayRecord }) {
       <div className="text-right">
         <p className="text-lg font-bold text-primary-dark">{formatPrice(stay.totalPrice)}</p>
         <Link
-          to={`/my-booking?ref=${stay.bookingRef}&email=`}
+          // Per H2 (hardening batch 2026-06-26): the
+          // lookup deep-link now carries the per-booking
+          // `lookupToken` instead of the (currently
+          // empty) `email` URL param. The `lookupToken`
+          // is part of `StayRecord` because the StaysPage
+          // already hydrates the full booking record
+          // (member view of their own bookings).
+          to={`/my-booking?ref=${stay.bookingRef}&token=${stay.lookupToken}`}
           className="text-[10px] font-semibold text-primary hover:underline mt-1 inline-flex items-center gap-0.5"
         >
           View details <ArrowRight size={10} />

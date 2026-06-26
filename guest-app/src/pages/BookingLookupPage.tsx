@@ -12,6 +12,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
+import { useTurnstileToken } from "../hooks/useTurnstileToken";
 
 interface BookingData {
   id: string;
@@ -75,6 +76,14 @@ export function BookingLookupPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [activeBooking, setActiveBooking] = useState<BookingData | null>(null);
 
+  // Per H2 (hardening batch 2026-06-26): the auth mode
+  // used for the most recent successful lookup. The
+  // cancel call must reuse the same mode so a bot that
+  // scraped the displayed `guestEmail` after a
+  // token-mode lookup can't pivot to the email path.
+  const [lookupAuthMode, setLookupAuthMode] = useState<"email" | "token" | null>(null);
+  const [activeLookupToken, setActiveLookupToken] = useState<string>("");
+
   // Action state
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -88,6 +97,17 @@ export function BookingLookupPage() {
   const [resendCooldownTick, setResendCooldownTick] = useState(0);
   const lastAutoLookupSignatureRef = useRef("");
 
+  // Per H1 (hardening batch 2026-06-26): the lookup +
+  // cancel POSTs are Turnstile-gated. The widget renders
+  // below the submit button on the search form; the cancel
+  // modal reuses the same token (still valid within the
+  // 2-min expiry window for a typical cancel flow).
+  const {
+    token: turnstileToken,
+    reset: resetTurnstile,
+    containerRef: turnstileContainerRef
+  } = useTurnstileToken();
+
   useEffect(() => {
     if (resendCooldownUntil === 0) return;
     const interval = setInterval(() => {
@@ -96,16 +116,35 @@ export function BookingLookupPage() {
     return () => clearInterval(interval);
   }, [resendCooldownUntil]);
 
-  const performLookup = async (bookingRef: string, guestEmail: string) => {
+  // Per H2 (hardening batch 2026-06-26): `performLookup`
+  // takes an optional token; when present, the email
+  // field is omitted from the request body. The server
+  // picks the token-vs-email query path based on which
+  // is supplied.
+  const performLookup = async (bookingRef: string, guestEmail?: string, token?: string) => {
     setIsSearching(true);
     setSearchError("");
     setActiveBooking(null);
 
     try {
+      const payload: Record<string, string> = {
+        bookingRef,
+        turnstileToken: turnstileToken || "mock_token"
+      };
+      if (token) {
+        payload.token = token;
+        setLookupAuthMode("token");
+        setActiveLookupToken(token);
+      } else if (guestEmail) {
+        payload.guestEmail = guestEmail;
+        setLookupAuthMode("email");
+        setActiveLookupToken("");
+      }
+
       const response = await fetch("/api/bookings/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bookingRef, guestEmail })
+        body: JSON.stringify(payload)
       });
 
       const result = await response.json().catch(() => null);
@@ -115,6 +154,12 @@ export function BookingLookupPage() {
           result?.error ||
             "We couldn't find a booking with those details. Please check your reference number and email."
         );
+        // If Turnstile rejected the token, the widget
+        // will already be expired — reset it so the user
+        // can re-submit without a hard refresh.
+        if (response.status === 400 && /bot|turnstile|captcha/i.test(String(result?.error || ""))) {
+          resetTurnstile();
+        }
         return;
       }
 
@@ -153,22 +198,29 @@ export function BookingLookupPage() {
 
   useEffect(() => {
     const ref = searchParams.get("ref");
+    // Per H2 (hardening batch 2026-06-26): the deep-link
+    // now carries `?token=<lookupToken>` (set by the
+    // email magic link + the StaysPage "View details"
+    // link). The legacy `?email=` is still accepted for
+    // backward compat with any old in-flight links.
+    const token = searchParams.get("token");
     const email = searchParams.get("email");
-    if (!ref || !email) return;
-    const signature = `${ref}::${email}`;
+    if (!ref) return;
+    if (!token && !email) return;
+    const signature = `${ref}::${token || email || ""}`;
     if (lastAutoLookupSignatureRef.current === signature) return;
     lastAutoLookupSignatureRef.current = signature;
     setRefInput(ref);
-    setEmailInput(email);
+    if (email) setEmailInput(email);
     setHasSearched(true);
-    void performLookup(ref, email);
+    void performLookup(ref, email || undefined, token || undefined);
   }, [searchParams]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError("");
     setHasSearched(true);
-    await performLookup(refInput, emailInput);
+    await performLookup(refInput, emailInput || undefined);
   };
 
   const handleResetSearch = () => {
@@ -182,6 +234,12 @@ export function BookingLookupPage() {
     setCancelError("");
     setShowCancelModal(false);
     setCancelReason("");
+    // Per H2 (hardening batch 2026-06-26): clear the
+    // cached auth mode + token when the user goes back
+    // to the search screen so the next lookup starts
+    // from a known state.
+    setLookupAuthMode(null);
+    setActiveLookupToken("");
     lastAutoLookupSignatureRef.current = "";
   };
 
@@ -245,14 +303,28 @@ export function BookingLookupPage() {
     setCancelError("");
 
     try {
+      // Per H2 (hardening batch 2026-06-26): the cancel
+      // call must reuse the same auth mode that was used
+      // for the lookup. If the lookup was authenticated
+      // by a token, the cancel reuses that token — even
+      // though the displayed `guestEmail` would also
+      // authenticate, pivoting across modes is denied so
+      // a bot can't scrape the email from the page
+      // response and re-authenticate via the email path.
+      const cancelPayload: Record<string, string> = {
+        bookingRef: activeBooking.bookingRef,
+        reason: cancelReason,
+        turnstileToken: turnstileToken || "mock_token"
+      };
+      if (lookupAuthMode === "token" && activeLookupToken) {
+        cancelPayload.token = activeLookupToken;
+      } else {
+        cancelPayload.guestEmail = activeBooking.guestEmail;
+      }
       const response = await fetch("/api/bookings/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingRef: activeBooking.bookingRef,
-          guestEmail: activeBooking.guestEmail,
-          reason: cancelReason
-        })
+        body: JSON.stringify(cancelPayload)
       });
 
       const result = await response.json().catch(() => null);
@@ -357,6 +429,14 @@ export function BookingLookupPage() {
                   {searchError}
                 </p>
               )}
+
+              {/* Per H1 (hardening batch 2026-06-26):
+                  Turnstile challenge gates the lookup
+                  endpoint against ref-guessing bots. */}
+              <div
+                ref={turnstileContainerRef}
+                className="flex justify-center"
+              />
 
               <PrimaryButton type="submit" className="w-full" disabled={isSearching}>
                 {isSearching ? "Looking up..." : "Find My Booking"}
