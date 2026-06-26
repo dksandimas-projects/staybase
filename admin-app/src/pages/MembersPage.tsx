@@ -157,8 +157,9 @@ export function MembersPage() {
   );
 
   return (
-    <div className="space-y-8 font-body">
-      <header>
+    <>
+      <div className="space-y-8 font-body">
+        <header>
         <h1 className="font-heading text-3xl text-gray-950 lowercase">Spark Rewards Members</h1>
         <p className="text-xs text-gray-500 mt-1">Audit guest loyalty profiles, execute points corrections, and inspect membership tiers.</p>
       </header>
@@ -185,6 +186,8 @@ export function MembersPage() {
         emptyMessage="No members match the current search."
         mobileCardShowChevron
       />
+
+      </div>
 
       {/* Member Details Drawer (D-04) */}
       <Drawer
@@ -365,6 +368,6 @@ export function MembersPage() {
           </div>
         )}
       </Drawer>
-    </div>
+    </>
   );
 }
