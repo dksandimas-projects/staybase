@@ -285,7 +285,7 @@ export function CorporateStaysPage() {
         <div className="absolute inset-0 z-0 opacity-30">
           {corpHeroPhoto ? (
             <HeroImage
-              className="w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-cover"
               alt="Sophisticated corporate meeting room and lounge"
               src={corpHeroPhoto}
               placeholder={CORPORATE_HERO_LQIP}
