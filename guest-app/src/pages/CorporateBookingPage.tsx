@@ -535,6 +535,14 @@ export function CorporateBookingPage() {
 
       if (result.success && result.data) {
         setBookingResponse({ ref: result.data.bookingRef });
+        // Per BF-39 (booking-flow audit 2026-06-26): prefer the
+        // server-returned `totalPrice` so the confirmation
+        // matches what was actually charged. Fall back to the
+        // local `total` only if the server response is missing
+        // the field.
+        const serverTotal = typeof result.data?.totalPrice === "number"
+          ? result.data.totalPrice
+          : null;
         const params = new URLSearchParams({
           step: "confirm",
           bookingRef: result.data.bookingRef,
@@ -546,7 +554,7 @@ export function CorporateBookingPage() {
           guests: String(guests),
           companyName: guestDetails.companyName,
           billingArrangement: guestDetails.billingArrangement,
-          total: String(total || result.data.totalPrice || 0),
+          total: String(serverTotal ?? total),
         });
         setSearchParams(params);
       } else {

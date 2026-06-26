@@ -156,11 +156,15 @@ describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => 
     });
 
     it("handleAddPayment fires staff-new-payment only when paymentProofUrl is set", () => {
-      // The staff-new-payment fire must be guarded by the
-      // paymentProofUrl presence + the emailNotificationsSent
-      // idempotency marker.
+      // Per BF-14 (booking-flow audit 2026-06-26): the dedup
+      // marker is now written inside the transaction (so a
+      // concurrent addPayment call doesn't re-fire the email).
+      // The email-send itself runs after the transaction; the
+      // guard logic now references the transaction-captured
+      // `hadPaymentProof` + `staffPaymentMarkerMissing` flags
+      // rather than re-reading the booking doc.
       const fireBlock = bookingsSrc.match(
-        /if\s*\(\s*bookingData\.paymentProofUrl\s*&&\s*!bookingData\.emailNotificationsSent\?\.staffNewPayment\s*\)\s*\{/
+        /if\s*\(\s*hadPaymentProof\s*&&\s*staffPaymentMarkerMissing\s*\)\s*\{[\s\S]{0,200}sendStaffNewPaymentTrigger/
       );
       expect(fireBlock, "expected to find the staff-new-payment fire block").toBeTruthy();
       expect(bookingsSrc).toMatch(/sendStaffNewPaymentTrigger/);

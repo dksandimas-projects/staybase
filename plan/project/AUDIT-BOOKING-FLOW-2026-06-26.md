@@ -26,13 +26,13 @@
 
 ## Executive Summary
 
-| Severity | Open | Staged (this PR) | **Total** |
+| Severity | Open | Staged | **Total** |
 |---|---|---|---|
-| **SEV-1 (critical)** | 0 | 6 | **6** |
-| **SEV-2 (major)** | 4 | 4 | **8** |
-| **SEV-3 (minor / code health)** | 35 | 0 | **35** |
+| **SEV-1 (critical)** | 0 | 6 (batch 1) | **6** |
+| **SEV-2 (major)** | 0 | 8 (4 in batch 1, 4 in batch 2) | **8** |
+| **SEV-3 (minor / code health)** | 29 | 6 (batch 2) | **35** |
 | **SEV-4 (nit)** | 1 | 0 | **1** |
-| **Total** | **40** | **10** | **50** |
+| **Total** | **30** | **20** | **50** |
 
 ### Test status at audit time
 - `npm run typecheck` — **passes** (but `guest-app/tsconfig.json` `include` excludes
@@ -912,39 +912,39 @@ is correct — do not add per-route files.
 | BF-04 | S1 | `staff-new-booking` email dedup logic is broken | `guest-app/server/handlers/bookings.ts:512-527` | **Fixed in `8891dce`** (re-reads the booking doc after commit; 3 new tests in `bookings-staff-email-dedup.test.ts`; `batch-10-email-extensions.test.ts` regex updated to match the new pattern) |
 | BF-05 | S1 | `originalTotalPrice` stored wrong on Senior/PWD-only | `guest-app/server/handlers/bookings.ts:392,791-794` | **Fixed in `8891dce`** (now stores full `subtotal`; `handleRejectDiscount` subtracts the voucher; 4 new tests in `bookings-reject-discount.test.ts`) |
 | BF-06 | S4 | Vercel function count budget is fine | `guest-app/api/[...route].ts` | ✓ Verified |
-| BF-07 | S3 | Voucher error map is dead code | `guest-app/src/pages/BookingPage.tsx:53-58,537-538` | Open |
+| BF-07 | S3 | Voucher error map is dead code | `guest-app/src/pages/BookingPage.tsx:53-58,537-538` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-08 | S2 | Client `total` shown to guest ≠ server `totalPrice` (weekend) | `BookingPage.tsx:265-276`, `CorporateBookingPage.tsx:286-294` | **Fixed in `31ca546`** (`calculateBookingTotal` now accepts a pre-computed `roomTotal`; 2 new tests in `pricing.test.ts`; both pages pass `roomTotal` explicitly) |
 | BF-09 | S2 | Discount-rejection total math off | `bookings.ts:392`, `email.ts:360` | Open |
 | BF-10 | S2 | PayPal option never exposed | `BookingPage.tsx:1034-1084` | **Fixed in `31ca546`** (PayPal added as a 4th payment method with its own instructions panel; type widened to include `"paypal"`) |
 | BF-11 | S2 | `BookingConfirmPage` ICS filename hardcodes `spark-inn-` | `BookingConfirmPage.tsx:73` | **Fixed in `31ca546`** (filename now `${bookingRef}.ics`; brand name lives in the event title) |
 | BF-12 | S2 | Hotel name / numbers hardcoded as payment-instruction fallbacks | `BookingPage.tsx:1092-1133` | **Fixed in `31ca546`** (GCash + Bank fallbacks now use `config.legalName` / `config.frontDeskPhone`; QR placeholder shows a "not yet configured" message instead of a hardcoded URL; bank "BPI"/"1234-5678-90" hardcodes removed) |
 | BF-13 | S3 | Lookup has correct case-insensitive fallback | `bookings.ts:1148-1167` | ✓ Verified |
-| BF-14 | S2 | Racy `addPayment` totalPaid read | `bookings.ts:920-950` | Open |
-| BF-15 | S2 | `confirmedBy` / `discountRejectedBy` are emails, not UIDs | `bookings.ts:798,984,1006` | Open |
-| BF-16 | S2 | Self-cancel blocked for `confirmed` and `payment-confirmed` | `bookings.ts:870` | Open (decision needed) |
+| BF-14 | S2 | Racy `addPayment` totalPaid read | `bookings.ts:920-950` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
+| BF-15 | S2 | `confirmedBy` / `discountRejectedBy` are emails, not UIDs | `bookings.ts:798,984,1006` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
+| BF-16 | S2 | Self-cancel blocked for `confirmed` and `payment-confirmed` | `bookings.ts:870` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-17 | S3 | Corporate-code lookup server-authoritative | `bookings.ts:259-292` | ✓ Verified |
-| BF-18 | S3 | Voucher `applicableRoomTypes` uses `roomData.type` (post-assignment) | `bookings.ts:335` | Open |
+| BF-18 | S3 | Voucher `applicableRoomTypes` uses `roomData.type` (post-assignment) | `bookings.ts:335` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-19 | S3 | Redundant `applicableRoomTypes` guard | `bookings.ts:335` | Open |
 | BF-20 | S3 | Stacking var names mislead | `bookings.ts:382-392` | Open |
 | BF-21 | S3 | `BookingLookupPage` needs dedicated audit | `BookingLookupPage.tsx` | Open (deferred) |
-| BF-22 | S3 | `handleRoomAvailability` does a full collection scan | `rooms.ts:71-93` | Open |
-| BF-23 | S3 | Missing composite indexes will break at scale | `firestore.indexes.json` | Open |
+| BF-22 | S3 | `handleRoomAvailability` does a full collection scan | `rooms.ts:71-93` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
+| BF-23 | S3 | Missing composite indexes will break at scale | `firestore.indexes.json` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-24 | S1 | Turnstile test-key fallback in non-allowlisted origins | `[...route].ts:146-179` | **Fixed in `8891dce`** (production-without-secret now fails closed; origin check tightened) |
 | BF-25 | S3 | Silent origin parse failure in `verifyTurnstile` | `[...route].ts:160-170` | Open |
-| BF-26 | S2 | Hardcoded breakfast rate `350` / `enabled: true` in `BookingPage` | `BookingPage.tsx:46-47` | Open |
+| BF-26 | S2 | Hardcoded breakfast rate `350` / `enabled: true` in `BookingPage` | `BookingPage.tsx:46-47` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-27 | S3 | Hardcoded fallback dates / total in `BookingConfirmPage` | `BookingConfirmPage.tsx:29-30,41` | Open |
 | BF-28 | S3 | Client `roomTotal` (correct) ≠ client `total` (wrong) | `BookingPage.tsx:235-276` | Open (rolled into BF-08) |
 | BF-29 | S3 | Inline regex instead of Zod | `BookingPage.tsx:297` | Open |
 | BF-30 | S3 | Two-state file/url pattern in upload widgets | `BookingPage.tsx:165-171` | Open |
 | BF-31 | S3 | Stale tab loses consent on remount | `BookingPage.tsx:103,144` | ✓ No fix |
-| BF-32 | S3 | Token-verify failure silently downgrades to anonymous | `bookings.ts:138-152` | Open |
+| BF-32 | S3 | Token-verify failure silently downgrades to anonymous | `bookings.ts:138-152` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-33 | S3 | Redundant post-filter on `isActive` | `bookings.ts:188-195` | Open |
 | BF-34 | S3 | Locale-aware sort | `bookings.ts:191-195` | ✓ Verified |
 | BF-35 | S3 | Token verify behind rate limit | `[...route].ts:252,138` | ✓ Verified |
 | BF-36 | S3 | Lookup response includes guestEmail/Phone | `bookings.ts:1201-1202` | Open |
-| BF-37 | S3 | `emailNotificationsSent` not in TYPES.md schema | `TYPES.md`, `bookings.ts:514-516` | Open |
+| BF-37 | S3 | `emailNotificationsSent` not in TYPES.md schema | `TYPES.md`, `bookings.ts:514-516` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-38 | S3 | `/api/bookings/create` return shape matches spec | `bookings.ts:529-538` | ✓ Verified |
-| BF-39 | S2 | Confirmation `total` from local calc, not server | `CorporateBookingPage.tsx:541` | Open |
+| BF-39 | S2 | Confirmation `total` from local calc, not server | `CorporateBookingPage.tsx:541` | **In progress (staged on `fix/audit-batch-2-booking-sev2-sev3`)** |
 | BF-40 | S3 | Voucher increment atomic | `bookings.ts:347-350` | ✓ Verified |
 | BF-41 | S3 | Date math correct | `bookings.ts:103-113` | ✓ Verified |
 | BF-42 | S3 | Manila-date logic duplicated | `bookings.ts:53-65,669` | Open |
