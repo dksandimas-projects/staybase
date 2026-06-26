@@ -26,26 +26,33 @@ const dashboardSrc = readFileSync(
 );
 
 describe("Phase 11.6 Batch 6 — small polish fixes", () => {
-  describe("S1.4 — self-cancel blocked after payment-confirmed or confirmed", () => {
-    it("blocks cancellation for payment-confirmed bookings", () => {
-      // Find the cancel status-guard block and ensure it now includes
-      // 'payment-confirmed' in addition to the original three.
+  // Per BF-16 (booking-flow audit 2026-06-26): the cancel block
+  // list was relaxed to block only the terminal states
+  // (checked-in, checked-out, cancelled). `confirmed` and
+  // `payment-confirmed` are now self-cancellable. The
+  // batch-6 tests below were written under the old S1.4
+  // policy; this revision flips them to assert the new
+  // behavior.
+  describe("S1.4 — self-cancel block list (BF-16 relaxed policy)", () => {
+    it("no longer blocks cancellation for payment-confirmed bookings", () => {
+      // Find the cancel status-guard block; payment-confirmed
+      // must NOT be in it.
       const guardMatch = bookingsSrc.match(
         /if\s*\(\s*bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
       );
       expect(guardMatch, "expected to find the cancel status guard").toBeTruthy();
-      expect(guardMatch![0]).toMatch(/["']payment-confirmed["']/);
+      expect(guardMatch![0]).not.toMatch(/["']payment-confirmed["']/);
     });
 
-    it("blocks cancellation for confirmed bookings", () => {
+    it("no longer blocks cancellation for confirmed bookings", () => {
       const guardMatch = bookingsSrc.match(
         /if\s*\(\s*bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
       );
       expect(guardMatch).toBeTruthy();
-      expect(guardMatch![0]).toMatch(/["']confirmed["']/);
+      expect(guardMatch![0]).not.toMatch(/["']confirmed["']/);
     });
 
-    it("still blocks cancellation for the original three terminal states", () => {
+    it("still blocks cancellation for the three terminal states", () => {
       const guardMatch = bookingsSrc.match(
         /if\s*\(\s*bookingData\.status\s*===\s*["']checked-in["'][\s\S]*?return\s+res\.status\(400\)/
       );
