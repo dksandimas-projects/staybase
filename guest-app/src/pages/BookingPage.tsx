@@ -32,6 +32,12 @@ import {
   staggerContainer,
   compressImageFile
 } from "@spark-inn/shared";
+// Per BF-29 (booking-flow audit 2026-06-26): replace the
+// inline email regex with Zod's `z.string().email()` so the
+// validation matches the server-side schema (RFC-ish checks,
+// consistent error formatting) and stays in sync with the
+// rest of the form-validation surface.
+import { z } from "zod";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -187,13 +193,17 @@ export function BookingPage() {
   const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
 
   const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
-  const [discountIdFile, setDiscountIdFile] = useState<string | null>(null);
-  const [discountIdUrl, setDiscountIdUrl] = useState<string | null>(null);
+  // Per BF-30 (booking-flow audit 2026-06-26): the previous
+  // shape was two parallel state vars (`discountIdFile` +
+  // `discountIdUrl`) that could desync. Collapse to a single
+  // record `{ name, url } | null` so the file name and
+  // download URL are always written together. Same for the
+  // payment proof.
+  const [discountIdUpload, setDiscountIdUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank" | "paypal" | "pay-at-hotel">("gcash");
-  const [paymentProofFile, setPaymentProofFile] = useState<string | null>(null);
-  const [paymentProofUrl, setPaymentProofUrl] = useState<string | null>(null);
+  const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
 
   const [termsConsent, setTermsConsent] = useState(false);
@@ -321,10 +331,18 @@ export function BookingPage() {
   reviewParams.set("phone", guestDetails.phone);
   reviewParams.set("requests", guestDetails.requests);
 
+  // Per BF-29: Zod-based email validation. Compile once at
+  // module scope so the regex doesn't re-compile on every
+  // render. Zod's `.email()` matches the server's
+  // `GuestDetailsSchema` (shared/schemas/booking.ts).
+  const emailSchema = z.string().email("Enter a valid email address.");
+
   const guestErrors = {
     firstName: guestDetails.firstName.trim() ? "" : "First name is required.",
     lastName: guestDetails.lastName.trim() ? "" : "Last name is required.",
-    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestDetails.email) ? "" : "Enter a valid email address.",
+    email: guestDetails.email.trim() && emailSchema.safeParse(guestDetails.email).success
+      ? ""
+      : "Enter a valid email address.",
     phone: guestDetails.phone.trim().length >= 8 ? "" : "Phone number is required.",
     guestCount:
       Number(guestDetails.guestCount) >= 1 && selectedMaxCapacity > 0 && Number(guestDetails.guestCount) <= selectedMaxCapacity
@@ -586,8 +604,7 @@ export function BookingPage() {
   function handleDiscountChange(type: "none" | "senior" | "pwd") {
     setDiscountType(type);
     if (type === "none") {
-      setDiscountIdFile(null);
-      setDiscountIdUrl(null);
+      setDiscountIdUpload(null);
     }
   }
 
@@ -601,8 +618,9 @@ export function BookingPage() {
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${compressed.file.name}`);
         await uploadBytes(storageRef, compressed.file);
         const url = await getDownloadURL(storageRef);
-        setDiscountIdUrl(url);
-        setDiscountIdFile(file.name);
+        // Per BF-30: single state record so the name + url
+        // are always written together (no desync race).
+        setDiscountIdUpload({ name: file.name, url });
       } catch (err) {
         console.error("Discount ID upload failed:", err);
         alert("Image upload failed. Please try again.");
@@ -621,8 +639,8 @@ export function BookingPage() {
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
         await uploadBytes(storageRef, compressed.file);
         const url = await getDownloadURL(storageRef);
-        setPaymentProofUrl(url);
-        setPaymentProofFile(file.name);
+        // Per BF-30: single state record.
+        setPaymentProofUpload({ name: file.name, url });
       } catch (err) {
         console.error("Payment proof upload failed:", err);
         alert("Receipt upload failed. Please try again.");
@@ -658,10 +676,10 @@ export function BookingPage() {
             consent: guestDetails.consent
           },
           discountType: discountType === "none" ? "" : discountType,
-          discountIdPhotoUrl: discountIdUrl,
+          discountIdPhotoUrl: discountIdUpload?.url ?? null,
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
-          paymentProofUrl: paymentProofUrl,
+          paymentProofUrl: paymentProofUpload?.url ?? null,
           // Per W1.3 / decision #79 / audit S1.5: the standard
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
@@ -924,8 +942,8 @@ export function BookingPage() {
   }
 
   if (isReviewStep) {
-    const isIdUploadRequired = discountType !== "none" && !discountIdUrl;
-    const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUrl;
+  const isIdUploadRequired = discountType !== "none" && !discountIdUpload;
+  const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUpload;
     const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry);
 
     // Retrieve active payment method details from hotelConfig
@@ -1031,17 +1049,16 @@ export function BookingPage() {
                   <p className="mt-1 text-xs text-gray-500">Please upload a photo of your valid ID card. Our front desk will verify it upon check-in.</p>
                   
                   <div className="mt-3">
-                    {discountIdFile ? (
+                    {discountIdUpload ? (
                       <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 size={18} className="text-status-green-text" />
-                          <span className="text-sm font-medium text-gray-800">{discountIdFile}</span>
+                          <span className="text-sm font-medium text-gray-800">{discountIdUpload.name}</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            setDiscountIdFile(null);
-                            setDiscountIdUrl(null);
+                            setDiscountIdUpload(null);
                           }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
@@ -1260,17 +1277,16 @@ export function BookingPage() {
                   <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful digital wallet payment or bank transfer receipt.</p>
                   
                   <div className="mt-3">
-                    {paymentProofFile ? (
+                    {paymentProofUpload ? (
                       <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 size={18} className="text-status-green-text" />
-                          <span className="text-sm font-medium text-gray-800">{paymentProofFile}</span>
+                          <span className="text-sm font-medium text-gray-800">{paymentProofUpload.name}</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            setPaymentProofFile(null);
-                            setPaymentProofUrl(null);
+                            setPaymentProofUpload(null);
                           }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
