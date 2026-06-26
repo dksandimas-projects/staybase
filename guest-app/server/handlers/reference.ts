@@ -1,21 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { generateBookingRef } from "@spark-inn/shared";
+import { generateBookingRef, getManilaDateInfo } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 
-function getLocalDate(timezone: string) {
-  const localDateString = new Date().toLocaleString("en-US", {
-    timeZone: timezone
-  });
-  return new Date(localDateString);
-}
-
-function getDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getLocalDate` + `getDateKey` helpers here were a third
+// copy of the Asia/Manila date logic that the other handlers
+// had. The shared `getManilaDateInfo()` now provides the
+// equivalent (`todayStr` = the YYYY-MM-DD counter key). Local
+// helpers removed.
 
 export async function handleGenerateReference(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -24,8 +17,7 @@ export async function handleGenerateReference(req: VercelRequest, res: VercelRes
 
   try {
     const timezone = config.timezone || "Asia/Manila";
-    const today = getLocalDate(timezone);
-    const counterId = `bookings-${getDateKey(today)}`;
+    const { todayStr: counterId, manilaDate: today } = getManilaDateInfo(timezone);
     const counterRef = adminDb.collection("counters").doc(counterId);
 
     let bookingRef = "";

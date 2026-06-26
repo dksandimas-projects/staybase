@@ -31,6 +31,10 @@
     {
       "path": "/api/email/checkin-reminder",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/janitor/storage-sweep",
+      "schedule": "0 19 * * *"
     }
   ]
 }

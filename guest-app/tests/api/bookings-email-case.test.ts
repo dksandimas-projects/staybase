@@ -40,7 +40,18 @@ describe("bookings.ts — guestEmail lowercase normalization (SEV-1 #4)", () => 
     // query value. Without this, a guest with "Maria@Example.com" cannot
     // self-cancel because the storage is now lowercase but the query was
     // still mixed case.
-    expect(src).toMatch(/where\(\s*["']guestEmail["']\s*,\s*["']==["']\s*,\s*guestEmail\.trim\(\)\.toLowerCase\(\)\s*\)/);
+    //
+    // Per BF-21 (booking-flow audit 2026-06-26): the cancel
+    // path now goes through `guestCancelSchema` (Zod), which
+    // lowercases the email in the schema itself
+    // (`z.string().trim().toLowerCase().email().max(160)`),
+    // so the cancel query binds to the lowercased value. The
+    // regex below accepts either the old `.trim().toLowerCase()`
+    // form or the new schema-validated `parsed.data.guestEmail`
+    // form so the test does not break across the refactor.
+    expect(src).toMatch(
+      /where\(\s*["']guestEmail["']\s*,\s*["']==["']\s*,\s*(?:guestEmail\.trim\(\)\.toLowerCase\(\)|parsed\.data\.guestEmail)\s*\)/
+    );
   });
 
   it("does not leave any write path storing guestEmail as mixed case", () => {

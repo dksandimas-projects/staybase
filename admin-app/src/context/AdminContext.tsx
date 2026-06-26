@@ -112,7 +112,9 @@ export interface Booking {
   specialRequests: string;
   status: "pending" | "payment-uploaded" | "payment-confirmed" | "confirmed" | "checked-in" | "checked-out" | "cancelled";
   paymentMethod: string;
-  paymentProofUrl: string;
+  // Per BF-45 (booking-flow audit 2026-06-26): canonical
+  // "no payment proof" is `null` (not `""`).
+  paymentProofUrl: string | null;
   source: "online" | "walk-in" | "phone" | "facebook" | "corporate";
   notes: string;
   memberId: string | null;
@@ -812,7 +814,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             specialRequests: data.specialRequests || "",
             status: data.status || "pending",
             paymentMethod: data.paymentMethod || "",
-            paymentProofUrl: data.paymentProofUrl || "",
+            // Per BF-45 (booking-flow audit 2026-06-26):
+            // canonical "absent" is `null`, not `""`.
+            paymentProofUrl: data.paymentProofUrl || null,
             source: data.source || "online",
             notes: data.notes || "",
             memberId: data.memberId || null,

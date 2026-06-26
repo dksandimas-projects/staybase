@@ -152,7 +152,7 @@ describe("/api/bookings/lookup", () => {
     await realHandleLookupBooking(
       {
         method: "POST",
-        body: { bookingRef: "SI-DOES-NOT-EXIST", guestEmail: "noone@example.test" }
+        body: { bookingRef: "SI-20260101-999", guestEmail: "noone@example.test" }
       },
       res
     );
@@ -171,7 +171,7 @@ describe("/api/bookings/lookup", () => {
     await realHandleLookupBooking(
       {
         method: "POST",
-        body: { bookingRef: "SI-OTHER-REF", guestEmail: "maria@example.test" }
+        body: { bookingRef: "SI-20260101-999", guestEmail: "maria@example.test" }
       },
       res
     );
@@ -238,5 +238,71 @@ describe("/api/bookings/lookup", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     const jsonCall = (res.json as any).mock.calls[0][0];
     expect(jsonCall.data.roomName).toBe("standard-double");
+  });
+
+  // Per BF-21 (booking-flow audit 2026-06-26): malformed
+  // input must short-circuit with 400 before hitting
+  // Firestore.
+  describe("input validation (BF-21)", () => {
+    test("returns 400 on a malformed booking reference (wrong date format)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-26-15-001", guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 on a malformed booking reference (non-numeric sequence)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-XXX", guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 on a malformed email (no @ sign)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", guestEmail: "notanemail" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 on an oversized body (100KB string)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "A".repeat(100_000), guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 (not 404) so callers can distinguish bad input from no match", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "garbage", guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
   });
 });
