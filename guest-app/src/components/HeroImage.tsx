@@ -42,30 +42,41 @@ export function buildHeroSrcSet(src: string): string | undefined {
   if (!src) return undefined;
   const WIDTHS = [640, 1080, 1920];
   try {
-    // Unsplash: URL already has query params (e.g. `?auto=format&fit=crop`).
-    // We append `&w=N` for each breakpoint.
+    // ── Unsplash ────────────────────────────────────────────────────────────
+    // Strip any existing `w=` param before appending so we don't produce
+    // duplicate params (e.g. `?w=1600&w=640`).
     if (src.includes("images.unsplash.com")) {
-      return WIDTHS.map((w) => `${src}&w=${w} ${w}w`).join(", ");
+      const base = src.replace(/[&?]w=\d+/, "");
+      const sep = base.includes("?") ? "&" : "?";
+      return WIDTHS.map((w) => `${base}${sep}w=${w} ${w}w`).join(", ");
     }
-    // Google User Content / Firebase Storage: the image-size token is a
-    // `=sN` or `=wN` suffix at the end of the path segment, before `?`.
-    // We strip any existing `=s`/`=w` token and insert our own.
-    if (
-      src.includes("googleusercontent.com") ||
-      src.includes("firebasestorage.googleapis.com")
-    ) {
-      // Split off query string so we don't accidentally mutate params.
+    // ── Google image-serving (lh3.googleusercontent.com, etc.) ─────────────
+    // The `=sN` / `=wN` URL suffix is ONLY supported by Google's image-
+    // serving infrastructure for standard Google Photos / Drive / Storage
+    // thumbnails. AI-generated content URLs (aida-public, etc.) and raw
+    // Firebase Storage download URLs do NOT support this transform — so
+    // we only apply it when the URL already carries a recognised size
+    // token, which confirms the host is using the image-serving stack.
+    if (src.includes("googleusercontent.com")) {
       const [base, qs] = src.split("?");
       const suffix = qs ? `?${qs}` : "";
-      // Remove any existing size token (=s<N> or =w<N>) at end of path.
+      // Bail out if there's no existing size token; appending =wN to an
+      // unsupported URL returns a 404 and breaks the image entirely.
+      if (!/=[sw]\d+$/.test(base)) return undefined;
       const stripped = base.replace(/=[sw]\d+$/, "");
       return WIDTHS.map((w) => `${stripped}=w${w}${suffix} ${w}w`).join(", ");
     }
+    // ── Firebase Storage ────────────────────────────────────────────────────
+    // Firebase Storage (firebasestorage.googleapis.com) uses signed download
+    // URLs with `?alt=media&token=...`. It does NOT natively support
+    // URL-based image resizing — that requires the Resize Images extension.
+    // We deliberately skip it to avoid generating broken srcset candidates.
   } catch {
     // URL parsing failure — fall back to no srcset.
   }
   return undefined;
 }
+
 
 
 export interface HeroImageProps {
