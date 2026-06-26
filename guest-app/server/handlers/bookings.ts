@@ -1,8 +1,36 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
-import { toDateOrNull, validateCorporateCode } from "@spark-inn/shared";
+import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REGEX } from "@spark-inn/shared";
+import { z } from "zod";
 import config from "../../../hotel.config";
+
+// Per BF-21 (booking-flow audit 2026-06-26): the public
+// self-service endpoints (`/api/bookings/lookup`,
+// `/api/bookings/cancel`) accept a bookingRef + guestEmail
+// pair to look up and act on a booking without auth. The
+// previous validation was just `!bookingRef || !guestEmail`,
+// so a 100KB body, `""`, or `"notanemail"` would all hit
+// Firestore. These schemas short-circuit malformed input
+// with a 400 before the query runs.
+const lookupSchema = z.object({
+  bookingRef: z
+    .string()
+    .trim()
+    .max(40)
+    .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+  guestEmail: z.string().trim().toLowerCase().email().max(160)
+});
+
+const guestCancelSchema = z.object({
+  bookingRef: z
+    .string()
+    .trim()
+    .max(40)
+    .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+  guestEmail: z.string().trim().toLowerCase().email().max(160),
+  reason: z.string().trim().max(500).optional().default("")
+});
 
 interface GuestDetails {
   firstName: string;
@@ -50,19 +78,12 @@ interface CreateBookingBody {
   linkedInquiryId?: string | null;
 }
 
-function getManilaDateInfo() {
-  const d = new Date();
-  const manilaStr = d.toLocaleString("en-US", { timeZone: "Asia/Manila" });
-  const manilaDate = new Date(manilaStr);
-  const year = manilaDate.getFullYear();
-  const month = String(manilaDate.getMonth() + 1).padStart(2, "0");
-  const day = String(manilaDate.getDate()).padStart(2, "0");
-  return {
-    todayStr: `${year}-${month}-${day}`,
-    todayCompact: `${year}${month}${day}`,
-    manilaDate
-  };
-}
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getManilaDateInfo()` helper was duplicated here twice
+// (and in `store.ts`, `corporate-inquiries.ts`, `email.ts`,
+// `reference.ts`). The shared implementation lives in
+// `shared/utils/bookingDates.ts` and is imported as
+// `getManilaDateInfo` above. Local definitions removed BF-42.
 
 export async function handleCreateBooking(req: any, res: any) {
   if (req.method !== "POST") {
@@ -509,7 +530,11 @@ export async function handleCreateBooking(req: any, res: any) {
         specialRequests: guestDetails.requests || "",
         status: paymentProofUrl ? "payment-uploaded" : "pending",
         paymentMethod,
-        paymentProofUrl: paymentProofUrl || "",
+        // Per BF-45 (booking-flow audit 2026-06-26): write
+        // `null` (not `""`) when no payment proof is attached.
+        // `|| null` coalesces both `""` and `undefined` to
+        // `null` so the canonical "absent" value is consistent.
+        paymentProofUrl: paymentProofUrl || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
@@ -851,7 +876,11 @@ export async function handleCreateWalkin(req: any, res: any) {
         specialRequests: guestDetails.requests || "",
         status: status || "confirmed",
         paymentMethod,
-        paymentProofUrl: "",
+        // Per BF-45 (booking-flow audit 2026-06-26): walkin
+        // bookings start without a payment proof; write `null`
+        // (not `""`) so the canonical "absent" value is
+        // consistent with the online flow.
+        paymentProofUrl: null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",
@@ -984,6 +1013,13 @@ export async function handleRejectDiscount(req: any, res: any) {
 export async function handleCancelBooking(req: any, res: any) {
   const { bookingId, bookingRef, guestEmail, reason } = req.body;
 
+  // Per BF-21 (booking-flow audit 2026-06-26): normalise
+  // `reason` once here so the staff + guest paths share the
+  // same downstream binding. Staff passes a free-form string;
+  // guests go through `guestCancelSchema` which trims +
+  // caps to 500 chars.
+  let validReason = typeof reason === "string" ? reason.slice(0, 500) : "";
+
   try {
     let bookingDocumentRef: any;
     let bookingData: any;
@@ -1001,27 +1037,36 @@ export async function handleCancelBooking(req: any, res: any) {
       } else {
         return res.status(400).json({ success: false, error: "Booking ID or Reference is required." });
       }
-      
+
       const doc = await bookingDocumentRef.get();
       if (!doc.exists) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
       bookingData = doc.data();
     } else {
-      if (!bookingRef || !guestEmail) {
-        return res.status(400).json({ success: false, error: "Booking Reference and Guest Email are required." });
+      // Per BF-21 (booking-flow audit 2026-06-26): validate
+      // the guest-self-service cancel input with the same
+      // schema as lookup so a 100KB body / malformed email
+      // never reaches Firestore.
+      const parsed = guestCancelSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a valid booking reference and email address."
+        });
       }
+      validReason = parsed.data.reason;
 
       const query = adminDb.collection("bookings")
-        .where("bookingRef", "==", bookingRef.trim())
-        .where("guestEmail", "==", guestEmail.trim().toLowerCase())
+        .where("bookingRef", "==", parsed.data.bookingRef)
+        .where("guestEmail", "==", parsed.data.guestEmail)
         .limit(1);
-      
+
       const snapshot = await query.get();
       if (snapshot.empty) {
         return res.status(404).json({ success: false, error: "Booking not found with matching email." });
       }
-      
+
       bookingDocumentRef = snapshot.docs[0].ref;
       bookingData = snapshot.docs[0].data();
     }
@@ -1049,14 +1094,14 @@ export async function handleCancelBooking(req: any, res: any) {
 
     await bookingDocumentRef.update({
       status: "cancelled",
-      cancellationReason: reason || "",
+      cancellationReason: validReason,
       updatedAt: new Date()
     });
 
     try {
       await sendBookingTrigger("booking-cancelled", {
         ...bookingData,
-        cancellationReason: reason || ""
+        cancellationReason: validReason
       });
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
@@ -1372,13 +1417,20 @@ export async function handleCheckoutBooking(req: any, res: any) {
 }
 
 export async function handleLookupBooking(req: any, res: any) {
-  const { bookingRef, guestEmail } = req.body || {};
-  if (!bookingRef || !guestEmail) {
-    return res.status(400).json({ success: false, error: "Booking reference and guest email are required." });
+  const parsed = lookupSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    // Per BF-21 (booking-flow audit 2026-06-26): return 400
+    // (not 404) on malformed input so the caller can
+    // distinguish "bad input" from "no match". The error
+    // message is intentionally generic so the validator
+    // does not become an oracle for the booking-ref shape.
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference and email address."
+    });
   }
 
-  const trimmedRef = String(bookingRef).trim();
-  const normalizedEmail = String(guestEmail).trim().toLowerCase();
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail } = parsed.data;
 
   try {
     const snapshot = await adminDb.collection("bookings")
@@ -1410,7 +1462,7 @@ export async function handleLookupBooking(req: any, res: any) {
     const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
     return await enrichAndRespond(res, bookingData);
   } catch (error: any) {
-    console.error("Booking lookup failed:", error);
+    console.error("Booking lookup failed:", error?.message || error);
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
   }
 }

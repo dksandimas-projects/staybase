@@ -71,7 +71,13 @@ export interface Booking {
   specialRequests: string;
   status: BookingStatus;
   paymentMethod: PaymentMethod;
-  paymentProofUrl: string;
+  // Per BF-45 (booking-flow audit 2026-06-26): the
+  // canonical "no payment proof" value is `null` (not
+  // `""`). Writes coalesce `""` to `null` so all read
+  // sites can rely on `!!booking.paymentProofUrl` /
+  // `paymentProofUrl === null` checks without a string
+  // comparison.
+  paymentProofUrl: string | null;
   source: BookingSource;
   notes: string;
   memberId: string | null;

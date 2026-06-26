@@ -2,6 +2,14 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getManilaDateInfo()` helper was duplicated in 5 server-side
+// files. The shared implementation lives in
+// `shared/utils/bookingDates.ts`. The cron handler in
+// `getTomorrowConfirmedBookings` (below) uses the shared
+// helper to anchor "today" in the property's timezone, then
+// adds 1 day for the "tomorrow at 00:00 local" range.
+import { getManilaDateInfo } from "@spark-inn/shared";
 
 type EmailAction =
   | "booking-submitted"
@@ -784,8 +792,13 @@ export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
 }
 
 async function getTomorrowConfirmedBookings() {
-  const nowLocal = new Date(new Date().toLocaleString("en-US", { timeZone: config.timezone }));
-  const start = new Date(nowLocal);
+  // Per BF-42 (booking-flow audit 2026-06-26): this is NOT
+  // a duplicate of getManilaDateInfo() — it computes a
+  // "tomorrow at 00:00 local" range for the cron query. Use
+  // the shared helper to anchor "today" in the property's
+  // timezone, then add 1 day.
+  const { manilaDate } = getManilaDateInfo(config.timezone);
+  const start = new Date(manilaDate);
   start.setDate(start.getDate() + 1);
   start.setHours(0, 0, 0, 0);
 

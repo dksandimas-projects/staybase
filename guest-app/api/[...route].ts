@@ -19,6 +19,7 @@ import { handleEmailTrigger } from "../server/handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
 import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
 import { handleRoomAvailability } from "../server/handlers/rooms";
+import { handleJanitorStorageSweep } from "../server/handlers/janitor";
 import { adminAuth } from "../server/lib/firebase-admin";
 import config from "@config";
 
@@ -629,6 +630,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleEmailTrigger(req, res, action as Parameters<typeof handleEmailTrigger>[2]);
+  }
+
+  // Per BF-50 (booking-flow audit 2026-06-26): Vercel
+  // Cron-driven janitor that deletes orphaned
+  // `bookings/{id}/` Storage subfolders where the matching
+  // Firestore doc was never written (user abandoned the
+  // form). Auth-gated by `CRON_SECRET`.
+  if (domain === "janitor" && action === "storage-sweep" && (req.method === "POST" || req.method === "GET")) {
+    return await handleJanitorStorageSweep(req, res);
   }
 
   // Fallback 404
