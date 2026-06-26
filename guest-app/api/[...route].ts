@@ -179,8 +179,14 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
         originAllowed = true;
       }
     }
-  } catch {
-    // URL parse failure → treat as non-production.
+  } catch (parseErr) {
+    // Per BF-25 (booking-flow audit 2026-06-26): the previous
+    // version silently fell through to non-production on any
+    // URL parse failure. Log at debug level so the issue is
+    // visible in Vercel logs (no behavior change — the origin
+    // genuinely couldn't be parsed, so non-production is
+    // still the right fallback for local + vercel dev).
+    console.debug("Turnstile origin parse failed:", parseErr);
   }
 
   // If the request looks like a production request, require the
@@ -250,8 +256,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (ALLOWED_ORIGINS.has(requestOrigin) || ALLOWED_ORIGINS.has(`https://${originHost}`) || ALLOWED_ORIGINS.has(`http://${originHost}`)) {
       allowOrigin = requestOrigin;
     }
-  } catch {
-    // requestOrigin was empty or malformed — no allow-origin echoed
+  } catch (parseErr) {
+    // Per BF-25 (booking-flow audit 2026-06-26): the CORS
+    // origin parse also swallowed errors silently. Log at
+    // debug level so the issue is visible in Vercel logs
+    // (no behavior change — an unparseable origin is not in
+    // the allowlist, so no allow-origin is the right output).
+    console.debug("CORS origin parse failed:", parseErr);
   }
   if (allowOrigin) res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   res.setHeader("Vary", "Origin");
@@ -288,10 +299,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Honeypot Bot Check
     if (req.body && typeof req.body === "object" && req.body._hp) {
       console.log("Honeypot triggered, silently ignoring write.");
+      // Per BF-44 (booking-flow audit 2026-06-26): the previous
+      // echo included `req.body.bookingId` if the bot supplied
+      // one — a real preallocated ID was leaked back to the bot
+      // as part of the fake success. Always return a fresh fake
+      // ID; never reflect the bot's input.
       return res.status(200).json({
         success: true,
         data: {
-          bookingId: req.body.bookingId || "hp_" + Math.random().toString(36).substring(2, 9),
+          bookingId: "hp_" + Math.random().toString(36).substring(2, 9),
           bookingRef: `SI-${new Date().getFullYear()}0608-099`
         }
       });

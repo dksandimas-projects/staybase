@@ -217,9 +217,16 @@ export async function handleCreateBooking(req: any, res: any) {
         .where("type", "==", roomType)
         .where("isActive", "==", true);
       const candidatesSnapshot = await transaction.get(candidatesQuery);
+      // Per BF-33 (booking-flow audit 2026-06-26): the previous
+      // post-filter `.filter((c) => c.data && c.data.isActive !== false)`
+      // was redundant with the `where("isActive", "==", true)` on
+      // the query. The query is the single source of truth; drop
+      // the post-filter to avoid the two filters drifting out of
+      // sync. Defensive null-check on `data` remains in case a
+      // doc exists with no fields.
       const candidates = candidatesSnapshot.docs
         .map((d) => ({ id: d.id, data: d.data() }))
-        .filter((c) => c.data && c.data.isActive !== false)
+        .filter((c) => c.data)
         .sort((a, b) => {
           const an = String(a.data.roomNumber || a.id);
           const bn = String(b.data.roomNumber || b.id);
@@ -371,7 +378,12 @@ export async function handleCreateBooking(req: any, res: any) {
             vData.isActive !== false &&
             (!vData.expiresAt || vData.expiresAt.toDate() >= now) &&
             (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) &&
-            (!vData.applicableRoomTypes || vData.applicableRoomTypes.length === 0 || vData.applicableRoomTypes.includes(roomData.type)) &&
+            // Per BF-19 (booking-flow audit 2026-06-26): the
+            // empty-or-undefined case is covered by the optional
+            // chaining below; drop the redundant `!vData.applicableRoomTypes`
+            // short-circuit. The `length === 0` covers both the
+            // "empty array" and "falsy" cases via `?.length ?? 0`.
+            ((vData.applicableRoomTypes?.length ?? 0) === 0 || vData.applicableRoomTypes.includes(roomData.type)) &&
             assignedTypeMatchesChosen;
 
           if (isValid) {
@@ -405,7 +417,12 @@ export async function handleCreateBooking(req: any, res: any) {
       // 8b. Spark Rewards member discount (3rd stacking step per
       // DECISIONS-FEATURES.md #13b). Read settings/rewardsConfig inside
       // the transaction. Applied to the post-voucher subtotal.
-      let memberDiscountPct = 0;
+      // Per BF-20 (booking-flow audit 2026-06-26): the local
+      // var was named `memberDiscountPct` which collides with
+      // the doc field of the same name. Rename to
+      // `appliedMemberDiscountPct` so the doc-write is clearly
+      // distinct from the in-scope variable.
+      let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
@@ -413,7 +430,7 @@ export async function handleCreateBooking(req: any, res: any) {
           const rc = rewardsDoc.data()!;
           if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
-            if (pct > 0) memberDiscountPct = pct;
+            if (pct > 0) appliedMemberDiscountPct = pct;
           }
         }
       }
@@ -425,7 +442,7 @@ export async function handleCreateBooking(req: any, res: any) {
       const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
       const afterSeniorPwd = subtotal - seniorPwdDiscount;
       const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
       // Pre-discount total to restore if discount is rejected.
@@ -499,7 +516,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
         // Set from the Authorization Bearer token detected above.
         memberId: detectedMemberId,
-        memberDiscountPct: memberDiscountPct,
+        memberDiscountPct: appliedMemberDiscountPct,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
