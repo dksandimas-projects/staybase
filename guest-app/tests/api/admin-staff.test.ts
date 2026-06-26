@@ -4,12 +4,14 @@ const {
   mockCreateUser,
   mockSetCustomUserClaims,
   mockUpdateUser,
+  mockDeleteUser,
   mockGuestDocs,
   mockGuestSet
 } = vi.hoisted(() => ({
   mockCreateUser: vi.fn(),
   mockSetCustomUserClaims: vi.fn(),
   mockUpdateUser: vi.fn(),
+  mockDeleteUser: vi.fn(),
   mockGuestDocs: new Map<string, any>(),
   mockGuestSet: vi.fn()
 }));
@@ -18,7 +20,8 @@ vi.mock("../../server/lib/firebase-admin", () => ({
   adminAuth: {
     createUser: mockCreateUser,
     setCustomUserClaims: mockSetCustomUserClaims,
-    updateUser: mockUpdateUser
+    updateUser: mockUpdateUser,
+    deleteUser: mockDeleteUser
   },
   adminDb: {
     collection: vi.fn().mockImplementation((collectionName: string) => {
@@ -198,6 +201,100 @@ describe("/api/admin staff handlers", () => {
     expect(res.json).toHaveBeenCalledWith({
       success: true,
       data: { uid: "staff_1" }
+    });
+  });
+
+  // Per S4 (soft batch 2026-06-26): the staff-creation
+  // path is non-atomic across auth + claims + Firestore.
+  // If the post-create sync fails, the orphaned auth user
+  // is rolled back so the operator can retry the create.
+  describe("S4 transactional consistency", () => {
+    beforeEach(() => {
+      mockCreateUser.mockReset();
+      mockSetCustomUserClaims.mockReset();
+      mockUpdateUser.mockReset();
+      mockDeleteUser.mockReset();
+      mockGuestSet.mockReset();
+      mockGuestDocs.clear();
+    });
+
+    test("rolls back the auth user if the claims write fails", async () => {
+      mockCreateUser.mockResolvedValue({ uid: "new_staff" });
+      mockSetCustomUserClaims.mockRejectedValue(new Error("claims service down"));
+      mockDeleteUser.mockResolvedValue(undefined);
+
+      const res = mockResponse();
+      await handleCreateStaff(
+        {
+          method: "POST",
+          staff: adminStaff,
+          body: {
+            fullName: "Test User",
+            email: "test@example.test",
+            password: "password123",
+            role: "front-desk"
+          }
+        } as any,
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(mockDeleteUser).toHaveBeenCalledWith("new_staff");
+    });
+
+    test("rolls back the auth user if the Firestore set fails", async () => {
+      mockCreateUser.mockResolvedValue({ uid: "new_staff" });
+      mockSetCustomUserClaims.mockResolvedValue(undefined);
+      mockGuestSet.mockRejectedValue(new Error("firestore unavailable"));
+      mockDeleteUser.mockResolvedValue(undefined);
+
+      const res = mockResponse();
+      await handleCreateStaff(
+        {
+          method: "POST",
+          staff: adminStaff,
+          body: {
+            fullName: "Test User",
+            email: "test@example.test",
+            password: "password123",
+            role: "front-desk"
+          }
+        } as any,
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(mockDeleteUser).toHaveBeenCalledWith("new_staff");
+    });
+
+    test("writes Firestore before disabling the auth user", async () => {
+      const callOrder: string[] = [];
+      mockGuestSet.mockImplementation(async () => { callOrder.push("firestore"); });
+      mockUpdateUser.mockImplementation(async () => { callOrder.push("auth"); });
+      mockGuestDocs.set("staff_1", { role: "front-desk", isActive: true });
+
+      const res = mockResponse();
+      await handleDisableStaff(
+        { method: "POST", staff: adminStaff, body: { uid: "staff_1" } } as any,
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(callOrder).toEqual(["firestore", "auth"]);
+    });
+
+    test("rolls back the Firestore disable if the auth update fails", async () => {
+      const writes: any[] = [];
+      mockGuestSet.mockImplementation(async (patch: any) => { writes.push(patch); });
+      mockUpdateUser.mockRejectedValue(new Error("auth service down"));
+      mockGuestDocs.set("staff_1", { role: "front-desk", isActive: true });
+
+      const res = mockResponse();
+      await handleDisableStaff(
+        { method: "POST", staff: adminStaff, body: { uid: "staff_1" } } as any,
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(500);
+      // First write: disable; second write: rollback.
+      expect(writes[0]).toMatchObject({ isActive: false });
+      expect(writes[1]).toMatchObject({ isActive: true, disabledAt: null });
     });
   });
 });

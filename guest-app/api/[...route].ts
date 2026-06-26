@@ -19,7 +19,7 @@ import { handleEmailTrigger } from "../server/handlers/email";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
 import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
 import { handleRoomAvailability } from "../server/handlers/rooms";
-import { handleJanitorStorageSweep, handleJanitorStats } from "../server/handlers/janitor";
+import { handleJanitorStorageSweep, handleJanitorStats, handleH2LookupTokenBackfill, handleH2BackfillStatus } from "../server/handlers/janitor";
 import { adminAuth } from "../server/lib/firebase-admin";
 import config from "@config";
 
@@ -140,6 +140,27 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
   return record.count > limit;
 }
 
+// Per S2 (soft batch 2026-06-26): the booking-lookup
+// endpoint is a ref+token oracle. Turnstile (H1) raises
+// the per-attempt cost, and the 10/min rate limit caps
+// throughput, but a determined attacker with a residential
+// proxy pool can still iterate the 99,999-key daily
+// namespace. We add a second layer: after 3 consecutive
+// 404s from the same IP, the IP is parked in a 1-hour
+// backoff bucket. A single successful lookup resets the
+// counter. This drops the per-IP PoR from ~14%/day
+// (14,400 attempts / 99,999 keys) to ~0.07%/day
+// (3 attempts / IP / hour × 24 = 72 attempts/day/IP).
+//
+// The state lives in module memory (same as the
+// per-minute rate-limit cache) and is exposed as a
+// shared `FailureBackoffState` so the unit tests can
+// drive it deterministically with an injected clock.
+import { createFailureBackoffState } from "@spark-inn/shared";
+const lookupFailures = createFailureBackoffState();
+const LOOKUP_FAILURE_THRESHOLD = 3;
+const LOOKUP_FAILURE_WINDOW_MS = 3600000;
+
 async function verifyTurnstile(token: string | undefined, req?: VercelRequest): Promise<{ success: boolean; error?: string }> {
   // Cloudflare test keys: always verify successfully.
   // Test bypass: NODE_ENV is "test", OR the client supplied an
@@ -237,6 +258,26 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Per S2 (soft batch 2026-06-26): wrap `res.status` once
+  // so the post-handler hooks (e.g. the lookup
+  // 404-backoff counter) can read the final status code.
+  // The wrapper is transparent: it returns `res` so the
+  // existing `res.status(200).json(...)` call sites work
+  // unchanged. We only wrap when `res.status` is the real
+  // Vercel response (not a vi.fn spy) so existing unit
+  // tests that mock the response object keep working.
+  const existingStatus = (res as any).status;
+  if (typeof existingStatus === "function" && !existingStatus.mock) {
+    const originalStatus = existingStatus.bind(res);
+    (res as any)._lastStatusCode = 200;
+    (res as any).status = (code: number) => {
+      (res as any)._lastStatusCode = code;
+      return originalStatus(code);
+    };
+  } else {
+    (res as any)._lastStatusCode = 200;
+  }
+
   // 1. Enforce CORS
   // Per W4.6 / W1.13 / decision #106 / #86: explicit allowlist from config + dev origins.
   // `Access-Control-Allow-Credentials` is removed — Firebase ID tokens ride in the
@@ -405,6 +446,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many lookup attempts. Please try again in a minute." });
     }
 
+    // Per S2 (soft batch 2026-06-26): an IP that has
+    // burned through 3 consecutive 404s on this endpoint
+    // is parked in a 1-hour backoff. The bucket is keyed
+    // independently of the per-minute limit so a slow
+    // trickle of attempts still trips it.
+    if (process.env.NODE_ENV !== "test" && lookupFailures.isInBackoff(`bookings-lookup-fail:${ip}`, LOOKUP_FAILURE_THRESHOLD)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many failed lookups. Please contact the front desk for help finding your booking."
+      });
+    }
+
     // Per H1 (hardening batch 2026-06-26): the lookup
     // endpoint is a ref+email oracle — without Turnstile,
     // a bot can probe the 99,999-key daily namespace
@@ -416,7 +469,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
-    return await handleLookupBooking(req, res);
+    const lookupResult = await handleLookupBooking(req, res);
+
+    // S2: a 404 increments the per-IP failure counter; a
+    // 2xx clears it. We can't read the response status
+    // directly here (the handler has already called
+    // `res.status(...)`), so we wrap `res.status` once
+    // to capture the most recent code, then read it
+    // after the handler returns.
+    if (process.env.NODE_ENV !== "test") {
+      const statusCode = (res as any)._lastStatusCode;
+      if (statusCode === 200) {
+        lookupFailures.clear(`bookings-lookup-fail:${ip}`);
+      } else if (statusCode === 404) {
+        lookupFailures.record(`bookings-lookup-fail:${ip}`, LOOKUP_FAILURE_WINDOW_MS);
+      }
+    }
+
+    return lookupResult;
   }
 
   if (domain === "rooms" && action === "availability" && req.method === "GET") {
@@ -572,6 +642,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (domain === "admin" && action === "create-staff" && req.method === "POST") {
+    // Per S4 (soft batch 2026-06-26): rate-limit the
+    // staff-creation endpoint. An attacker with admin
+    // access could otherwise iterate the email
+    // already-exists oracle at high speed.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-create-staff:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many staff-creation requests. Please try again in a minute." });
+    }
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
@@ -584,6 +661,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (domain === "admin" && action === "disable-staff" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-disable-staff:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many disable-staff requests. Please try again in a minute." });
+    }
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
@@ -670,6 +750,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Same CRON_SECRET auth as the sweep itself.
   if (domain === "janitor" && action === "stats" && req.method === "GET") {
     return await handleJanitorStats(req, res);
+  }
+
+  // Per S1 (soft batch 2026-06-26): one-time backfill that
+  // adds `lookupToken` to every legacy booking doc so the
+  // H2 deep-link works for the whole catalogue, not just
+  // post-H2 bookings. Resumable (cursor persisted in
+  // Firestore). CRON_SECRET-gated.
+  if (domain === "janitor" && action === "h2-backfill" && (req.method === "POST" || req.method === "GET")) {
+    return await handleH2LookupTokenBackfill(req, res);
+  }
+  if (domain === "janitor" && action === "h2-status" && req.method === "GET") {
+    return await handleH2BackfillStatus(req, res);
   }
 
   // Fallback 404

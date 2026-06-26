@@ -62,18 +62,38 @@ export async function handleCreateStaff(req: any, res: any) {
       disabled: false
     });
 
-    await adminAuth.setCustomUserClaims(user.uid, { role });
-    await adminDb.collection("guests").doc(user.uid).set({
-      fullName,
-      email: email.toLowerCase(),
-      phone,
-      nationality,
-      role,
-      isActive: true,
-      createdBy: staff.uid || "",
-      createdAt: now,
-      updatedAt: now
-    });
+    try {
+      await adminAuth.setCustomUserClaims(user.uid, { role });
+      await adminDb.collection("guests").doc(user.uid).set({
+        fullName,
+        email: email.toLowerCase(),
+        phone,
+        nationality,
+        role,
+        isActive: true,
+        createdBy: staff.uid || "",
+        createdAt: now,
+        updatedAt: now
+      });
+    } catch (postCreateErr) {
+      // Per S4 (soft batch 2026-06-26): the
+      // `adminAuth.createUser` + `setCustomUserClaims` +
+      // Firestore `set` sequence is not atomic. If the
+      // claims write or the Firestore set fails, the
+      // auth user is left in an inconsistent state —
+      // they exist in Firebase Auth but have no
+      // role / profile. A retry of the create with the
+      // same email then 409s on `email-already-exists`
+      // and the operator is stuck. The fix rolls back
+      // the auth user on any post-create failure.
+      console.error("Staff post-create sync failed, rolling back auth user:", postCreateErr);
+      try {
+        await adminAuth.deleteUser(user.uid);
+      } catch (rollbackErr) {
+        console.error("Failed to roll back orphaned auth user:", rollbackErr);
+      }
+      throw postCreateErr;
+    }
 
     return res.status(200).json({
       success: true,
@@ -147,13 +167,41 @@ export async function handleDisableStaff(req: any, res: any) {
     }
 
     const now = new Date();
-    await adminAuth.updateUser(uid, { disabled: true });
-    await staffRef.set({
-      isActive: false,
-      disabledAt: now,
-      disabledBy: staff.uid || "",
-      updatedAt: now
-    }, { merge: true });
+    // Per S4 (soft batch 2026-06-26): the previous code
+    // called `adminAuth.updateUser({ disabled: true })`
+    // first, then wrote the Firestore `isActive: false`
+    // flag. If the Firestore write failed, the auth
+    // account was disabled but the Firestore doc still
+    // said `isActive: true` — the staff member couldn't
+    // log in but the admin app UI thought they were
+    // active, producing a ghost account. The fix writes
+    // Firestore first (the source of truth for the
+    // admin app), then disables the auth account, with
+    // a rollback on partial failure.
+    try {
+      await staffRef.set({
+        isActive: false,
+        disabledAt: now,
+        disabledBy: staff.uid || "",
+        updatedAt: now
+      }, { merge: true });
+      await adminAuth.updateUser(uid, { disabled: true });
+    } catch (syncErr) {
+      // If the auth disable fails, roll back the
+      // Firestore write so the doc + auth stay aligned.
+      console.error("Staff disable sync failed, rolling back Firestore:", syncErr);
+      try {
+        await staffRef.set({
+          isActive: targetStaff?.isActive !== false,
+          disabledAt: null,
+          disabledBy: null,
+          updatedAt: new Date()
+        }, { merge: true });
+      } catch (rollbackErr) {
+        console.error("Failed to roll back Firestore disable:", rollbackErr);
+      }
+      throw syncErr;
+    }
 
     return res.status(200).json({
       success: true,
