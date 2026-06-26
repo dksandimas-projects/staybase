@@ -181,8 +181,9 @@ export function RoomsPage() {
   }, [roomTypes]);
 
   return (
-    <div className="space-y-6 font-body sm:space-y-8">
-      <header className="space-y-2">
+    <>
+      <div className="space-y-6 font-body sm:space-y-8">
+        <header className="space-y-2">
         <h1 className="font-heading text-2xl text-gray-950 lowercase sm:text-3xl">room management</h1>
         <p className="text-xs text-gray-500 sm:text-sm">
           Configure room capacities, set price matrices, and block rooms for maintenance.
@@ -258,6 +259,8 @@ export function RoomsPage() {
             </div>
           );
         })}
+      </div>
+
       </div>
 
       <Drawer
@@ -608,6 +611,6 @@ export function RoomsPage() {
           </div>
         )}
       </Modal>
-    </div>
+    </>
   );
 }
