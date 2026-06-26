@@ -160,7 +160,9 @@ describe("/api/store/order-status", () => {
     // Seed today's counter so the handler takes the `update` path
     // (sequence goes from 4 to 5, matching the original intent).
     mockState.counters[`store-orders-${todayStr}`] = { count: 4 };
-    const expectedRef = `SO-${todayStr.replace(/-/g, "")}-005`;
+    // Per H3 (hardening batch 2026-06-26): store-order
+    // sequence width is now 5 digits.
+    const expectedRef = `SO-${todayStr.replace(/-/g, "")}-00005`;
 
     const req = {
       method: "POST",

@@ -1,7 +1,7 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
-import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REGEX } from "@spark-inn/shared";
+import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REGEX, generateLookupToken } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 
@@ -13,24 +13,55 @@ import config from "../../../hotel.config";
 // so a 100KB body, `""`, or `"notanemail"` would all hit
 // Firestore. These schemas short-circuit malformed input
 // with a 400 before the query runs.
-const lookupSchema = z.object({
-  bookingRef: z
-    .string()
-    .trim()
-    .max(40)
-    .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
-  guestEmail: z.string().trim().toLowerCase().email().max(160)
-});
+//
+// Per H2 (hardening batch 2026-06-26): the schemas now
+// accept either `guestEmail` (legacy) OR `token` (the new
+// per-booking `lookupToken` random hex). Exactly one of
+// the two is required. The token path is what the email
+// magic link uses — the URL no longer carries the raw
+// `guestEmail`, so PII never lands in browser history or
+// Vercel access logs.
+const lookupSchema = z
+  .object({
+    bookingRef: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
+    token: z
+      .string()
+      .trim()
+      .max(64)
+      .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
+      .optional(),
+    turnstileToken: z.string().max(2000).optional()
+  })
+  .refine(
+    (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+    "Provide either an email or a lookup token (not both)."
+  );
 
-const guestCancelSchema = z.object({
-  bookingRef: z
-    .string()
-    .trim()
-    .max(40)
-    .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
-  guestEmail: z.string().trim().toLowerCase().email().max(160),
-  reason: z.string().trim().max(500).optional().default("")
-});
+const guestCancelSchema = z
+  .object({
+    bookingRef: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
+    token: z
+      .string()
+      .trim()
+      .max(64)
+      .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
+      .optional(),
+    reason: z.string().trim().max(500).optional().default("")
+  })
+  .refine(
+    (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+    "Provide either an email or a lookup token (not both)."
+  );
 
 interface GuestDetails {
   firstName: string;
@@ -490,7 +521,12 @@ export async function handleCreateBooking(req: any, res: any) {
         transaction.set(counterRef, { count: 1 });
       }
 
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(3, "0")}`;
+      // Per H3 (hardening batch 2026-06-26): sequence
+      // width is now 5 digits. Mirrors the shared
+      // `generateBookingRef` helper; the inline form is
+      // kept here so the counter transaction + the ref
+      // share the same scope.
+      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
 
       // Save output for outer scope
       finalBookingRef = bookingRef;
@@ -512,6 +548,11 @@ export async function handleCreateBooking(req: any, res: any) {
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
         ratePerNight: activeRoomRate,
+        // Per H2 (hardening batch 2026-06-26): random
+        // 32-char hex token used by the email magic link
+        // to authenticate the lookup / cancel endpoints
+        // without leaking the raw `guestEmail` in URLs.
+        lookupToken: generateLookupToken(),
         totalPrice,
         originalTotalPrice,
         discountType: discountType || "",
@@ -839,7 +880,12 @@ export async function handleCreateWalkin(req: any, res: any) {
         transaction.set(counterRef, { count: 1 });
       }
 
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(3, "0")}`;
+      // Per H3 (hardening batch 2026-06-26): sequence
+      // width is now 5 digits. Mirrors the shared
+      // `generateBookingRef` helper; the inline form is
+      // kept here so the counter transaction + the ref
+      // share the same scope.
+      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
 
       // 7. Prepare Document Fields
@@ -860,6 +906,13 @@ export async function handleCreateWalkin(req: any, res: any) {
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         originalTotalPrice: subtotal,
+        // Per H2 (hardening batch 2026-06-26): see the
+        // matching field in `handleCreateBooking`. The
+        // walkin flow writes a token too so the email
+        // magic link works the same way for walkins
+        // (reception sends it manually to the guest's
+        // email).
+        lookupToken: generateLookupToken(),
         discountType: "",
         discountPct: 0,
         discountIdPhotoUrl: null,
@@ -1048,23 +1101,37 @@ export async function handleCancelBooking(req: any, res: any) {
       // the guest-self-service cancel input with the same
       // schema as lookup so a 100KB body / malformed email
       // never reaches Firestore.
+      //
+      // Per H2 (hardening batch 2026-06-26): the schema
+      // accepts either `guestEmail` (legacy) OR `token`
+      // (the per-booking `lookupToken`). The query below
+      // branches on which was supplied.
       const parsed = guestCancelSchema.safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({
           success: false,
-          error: "Please provide a valid booking reference and email address."
+          error: "Please provide a valid booking reference and email or lookup token."
         });
       }
       validReason = parsed.data.reason;
 
+      const compositeFilter = parsed.data.token
+        ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() }
+        : { field: "guestEmail", value: parsed.data.guestEmail };
+
       const query = adminDb.collection("bookings")
         .where("bookingRef", "==", parsed.data.bookingRef)
-        .where("guestEmail", "==", parsed.data.guestEmail)
+        .where(compositeFilter.field, "==", compositeFilter.value)
         .limit(1);
 
       const snapshot = await query.get();
       if (snapshot.empty) {
-        return res.status(404).json({ success: false, error: "Booking not found with matching email." });
+        return res.status(404).json({
+          success: false,
+          error: parsed.data.token
+            ? "Booking not found with matching token."
+            : "Booking not found with matching email."
+        });
       }
 
       bookingDocumentRef = snapshot.docs[0].ref;
@@ -1426,20 +1493,41 @@ export async function handleLookupBooking(req: any, res: any) {
     // does not become an oracle for the booking-ref shape.
     return res.status(400).json({
       success: false,
-      error: "Please provide a valid booking reference and email address."
+      error: "Please provide a valid booking reference and email or lookup token."
     });
   }
 
-  const { bookingRef: trimmedRef, guestEmail: normalizedEmail } = parsed.data;
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken } = parsed.data;
 
   try {
+    // Per H2 (hardening batch 2026-06-26): the token
+    // path queries by `bookingRef + lookupToken` (an
+    // indexed compound — both fields are part of the
+    // existing composite index), bypassing `guestEmail`
+    // entirely. The email path is unchanged.
+    const compositeFilter = lookupToken
+      ? { field: "lookupToken", value: String(lookupToken).toLowerCase() }
+      : { field: "guestEmail", value: normalizedEmail };
+
     const snapshot = await adminDb.collection("bookings")
       .where("bookingRef", "==", trimmedRef)
-      .where("guestEmail", "==", normalizedEmail)
+      .where(compositeFilter.field, "==", compositeFilter.value)
       .limit(1)
       .get();
 
     if (snapshot.empty) {
+      // The composite index on (bookingRef, guestEmail)
+      // is the original lookup path. If the email-mode
+      // query returns no rows, retry with a fallback
+      // (limit 5) by bookingRef and re-filter in JS in
+      // case the stored email differs in case / whitespace.
+      // The token-mode query has no equivalent fallback
+      // (tokens are generated server-side and never
+      // re-cased by the user).
+      if (lookupToken) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+
       const fallbackSnapshot = await adminDb.collection("bookings")
         .where("bookingRef", "==", trimmedRef)
         .limit(5)

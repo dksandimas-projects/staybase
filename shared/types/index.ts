@@ -78,6 +78,16 @@ export interface Booking {
   // `paymentProofUrl === null` checks without a string
   // comparison.
   paymentProofUrl: string | null;
+  // Per H2 (hardening batch 2026-06-26): 32-char hex
+  // random token generated at booking-create time. The
+  // email magic link carries `?ref={bookingRef}&token={
+  // lookupToken}` instead of `?ref={...}&email={...}` so
+  // PII (the guest's email) never appears in URLs /
+  // browser history / Vercel access logs. The lookup +
+  // cancel endpoints accept either `{ bookingRef,
+  // guestEmail }` (legacy) or `{ bookingRef, token }`
+  // (new). See `server/handlers/bookings.ts`.
+  lookupToken: string;
   source: BookingSource;
   notes: string;
   memberId: string | null;

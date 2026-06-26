@@ -115,6 +115,10 @@ export interface Booking {
   // Per BF-45 (booking-flow audit 2026-06-26): canonical
   // "no payment proof" is `null` (not `""`).
   paymentProofUrl: string | null;
+  // Per H2 (hardening batch 2026-06-26): the email magic
+  // link carries this token (not the raw email) in the
+  // URL. See `shared/types/index.ts`.
+  lookupToken: string;
   source: "online" | "walk-in" | "phone" | "facebook" | "corporate";
   notes: string;
   memberId: string | null;
@@ -817,6 +821,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             // Per BF-45 (booking-flow audit 2026-06-26):
             // canonical "absent" is `null`, not `""`.
             paymentProofUrl: data.paymentProofUrl || null,
+            // Per H2 (hardening batch 2026-06-26): the
+            // server generates this on create. The admin
+            // app just hydrates the field for display /
+            // re-issue flows.
+            lookupToken: data.lookupToken || "",
             source: data.source || "online",
             notes: data.notes || "",
             memberId: data.memberId || null,
