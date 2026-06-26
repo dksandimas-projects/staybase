@@ -149,7 +149,7 @@ describe("/api/bookings/confirm", () => {
       path: "bookings/booking_1",
       data: expect.objectContaining({
         status: "confirmed",
-        confirmedBy: "frontdesk@sparkinn.com"
+        confirmedBy: "staff_1"
       })
     });
     expect(sendBookingTrigger).toHaveBeenCalledTimes(1);
@@ -265,6 +265,7 @@ describe("walk-in booking creation booking-confirmed trigger", () => {
     mockRooms["room_101"] = {
       isActive: true,
       status: "available",
+      type: "standard-double",
       maxCapacity: 4,
       pricePerNight: 2000,
       weekendRate: 2500,
@@ -274,6 +275,27 @@ describe("walk-in booking creation booking-confirmed trigger", () => {
     mockSettings["breakfastConfig"] = {
       isEnabled: false,
       ratePerPersonPerNight: 0
+    };
+    // Per BF-02 (booking-flow audit 2026-06-26): the walkin
+    // handler reads pricing + max capacity from the room type
+    // entry in settings/hotelConfig.roomTypes[], not from the
+    // individual room document (per W3.6/W3.7).
+    mockSettings["hotelConfig"] = {
+      roomTypes: [
+        {
+          value: "standard-double",
+          label: "Standard Double",
+          shortLabel: "Std Double",
+          imageUrls: [],
+          bedDefinition: "1 double bed",
+          description: "Simple comfort.",
+          amenities: ["WiFi", "AC"],
+          maxCapacity: 4,
+          pricePerNight: 2000,
+          weekendRate: 2500,
+          corporateRate: 1800
+        }
+      ]
     };
   });
 

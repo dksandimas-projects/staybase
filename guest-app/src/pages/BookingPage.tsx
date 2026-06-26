@@ -32,6 +32,12 @@ import {
   staggerContainer,
   compressImageFile
 } from "@spark-inn/shared";
+// Per BF-29 (booking-flow audit 2026-06-26): replace the
+// inline email regex with Zod's `z.string().email()` so the
+// validation matches the server-side schema (RFC-ish checks,
+// consistent error formatting) and stays in sync with the
+// rest of the form-validation surface.
+import { z } from "zod";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -43,19 +49,44 @@ import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
-const breakfastRatePerPerson = 350;
-const breakfastEnabled = true;
+// Per BF-26 (booking-flow audit 2026-06-26): the previous module-level
+// constants ignored the live `breakfastConfig` (rate + on/off toggle).
+// The Step 1 card price + the Room + Breakfast option therefore
+// disagreed with the server whenever admin configured a different
+// rate or disabled breakfast. Both values are now read from the
+// `breakfastConfig` state loaded from Firestore (see fetchConfigs
+// below) — these constants are gone.
 
 type RateChoice = "room-only" | "room-breakfast";
 type GuestField = "firstName" | "lastName" | "email" | "phone" | "guestCount";
-type VoucherIssue = "expired" | "usage-limit" | "room-mismatch" | "invalid";
+type VoucherIssue = "expired" | "usage-limit" | "room-mismatch" | "inactive" | "invalid";
 
+// Per BF-07 (booking-flow audit 2026-06-26): the previous
+// `voucherMessages` map was defined but never read — the
+// handler surfaced raw server error strings like
+// "Voucher has expired." which read awkwardly to guests. The
+// map is now used by `mapVoucherError()` to translate the
+// server message into one of the friendly strings below. The
+// `inactive` case was added for vouchers with `isActive: false`.
 const voucherMessages: Record<VoucherIssue, string> = {
   expired: "This voucher expired already. You can remove it or try another code.",
   "usage-limit": "This voucher has reached its usage limit. Please choose another code.",
   "room-mismatch": "This voucher is not valid for the selected room type.",
+  inactive: "This voucher is currently inactive. Please contact the front desk for a fresh code.",
   invalid: "We could not find that voucher. Check the code and try again."
 };
+
+// Per BF-07: map the server's raw voucher error text to a
+// friendly message. Falls back to the `invalid` message when
+// the server text doesn't match any known error.
+function mapVoucherError(serverMessage: string): string {
+  const lower = serverMessage.toLowerCase();
+  if (lower.includes("expired")) return voucherMessages.expired;
+  if (lower.includes("usage") || lower.includes("limit")) return voucherMessages["usage-limit"];
+  if (lower.includes("room type") || lower.includes("applicable")) return voucherMessages["room-mismatch"];
+  if (lower.includes("inactive")) return voucherMessages.inactive;
+  return voucherMessages.invalid;
+}
 
 function formatStayDate(value: string) {
   return new Intl.DateTimeFormat(config.locale, {
@@ -162,13 +193,17 @@ export function BookingPage() {
   const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
 
   const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
-  const [discountIdFile, setDiscountIdFile] = useState<string | null>(null);
-  const [discountIdUrl, setDiscountIdUrl] = useState<string | null>(null);
+  // Per BF-30 (booking-flow audit 2026-06-26): the previous
+  // shape was two parallel state vars (`discountIdFile` +
+  // `discountIdUrl`) that could desync. Collapse to a single
+  // record `{ name, url } | null` so the file name and
+  // download URL are always written together. Same for the
+  // payment proof.
+  const [discountIdUpload, setDiscountIdUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
 
-  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank" | "pay-at-hotel">("gcash");
-  const [paymentProofFile, setPaymentProofFile] = useState<string | null>(null);
-  const [paymentProofUrl, setPaymentProofUrl] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank" | "paypal" | "pay-at-hotel">("gcash");
+  const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
 
   const [termsConsent, setTermsConsent] = useState(false);
@@ -266,8 +301,13 @@ export function BookingPage() {
     ? calculateBookingTotal({
         ratePerNight: selectedRoomRates.pricePerNight,
         numNights: nights,
+        // Per BF-08 (booking-flow audit 2026-06-26): pass the
+        // weekend-aware per-night breakdown so the displayed
+        // total matches the server's `totalPrice` (the server
+        // walks each night and substitutes the weekend rate).
+        roomTotal,
         numGuests: guests,
-        breakfastRate: breakfastRate,
+        breakfastRate,
         hasBreakfast,
         discountPct,
         voucherDiscount,
@@ -291,10 +331,18 @@ export function BookingPage() {
   reviewParams.set("phone", guestDetails.phone);
   reviewParams.set("requests", guestDetails.requests);
 
+  // Per BF-29: Zod-based email validation. Compile once at
+  // module scope so the regex doesn't re-compile on every
+  // render. Zod's `.email()` matches the server's
+  // `GuestDetailsSchema` (shared/schemas/booking.ts).
+  const emailSchema = z.string().email("Enter a valid email address.");
+
   const guestErrors = {
     firstName: guestDetails.firstName.trim() ? "" : "First name is required.",
     lastName: guestDetails.lastName.trim() ? "" : "Last name is required.",
-    email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestDetails.email) ? "" : "Enter a valid email address.",
+    email: guestDetails.email.trim() && emailSchema.safeParse(guestDetails.email).success
+      ? ""
+      : "Enter a valid email address.",
     phone: guestDetails.phone.trim().length >= 8 ? "" : "Phone number is required.",
     guestCount:
       Number(guestDetails.guestCount) >= 1 && selectedMaxCapacity > 0 && Number(guestDetails.guestCount) <= selectedMaxCapacity
@@ -535,7 +583,12 @@ export function BookingPage() {
       setVoucherError("");
     } catch (err: any) {
       console.error("Voucher error:", err);
-      setVoucherError(err.message || "We could not find that voucher. Check the code and try again.");
+      // Per BF-07 (booking-flow audit 2026-06-26): map the
+      // server's raw error text to one of the friendly
+      // `voucherMessages`. Fall back to the `invalid` message
+      // when the server text doesn't match.
+      const friendly = err?.message ? mapVoucherError(err.message) : voucherMessages.invalid;
+      setVoucherError(friendly);
       setVoucherApplied(false);
     } finally {
       setIsValidatingVoucher(false);
@@ -551,8 +604,7 @@ export function BookingPage() {
   function handleDiscountChange(type: "none" | "senior" | "pwd") {
     setDiscountType(type);
     if (type === "none") {
-      setDiscountIdFile(null);
-      setDiscountIdUrl(null);
+      setDiscountIdUpload(null);
     }
   }
 
@@ -566,8 +618,9 @@ export function BookingPage() {
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${compressed.file.name}`);
         await uploadBytes(storageRef, compressed.file);
         const url = await getDownloadURL(storageRef);
-        setDiscountIdUrl(url);
-        setDiscountIdFile(file.name);
+        // Per BF-30: single state record so the name + url
+        // are always written together (no desync race).
+        setDiscountIdUpload({ name: file.name, url });
       } catch (err) {
         console.error("Discount ID upload failed:", err);
         alert("Image upload failed. Please try again.");
@@ -586,8 +639,8 @@ export function BookingPage() {
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
         await uploadBytes(storageRef, compressed.file);
         const url = await getDownloadURL(storageRef);
-        setPaymentProofUrl(url);
-        setPaymentProofFile(file.name);
+        // Per BF-30: single state record.
+        setPaymentProofUpload({ name: file.name, url });
       } catch (err) {
         console.error("Payment proof upload failed:", err);
         alert("Receipt upload failed. Please try again.");
@@ -623,10 +676,10 @@ export function BookingPage() {
             consent: guestDetails.consent
           },
           discountType: discountType === "none" ? "" : discountType,
-          discountIdPhotoUrl: discountIdUrl,
+          discountIdPhotoUrl: discountIdUpload?.url ?? null,
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
-          paymentProofUrl: paymentProofUrl,
+          paymentProofUrl: paymentProofUpload?.url ?? null,
           // Per W1.3 / decision #79 / audit S1.5: the standard
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
@@ -642,6 +695,14 @@ export function BookingPage() {
       }
 
       // Successful creation, redirect to confirmation page
+      // Per BF-39 (booking-flow audit 2026-06-26): prefer the
+      // server-returned `totalPrice` so the confirmation page
+      // displays what was actually charged. Fall back to the
+      // local `total` only if the server response is missing it
+      // (legacy / future-proof).
+      const serverTotal = typeof result.data?.totalPrice === "number"
+        ? result.data.totalPrice
+        : null;
       const confirmParams = new URLSearchParams({
         bookingRef: result.data.bookingRef,
         roomType: result.data.roomType || selectedTypeEntry?.value || "",
@@ -651,7 +712,7 @@ export function BookingPage() {
         checkOut,
         guests: String(guests),
         paymentMethod,
-        total: String(total)
+        total: String(serverTotal ?? total)
       });
       navigate(`/book/confirm?${confirmParams.toString()}`);
     } catch (err: any) {
@@ -881,8 +942,8 @@ export function BookingPage() {
   }
 
   if (isReviewStep) {
-    const isIdUploadRequired = discountType !== "none" && !discountIdUrl;
-    const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUrl;
+  const isIdUploadRequired = discountType !== "none" && !discountIdUpload;
+  const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUpload;
     const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry);
 
     // Retrieve active payment method details from hotelConfig
@@ -988,17 +1049,16 @@ export function BookingPage() {
                   <p className="mt-1 text-xs text-gray-500">Please upload a photo of your valid ID card. Our front desk will verify it upon check-in.</p>
                   
                   <div className="mt-3">
-                    {discountIdFile ? (
+                    {discountIdUpload ? (
                       <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 size={18} className="text-status-green-text" />
-                          <span className="text-sm font-medium text-gray-800">{discountIdFile}</span>
+                          <span className="text-sm font-medium text-gray-800">{discountIdUpload.name}</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            setDiscountIdFile(null);
-                            setDiscountIdUrl(null);
+                            setDiscountIdUpload(null);
                           }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
@@ -1031,7 +1091,7 @@ export function BookingPage() {
               <h3 className="text-lg font-semibold text-gray-950">Payment Method</h3>
               <p className="mt-1 text-sm text-gray-600">Select how you would like to pay for your reservation.</p>
 
-              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {/* GCash */}
                 <button
                   type="button"
@@ -1064,6 +1124,28 @@ export function BookingPage() {
                   <span className="mt-0.5 block text-xs text-gray-500">Direct Deposit</span>
                 </button>
 
+                {/* PayPal — per BF-10 (booking-flow audit 2026-06-26):
+                   the spec (`BACKEND.md`, `API-ROUTES.md`) allows
+                   `"paypal"` as a `PaymentMethod` value, but the UI
+                   didn't expose it. Added as a fourth option; admin
+                   configures the PayPal account details in
+                   `settings/hotelConfig.paymentMethods[]` like the
+                   other methods. */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("paypal")}
+                  className={cn(
+                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                    paymentMethod === "paypal"
+                      ? "border-primary bg-primary-light ring-1 ring-primary"
+                      : "border-gray-200 bg-white hover:border-primary"
+                  )}
+                >
+                  <CreditCard size={20} className={paymentMethod === "paypal" ? "text-primary" : "text-gray-500"} />
+                  <span className="mt-3 block text-sm font-bold text-gray-900">PayPal</span>
+                  <span className="mt-0.5 block text-xs text-gray-500">International card / PayPal balance</span>
+                </button>
+
                 {/* Pay at Hotel */}
                 {(!hotelConfig || hotelConfig.payAtHotelEnabled) && (
                   <button
@@ -1088,19 +1170,25 @@ export function BookingPage() {
                 {paymentMethod === "gcash" && (
                   <div className="grid sm:grid-cols-5">
                     <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
-                      <img
-                        src={activePaymentConfig?.qrUrl || "https://lh3.googleusercontent.com/aida-public/AB6AXuCYBsw9jHiKwa9uZlbY7gkxyAiWy9iO8lZGoL0XHN7xvIgaNO7vtr3QzTuUUpa_zti6o6V77lVXpUrBfIxdcwCku-9V2_zJ34vuxteegFyGZ4gCaqLUNSjPW4oFlX7juZojMJzOFBtLH0-TtD5RZlk-kS5FqRBZopVFBvPkfjSRUQofx5VzpEkkdwPiIa0kQXNQw7VhHMmE_HC0DE8lIDCX5aSWJF_3v0N07C1i8nr2Giua6iOdTxTVWNr1aZZhfSvTeu9kbaXNA1xb"}
-                        alt="GCash / Maya QR Code"
-                        className="h-40 w-40 object-contain rounded"
-                      />
+                      {activePaymentConfig?.qrUrl ? (
+                        <img
+                          src={activePaymentConfig.qrUrl}
+                          alt="GCash / Maya QR Code"
+                          className="h-40 w-40 object-contain rounded"
+                        />
+                      ) : (
+                        <p className="text-xs text-gray-500 text-center px-4">
+                          QR code not yet configured. Please contact the front desk for payment details.
+                        </p>
+                      )}
                     </div>
                     <div className="sm:col-span-3 p-5 flex flex-col justify-center">
                       <h4 className="font-semibold text-primary text-base">Scan to Pay</h4>
                       <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                        Please use your digital wallet (GCash or Maya) to scan the QR code. Ensure the recipient name is <span className="font-bold text-gray-800">{activePaymentConfig?.accountName || "spark inn Bohol"}</span>.
+                        Please use your digital wallet (GCash or Maya) to scan the QR code. Ensure the recipient name is <span className="font-bold text-gray-800">{activePaymentConfig?.accountName || config.legalName}</span>.
                       </p>
                       <p className="mt-1 text-xs font-semibold text-gray-800">
-                        Number: {activePaymentConfig?.accountNumber || "0917-000-0000"}
+                        Number: {activePaymentConfig?.accountNumber || config.frontDeskPhone}
                       </p>
                       <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
                         <li className="flex items-center gap-1.5">
@@ -1122,21 +1210,46 @@ export function BookingPage() {
                     <div className="mt-3 grid gap-3 text-xs text-gray-600 sm:grid-cols-3">
                       <div>
                         <p className="font-bold text-gray-500 uppercase tracking-wide">Bank Name</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.label || "BPI"}</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.label || "—"}</p>
                       </div>
                       <div>
                         <p className="font-bold text-gray-500 uppercase tracking-wide">Account Name</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountName || "Spark Inn Hotel Corp"}</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountName || config.legalName}</p>
                       </div>
                       <div>
                         <p className="font-bold text-gray-500 uppercase tracking-wide">Account Number</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountNumber || "1234-5678-90"}</p>
+                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountNumber || "—"}</p>
                       </div>
                     </div>
-                    <ul className="mt-4 space-y-1.5 text-xs text-gray-500">
+                    <p className="mt-4 text-xs text-gray-500">
+                      Bank details not yet configured. Please contact the front desk at <span className="font-semibold text-gray-800">{config.frontDeskPhone}</span> for the deposit slip.
+                    </p>
+                    <ul className="mt-2 space-y-1.5 text-xs text-gray-500">
                       <li className="flex items-center gap-1.5">
                         <Info size={14} className="text-primary" />
                         Please complete transfer within 30 minutes to hold room.
+                      </li>
+                    </ul>
+                  </div>
+                )}
+
+                {paymentMethod === "paypal" && (
+                  <div className="p-5">
+                    <h4 className="font-semibold text-primary text-base">PayPal Payment Details</h4>
+                    <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+                      Send your payment to our PayPal account: <span className="font-bold text-gray-800">{activePaymentConfig?.accountName || config.legalName}</span>.
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                      PayPal email: <span className="font-bold text-gray-800">{activePaymentConfig?.accountNumber || config.supportEmail}</span>
+                    </p>
+                    <ul className="mt-4 space-y-1.5 text-xs text-gray-500">
+                      <li className="flex items-center gap-1.5">
+                        <Info size={14} className="text-primary" />
+                        Use "Friends & Family" for non-Philippine bank transfers when possible to avoid fees.
+                      </li>
+                      <li className="flex items-center gap-1.5">
+                        <ShieldCheck size={14} className="text-primary" />
+                        Secure transaction via PayPal — no card details shared with the hotel.
                       </li>
                     </ul>
                   </div>
@@ -1164,17 +1277,16 @@ export function BookingPage() {
                   <p className="mt-1 text-xs text-gray-500">Upload a screenshot or photo of your successful digital wallet payment or bank transfer receipt.</p>
                   
                   <div className="mt-3">
-                    {paymentProofFile ? (
+                    {paymentProofUpload ? (
                       <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3 bg-gray-50">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 size={18} className="text-status-green-text" />
-                          <span className="text-sm font-medium text-gray-800">{paymentProofFile}</span>
+                          <span className="text-sm font-medium text-gray-800">{paymentProofUpload.name}</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            setPaymentProofFile(null);
-                            setPaymentProofUrl(null);
+                            setPaymentProofUpload(null);
                           }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
@@ -1412,10 +1524,17 @@ export function BookingPage() {
               {availableRoomTypes.map((entry, index) => {
                 const type = entry.type;
                 const isSelected = type.value === selectedRoomType;
-                // Per W3.6 — pricing lives on the type.
+                // Per W3.6 — pricing + max capacity live on the type.
                 const typePricePerNight = type.pricePerNight ?? 0;
                 const typeMaxCapacity = type.maxCapacity ?? 0;
                 const typeImageUrl = getRoomTypeImages(roomTypes, type.value)[0];
+                // Per BF-26: read the live breakfast rate from
+                // `breakfastConfig` (loaded from Firestore). The
+                // previous module-level constant `350` ignored
+                // the admin's configured rate.
+                const liveBreakfastRate = breakfastConfig.isEnabled
+                  ? (breakfastConfig.ratePerPersonPerNight || 0)
+                  : 0;
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights
@@ -1424,7 +1543,7 @@ export function BookingPage() {
                   ratePerNight: typePricePerNight,
                   numNights: nights,
                   numGuests: guests,
-                  breakfastRate: breakfastRatePerPerson,
+                  breakfastRate: liveBreakfastRate,
                   hasBreakfast: true
                 });
 
@@ -1490,12 +1609,13 @@ export function BookingPage() {
                             totalLabel={`${formatPrice(roomOnlyTotal)} total`}
                             onSelect={() => selectRoomType(type.value, "room-only")}
                           />
-                          {breakfastEnabled ? (
+                          {breakfastConfig.isEnabled ? (
                             <RateOption
                               active={isSelected && rateChoice === "room-breakfast"}
                               label="Room + Breakfast"
                               helper="Includes daily local breakfast for selected guests"
-                              priceLabel={`${formatPrice(typePricePerNight + breakfastRatePerPerson * guests)} / night`}
+                              // Per BF-26: live rate + guest count.
+                              priceLabel={`${formatPrice(typePricePerNight + liveBreakfastRate * guests)} / night`}
                               totalLabel={`${formatPrice(breakfastTotal)} total`}
                               onSelect={() => selectRoomType(type.value, "room-breakfast")}
                             />

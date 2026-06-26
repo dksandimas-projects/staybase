@@ -13,5 +13,7 @@ export * from "./utils/images";
 export * from "./utils/points";
 export * from "./utils/pricing";
 export * from "./utils/references";
+export * from "./utils/storageJanitor";
 export * from "./utils/vouchers";
 export * from "./utils/corporate-codes";
+export * from "./utils/failureBackoff";
