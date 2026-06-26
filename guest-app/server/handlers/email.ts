@@ -2,6 +2,14 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getManilaDateInfo()` helper was duplicated in 5 server-side
+// files. The shared implementation lives in
+// `shared/utils/bookingDates.ts`. The cron handler in
+// `getTomorrowConfirmedBookings` (below) uses the shared
+// helper to anchor "today" in the property's timezone, then
+// adds 1 day for the "tomorrow at 00:00 local" range.
+import { getManilaDateInfo } from "@spark-inn/shared";
 
 type EmailAction =
   | "booking-submitted"
@@ -43,6 +51,20 @@ function siteUrl(path = "") {
 
 function adminUrl(path = "") {
   return `https://${config.adminDomain}${path}`;
+}
+
+// Per H2 (hardening batch 2026-06-26): the public
+// lookup deep-link carries the per-booking `lookupToken`
+// instead of the raw `guestEmail`. The token is random,
+// unguessable, and unique per booking so the email
+// magic link can authenticate the recipient without
+// leaking PII into URLs / browser history / Vercel
+// access logs.
+function lookupUrl(booking: any) {
+  const ref = encodeURIComponent(booking.bookingRef || "");
+  const token = encodeURIComponent(booking.lookupToken || "");
+  if (!ref || !token) return siteUrl("/my-booking");
+  return siteUrl(`/my-booking?ref=${ref}&token=${token}`);
 }
 
 function addressLine() {
@@ -282,7 +304,7 @@ function bookingSubmittedEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">You can check the latest status any time using your booking reference and email address.</p>
     `,
     ctaLabel: "Check booking status",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -297,7 +319,7 @@ function paymentConfirmedEmail(booking: any) {
       ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
     `,
     ctaLabel: "View booking",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -312,7 +334,7 @@ function bookingConfirmedEmail(booking: any) {
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Review booking details",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -327,7 +349,7 @@ function checkinReminderEmail(booking: any) {
       ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
     `,
     ctaLabel: "Open booking lookup",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -361,7 +383,7 @@ function discountRejectedEmail(booking: any) {
       ${card("Updated booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "View my booking",
-    ctaUrl: siteUrl("/my-booking")
+    ctaUrl: lookupUrl(booking)
   });
 }
 
@@ -784,8 +806,13 @@ export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
 }
 
 async function getTomorrowConfirmedBookings() {
-  const nowLocal = new Date(new Date().toLocaleString("en-US", { timeZone: config.timezone }));
-  const start = new Date(nowLocal);
+  // Per BF-42 (booking-flow audit 2026-06-26): this is NOT
+  // a duplicate of getManilaDateInfo() — it computes a
+  // "tomorrow at 00:00 local" range for the cron query. Use
+  // the shared helper to anchor "today" in the property's
+  // timezone, then add 1 day.
+  const { manilaDate } = getManilaDateInfo(config.timezone);
+  const start = new Date(manilaDate);
   start.setDate(start.getDate() + 1);
   start.setHours(0, 0, 0, 0);
 

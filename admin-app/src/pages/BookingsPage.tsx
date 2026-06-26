@@ -1273,7 +1273,15 @@ export function BookingsPage() {
         specialRequests: "Walk-in registration.",
         status: immediateCheckIn ? "checked-in" : "confirmed",
         paymentMethod: walkinPayment,
-        paymentProofUrl: "",
+        // Per BF-45 (booking-flow audit 2026-06-26):
+        // canonical "absent" is `null`, not `""`.
+        paymentProofUrl: null,
+        // Per H2 (hardening batch 2026-06-26): the admin
+        // walkin flow generates a fresh per-booking token
+        // on the server. The client just needs to send an
+        // empty string placeholder so the type is satisfied;
+        // the server overwrites it with the real token.
+        lookupToken: "",
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         memberId: null,

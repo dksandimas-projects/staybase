@@ -118,7 +118,19 @@ Booking {
   specialRequests: string
   status: BookingStatus
   paymentMethod: PaymentMethod
-  paymentProofUrl: string
+  // Per BF-45 (booking-flow audit 2026-06-26): the
+  // canonical "no payment proof" value is `null` (not
+  // `""`). Writes coalesce `""` to `null` so all read
+  // sites can rely on `!!booking.paymentProofUrl` /
+  // `paymentProofUrl === null` checks without a string
+  // comparison.
+  paymentProofUrl: string | null
+  // Per H2 (hardening batch 2026-06-26): 32-char hex
+  // random token generated at booking-create time. The
+  // email magic link carries `?ref={bookingRef}&token={
+  // lookupToken}` instead of `?ref={...}&email={...}` so
+  // PII (the guest's email) never appears in URLs.
+  lookupToken: string
   source: BookingSource
   linkedInquiryId: string | null     // set when created from a converted corporate inquiry (per `DECISIONS-FEATURES.md #102`)
   louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99`)
@@ -145,6 +157,23 @@ Booking {
   breakfastSelections?: Record<string, string> // key format: yyyy-mm-dd-guest-n → silog item name
   handledBy: string
   cancellationReason: string
+  // Per BF-37 (booking-flow audit 2026-06-26) and W4.4 /
+  // decision #104: per-booking email idempotency markers.
+  // Written by the server when a transactional email fires so
+  // retries (and manual re-fires via /api/email/*) do not
+  // duplicate. Set on `staff-new-booking` and `staff-new-payment`;
+  // `reminderSentAt` is the cron idempotency key (per
+  // DECISIONS-FEATURES.md #83).
+  emailNotificationsSent?: {
+    staffNewBooking?: Date
+    staffNewPayment?: Date
+    reminderSentAt?: Date
+  }
+  // Same field as `emailNotificationsSent.reminderSentAt`; the
+  // schema uses both names — keep `reminderSentAt` at the top
+  // level for the cron query (DECISIONS-FEATURES.md #83) and
+  // the nested form for the other two.
+  reminderSentAt?: Date
   createdAt: Date
   updatedAt: Date
 }

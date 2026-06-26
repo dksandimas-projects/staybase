@@ -77,4 +77,29 @@ describe("pricing utilities", () => {
     });
     expect(total).toBe(0);
   });
+
+  // Per BF-08 (booking-flow audit 2026-06-26): callers can
+  // pass a pre-computed `roomTotal` to override the flat
+  // `ratePerNight * numNights` calc. This lets the BookingPage
+  // pass a weekend-aware per-night breakdown and display the
+  // same total the server will charge.
+  test("roomTotal override takes precedence over ratePerNight * numNights (BF-08)", () => {
+    const total = calculateBookingTotal({
+      ratePerNight: 2000,
+      numNights: 2,
+      roomTotal: 4500 // 1 night @ 2000 + 1 weekend night @ 2500
+    });
+    expect(total).toBe(4500);
+  });
+
+  test("roomTotal override still flows through the discount stack (BF-08)", () => {
+    const total = calculateBookingTotal({
+      ratePerNight: 2000,
+      numNights: 2,
+      roomTotal: 4500,
+      discountPct: 20
+    });
+    // subtotal = 4500, senior discount 20% = 900, total = 3600
+    expect(total).toBe(3600);
+  });
 });

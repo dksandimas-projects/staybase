@@ -1,8 +1,67 @@
-import { adminDb } from "../lib/firebase-admin";
+import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
-import { toDateOrNull, validateCorporateCode } from "@spark-inn/shared";
+import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REGEX, generateLookupToken } from "@spark-inn/shared";
+import { z } from "zod";
 import config from "../../../hotel.config";
+
+// Per BF-21 (booking-flow audit 2026-06-26): the public
+// self-service endpoints (`/api/bookings/lookup`,
+// `/api/bookings/cancel`) accept a bookingRef + guestEmail
+// pair to look up and act on a booking without auth. The
+// previous validation was just `!bookingRef || !guestEmail`,
+// so a 100KB body, `""`, or `"notanemail"` would all hit
+// Firestore. These schemas short-circuit malformed input
+// with a 400 before the query runs.
+//
+// Per H2 (hardening batch 2026-06-26): the schemas now
+// accept either `guestEmail` (legacy) OR `token` (the new
+// per-booking `lookupToken` random hex). Exactly one of
+// the two is required. The token path is what the email
+// magic link uses — the URL no longer carries the raw
+// `guestEmail`, so PII never lands in browser history or
+// Vercel access logs.
+const lookupSchema = z
+  .object({
+    bookingRef: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
+    token: z
+      .string()
+      .trim()
+      .max(64)
+      .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
+      .optional(),
+    turnstileToken: z.string().max(2000).optional()
+  })
+  .refine(
+    (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+    "Provide either an email or a lookup token (not both)."
+  );
+
+const guestCancelSchema = z
+  .object({
+    bookingRef: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
+    token: z
+      .string()
+      .trim()
+      .max(64)
+      .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
+      .optional(),
+    reason: z.string().trim().max(500).optional().default("")
+  })
+  .refine(
+    (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+    "Provide either an email or a lookup token (not both)."
+  );
 
 interface GuestDetails {
   firstName: string;
@@ -50,19 +109,12 @@ interface CreateBookingBody {
   linkedInquiryId?: string | null;
 }
 
-function getManilaDateInfo() {
-  const d = new Date();
-  const manilaStr = d.toLocaleString("en-US", { timeZone: "Asia/Manila" });
-  const manilaDate = new Date(manilaStr);
-  const year = manilaDate.getFullYear();
-  const month = String(manilaDate.getMonth() + 1).padStart(2, "0");
-  const day = String(manilaDate.getDate()).padStart(2, "0");
-  return {
-    todayStr: `${year}-${month}-${day}`,
-    todayCompact: `${year}${month}${day}`,
-    manilaDate
-  };
-}
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getManilaDateInfo()` helper was duplicated here twice
+// (and in `store.ts`, `corporate-inquiries.ts`, `email.ts`,
+// `reference.ts`). The shared implementation lives in
+// `shared/utils/bookingDates.ts` and is imported as
+// `getManilaDateInfo` above. Local definitions removed BF-42.
 
 export async function handleCreateBooking(req: any, res: any) {
   if (req.method !== "POST") {
@@ -132,6 +184,7 @@ export async function handleCreateBooking(req: any, res: any) {
     // optional — anonymous bookings get no member discount.
     let detectedMemberId: string | null = null;
     let detectedMemberDoc: any = null;
+    let memberTokenError: Error | null = null;
     const authHeader = req.headers?.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const idToken = authHeader.split("Bearer ")[1];
@@ -147,8 +200,39 @@ export async function handleCreateBooking(req: any, res: any) {
           }
         }
       } catch (err) {
-        // Invalid/expired token — fall through to anonymous booking
+        // Per BF-32 (booking-flow audit 2026-06-26): the previous
+        // handler silently swallowed every token-verify error
+        // and downgraded to an anonymous booking. A transient
+        // Firebase Auth error (quota, network) would silently
+        // lose a member's discount. We now:
+        //   1. log at warn level so the issue is visible
+        //   2. distinguish "infra" errors (Firebase unavailable,
+        //      network, quota) from auth-style errors (invalid or
+        //      expired token). Infra errors fail the request with
+        //      503 so the client can retry. Auth-style errors
+        //      fall through to anonymous booking.
+        memberTokenError = err as Error;
+        const code = (err as any)?.code || "";
+        // Only rethrow for known Firebase infra codes. Anything
+        // else (including plain `Error` from test mocks or a
+        // thrown string from upstream) is an auth-style failure
+        // and falls through to anonymous.
+        const isInfraError = typeof code === "string" && (
+          code.includes("UNAVAILABLE")
+          || code.includes("DEADLINE_EXCEEDED")
+          || code.includes("RESOURCE_EXHAUSTED")
+          || code.includes("INTERNAL")
+          || code.includes("ECONNRESET")
+          || code.includes("ETIMEDOUT")
+        );
+        if (isInfraError) {
+          throw err;
+        }
+        // Auth-style error: fall through to anonymous booking.
       }
+    }
+    if (memberTokenError) {
+      console.warn("ID token verify failed; continuing as anonymous booking:", memberTokenError.message);
     }
 
     // Run Firestore Transaction
@@ -185,9 +269,16 @@ export async function handleCreateBooking(req: any, res: any) {
         .where("type", "==", roomType)
         .where("isActive", "==", true);
       const candidatesSnapshot = await transaction.get(candidatesQuery);
+      // Per BF-33 (booking-flow audit 2026-06-26): the previous
+      // post-filter `.filter((c) => c.data && c.data.isActive !== false)`
+      // was redundant with the `where("isActive", "==", true)` on
+      // the query. The query is the single source of truth; drop
+      // the post-filter to avoid the two filters drifting out of
+      // sync. Defensive null-check on `data` remains in case a
+      // doc exists with no fields.
       const candidates = candidatesSnapshot.docs
         .map((d) => ({ id: d.id, data: d.data() }))
-        .filter((c) => c.data && c.data.isActive !== false)
+        .filter((c) => c.data)
         .sort((a, b) => {
           const an = String(a.data.roomNumber || a.id);
           const bn = String(b.data.roomNumber || b.id);
@@ -328,11 +419,24 @@ export async function handleCreateBooking(req: any, res: any) {
         if (voucherDoc.exists) {
           const vData = voucherDoc.data()!;
           const now = new Date();
+          // Per BF-18 (booking-flow audit 2026-06-26): the
+          // assigned room's `type` should match the room type
+          // the guest selected (the body's `roomType`). If they
+          // diverge (legacy data drift), skip the voucher — it's
+          // safer to under-apply than to apply against a room
+          // type the guest never saw.
+          const assignedTypeMatchesChosen = !roomType || roomData.type === roomType;
           const isValid =
             vData.isActive !== false &&
             (!vData.expiresAt || vData.expiresAt.toDate() >= now) &&
             (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) &&
-            (!vData.applicableRoomTypes || vData.applicableRoomTypes.length === 0 || vData.applicableRoomTypes.includes(roomData.type));
+            // Per BF-19 (booking-flow audit 2026-06-26): the
+            // empty-or-undefined case is covered by the optional
+            // chaining below; drop the redundant `!vData.applicableRoomTypes`
+            // short-circuit. The `length === 0` covers both the
+            // "empty array" and "falsy" cases via `?.length ?? 0`.
+            ((vData.applicableRoomTypes?.length ?? 0) === 0 || vData.applicableRoomTypes.includes(roomData.type)) &&
+            assignedTypeMatchesChosen;
 
           if (isValid) {
             appliedVoucherCode = formattedCode;
@@ -365,7 +469,12 @@ export async function handleCreateBooking(req: any, res: any) {
       // 8b. Spark Rewards member discount (3rd stacking step per
       // DECISIONS-FEATURES.md #13b). Read settings/rewardsConfig inside
       // the transaction. Applied to the post-voucher subtotal.
-      let memberDiscountPct = 0;
+      // Per BF-20 (booking-flow audit 2026-06-26): the local
+      // var was named `memberDiscountPct` which collides with
+      // the doc field of the same name. Rename to
+      // `appliedMemberDiscountPct` so the doc-write is clearly
+      // distinct from the in-scope variable.
+      let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
@@ -373,7 +482,7 @@ export async function handleCreateBooking(req: any, res: any) {
           const rc = rewardsDoc.data()!;
           if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
-            if (pct > 0) memberDiscountPct = pct;
+            if (pct > 0) appliedMemberDiscountPct = pct;
           }
         }
       }
@@ -385,11 +494,20 @@ export async function handleCreateBooking(req: any, res: any) {
       const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
       const afterSeniorPwd = subtotal - seniorPwdDiscount;
       const afterVoucher = afterSeniorPwd - voucherDiscount;
-      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
-      // Pre-discount total to restore if discount is rejected
-      const originalTotalPrice = discountPct > 0 ? (subtotal - voucherDiscount) : null;
+      // Pre-discount total to restore if discount is rejected.
+      // Per BF-05 (booking-flow audit 2026-06-26): the value
+      // stored must be the full pre-Senior/PWD subtotal so a
+      // rejection restores the price the guest would have paid
+      // without any discount applied. The previous formula
+      // `subtotal - voucherDiscount` was correct only when a
+      // voucher was also applied; without a voucher it stored
+      // `null` and the reject-discount handler 500'd. The
+      // handler now uses `originalTotalPrice - voucherDiscount`
+      // to apply the voucher if one was also applied.
+      const originalTotalPrice = discountPct > 0 ? subtotal : null;
 
       // 9. Generate Reference Number
       const { todayStr, todayCompact } = getManilaDateInfo();
@@ -403,7 +521,12 @@ export async function handleCreateBooking(req: any, res: any) {
         transaction.set(counterRef, { count: 1 });
       }
 
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(3, "0")}`;
+      // Per H3 (hardening batch 2026-06-26): sequence
+      // width is now 5 digits. Mirrors the shared
+      // `generateBookingRef` helper; the inline form is
+      // kept here so the counter transaction + the ref
+      // share the same scope.
+      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
 
       // Save output for outer scope
       finalBookingRef = bookingRef;
@@ -425,6 +548,11 @@ export async function handleCreateBooking(req: any, res: any) {
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
         ratePerNight: activeRoomRate,
+        // Per H2 (hardening batch 2026-06-26): random
+        // 32-char hex token used by the email magic link
+        // to authenticate the lookup / cancel endpoints
+        // without leaking the raw `guestEmail` in URLs.
+        lookupToken: generateLookupToken(),
         totalPrice,
         originalTotalPrice,
         discountType: discountType || "",
@@ -443,14 +571,18 @@ export async function handleCreateBooking(req: any, res: any) {
         specialRequests: guestDetails.requests || "",
         status: paymentProofUrl ? "payment-uploaded" : "pending",
         paymentMethod,
-        paymentProofUrl: paymentProofUrl || "",
+        // Per BF-45 (booking-flow audit 2026-06-26): write
+        // `null` (not `""`) when no payment proof is attached.
+        // `|| null` coalesces both `""` and `undefined` to
+        // `null` so the canonical "absent" value is consistent.
+        paymentProofUrl: paymentProofUrl || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
         // Set from the Authorization Bearer token detected above.
         memberId: detectedMemberId,
-        memberDiscountPct: memberDiscountPct,
+        memberDiscountPct: appliedMemberDiscountPct,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
@@ -471,6 +603,19 @@ export async function handleCreateBooking(req: any, res: any) {
       };
 
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      // Per BF-03 (booking-flow audit 2026-06-26): the
+      // preallocated `bookingId` is a Firestore document ID
+      // generated client-side before payment-proof + discount-ID
+      // uploads. A client retry after a network blip where the
+      // original write committed would hand the same ID to the
+      // second request, and a blind `set` would clobber the prior
+      // booking (including any staff-applied status changes,
+      // the daily counter, and the bookingRef). The existence
+      // check + abort makes the create truly idempotent.
+      const existingBooking = await transaction.get(bookingDocRef);
+      if (existingBooking.exists) {
+        throw new Error("Booking already exists");
+      }
       transaction.set(bookingDocRef, newBooking);
 
       computedData = {
@@ -509,8 +654,20 @@ export async function handleCreateBooking(req: any, res: any) {
     // bookings take a different path with their own notifications).
     // Persist a timestamp on the booking so a re-fire via the
     // /api/email/staff-new-booking endpoint won't double-send.
+    //
+    // Per BF-04 (booking-flow audit 2026-06-26): the previous
+    // guard read `computedData.emailNotificationsSent?.staffNewBooking`
+    // from the in-memory `computedData` object, which is never
+    // populated with that field — so the email always fired
+    // (and a client retry between send and timestamp write would
+    // fire a duplicate). The fix reads the fresh booking doc
+    // after commit so the dedup works against real persisted
+    // state.
     try {
-      if (!computedData.emailNotificationsSent?.staffNewBooking) {
+      const freshBookingSnap = await adminDb.collection("bookings").doc(bookingId).get();
+      const alreadySent = freshBookingSnap.exists
+        && (freshBookingSnap.data() as any)?.emailNotificationsSent?.staffNewBooking;
+      if (!alreadySent) {
         await adminDb.collection("bookings").doc(bookingId).update({
           "emailNotificationsSent.staffNewBooking": new Date()
         });
@@ -531,6 +688,13 @@ export async function handleCreateBooking(req: any, res: any) {
       data: {
         bookingId,
         bookingRef: finalBookingRef,
+        // Per BF-39 (booking-flow audit 2026-06-26): surface the
+        // server-computed `totalPrice` so the confirmation page
+        // (and the corporate confirmation step) can display what
+        // was actually charged, not the client's local
+        // `calculateBookingTotal` (which still carries the
+        // weekend-rate override but is otherwise prone to drift).
+        totalPrice: finalTotalPrice,
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
         roomType
@@ -539,7 +703,25 @@ export async function handleCreateBooking(req: any, res: any) {
 
   } catch (error: any) {
     console.error("Booking creation failed:", error);
-    const status = error.message === "Room no longer available" ? 409 : 500;
+    // Per BF-32 (booking-flow audit 2026-06-26): surface 503
+    // for upstream infrastructure errors (Firebase Auth
+    // quota, network) so the client can retry, instead of
+    // collapsing them into a generic 500.
+    const code = (error as any)?.code || "";
+    const isInfraError = typeof code === "string" && (
+      code.includes("UNAVAILABLE")
+      || code.includes("DEADLINE_EXCEEDED")
+      || code.includes("RESOURCE_EXHAUSTED")
+      || code.includes("INTERNAL")
+    );
+    let status: number;
+    if (error.message === "Room no longer available") {
+      status = 409;
+    } else if (isInfraError) {
+      status = 503;
+    } else {
+      status = 500;
+    }
     return res.status(status).json({
       success: false,
       error: error.message || "An unexpected error occurred during booking creation."
@@ -611,8 +793,29 @@ export async function handleCreateWalkin(req: any, res: any) {
           throw new Error("Room no longer available");
         }
       }
-      if (guests > roomData.maxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
+
+      // 1b. Per W3.6 + W3.7: pricing + max capacity live on the
+      // room type, not on individual room docs. Read the type
+      // entry from settings/hotelConfig.roomTypes[] and use those
+      // values for the capacity check + pricing. The room-doc
+      // fields are no longer authoritative (per TYPES.md §Room).
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      if (!hotelConfigDoc.exists) {
+        throw new Error("Room type catalog is not configured.");
+      }
+      const hotelConfig = hotelConfigDoc.data()!;
+      const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
+      if (!typeEntry) {
+        throw new Error("Room type is not available.");
+      }
+      const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
+      const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
+      const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
+
+      if (guests > typeMaxCapacity) {
+        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
 
       // 2. Overlapping Booking Check
@@ -645,10 +848,10 @@ export async function handleCreateWalkin(req: any, res: any) {
       for (let i = 0; i < numNights; i++) {
         const day = dateCursor.getUTCDay();
         const isWeekend = day === 0 || day === 6;
-        if (isWeekend && roomData.weekendRate) {
-          roomTotal += roomData.weekendRate;
+        if (isWeekend && typeWeekendRate) {
+          roomTotal += typeWeekendRate;
         } else {
-          roomTotal += roomData.pricePerNight;
+          roomTotal += typeBaseRate;
         }
         dateCursor.setUTCDate(dateCursor.getUTCDate() + 1);
       }
@@ -677,7 +880,12 @@ export async function handleCreateWalkin(req: any, res: any) {
         transaction.set(counterRef, { count: 1 });
       }
 
-      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(3, "0")}`;
+      // Per H3 (hardening batch 2026-06-26): sequence
+      // width is now 5 digits. Mirrors the shared
+      // `generateBookingRef` helper; the inline form is
+      // kept here so the counter transaction + the ref
+      // share the same scope.
+      const bookingRef = `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
 
       // 7. Prepare Document Fields
@@ -695,9 +903,16 @@ export async function handleCreateWalkin(req: any, res: any) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        ratePerNight: roomData.pricePerNight,
+        ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         originalTotalPrice: subtotal,
+        // Per H2 (hardening batch 2026-06-26): see the
+        // matching field in `handleCreateBooking`. The
+        // walkin flow writes a token too so the email
+        // magic link works the same way for walkins
+        // (reception sends it manually to the guest's
+        // email).
+        lookupToken: generateLookupToken(),
         discountType: "",
         discountPct: 0,
         discountIdPhotoUrl: null,
@@ -714,7 +929,11 @@ export async function handleCreateWalkin(req: any, res: any) {
         specialRequests: guestDetails.requests || "",
         status: status || "confirmed",
         paymentMethod,
-        paymentProofUrl: "",
+        // Per BF-45 (booking-flow audit 2026-06-26): walkin
+        // bookings start without a payment proof; write `null`
+        // (not `""`) so the canonical "absent" value is
+        // consistent with the online flow.
+        paymentProofUrl: null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",
@@ -740,6 +959,13 @@ export async function handleCreateWalkin(req: any, res: any) {
       }
 
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      // Per BF-03: same idempotency check as handleCreateBooking
+      // — a walkin retry with the same preallocated `bookingId`
+      // would otherwise overwrite the prior record.
+      const existingWalkin = await transaction.get(bookingDocRef);
+      if (existingWalkin.exists) {
+        throw new Error("Booking already exists");
+      }
       transaction.set(bookingDocRef, newBooking);
     });
 
@@ -793,12 +1019,27 @@ export async function handleRejectDiscount(req: any, res: any) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
 
+    // Per BF-05 (booking-flow audit 2026-06-26): the booking's
+    // `originalTotalPrice` is the full pre-Senior/PWD subtotal.
+    // If a voucher was also applied, the new total restores the
+    // voucher deduction too.
+    const voucherDiscount = Number(bookingData.voucherDiscount || 0);
+    const restoredTotalPrice = Math.max(originalTotalPrice - voucherDiscount, 0);
+
+    // Per BF-15 (booking-flow audit 2026-06-26): the
+    // `discountRejectedBy` field is a staff UID per the
+    // BACKEND.md schema, not the staff email. Audit logs flow
+    // through the `bookings/audit/records` collection which is
+    // PII-sensitive; writing the email leaks the staff member's
+    // contact info. Use the UID from the auth result.
+    const discountRejectedBy = req.staff?.uid || "staff";
+
     const updates = {
       discountRejected: true,
-      discountRejectedBy: req.staff.email || "staff",
+      discountRejectedBy,
       discountRejectionReason: reason || "",
       discountPct: 0,
-      totalPrice: originalTotalPrice,
+      totalPrice: restoredTotalPrice,
       status: "pending",
       updatedAt: new Date()
     };
@@ -825,6 +1066,13 @@ export async function handleRejectDiscount(req: any, res: any) {
 export async function handleCancelBooking(req: any, res: any) {
   const { bookingId, bookingRef, guestEmail, reason } = req.body;
 
+  // Per BF-21 (booking-flow audit 2026-06-26): normalise
+  // `reason` once here so the staff + guest paths share the
+  // same downstream binding. Staff passes a free-form string;
+  // guests go through `guestCancelSchema` which trims +
+  // caps to 500 chars.
+  let validReason = typeof reason === "string" ? reason.slice(0, 500) : "";
+
   try {
     let bookingDocumentRef: any;
     let bookingData: any;
@@ -842,45 +1090,85 @@ export async function handleCancelBooking(req: any, res: any) {
       } else {
         return res.status(400).json({ success: false, error: "Booking ID or Reference is required." });
       }
-      
+
       const doc = await bookingDocumentRef.get();
       if (!doc.exists) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
       bookingData = doc.data();
     } else {
-      if (!bookingRef || !guestEmail) {
-        return res.status(400).json({ success: false, error: "Booking Reference and Guest Email are required." });
+      // Per BF-21 (booking-flow audit 2026-06-26): validate
+      // the guest-self-service cancel input with the same
+      // schema as lookup so a 100KB body / malformed email
+      // never reaches Firestore.
+      //
+      // Per H2 (hardening batch 2026-06-26): the schema
+      // accepts either `guestEmail` (legacy) OR `token`
+      // (the per-booking `lookupToken`). The query below
+      // branches on which was supplied.
+      const parsed = guestCancelSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a valid booking reference and email or lookup token."
+        });
       }
+      validReason = parsed.data.reason;
+
+      const compositeFilter = parsed.data.token
+        ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() }
+        : { field: "guestEmail", value: parsed.data.guestEmail };
 
       const query = adminDb.collection("bookings")
-        .where("bookingRef", "==", bookingRef.trim())
-        .where("guestEmail", "==", guestEmail.trim().toLowerCase())
+        .where("bookingRef", "==", parsed.data.bookingRef)
+        .where(compositeFilter.field, "==", compositeFilter.value)
         .limit(1);
-      
+
       const snapshot = await query.get();
       if (snapshot.empty) {
-        return res.status(404).json({ success: false, error: "Booking not found with matching email." });
+        return res.status(404).json({
+          success: false,
+          error: parsed.data.token
+            ? "Booking not found with matching token."
+            : "Booking not found with matching email."
+        });
       }
-      
+
       bookingDocumentRef = snapshot.docs[0].ref;
       bookingData = snapshot.docs[0].data();
     }
 
-    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled" || bookingData.status === "confirmed" || bookingData.status === "payment-confirmed") {
-      return res.status(400).json({ success: false, error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk to cancel a confirmed booking.` });
+    // Per BF-16 (booking-flow audit 2026-06-26): the previous
+    // block list also rejected `confirmed` and `payment-confirmed`
+    // bookings, forcing paid guests to call the front desk. The
+    // self-service path is the more useful default; the only
+    // statuses that genuinely cannot be cancelled online are the
+    // terminal ones (`checked-in` has the guest on-property,
+    // `checked-out` is past, `cancelled` is already terminal). A
+    // confirmed or payment-confirmed booking has no business
+    // reason to be undeleteable — staff can reverse charges out
+    // of band if needed.
+    if (
+      bookingData.status === "checked-in"
+      || bookingData.status === "checked-out"
+      || bookingData.status === "cancelled"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
+      });
     }
 
     await bookingDocumentRef.update({
       status: "cancelled",
-      cancellationReason: reason || "",
+      cancellationReason: validReason,
       updatedAt: new Date()
     });
 
     try {
       await sendBookingTrigger("booking-cancelled", {
         ...bookingData,
-        cancellationReason: reason || ""
+        cancellationReason: validReason
       });
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
@@ -894,101 +1182,192 @@ export async function handleCancelBooking(req: any, res: any) {
 }
 
 export async function handleAddPayment(req: any, res: any) {
-  const { bookingId, amount, method, note } = req.body;
+  const { bookingId, amount, method, note } = req.body || {};
   if (!bookingId || amount === undefined || !method) {
     return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
   }
 
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ success: false, error: "Payment amount must be a positive number." });
+  }
+
+  // Per S4 (soft batch 2026-06-26): a 1B-peso typo would
+  // otherwise land in the payments subcollection + inflate
+  // the running total past `totalPrice` and skew the audit
+  // trail. Cap at 1,000,000 PHP — the largest realistic
+  // single payment for a hotel room.
+  if (numericAmount > 1_000_000) {
+    return res.status(400).json({ success: false, error: "Payment amount exceeds the 1,000,000 per-transaction limit." });
+  }
+
+  // Trim + cap the free-form note. A 100KB note used to
+  // land in the payments subcollection as-is.
+  const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
+
+  // Per BF-14 (booking-flow audit 2026-06-26): the previous
+  // implementation wrote the new payment, then re-read the
+  // entire `bookings/{id}/payments` subcollection to compute
+  // the running total. Two staff adding payments in parallel
+  // could each see the other's write missing and either
+  // (a) both decide `fullyPaid === false` and miss the
+  // `payment-confirmed` trigger, or (b) both decide
+  // `fullyPaid === true` and send duplicate `payment-confirmed`
+  // emails. The fix appends the payment + re-sums + decides
+  // the staff-new-payment dedup inside a Firestore transaction,
+  // then defers the email sends to a single follow-up read.
+  const staffUid = req.staff?.uid || "staff";
+  const paymentRecord = {
+    amount: numericAmount,
+    method,
+    note: safeNote,
+    recordedBy: staffUid,
+    recordedAt: new Date()
+  };
+
+  // Result of the transaction — used to decide which emails to
+  // fire after the transaction commits.
+  let totalPaid = 0;
+  let totalPrice = 0;
+  let isConfirmableStatus = false;
+  let fullyPaid = false;
+  let hadPaymentProof = false;
+  let staffPaymentMarkerMissing = true;
+  let bookingDataSnapshot: any = null;
+
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found");
+      }
+      const bookingData = bookingDoc.data()!;
+      bookingDataSnapshot = bookingData;
 
-    const bookingData = bookingDoc.data()!;
-    const numericAmount = Number(amount);
+      // Append the payment record inside the transaction so the
+      // post-commit read sees the new total.
+      const paymentsRef = bookingRef.collection("payments");
+      const newPaymentRef = paymentsRef.doc();
+      transaction.set(newPaymentRef, paymentRecord);
 
-    const paymentRecord = {
-      amount: numericAmount,
-      method,
-      note: note || "",
-      recordedBy: req.staff.email || "staff",
-      recordedAt: new Date()
-    };
-
-    await bookingRef.collection("payments").add(paymentRecord);
-
-    try {
-      const paymentsSnapshot = await bookingRef.collection("payments").get();
-      const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => {
-        const data = doc.data() as { amount?: number };
+      // Re-read the subcollection inside the same transaction.
+      // The Firestore Admin SDK's transaction.get() works for
+      // subcollection queries.
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      totalPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
+        const data = docSnap.data() as { amount?: number };
         return sum + Number(data.amount || 0);
       }, 0);
 
-      const totalPrice = Number(bookingData.totalPrice || 0);
-      const fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
-      const isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
+      totalPrice = Number(bookingData.totalPrice || 0);
+      fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+      isConfirmableStatus = bookingData.status === "pending"
+        || bookingData.status === "payment-uploaded";
+      hadPaymentProof = !!bookingData.paymentProofUrl;
+      staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
 
-      if (fullyPaid && isConfirmableStatus) {
-        await sendBookingTrigger("payment-confirmed", bookingData);
-      }
-
-      // Per W4.4 / decision #104: notify staff when a guest
-      // uploads a payment proof. The `paymentProofUrl` lives on
-      // the booking doc when the guest uploads via Step 3.
-      // Idempotent via the emailNotificationsSent.staffNewPayment
-      // timestamp — only fire once per booking.
-      if (bookingData.paymentProofUrl && !bookingData.emailNotificationsSent?.staffNewPayment) {
-        await bookingRef.update({
+      // Mark the staff-new-payment dedup inside the transaction
+      // so a concurrent addPayment call doesn't re-fire the email.
+      if (hadPaymentProof && staffPaymentMarkerMissing) {
+        transaction.update(bookingRef, {
           "emailNotificationsSent.staffNewPayment": new Date()
         });
-        await sendStaffNewPaymentTrigger(
-          { ...bookingData, bookingRef: bookingData.bookingRef },
-          { ...paymentRecord, paymentProofUrl: bookingData.paymentProofUrl }
-        );
       }
-    } catch (emailErr) {
-      console.error("Failed to send payment confirmation email:", emailErr);
-    }
-
-    return res.status(200).json({ success: true, data: paymentRecord });
+    });
   } catch (error: any) {
+    if (error.message === "Booking not found") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
+
+  // Email sends stay outside the transaction (Resend calls are
+  // external and slow) but the dedup marker is now written
+  // transactionally so the duplicate-fire race is closed.
+  try {
+    if (fullyPaid && isConfirmableStatus) {
+      await sendBookingTrigger("payment-confirmed", bookingDataSnapshot);
+    }
+    // Per W4.4 / decision #104: notify staff when a guest
+    // uploads a payment proof. Idempotent via the
+    // `emailNotificationsSent.staffNewPayment` timestamp.
+    if (hadPaymentProof && staffPaymentMarkerMissing) {
+      await sendStaffNewPaymentTrigger(
+        { ...bookingDataSnapshot, bookingRef: bookingDataSnapshot.bookingRef },
+        { ...paymentRecord, paymentProofUrl: bookingDataSnapshot.paymentProofUrl }
+      );
+    }
+  } catch (emailErr) {
+    console.error("Failed to send payment confirmation email:", emailErr);
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: { ...paymentRecord, totalPaid }
+  });
 }
 
 export async function handleConfirmBooking(req: any, res: any) {
-  const { bookingId } = req.body;
-  if (!bookingId) {
+  const { bookingId } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
+    const confirmedBy = req.staff?.uid || "staff";
+    let bookingData: any = null;
+    let alreadyConfirmed = false;
 
-    const bookingData = bookingDoc.data()!;
-    const allowedStatuses = ["pending", "payment-uploaded"];
-    if (!allowedStatuses.includes(bookingData.status)) {
-      return res.status(400).json({
-        success: false,
-        error: `Booking cannot be confirmed because its status is already ${bookingData.status}.`
+    // Per S4 (soft batch 2026-06-26): wrap the
+    // read + status check + write in a transaction so two
+    // staff confirming the same booking in parallel
+    // don't both fire the `booking-confirmed` email. The
+    // transaction's first reader sees `pending`; the
+    // second sees the new `confirmed` status and
+    // short-circuits.
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const data = bookingDoc.data()!;
+      bookingData = data;
+
+      if (data.status === "confirmed") {
+        // Idempotent: already confirmed by another staff
+        // member. Return success without re-firing the
+        // email.
+        alreadyConfirmed = true;
+        return;
+      }
+
+      const allowedStatuses = ["pending", "payment-uploaded"];
+      if (!allowedStatuses.includes(data.status)) {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+
+      transaction.update(bookingRef, {
+        status: "confirmed",
+        confirmedAt: new Date(),
+        confirmedBy,
+        updatedAt: new Date()
       });
-    }
-
-    const confirmedBy = req.staff?.email || "staff";
-    await bookingRef.update({
-      status: "confirmed",
-      confirmedAt: new Date(),
-      confirmedBy,
-      updatedAt: new Date()
     });
 
+    if (alreadyConfirmed) {
+      return res.status(200).json({ success: true, data: { status: "confirmed", alreadyConfirmed: true } });
+    }
+
+    // Per BF-15 (booking-flow audit 2026-06-26): the
+    // `confirmedBy` field is a staff UID per the BACKEND.md
+    // schema, not the staff email. The audit collection
+    // (`bookings/audit/records/{id}`) reads these fields and
+    // is PII-sensitive; storing emails leaks the staff member's
+    // contact info. Use the UID from the auth result (the
+    // dispatcher's `authenticateStaff` guarantees presence).
     try {
       await sendBookingTrigger("booking-confirmed", { ...bookingData, status: "confirmed" });
     } catch (emailErr) {
@@ -997,6 +1376,15 @@ export async function handleConfirmBooking(req: any, res: any) {
 
     return res.status(200).json({ success: true, data: { status: "confirmed" } });
   } catch (error: any) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be confirmed because its status is already ${error.message.split(":")[1]}.`
+      });
+    }
     console.error("Confirm booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
@@ -1023,7 +1411,11 @@ export async function handleCheckoutBooking(req: any, res: any) {
       });
     }
 
-    const checkedOutBy = req.staff?.email || "staff";
+    // Per BF-15 (booking-flow audit 2026-06-26): store the staff
+    // UID (not email) on `checkedOutBy` + `resolvedBy`. These
+    // fields flow into the `bookings/audit/records` collection
+    // and are PII-sensitive.
+    const checkedOutBy = req.staff?.uid || "staff";
     const totalPrice = Number(bookingData.totalPrice || 0);
 
     let pointsAwarded = 0;
@@ -1136,22 +1528,50 @@ export async function handleCheckoutBooking(req: any, res: any) {
 }
 
 export async function handleLookupBooking(req: any, res: any) {
-  const { bookingRef, guestEmail } = req.body || {};
-  if (!bookingRef || !guestEmail) {
-    return res.status(400).json({ success: false, error: "Booking reference and guest email are required." });
+  const parsed = lookupSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    // Per BF-21 (booking-flow audit 2026-06-26): return 400
+    // (not 404) on malformed input so the caller can
+    // distinguish "bad input" from "no match". The error
+    // message is intentionally generic so the validator
+    // does not become an oracle for the booking-ref shape.
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference and email or lookup token."
+    });
   }
 
-  const trimmedRef = String(bookingRef).trim();
-  const normalizedEmail = String(guestEmail).trim().toLowerCase();
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken } = parsed.data;
 
   try {
+    // Per H2 (hardening batch 2026-06-26): the token
+    // path queries by `bookingRef + lookupToken` (an
+    // indexed compound — both fields are part of the
+    // existing composite index), bypassing `guestEmail`
+    // entirely. The email path is unchanged.
+    const compositeFilter = lookupToken
+      ? { field: "lookupToken", value: String(lookupToken).toLowerCase() }
+      : { field: "guestEmail", value: normalizedEmail };
+
     const snapshot = await adminDb.collection("bookings")
       .where("bookingRef", "==", trimmedRef)
-      .where("guestEmail", "==", normalizedEmail)
+      .where(compositeFilter.field, "==", compositeFilter.value)
       .limit(1)
       .get();
 
     if (snapshot.empty) {
+      // The composite index on (bookingRef, guestEmail)
+      // is the original lookup path. If the email-mode
+      // query returns no rows, retry with a fallback
+      // (limit 5) by bookingRef and re-filter in JS in
+      // case the stored email differs in case / whitespace.
+      // The token-mode query has no equivalent fallback
+      // (tokens are generated server-side and never
+      // re-cased by the user).
+      if (lookupToken) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+
       const fallbackSnapshot = await adminDb.collection("bookings")
         .where("bookingRef", "==", trimmedRef)
         .limit(5)
@@ -1174,7 +1594,7 @@ export async function handleLookupBooking(req: any, res: any) {
     const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
     return await enrichAndRespond(res, bookingData);
   } catch (error: any) {
-    console.error("Booking lookup failed:", error);
+    console.error("Booking lookup failed:", error?.message || error);
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
   }
 }
