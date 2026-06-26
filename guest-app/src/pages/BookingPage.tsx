@@ -43,19 +43,44 @@ import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
-const breakfastRatePerPerson = 350;
-const breakfastEnabled = true;
+// Per BF-26 (booking-flow audit 2026-06-26): the previous module-level
+// constants ignored the live `breakfastConfig` (rate + on/off toggle).
+// The Step 1 card price + the Room + Breakfast option therefore
+// disagreed with the server whenever admin configured a different
+// rate or disabled breakfast. Both values are now read from the
+// `breakfastConfig` state loaded from Firestore (see fetchConfigs
+// below) — these constants are gone.
 
 type RateChoice = "room-only" | "room-breakfast";
 type GuestField = "firstName" | "lastName" | "email" | "phone" | "guestCount";
-type VoucherIssue = "expired" | "usage-limit" | "room-mismatch" | "invalid";
+type VoucherIssue = "expired" | "usage-limit" | "room-mismatch" | "inactive" | "invalid";
 
+// Per BF-07 (booking-flow audit 2026-06-26): the previous
+// `voucherMessages` map was defined but never read — the
+// handler surfaced raw server error strings like
+// "Voucher has expired." which read awkwardly to guests. The
+// map is now used by `mapVoucherError()` to translate the
+// server message into one of the friendly strings below. The
+// `inactive` case was added for vouchers with `isActive: false`.
 const voucherMessages: Record<VoucherIssue, string> = {
   expired: "This voucher expired already. You can remove it or try another code.",
   "usage-limit": "This voucher has reached its usage limit. Please choose another code.",
   "room-mismatch": "This voucher is not valid for the selected room type.",
+  inactive: "This voucher is currently inactive. Please contact the front desk for a fresh code.",
   invalid: "We could not find that voucher. Check the code and try again."
 };
+
+// Per BF-07: map the server's raw voucher error text to a
+// friendly message. Falls back to the `invalid` message when
+// the server text doesn't match any known error.
+function mapVoucherError(serverMessage: string): string {
+  const lower = serverMessage.toLowerCase();
+  if (lower.includes("expired")) return voucherMessages.expired;
+  if (lower.includes("usage") || lower.includes("limit")) return voucherMessages["usage-limit"];
+  if (lower.includes("room type") || lower.includes("applicable")) return voucherMessages["room-mismatch"];
+  if (lower.includes("inactive")) return voucherMessages.inactive;
+  return voucherMessages.invalid;
+}
 
 function formatStayDate(value: string) {
   return new Intl.DateTimeFormat(config.locale, {
@@ -540,7 +565,12 @@ export function BookingPage() {
       setVoucherError("");
     } catch (err: any) {
       console.error("Voucher error:", err);
-      setVoucherError(err.message || "We could not find that voucher. Check the code and try again.");
+      // Per BF-07 (booking-flow audit 2026-06-26): map the
+      // server's raw error text to one of the friendly
+      // `voucherMessages`. Fall back to the `invalid` message
+      // when the server text doesn't match.
+      const friendly = err?.message ? mapVoucherError(err.message) : voucherMessages.invalid;
+      setVoucherError(friendly);
       setVoucherApplied(false);
     } finally {
       setIsValidatingVoucher(false);
@@ -647,6 +677,14 @@ export function BookingPage() {
       }
 
       // Successful creation, redirect to confirmation page
+      // Per BF-39 (booking-flow audit 2026-06-26): prefer the
+      // server-returned `totalPrice` so the confirmation page
+      // displays what was actually charged. Fall back to the
+      // local `total` only if the server response is missing it
+      // (legacy / future-proof).
+      const serverTotal = typeof result.data?.totalPrice === "number"
+        ? result.data.totalPrice
+        : null;
       const confirmParams = new URLSearchParams({
         bookingRef: result.data.bookingRef,
         roomType: result.data.roomType || selectedTypeEntry?.value || "",
@@ -656,7 +694,7 @@ export function BookingPage() {
         checkOut,
         guests: String(guests),
         paymentMethod,
-        total: String(total)
+        total: String(serverTotal ?? total)
       });
       navigate(`/book/confirm?${confirmParams.toString()}`);
     } catch (err: any) {
@@ -1470,10 +1508,17 @@ export function BookingPage() {
               {availableRoomTypes.map((entry, index) => {
                 const type = entry.type;
                 const isSelected = type.value === selectedRoomType;
-                // Per W3.6 — pricing lives on the type.
+                // Per W3.6 — pricing + max capacity live on the type.
                 const typePricePerNight = type.pricePerNight ?? 0;
                 const typeMaxCapacity = type.maxCapacity ?? 0;
                 const typeImageUrl = getRoomTypeImages(roomTypes, type.value)[0];
+                // Per BF-26: read the live breakfast rate from
+                // `breakfastConfig` (loaded from Firestore). The
+                // previous module-level constant `350` ignored
+                // the admin's configured rate.
+                const liveBreakfastRate = breakfastConfig.isEnabled
+                  ? (breakfastConfig.ratePerPersonPerNight || 0)
+                  : 0;
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights
@@ -1482,7 +1527,7 @@ export function BookingPage() {
                   ratePerNight: typePricePerNight,
                   numNights: nights,
                   numGuests: guests,
-                  breakfastRate: breakfastRatePerPerson,
+                  breakfastRate: liveBreakfastRate,
                   hasBreakfast: true
                 });
 
@@ -1548,12 +1593,13 @@ export function BookingPage() {
                             totalLabel={`${formatPrice(roomOnlyTotal)} total`}
                             onSelect={() => selectRoomType(type.value, "room-only")}
                           />
-                          {breakfastEnabled ? (
+                          {breakfastConfig.isEnabled ? (
                             <RateOption
                               active={isSelected && rateChoice === "room-breakfast"}
                               label="Room + Breakfast"
                               helper="Includes daily local breakfast for selected guests"
-                              priceLabel={`${formatPrice(typePricePerNight + breakfastRatePerPerson * guests)} / night`}
+                              // Per BF-26: live rate + guest count.
+                              priceLabel={`${formatPrice(typePricePerNight + liveBreakfastRate * guests)} / night`}
                               totalLabel={`${formatPrice(breakfastTotal)} total`}
                               onSelect={() => selectRoomType(type.value, "room-breakfast")}
                             />

@@ -149,7 +149,7 @@ describe("/api/bookings/confirm", () => {
       path: "bookings/booking_1",
       data: expect.objectContaining({
         status: "confirmed",
-        confirmedBy: "frontdesk@sparkinn.com"
+        confirmedBy: "staff_1"
       })
     });
     expect(sendBookingTrigger).toHaveBeenCalledTimes(1);

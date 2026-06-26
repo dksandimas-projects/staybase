@@ -51,12 +51,40 @@ vi.mock("../../server/lib/firebase-admin", () => {
           }
         }
       },
-      collection: (sub: string) => ({
-        add: async (subData: any) => {
-          setCalls.push({ path: `${path}/${sub}`, data: subData });
-          return { id: "mock_sub_id" };
-        }
-      })
+      collection: (sub: string) => {
+        const subPath = `${path}/${sub}`;
+        return {
+          path: subPath,
+          // Per BF-14 (booking-flow audit 2026-06-26): the new
+          // transactional handleAddPayment uses
+          // `paymentsRef.doc()` to mint a new doc ref + write
+          // inside the transaction. The post-write `get()` must
+          // return the just-written payment so the reduce works.
+          doc: (id?: string) => ({
+            id: id || "mock_sub_id",
+            path: `${subPath}/${id || "mock_sub_id"}`,
+            set: async (data: any) => {
+              setCalls.push({ path: `${subPath}/${id || "mock_sub_id"}`, data });
+            }
+          }),
+          add: async (subData: any) => {
+            setCalls.push({ path: subPath, data: subData });
+            return { id: "mock_sub_id" };
+          },
+          // Return the subcollection docs as collected by the
+          // test setup. The handler's `reduce` reads
+          // `doc.data().amount`.
+          get: async () => {
+            const paymentDocs = setCalls
+              .filter((c) => c.path.startsWith(`${subPath}/`))
+              .map((c, i) => ({
+                id: `payment_${i + 1}`,
+                data: () => c.data
+              }));
+            return { docs: paymentDocs };
+          }
+        };
+      }
     };
   };
 
@@ -116,7 +144,17 @@ vi.mock("../../server/lib/firebase-admin", () => {
         return { exists: false };
       }
 
+      // Per BF-14 (booking-flow audit 2026-06-26): a 3-segment
+      // path like `bookings/{id}/payments` is a subcollection
+      // reference; the per-collection logic below only handles
+      // 2-segment doc paths. Fall through to `ref.get()` so
+      // the subcollection's get() (which filters setCalls by
+      // the subcollection path) is used.
       const path = ref.path;
+      if (path.split("/").length === 3 && typeof ref.get === "function") {
+        return ref.get();
+      }
+
       const [coll, docId] = path.split("/");
 
       if (coll === "rooms") {
@@ -817,7 +855,9 @@ describe("/api/bookings/create", () => {
       expect(loggedPayment).toBeDefined();
       expect(loggedPayment.amount).toBe(2500);
       expect(loggedPayment.method).toBe("cash");
-      expect(loggedPayment.recordedBy).toBe("mock_staff@sparkinn.com"); // server-side resolved from staff token info
+      // Per BF-15 (booking-flow audit 2026-06-26): `recordedBy` is
+      // the staff UID, not the email (PII + audit-log concern).
+      expect(loggedPayment.recordedBy).toBe("mock_staff_uid");
     });
 
     test("POST /api/bookings/reject-discount: rejects government discount and restores full price", async () => {
@@ -851,7 +891,9 @@ describe("/api/bookings/create", () => {
 
       // Assert database document was updated correctly
       expect(discountedBooking.discountRejected).toBe(true);
-      expect(discountedBooking.discountRejectedBy).toBe("mock_staff@sparkinn.com");
+      // Per BF-15 (booking-flow audit 2026-06-26): `discountRejectedBy`
+      // is the staff UID, not the email.
+      expect(discountedBooking.discountRejectedBy).toBe("mock_staff_uid");
       expect(discountedBooking.discountRejectionReason).toBe("Invalid ID card photo quality");
       expect(discountedBooking.discountPct).toBe(0);
       expect(discountedBooking.totalPrice).toBe(6000); // full price restored
@@ -891,10 +933,13 @@ describe("/api/bookings/create", () => {
       expect(activeBooking.cancellationReason).toBe("Change of plans");
     });
 
-    test("POST /api/bookings/cancel: rejects self-cancel after confirmed (audit S1.4)", async () => {
-      // Per audit S1.4 / Phase 11.6 Batch 6: confirmed bookings must
-      // not be self-cancellable. The server is the source of truth;
-      // the UI may hide the button, but the handler must reject.
+    test("POST /api/bookings/cancel: allows self-cancel after confirmed (BF-16)", async () => {
+      // Per BF-16 (booking-flow audit 2026-06-26): the previous
+      // block list also rejected `confirmed` and `payment-confirmed`
+      // bookings. The relaxed policy is to block only the terminal
+      // states (checked-in, checked-out, cancelled). Confirmed and
+      // payment-confirmed bookings are now self-cancellable; the
+      // existing test was written under audit S1.4's old policy.
       const confirmedBooking = {
         id: "booking_confirmed",
         bookingId: "booking_confirmed",
@@ -916,15 +961,12 @@ describe("/api/bookings/create", () => {
       const res = mockResponse();
       await handler(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        success: false,
-        error: expect.stringMatching(/cannot be cancelled because its status is already confirmed/i)
-      }));
-      expect(confirmedBooking.status).toBe("confirmed");
+      expect(res.status).toHaveBeenCalledWith(200);
+      // Status is flipped to cancelled.
+      expect(confirmedBooking.status).toBe("cancelled");
     });
 
-    test("POST /api/bookings/cancel: rejects self-cancel after payment-confirmed (audit S1.4)", async () => {
+    test("POST /api/bookings/cancel: allows self-cancel after payment-confirmed (BF-16)", async () => {
       const paymentConfirmedBooking = {
         id: "booking_payment_confirmed",
         bookingId: "booking_payment_confirmed",
@@ -946,12 +988,41 @@ describe("/api/bookings/create", () => {
       const res = mockResponse();
       await handler(req, res);
 
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(paymentConfirmedBooking.status).toBe("cancelled");
+    });
+
+    test("POST /api/bookings/cancel: still rejects self-cancel after checked-in (BF-16)", async () => {
+      // Per BF-16: terminal states (checked-in, checked-out,
+      // cancelled) are still blocked.
+      const checkedInBooking = {
+        id: "booking_checked_in",
+        bookingId: "booking_checked_in",
+        bookingRef: "SI-20260608-014",
+        guestName: "Checked-in Guest",
+        guestEmail: "checked-in@guest.com",
+        status: "checked-in",
+        checkIn: { toDate: () => new Date("2026-06-12") },
+        checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockBookings.push(checkedInBooking);
+
+      const req = mockRequest(
+        { bookingId: "booking_checked_in", reason: "Change of plans" },
+        "POST",
+        "/api/bookings/cancel",
+        { authorization: "Bearer mock_token" }
+      );
+      const res = mockResponse();
+      await handler(req, res);
+
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
         success: false,
-        error: expect.stringMatching(/cannot be cancelled because its status is already payment-confirmed/i)
+        error: expect.stringMatching(/cannot be cancelled because its status is already checked-in/i)
       }));
-      expect(paymentConfirmedBooking.status).toBe("payment-confirmed");
+      // Status is unchanged — the cancel was rejected.
+      expect(mockBookings.find((b: any) => b.id === "booking_checked_in").status).toBe("checked-in");
     });
   });
 });
