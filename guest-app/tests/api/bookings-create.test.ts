@@ -500,9 +500,20 @@ describe("/api/bookings/create", () => {
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
+    // Per BF-44 (booking-flow audit 2026-06-26): the fake
+    // success now always returns a fresh random bookingId;
+    // the bot's preallocated `booking_hp` is NOT echoed
+    // back (it would leak the real preallocated ID into the
+    // bot's response).
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       data: expect.objectContaining({
+        bookingId: expect.stringMatching(/^hp_/)
+      })
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.not.objectContaining({
         bookingId: "booking_hp"
       })
     }));
