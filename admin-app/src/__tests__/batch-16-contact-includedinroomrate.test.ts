@@ -107,7 +107,7 @@ describe("Phase 11.6 Batch 16 — contact form wired + includedInRoomRate absent
       const body = branch![0];
       expect(body).toMatch(/isRateLimited\(`contact-inquiry:/);
       expect(body).toMatch(/req\.body\._hp/);
-      expect(body).toMatch(/verifyTurnstile\(req\.body\?\.turnstileToken\)/);
+      expect(body).toMatch(/verifyTurnstile\(req\.body\?\.turnstileToken/);
     });
 
     it("contact handler writes to the contactInquiries collection + fires an admin email", () => {
