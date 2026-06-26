@@ -24,6 +24,50 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 
+// ---------------------------------------------------------------------------
+// CDN-aware srcset builder
+// ---------------------------------------------------------------------------
+// Auto-detects the image host from the URL and returns a `srcset` string
+// that lets the browser pick the smallest image that fills the viewport.
+//
+//   • Unsplash  (images.unsplash.com)       — append `&w=N` query param
+//   • Google/Firebase (*.googleusercontent.com | firebasestorage.googleapis.com)
+//                                           — insert `=wN` suffix before `?`
+//   • Everything else                       — returns undefined (no srcset)
+//
+// Widths 640 / 1080 / 1920 cover mobile, tablet, and full desktop.
+// The caller always passes the original `src` as the 1920w candidate so
+// an unsupported CDN still has a valid single-src fallback.
+export function buildHeroSrcSet(src: string): string | undefined {
+  if (!src) return undefined;
+  const WIDTHS = [640, 1080, 1920];
+  try {
+    // Unsplash: URL already has query params (e.g. `?auto=format&fit=crop`).
+    // We append `&w=N` for each breakpoint.
+    if (src.includes("images.unsplash.com")) {
+      return WIDTHS.map((w) => `${src}&w=${w} ${w}w`).join(", ");
+    }
+    // Google User Content / Firebase Storage: the image-size token is a
+    // `=sN` or `=wN` suffix at the end of the path segment, before `?`.
+    // We strip any existing `=s`/`=w` token and insert our own.
+    if (
+      src.includes("googleusercontent.com") ||
+      src.includes("firebasestorage.googleapis.com")
+    ) {
+      // Split off query string so we don't accidentally mutate params.
+      const [base, qs] = src.split("?");
+      const suffix = qs ? `?${qs}` : "";
+      // Remove any existing size token (=s<N> or =w<N>) at end of path.
+      const stripped = base.replace(/=[sw]\d+$/, "");
+      return WIDTHS.map((w) => `${stripped}=w${w}${suffix} ${w}w`).join(", ");
+    }
+  } catch {
+    // URL parsing failure — fall back to no srcset.
+  }
+  return undefined;
+}
+
+
 export interface HeroImageProps {
   src: string;
   alt: string;
@@ -46,13 +90,21 @@ export interface HeroImageProps {
   priority?: boolean;
 }
 
-function injectPreload(src: string): HTMLLinkElement | null {
+function injectPreload(src: string, resolvedSrcSet?: string): HTMLLinkElement | null {
   if (typeof document === "undefined") return null;
   const link = document.createElement("link");
   link.rel = "preload";
   link.as = "image";
   link.href = src;
   link.setAttribute("fetchpriority", "high");
+  // Responsive preload: tell the browser which srcset variant to
+  // download at this viewport width so it matches what the `<img>`
+  // will request. Without this the browser preloads the full `src`
+  // even when a smaller srcset candidate would be used.
+  if (resolvedSrcSet) {
+    link.setAttribute("imagesrcset", resolvedSrcSet);
+    link.setAttribute("imagesizes", "100vw");
+  }
   link.dataset.heroImagePreload = "true";
   document.head.appendChild(link);
   return link;
@@ -71,8 +123,8 @@ export function HeroImage({
   alt,
   className = "absolute inset-0 h-full w-full object-cover",
   placeholder,
-  srcSet,
-  sizes,
+  srcSet: srcSetProp,
+  sizes: sizesProp,
   priority = true
 }: HeroImageProps): ReactElement {
   const [loaded, setLoaded] = useState(false);
@@ -82,11 +134,19 @@ export function HeroImage({
   // hero photo) without thrashing the head on every render.
   const preloadedSrcRef = useRef<string>("");
 
+  // Auto-build a responsive srcset from the CDN URL when the caller
+  // has not provided one. Falls back to undefined for unrecognised
+  // hosts, in which case the browser fetches `src` as-is.
+  const resolvedSrcSet = srcSetProp ?? buildHeroSrcSet(src);
+  // Hero images always span 100vw. The caller can override for
+  // narrower usages (e.g. split-panel layouts).
+  const resolvedSizes = sizesProp ?? (resolvedSrcSet ? "100vw" : undefined);
+
   useEffect(() => {
     if (!priority || !src) return;
     if (preloadedSrcRef.current === src) return;
     removePreload();
-    injectPreload(src);
+    injectPreload(src, resolvedSrcSet);
     preloadedSrcRef.current = src;
     return () => {
       if (preloadedSrcRef.current === src) {
@@ -94,6 +154,7 @@ export function HeroImage({
         preloadedSrcRef.current = "";
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [priority, src]);
 
   // Check if image is already complete when mounting or when src changes,
@@ -131,8 +192,8 @@ export function HeroImage({
       <img
         ref={handleRef}
         src={src}
-        srcSet={srcSet}
-        sizes={sizes}
+        srcSet={resolvedSrcSet}
+        sizes={resolvedSizes}
         alt={alt}
         // LCP images must be eager + high priority; the preload tag
         // in <head> (see useEffect above) does the heavy lifting.
