@@ -1,4 +1,4 @@
-import { adminDb } from "../lib/firebase-admin";
+import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
 import { toDateOrNull, validateCorporateCode } from "@spark-inn/shared";
@@ -388,8 +388,17 @@ export async function handleCreateBooking(req: any, res: any) {
       const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
-      // Pre-discount total to restore if discount is rejected
-      const originalTotalPrice = discountPct > 0 ? (subtotal - voucherDiscount) : null;
+      // Pre-discount total to restore if discount is rejected.
+      // Per BF-05 (booking-flow audit 2026-06-26): the value
+      // stored must be the full pre-Senior/PWD subtotal so a
+      // rejection restores the price the guest would have paid
+      // without any discount applied. The previous formula
+      // `subtotal - voucherDiscount` was correct only when a
+      // voucher was also applied; without a voucher it stored
+      // `null` and the reject-discount handler 500'd. The
+      // handler now uses `originalTotalPrice - voucherDiscount`
+      // to apply the voucher if one was also applied.
+      const originalTotalPrice = discountPct > 0 ? subtotal : null;
 
       // 9. Generate Reference Number
       const { todayStr, todayCompact } = getManilaDateInfo();
@@ -471,6 +480,19 @@ export async function handleCreateBooking(req: any, res: any) {
       };
 
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      // Per BF-03 (booking-flow audit 2026-06-26): the
+      // preallocated `bookingId` is a Firestore document ID
+      // generated client-side before payment-proof + discount-ID
+      // uploads. A client retry after a network blip where the
+      // original write committed would hand the same ID to the
+      // second request, and a blind `set` would clobber the prior
+      // booking (including any staff-applied status changes,
+      // the daily counter, and the bookingRef). The existence
+      // check + abort makes the create truly idempotent.
+      const existingBooking = await transaction.get(bookingDocRef);
+      if (existingBooking.exists) {
+        throw new Error("Booking already exists");
+      }
       transaction.set(bookingDocRef, newBooking);
 
       computedData = {
@@ -509,8 +531,20 @@ export async function handleCreateBooking(req: any, res: any) {
     // bookings take a different path with their own notifications).
     // Persist a timestamp on the booking so a re-fire via the
     // /api/email/staff-new-booking endpoint won't double-send.
+    //
+    // Per BF-04 (booking-flow audit 2026-06-26): the previous
+    // guard read `computedData.emailNotificationsSent?.staffNewBooking`
+    // from the in-memory `computedData` object, which is never
+    // populated with that field — so the email always fired
+    // (and a client retry between send and timestamp write would
+    // fire a duplicate). The fix reads the fresh booking doc
+    // after commit so the dedup works against real persisted
+    // state.
     try {
-      if (!computedData.emailNotificationsSent?.staffNewBooking) {
+      const freshBookingSnap = await adminDb.collection("bookings").doc(bookingId).get();
+      const alreadySent = freshBookingSnap.exists
+        && (freshBookingSnap.data() as any)?.emailNotificationsSent?.staffNewBooking;
+      if (!alreadySent) {
         await adminDb.collection("bookings").doc(bookingId).update({
           "emailNotificationsSent.staffNewBooking": new Date()
         });
@@ -611,8 +645,29 @@ export async function handleCreateWalkin(req: any, res: any) {
           throw new Error("Room no longer available");
         }
       }
-      if (guests > roomData.maxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
+
+      // 1b. Per W3.6 + W3.7: pricing + max capacity live on the
+      // room type, not on individual room docs. Read the type
+      // entry from settings/hotelConfig.roomTypes[] and use those
+      // values for the capacity check + pricing. The room-doc
+      // fields are no longer authoritative (per TYPES.md §Room).
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      if (!hotelConfigDoc.exists) {
+        throw new Error("Room type catalog is not configured.");
+      }
+      const hotelConfig = hotelConfigDoc.data()!;
+      const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomData.type);
+      if (!typeEntry) {
+        throw new Error("Room type is not available.");
+      }
+      const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
+      const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
+      const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
+
+      if (guests > typeMaxCapacity) {
+        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
 
       // 2. Overlapping Booking Check
@@ -645,10 +700,10 @@ export async function handleCreateWalkin(req: any, res: any) {
       for (let i = 0; i < numNights; i++) {
         const day = dateCursor.getUTCDay();
         const isWeekend = day === 0 || day === 6;
-        if (isWeekend && roomData.weekendRate) {
-          roomTotal += roomData.weekendRate;
+        if (isWeekend && typeWeekendRate) {
+          roomTotal += typeWeekendRate;
         } else {
-          roomTotal += roomData.pricePerNight;
+          roomTotal += typeBaseRate;
         }
         dateCursor.setUTCDate(dateCursor.getUTCDate() + 1);
       }
@@ -695,7 +750,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        ratePerNight: roomData.pricePerNight,
+        ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         originalTotalPrice: subtotal,
         discountType: "",
@@ -740,6 +795,13 @@ export async function handleCreateWalkin(req: any, res: any) {
       }
 
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      // Per BF-03: same idempotency check as handleCreateBooking
+      // — a walkin retry with the same preallocated `bookingId`
+      // would otherwise overwrite the prior record.
+      const existingWalkin = await transaction.get(bookingDocRef);
+      if (existingWalkin.exists) {
+        throw new Error("Booking already exists");
+      }
       transaction.set(bookingDocRef, newBooking);
     });
 
@@ -793,12 +855,19 @@ export async function handleRejectDiscount(req: any, res: any) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
 
+    // Per BF-05 (booking-flow audit 2026-06-26): the booking's
+    // `originalTotalPrice` is the full pre-Senior/PWD subtotal.
+    // If a voucher was also applied, the new total restores the
+    // voucher deduction too.
+    const voucherDiscount = Number(bookingData.voucherDiscount || 0);
+    const restoredTotalPrice = Math.max(originalTotalPrice - voucherDiscount, 0);
+
     const updates = {
       discountRejected: true,
       discountRejectedBy: req.staff.email || "staff",
       discountRejectionReason: reason || "",
       discountPct: 0,
-      totalPrice: originalTotalPrice,
+      totalPrice: restoredTotalPrice,
       status: "pending",
       updatedAt: new Date()
     };
