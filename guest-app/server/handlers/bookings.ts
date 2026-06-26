@@ -132,6 +132,7 @@ export async function handleCreateBooking(req: any, res: any) {
     // optional — anonymous bookings get no member discount.
     let detectedMemberId: string | null = null;
     let detectedMemberDoc: any = null;
+    let memberTokenError: Error | null = null;
     const authHeader = req.headers?.authorization;
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const idToken = authHeader.split("Bearer ")[1];
@@ -147,8 +148,39 @@ export async function handleCreateBooking(req: any, res: any) {
           }
         }
       } catch (err) {
-        // Invalid/expired token — fall through to anonymous booking
+        // Per BF-32 (booking-flow audit 2026-06-26): the previous
+        // handler silently swallowed every token-verify error
+        // and downgraded to an anonymous booking. A transient
+        // Firebase Auth error (quota, network) would silently
+        // lose a member's discount. We now:
+        //   1. log at warn level so the issue is visible
+        //   2. distinguish "infra" errors (Firebase unavailable,
+        //      network, quota) from auth-style errors (invalid or
+        //      expired token). Infra errors fail the request with
+        //      503 so the client can retry. Auth-style errors
+        //      fall through to anonymous booking.
+        memberTokenError = err as Error;
+        const code = (err as any)?.code || "";
+        // Only rethrow for known Firebase infra codes. Anything
+        // else (including plain `Error` from test mocks or a
+        // thrown string from upstream) is an auth-style failure
+        // and falls through to anonymous.
+        const isInfraError = typeof code === "string" && (
+          code.includes("UNAVAILABLE")
+          || code.includes("DEADLINE_EXCEEDED")
+          || code.includes("RESOURCE_EXHAUSTED")
+          || code.includes("INTERNAL")
+          || code.includes("ECONNRESET")
+          || code.includes("ETIMEDOUT")
+        );
+        if (isInfraError) {
+          throw err;
+        }
+        // Auth-style error: fall through to anonymous booking.
       }
+    }
+    if (memberTokenError) {
+      console.warn("ID token verify failed; continuing as anonymous booking:", memberTokenError.message);
     }
 
     // Run Firestore Transaction
@@ -328,11 +360,19 @@ export async function handleCreateBooking(req: any, res: any) {
         if (voucherDoc.exists) {
           const vData = voucherDoc.data()!;
           const now = new Date();
+          // Per BF-18 (booking-flow audit 2026-06-26): the
+          // assigned room's `type` should match the room type
+          // the guest selected (the body's `roomType`). If they
+          // diverge (legacy data drift), skip the voucher — it's
+          // safer to under-apply than to apply against a room
+          // type the guest never saw.
+          const assignedTypeMatchesChosen = !roomType || roomData.type === roomType;
           const isValid =
             vData.isActive !== false &&
             (!vData.expiresAt || vData.expiresAt.toDate() >= now) &&
             (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) &&
-            (!vData.applicableRoomTypes || vData.applicableRoomTypes.length === 0 || vData.applicableRoomTypes.includes(roomData.type));
+            (!vData.applicableRoomTypes || vData.applicableRoomTypes.length === 0 || vData.applicableRoomTypes.includes(roomData.type)) &&
+            assignedTypeMatchesChosen;
 
           if (isValid) {
             appliedVoucherCode = formattedCode;
@@ -565,6 +605,13 @@ export async function handleCreateBooking(req: any, res: any) {
       data: {
         bookingId,
         bookingRef: finalBookingRef,
+        // Per BF-39 (booking-flow audit 2026-06-26): surface the
+        // server-computed `totalPrice` so the confirmation page
+        // (and the corporate confirmation step) can display what
+        // was actually charged, not the client's local
+        // `calculateBookingTotal` (which still carries the
+        // weekend-rate override but is otherwise prone to drift).
+        totalPrice: finalTotalPrice,
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
         roomType
@@ -573,7 +620,25 @@ export async function handleCreateBooking(req: any, res: any) {
 
   } catch (error: any) {
     console.error("Booking creation failed:", error);
-    const status = error.message === "Room no longer available" ? 409 : 500;
+    // Per BF-32 (booking-flow audit 2026-06-26): surface 503
+    // for upstream infrastructure errors (Firebase Auth
+    // quota, network) so the client can retry, instead of
+    // collapsing them into a generic 500.
+    const code = (error as any)?.code || "";
+    const isInfraError = typeof code === "string" && (
+      code.includes("UNAVAILABLE")
+      || code.includes("DEADLINE_EXCEEDED")
+      || code.includes("RESOURCE_EXHAUSTED")
+      || code.includes("INTERNAL")
+    );
+    let status: number;
+    if (error.message === "Room no longer available") {
+      status = 409;
+    } else if (isInfraError) {
+      status = 503;
+    } else {
+      status = 500;
+    }
     return res.status(status).json({
       success: false,
       error: error.message || "An unexpected error occurred during booking creation."
@@ -862,9 +927,17 @@ export async function handleRejectDiscount(req: any, res: any) {
     const voucherDiscount = Number(bookingData.voucherDiscount || 0);
     const restoredTotalPrice = Math.max(originalTotalPrice - voucherDiscount, 0);
 
+    // Per BF-15 (booking-flow audit 2026-06-26): the
+    // `discountRejectedBy` field is a staff UID per the
+    // BACKEND.md schema, not the staff email. Audit logs flow
+    // through the `bookings/audit/records` collection which is
+    // PII-sensitive; writing the email leaks the staff member's
+    // contact info. Use the UID from the auth result.
+    const discountRejectedBy = req.staff?.uid || "staff";
+
     const updates = {
       discountRejected: true,
-      discountRejectedBy: req.staff.email || "staff",
+      discountRejectedBy,
       discountRejectionReason: reason || "",
       discountPct: 0,
       totalPrice: restoredTotalPrice,
@@ -936,8 +1009,25 @@ export async function handleCancelBooking(req: any, res: any) {
       bookingData = snapshot.docs[0].data();
     }
 
-    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled" || bookingData.status === "confirmed" || bookingData.status === "payment-confirmed") {
-      return res.status(400).json({ success: false, error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk to cancel a confirmed booking.` });
+    // Per BF-16 (booking-flow audit 2026-06-26): the previous
+    // block list also rejected `confirmed` and `payment-confirmed`
+    // bookings, forcing paid guests to call the front desk. The
+    // self-service path is the more useful default; the only
+    // statuses that genuinely cannot be cancelled online are the
+    // terminal ones (`checked-in` has the guest on-property,
+    // `checked-out` is past, `cancelled` is already terminal). A
+    // confirmed or payment-confirmed booking has no business
+    // reason to be undeleteable — staff can reverse charges out
+    // of band if needed.
+    if (
+      bookingData.status === "checked-in"
+      || bookingData.status === "checked-out"
+      || bookingData.status === "cancelled"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
+      });
     }
 
     await bookingDocumentRef.update({
@@ -968,64 +1058,113 @@ export async function handleAddPayment(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
   }
 
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ success: false, error: "Payment amount must be a positive number." });
+  }
+
+  // Per BF-14 (booking-flow audit 2026-06-26): the previous
+  // implementation wrote the new payment, then re-read the
+  // entire `bookings/{id}/payments` subcollection to compute
+  // the running total. Two staff adding payments in parallel
+  // could each see the other's write missing and either
+  // (a) both decide `fullyPaid === false` and miss the
+  // `payment-confirmed` trigger, or (b) both decide
+  // `fullyPaid === true` and send duplicate `payment-confirmed`
+  // emails. The fix appends the payment + re-sums + decides
+  // the staff-new-payment dedup inside a Firestore transaction,
+  // then defers the email sends to a single follow-up read.
+  const staffUid = req.staff?.uid || "staff";
+  const paymentRecord = {
+    amount: numericAmount,
+    method,
+    note: note || "",
+    recordedBy: staffUid,
+    recordedAt: new Date()
+  };
+
+  // Result of the transaction — used to decide which emails to
+  // fire after the transaction commits.
+  let totalPaid = 0;
+  let totalPrice = 0;
+  let isConfirmableStatus = false;
+  let fullyPaid = false;
+  let hadPaymentProof = false;
+  let staffPaymentMarkerMissing = true;
+  let bookingDataSnapshot: any = null;
+
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found");
+      }
+      const bookingData = bookingDoc.data()!;
+      bookingDataSnapshot = bookingData;
 
-    const bookingData = bookingDoc.data()!;
-    const numericAmount = Number(amount);
+      // Append the payment record inside the transaction so the
+      // post-commit read sees the new total.
+      const paymentsRef = bookingRef.collection("payments");
+      const newPaymentRef = paymentsRef.doc();
+      transaction.set(newPaymentRef, paymentRecord);
 
-    const paymentRecord = {
-      amount: numericAmount,
-      method,
-      note: note || "",
-      recordedBy: req.staff.email || "staff",
-      recordedAt: new Date()
-    };
-
-    await bookingRef.collection("payments").add(paymentRecord);
-
-    try {
-      const paymentsSnapshot = await bookingRef.collection("payments").get();
-      const totalPaid = paymentsSnapshot.docs.reduce((sum, doc) => {
-        const data = doc.data() as { amount?: number };
+      // Re-read the subcollection inside the same transaction.
+      // The Firestore Admin SDK's transaction.get() works for
+      // subcollection queries.
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      totalPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
+        const data = docSnap.data() as { amount?: number };
         return sum + Number(data.amount || 0);
       }, 0);
 
-      const totalPrice = Number(bookingData.totalPrice || 0);
-      const fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
-      const isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
+      totalPrice = Number(bookingData.totalPrice || 0);
+      fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+      isConfirmableStatus = bookingData.status === "pending"
+        || bookingData.status === "payment-uploaded";
+      hadPaymentProof = !!bookingData.paymentProofUrl;
+      staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
 
-      if (fullyPaid && isConfirmableStatus) {
-        await sendBookingTrigger("payment-confirmed", bookingData);
-      }
-
-      // Per W4.4 / decision #104: notify staff when a guest
-      // uploads a payment proof. The `paymentProofUrl` lives on
-      // the booking doc when the guest uploads via Step 3.
-      // Idempotent via the emailNotificationsSent.staffNewPayment
-      // timestamp — only fire once per booking.
-      if (bookingData.paymentProofUrl && !bookingData.emailNotificationsSent?.staffNewPayment) {
-        await bookingRef.update({
+      // Mark the staff-new-payment dedup inside the transaction
+      // so a concurrent addPayment call doesn't re-fire the email.
+      if (hadPaymentProof && staffPaymentMarkerMissing) {
+        transaction.update(bookingRef, {
           "emailNotificationsSent.staffNewPayment": new Date()
         });
-        await sendStaffNewPaymentTrigger(
-          { ...bookingData, bookingRef: bookingData.bookingRef },
-          { ...paymentRecord, paymentProofUrl: bookingData.paymentProofUrl }
-        );
       }
-    } catch (emailErr) {
-      console.error("Failed to send payment confirmation email:", emailErr);
-    }
-
-    return res.status(200).json({ success: true, data: paymentRecord });
+    });
   } catch (error: any) {
+    if (error.message === "Booking not found") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
+
+  // Email sends stay outside the transaction (Resend calls are
+  // external and slow) but the dedup marker is now written
+  // transactionally so the duplicate-fire race is closed.
+  try {
+    if (fullyPaid && isConfirmableStatus) {
+      await sendBookingTrigger("payment-confirmed", bookingDataSnapshot);
+    }
+    // Per W4.4 / decision #104: notify staff when a guest
+    // uploads a payment proof. Idempotent via the
+    // `emailNotificationsSent.staffNewPayment` timestamp.
+    if (hadPaymentProof && staffPaymentMarkerMissing) {
+      await sendStaffNewPaymentTrigger(
+        { ...bookingDataSnapshot, bookingRef: bookingDataSnapshot.bookingRef },
+        { ...paymentRecord, paymentProofUrl: bookingDataSnapshot.paymentProofUrl }
+      );
+    }
+  } catch (emailErr) {
+    console.error("Failed to send payment confirmation email:", emailErr);
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: { ...paymentRecord, totalPaid }
+  });
 }
 
 export async function handleConfirmBooking(req: any, res: any) {
@@ -1050,7 +1189,14 @@ export async function handleConfirmBooking(req: any, res: any) {
       });
     }
 
-    const confirmedBy = req.staff?.email || "staff";
+    // Per BF-15 (booking-flow audit 2026-06-26): the
+    // `confirmedBy` field is a staff UID per the BACKEND.md
+    // schema, not the staff email. The audit collection
+    // (`bookings/audit/records/{id}`) reads these fields and
+    // is PII-sensitive; storing emails leaks the staff member's
+    // contact info. Use the UID from the auth result (the
+    // dispatcher's `authenticateStaff` guarantees presence).
+    const confirmedBy = req.staff?.uid || "staff";
     await bookingRef.update({
       status: "confirmed",
       confirmedAt: new Date(),
@@ -1092,7 +1238,11 @@ export async function handleCheckoutBooking(req: any, res: any) {
       });
     }
 
-    const checkedOutBy = req.staff?.email || "staff";
+    // Per BF-15 (booking-flow audit 2026-06-26): store the staff
+    // UID (not email) on `checkedOutBy` + `resolvedBy`. These
+    // fields flow into the `bookings/audit/records` collection
+    // and are PII-sensitive.
+    const checkedOutBy = req.staff?.uid || "staff";
     const totalPrice = Number(bookingData.totalPrice || 0);
 
     let pointsAwarded = 0;

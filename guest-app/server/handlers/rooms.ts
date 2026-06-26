@@ -64,13 +64,24 @@ export async function handleRoomAvailability(req: any, res: any) {
   }
 
   try {
-    // Only fetch active bookings whose date range overlaps the requested
-    // window. We use `where("status", "in", ...)` so Firestore filters
-    // out cancelled/no-show/etc. server-side. The client only needs the
-    // date span and roomId, not PII.
+    // Per BF-22 (booking-flow audit 2026-06-26): the previous
+    // implementation pulled every active booking in the
+    // collection and filtered in JS. The BookingPage calls this
+    // endpoint on every date change at Step 1, so the cost
+    // scales linearly with the bookings collection size. The
+    // fix pushes the upper bound of the overlap check down to
+    // Firestore: an existing booking can only overlap the
+    // requested window if its `checkIn` is strictly before the
+    // requested `checkOut`. The lower bound (`bEnd > reqStart`)
+    // is still filtered in JS (Firestore doesn't support OR
+    // across two inequality fields), but the dominant cost
+    // (a full collection scan) is gone. The composite index
+    // `(status, checkIn)` is declared in
+    // `firebase/firestore.indexes.json` (BF-23).
     const overlapSnapshot = await adminDb
       .collection("bookings")
       .where("status", "in", ACTIVE_STATUSES)
+      .where("checkIn", "<", reqEnd)
       .get();
 
     const bookedRanges: Array<{ roomId: string; checkIn: string; checkOut: string; status: string }> = [];
