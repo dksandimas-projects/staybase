@@ -1182,7 +1182,7 @@ export async function handleCancelBooking(req: any, res: any) {
 }
 
 export async function handleAddPayment(req: any, res: any) {
-  const { bookingId, amount, method, note } = req.body;
+  const { bookingId, amount, method, note } = req.body || {};
   if (!bookingId || amount === undefined || !method) {
     return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
   }
@@ -1191,6 +1191,19 @@ export async function handleAddPayment(req: any, res: any) {
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
     return res.status(400).json({ success: false, error: "Payment amount must be a positive number." });
   }
+
+  // Per S4 (soft batch 2026-06-26): a 1B-peso typo would
+  // otherwise land in the payments subcollection + inflate
+  // the running total past `totalPrice` and skew the audit
+  // trail. Cap at 1,000,000 PHP — the largest realistic
+  // single payment for a hotel room.
+  if (numericAmount > 1_000_000) {
+    return res.status(400).json({ success: false, error: "Payment amount exceeds the 1,000,000 per-transaction limit." });
+  }
+
+  // Trim + cap the free-form note. A 100KB note used to
+  // land in the payments subcollection as-is.
+  const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
 
   // Per BF-14 (booking-flow audit 2026-06-26): the previous
   // implementation wrote the new payment, then re-read the
@@ -1207,7 +1220,7 @@ export async function handleAddPayment(req: any, res: any) {
   const paymentRecord = {
     amount: numericAmount,
     method,
-    note: note || "",
+    note: safeNote,
     recordedBy: staffUid,
     recordedAt: new Date()
   };
@@ -1297,25 +1310,55 @@ export async function handleAddPayment(req: any, res: any) {
 }
 
 export async function handleConfirmBooking(req: any, res: any) {
-  const { bookingId } = req.body;
-  if (!bookingId) {
+  const { bookingId } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
-    if (!bookingDoc.exists) {
-      return res.status(404).json({ success: false, error: "Booking not found." });
-    }
+    const confirmedBy = req.staff?.uid || "staff";
+    let bookingData: any = null;
+    let alreadyConfirmed = false;
 
-    const bookingData = bookingDoc.data()!;
-    const allowedStatuses = ["pending", "payment-uploaded"];
-    if (!allowedStatuses.includes(bookingData.status)) {
-      return res.status(400).json({
-        success: false,
-        error: `Booking cannot be confirmed because its status is already ${bookingData.status}.`
+    // Per S4 (soft batch 2026-06-26): wrap the
+    // read + status check + write in a transaction so two
+    // staff confirming the same booking in parallel
+    // don't both fire the `booking-confirmed` email. The
+    // transaction's first reader sees `pending`; the
+    // second sees the new `confirmed` status and
+    // short-circuits.
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const data = bookingDoc.data()!;
+      bookingData = data;
+
+      if (data.status === "confirmed") {
+        // Idempotent: already confirmed by another staff
+        // member. Return success without re-firing the
+        // email.
+        alreadyConfirmed = true;
+        return;
+      }
+
+      const allowedStatuses = ["pending", "payment-uploaded"];
+      if (!allowedStatuses.includes(data.status)) {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+
+      transaction.update(bookingRef, {
+        status: "confirmed",
+        confirmedAt: new Date(),
+        confirmedBy,
+        updatedAt: new Date()
       });
+    });
+
+    if (alreadyConfirmed) {
+      return res.status(200).json({ success: true, data: { status: "confirmed", alreadyConfirmed: true } });
     }
 
     // Per BF-15 (booking-flow audit 2026-06-26): the
@@ -1325,14 +1368,6 @@ export async function handleConfirmBooking(req: any, res: any) {
     // is PII-sensitive; storing emails leaks the staff member's
     // contact info. Use the UID from the auth result (the
     // dispatcher's `authenticateStaff` guarantees presence).
-    const confirmedBy = req.staff?.uid || "staff";
-    await bookingRef.update({
-      status: "confirmed",
-      confirmedAt: new Date(),
-      confirmedBy,
-      updatedAt: new Date()
-    });
-
     try {
       await sendBookingTrigger("booking-confirmed", { ...bookingData, status: "confirmed" });
     } catch (emailErr) {
@@ -1341,6 +1376,15 @@ export async function handleConfirmBooking(req: any, res: any) {
 
     return res.status(200).json({ success: true, data: { status: "confirmed" } });
   } catch (error: any) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be confirmed because its status is already ${error.message.split(":")[1]}.`
+      });
+    }
     console.error("Confirm booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }

@@ -171,3 +171,81 @@ export function getSweepHistory(): ReadonlyArray<SweepResult & { at: number }> {
 export function clearSweepHistory(): void {
   sweepHistory.length = 0;
 }
+
+// Per S1 (soft batch 2026-06-26): a reusable cursor store
+// for batched backfill jobs. The H2 lookup-token backfill
+// is the first consumer; future one-time migrations can
+// share the same shape. The cursor is just the last
+// document id seen — `startAfter(lastId)` resumes from
+// there on the next invocation.
+
+export interface BackfillOptions {
+  /**
+   * The Firestore collection to scan.
+   * Mirrored as a parameter so the unit tests can drive
+   * it with a hand-rolled mock.
+   */
+  collection: {
+    /** Returns up to `limit` docs whose id is strictly greater than `afterId`, ordered by id. */
+    query(afterId: string | null, limit: number): Promise<Array<{ id: string; data: any }>>;
+    /** Patches a single doc with a partial update. */
+    update(id: string, patch: Record<string, any>): Promise<void>;
+  };
+  /** Predicate that decides whether a doc needs the patch. */
+  needsUpdate: (doc: { id: string; data: any }) => boolean;
+  /** Returns the patch to apply to a given doc id. */
+  buildPatch: (doc: { id: string; data: any }) => Record<string, any>;
+  /** Max docs to touch per invocation. */
+  batchSize?: number;
+  /** Optional callback invoked once per updated doc (for the result counter). */
+  onUpdate?: (id: string) => void;
+}
+
+export interface BackfillResult {
+  scanned: number;
+  updated: number;
+  skipped: number;
+  nextCursor: string | null;
+  exhausted: boolean;
+  durationMs: number;
+}
+
+export async function runBackfill(options: BackfillOptions): Promise<BackfillResult> {
+  const {
+    collection,
+    needsUpdate,
+    buildPatch,
+    batchSize = 500,
+    onUpdate
+  } = options;
+  const startedAt = Date.now();
+  // We sort by id ascending and paginate by id strictly
+  // greater than the last seen. The first call passes
+  // `afterId = null`; subsequent calls use the cursor
+  // returned by the previous run.
+  const afterId: string | null = null;
+  const docs = await collection.query(afterId, batchSize);
+  let scanned = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (const doc of docs) {
+    scanned += 1;
+    if (!needsUpdate(doc)) {
+      skipped += 1;
+      continue;
+    }
+    const patch = buildPatch(doc);
+    await collection.update(doc.id, patch);
+    updated += 1;
+    if (onUpdate) onUpdate(doc.id);
+  }
+  const exhausted = docs.length < batchSize;
+  return {
+    scanned,
+    updated,
+    skipped,
+    nextCursor: exhausted ? null : (docs[docs.length - 1]?.id ?? null),
+    exhausted,
+    durationMs: Date.now() - startedAt
+  };
+}
