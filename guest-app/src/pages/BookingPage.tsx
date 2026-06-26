@@ -395,9 +395,10 @@ export function BookingPage() {
     const container = turnstileContainerRef.current;
     if (!container) return;
 
-    const siteKey = String(
-      import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "1x00000000000000000000AA"
-    );
+    const isProductionDomain = window.location.hostname === config.domain || window.location.hostname === `www.${config.domain}`;
+    const siteKey = isProductionDomain
+      ? String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "1x00000000000000000000AA")
+      : "1x00000000000000000000AA";
     let cancelled = false;
     let widgetId: string | null = null;
     let pollHandle: ReturnType<typeof setTimeout> | null = null;
