@@ -48,8 +48,13 @@
   BF-08, plus 1 updated regex in `batch-10-email-extensions.test.ts`).
   The remaining 350 are admin-app + shared tests that were already
   passing.
-- Branch: `fix/audit-batch-1-booking-sev1` (uncommitted; awaiting
-  user review + commit authorization)
+- Branch: `fix/audit-batch-1-booking-sev1` — committed locally as:
+  - `8891dce fix(booking): close 6 SEV-1 booking-flow audit findings (BF-01, 02, 03, 04, 05, 24)`
+  - `31ca546 fix(booking): close 4 SEV-2 booking-flow audit findings (BF-08, 10, 11, 12)`
+  - `73e8410 chore: add booking-flow audit with 50 findings + batch-1 fix tracking`
+  - Each fix commit's body references the BF numbers + the audit doc.
+- `shared/VERSION` auto-bumped by husky pre-commit (0.108.7 on the
+  SEV-1 commit, 0.108.8 on the SEV-2 commit).
 
 ### Top 5 to fix first (one row per category)
 
@@ -901,18 +906,18 @@ is correct — do not add per-route files.
 
 | ID | Sev | Title | File:line | Status |
 |---|---|---|---|---|
-| BF-01 | S1 | `adminAuth` used but not imported → Spark Rewards members cannot book | `guest-app/server/handlers/bookings.ts:1,139` | **Staged on `fix/audit-batch-1-booking-sev1`** (adminAuth import added + `bookings-member-discount.test.ts` rewritten as behavioral, 5 new tests) |
-| BF-02 | S1 | Walkin reads dead room fields → ₱0 walk-ins | `guest-app/server/handlers/bookings.ts:614,648-651` | **Staged on `fix/audit-batch-1-booking-sev1`** (type-entry lookup added + 6 new tests in `bookings-walkin-roomtype.test.ts`) |
-| BF-03 | S1 | Preallocated `bookingId` `set` clobbers on retry | `guest-app/server/handlers/bookings.ts:473-474` | **Staged on `fix/audit-batch-1-booking-sev1`** (existence check in both create + walkin; covered by `bookings-staff-email-dedup.test.ts` "re-submitting the same bookingId is rejected") |
-| BF-04 | S1 | `staff-new-booking` email dedup logic is broken | `guest-app/server/handlers/bookings.ts:512-527` | **Staged on `fix/audit-batch-1-booking-sev1`** (re-reads the booking doc after commit; 3 new tests in `bookings-staff-email-dedup.test.ts`; `batch-10-email-extensions.test.ts` regex updated to match the new pattern) |
-| BF-05 | S1 | `originalTotalPrice` stored wrong on Senior/PWD-only | `guest-app/server/handlers/bookings.ts:392,791-794` | **Staged on `fix/audit-batch-1-booking-sev1`** (now stores full `subtotal`; `handleRejectDiscount` subtracts the voucher; 4 new tests in `bookings-reject-discount.test.ts`) |
+| BF-01 | S1 | `adminAuth` used but not imported → Spark Rewards members cannot book | `guest-app/server/handlers/bookings.ts:1,139` | **Fixed in `8891dce`** (adminAuth import added + `bookings-member-discount.test.ts` rewritten as behavioral, 5 new tests) |
+| BF-02 | S1 | Walkin reads dead room fields → ₱0 walk-ins | `guest-app/server/handlers/bookings.ts:614,648-651` | **Fixed in `8891dce`** (type-entry lookup added + 6 new tests in `bookings-walkin-roomtype.test.ts`) |
+| BF-03 | S1 | Preallocated `bookingId` `set` clobbers on retry | `guest-app/server/handlers/bookings.ts:473-474` | **Fixed in `8891dce`** (existence check in both create + walkin; covered by `bookings-staff-email-dedup.test.ts` "re-submitting the same bookingId is rejected") |
+| BF-04 | S1 | `staff-new-booking` email dedup logic is broken | `guest-app/server/handlers/bookings.ts:512-527` | **Fixed in `8891dce`** (re-reads the booking doc after commit; 3 new tests in `bookings-staff-email-dedup.test.ts`; `batch-10-email-extensions.test.ts` regex updated to match the new pattern) |
+| BF-05 | S1 | `originalTotalPrice` stored wrong on Senior/PWD-only | `guest-app/server/handlers/bookings.ts:392,791-794` | **Fixed in `8891dce`** (now stores full `subtotal`; `handleRejectDiscount` subtracts the voucher; 4 new tests in `bookings-reject-discount.test.ts`) |
 | BF-06 | S4 | Vercel function count budget is fine | `guest-app/api/[...route].ts` | ✓ Verified |
 | BF-07 | S3 | Voucher error map is dead code | `guest-app/src/pages/BookingPage.tsx:53-58,537-538` | Open |
-| BF-08 | S2 | Client `total` shown to guest ≠ server `totalPrice` (weekend) | `BookingPage.tsx:265-276`, `CorporateBookingPage.tsx:286-294` | **Staged on `fix/audit-batch-1-booking-sev1`** (`calculateBookingTotal` now accepts a pre-computed `roomTotal`; 2 new tests in `pricing.test.ts`; both pages pass `roomTotal` explicitly) |
+| BF-08 | S2 | Client `total` shown to guest ≠ server `totalPrice` (weekend) | `BookingPage.tsx:265-276`, `CorporateBookingPage.tsx:286-294` | **Fixed in `31ca546`** (`calculateBookingTotal` now accepts a pre-computed `roomTotal`; 2 new tests in `pricing.test.ts`; both pages pass `roomTotal` explicitly) |
 | BF-09 | S2 | Discount-rejection total math off | `bookings.ts:392`, `email.ts:360` | Open |
-| BF-10 | S2 | PayPal option never exposed | `BookingPage.tsx:1034-1084` | **Staged on `fix/audit-batch-1-booking-sev1`** (PayPal added as a 4th payment method with its own instructions panel; type widened to include `"paypal"`) |
-| BF-11 | S2 | `BookingConfirmPage` ICS filename hardcodes `spark-inn-` | `BookingConfirmPage.tsx:73` | **Staged on `fix/audit-batch-1-booking-sev1`** (filename now `${bookingRef}.ics`; brand name lives in the event title) |
-| BF-12 | S2 | Hotel name / numbers hardcoded as payment-instruction fallbacks | `BookingPage.tsx:1092-1133` | **Staged on `fix/audit-batch-1-booking-sev1`** (GCash + Bank fallbacks now use `config.legalName` / `config.frontDeskPhone`; QR placeholder shows a "not yet configured" message instead of a hardcoded URL; bank "BPI"/"1234-5678-90" hardcodes removed) |
+| BF-10 | S2 | PayPal option never exposed | `BookingPage.tsx:1034-1084` | **Fixed in `31ca546`** (PayPal added as a 4th payment method with its own instructions panel; type widened to include `"paypal"`) |
+| BF-11 | S2 | `BookingConfirmPage` ICS filename hardcodes `spark-inn-` | `BookingConfirmPage.tsx:73` | **Fixed in `31ca546`** (filename now `${bookingRef}.ics`; brand name lives in the event title) |
+| BF-12 | S2 | Hotel name / numbers hardcoded as payment-instruction fallbacks | `BookingPage.tsx:1092-1133` | **Fixed in `31ca546`** (GCash + Bank fallbacks now use `config.legalName` / `config.frontDeskPhone`; QR placeholder shows a "not yet configured" message instead of a hardcoded URL; bank "BPI"/"1234-5678-90" hardcodes removed) |
 | BF-13 | S3 | Lookup has correct case-insensitive fallback | `bookings.ts:1148-1167` | ✓ Verified |
 | BF-14 | S2 | Racy `addPayment` totalPaid read | `bookings.ts:920-950` | Open |
 | BF-15 | S2 | `confirmedBy` / `discountRejectedBy` are emails, not UIDs | `bookings.ts:798,984,1006` | Open |
@@ -924,7 +929,7 @@ is correct — do not add per-route files.
 | BF-21 | S3 | `BookingLookupPage` needs dedicated audit | `BookingLookupPage.tsx` | Open (deferred) |
 | BF-22 | S3 | `handleRoomAvailability` does a full collection scan | `rooms.ts:71-93` | Open |
 | BF-23 | S3 | Missing composite indexes will break at scale | `firestore.indexes.json` | Open |
-| BF-24 | S1 | Turnstile test-key fallback in non-allowlisted origins | `[...route].ts:146-179` | **Staged on `fix/audit-batch-1-booking-sev1`** (production-without-secret now fails closed; origin check tightened) |
+| BF-24 | S1 | Turnstile test-key fallback in non-allowlisted origins | `[...route].ts:146-179` | **Fixed in `8891dce`** (production-without-secret now fails closed; origin check tightened) |
 | BF-25 | S3 | Silent origin parse failure in `verifyTurnstile` | `[...route].ts:160-170` | Open |
 | BF-26 | S2 | Hardcoded breakfast rate `350` / `enabled: true` in `BookingPage` | `BookingPage.tsx:46-47` | Open |
 | BF-27 | S3 | Hardcoded fallback dates / total in `BookingConfirmPage` | `BookingConfirmPage.tsx:29-30,41` | Open |
