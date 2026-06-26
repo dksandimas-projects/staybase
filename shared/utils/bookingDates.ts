@@ -38,3 +38,38 @@ export function toDateOrNull(value: DateLike): Date | null {
   }
   return null;
 }
+
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getManilaDateInfo()` helper was duplicated in
+// `bookings.ts`, `store.ts`, `corporate-inquiries.ts`,
+// `email.ts`, and `reference.ts`. Single source of truth lives
+// here. Returns today's date in the property's configured
+// timezone (default "Asia/Manila" — see hotel.config.ts:
+// `timezone: "Asia/Manila"`).
+export interface ManilaDateInfo {
+  /** Today's date in the property's timezone, formatted as `YYYY-MM-DD`. */
+  todayStr: string;
+  /** Today's date in the property's timezone, formatted as `YYYYMMDD`. */
+  todayCompact: string;
+  /** A `Date` object representing today's date in the property's timezone (at 00:00 local). */
+  manilaDate: Date;
+}
+
+export function getManilaDateInfo(timezone: string = "Asia/Manila"): ManilaDateInfo {
+  const now = new Date();
+  // The `toLocaleString` trick converts `now` (UTC) into the
+  // property's local wall-clock string, then `new Date(...)`
+  // parses that string as a Date anchored in the local
+  // timezone. This is the same approach the previous
+  // inlined copies used.
+  const localString = now.toLocaleString("en-US", { timeZone: timezone });
+  const localDate = new Date(localString);
+  const year = localDate.getFullYear();
+  const month = String(localDate.getMonth() + 1).padStart(2, "0");
+  const day = String(localDate.getDate()).padStart(2, "0");
+  return {
+    todayStr: `${year}-${month}-${day}`,
+    todayCompact: `${year}${month}${day}`,
+    manilaDate: localDate
+  };
+}

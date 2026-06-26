@@ -30,15 +30,13 @@
 |---|---|---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | 6 (batch 1) | 0 | **6** |
 | **SEV-2 (major)** | 0 | 0 | 8 (4 in batch 1, 4 in batch 2) | 0 | **8** |
-| **SEV-3 (minor / code health)** | 4 (BF-21, BF-42, BF-45, BF-50 — all explicitly deferred) | 0 | 18 (6 in batch 2, 9 in batch 3, 3 covered) | 13 | **35** |
+| **SEV-3 (minor / code health)** | 0 | 0 | 22 (6 in batch 2, 9 in batch 3, 3 covered, 4 deferred → fixed in batch 5) | 13 | **35** |
 | **SEV-4 (nit)** | 0 | 0 | 0 | 1 (BF-06) | **1** |
-| **Total** | **4** | **0** | **32** | **14** | **50** |
+| **Total** | **0** | **0** | **36** | **14** | **50** |
 
-### Status after batch 4 (audit-doc cleanup)
-- All 21 batch-1/2/3 fix rows flipped from "In progress (staged on …)" to "Fixed in `<hash>`" with the actual commit hashes (`8891dce` for batch 1, `a441b82` for batch 2 SEV-2, `ffef46f` for batch 2 SEV-3, `403e9a4` for batch 3).
-- BF-09 / BF-28 / BF-49 (rolled into other findings) marked "Covered by …".
-- BF-21 / BF-42 / BF-45 / BF-50 explicitly marked "Open (deferred)" with the reason.
-- 32 of 50 findings are now fixed in code; 14 verified as already correct; 4 explicitly deferred.
+### Status after batch 5 (deferred fixes)
+- BF-21 / BF-42 / BF-45 / BF-50 flipped from "Open (deferred)" to "Fixed in batch 5". Per-finding fix hashes + summary live in the per-finding sections below; the high-level hashes are in `plan/CHANGELOG.md`.
+- 36 of 50 findings are now fixed in code; 14 verified as already correct; 0 explicitly deferred.
 
 ### Test status at audit time
 - `npm run typecheck` — **passes** (but `guest-app/tsconfig.json` `include` excludes
@@ -526,17 +524,60 @@ field (line 453) — easier to read if the local var were renamed
 ---
 
 ### BF-21 — `BookingLookupPage` needs dedicated audit
-**Status:** Open (deferred to a follow-up audit)
-**File:** `guest-app/src/pages/BookingLookupPage.tsx` (625 lines)
+**Status:** **Fixed in batch 5** (see `plan/CHANGELOG.md` for the fix hash)
+**File:** `guest-app/src/pages/BookingLookupPage.tsx` (625 lines), `guest-app/server/handlers/bookings.ts:1375-1431`, `shared/utils/references.ts`
 
-Not fully read in this audit. High risk: this is the public
-booking-lookup endpoint for guest self-service via ref+email, and PII
-exposure here is a regulatory concern (RA 10173). Recommend a focused
-review of what fields are returned (does it include `paymentProofUrl`?
-`discountIdPhotoUrl`?) and whether the rate limit + ownership check is
-robust. (Server side: `bookings.ts:1182-1218` returns `guestEmail` and
-`guestPhone`; client side: the lookup page displays them for the
-guest to confirm.)
+**Findings + fixes:**
+
+1. **No format validation on the public self-service input** — the
+   previous `if (!bookingRef || !guestEmail)` check let 100KB bodies,
+   `""`, and `"notanemail"` through to Firestore. Replaced with a Zod
+   `lookupSchema` / `guestCancelSchema` that validates the booking ref
+   against the shared `BOOKING_REF_REGEX` (`/^[A-Z]{1,4}-\d{8}-\d{3,5}$/i`)
+   and the email with `z.string().email().max(160)`. Malformed input
+   now short-circuits with `400 "Please provide a valid booking
+   reference and email address."` before the Firestore query.
+
+2. **Booking ref regex centralised in `shared/utils/references.ts`** —
+   `BOOKING_REF_REGEX` + `isValidBookingRef()` are exported from
+   `@spark-inn/shared` so the same canonical shape is used by the
+   create path (generates refs) and the lookup/cancel paths
+   (validates them). Tested with 8 new cases in
+   `shared/__tests__/references.test.ts`.
+
+3. **Cancel path had the same gap** — the guest branch of
+   `handleCancelBooking` previously ran
+   `guestEmail.trim().toLowerCase()` on raw input. Now it goes through
+   the same `guestCancelSchema`, and `reason` is normalised once at
+   the top of the handler (`reason.slice(0, 500)`) so the staff and
+   guest paths share the same downstream binding.
+
+4. **`console.error("Booking lookup failed:", error)` could leak the
+   request path / email** if Firestore threw. Reduced to
+   `error?.message || error` to align with the rest of the codebase.
+
+5. **Lookup response does not include `paymentProofUrl` or
+   `discountIdPhotoUrl`** — only display fields (dates, room, price,
+   status, hasBreakfast, specialRequests). PII surface is
+   `guestName` + `guestEmail` + `guestPhone`, all of which the user
+   already knows (ref+email is the lookup key). No change needed.
+
+6. **Rate limit + ownership** — the route enforces
+   `10 lookups/IP/minute` (`api/[...route].ts:391`) and the handler
+   matches on `bookingRef + guestEmail` (composite index), so a
+   guessed ref without the email always 404s. The fallback query
+   (`limit(5)`) only matches by `bookingRef` and then re-filters by
+   email in JS, so it cannot leak a different booking. The
+   pre-existing `bookings-lookup.test.ts` covers both leak paths.
+
+7. **New test cases** in `tests/api/bookings-lookup.test.ts`:
+   `malformed booking reference (wrong date format)`,
+   `malformed booking reference (non-numeric sequence)`,
+   `malformed email (no @ sign)`, `oversized body (100KB string)`,
+   `400 (not 404) so callers can distinguish bad input from no match`.
+
+**Tests:** 8 new in `shared/__tests__/references.test.ts` + 5 new in
+`tests/api/bookings-lookup.test.ts`.
 
 ---
 
@@ -842,17 +883,38 @@ bot sent.
 ---
 
 ### BF-45 — `paymentProofUrl: ""` vs `null` inconsistency
-**Status:** **Open (deferred — covered by broader Booking-schema refactor)**
-**File:** `guest-app/server/handlers/bookings.ts:446`
+**Status:** **Fixed in batch 5** (see `plan/CHANGELOG.md` for the fix hash)
+**File:** `guest-app/server/handlers/bookings.ts:505,847`, `guest-app/server/handlers/corporate-inquiries.ts:301`, `admin-app/src/context/AdminContext.tsx:115,817`, `admin-app/src/pages/BookingsPage.tsx:1276`, `shared/types/index.ts`, `plan/docs/TYPES.md`
 
 `paymentProofUrl: paymentProofUrl || ""` (line 446) — `TYPES.md:121`
-declares `paymentProofUrl: string` not `string | null`. Both empty
+declared `paymentProofUrl: string` not `string | null`. Both empty
 string and `null` are passed elsewhere in the handler
-(`discountIdPhotoUrl: discountIdPhotoUrl || null`, line 432). Pick one.
+(`discountIdPhotoUrl: discountIdPhotoUrl || null`, line 432). Picked
+`null` to match the rest of the schema.
 
-**Fix:** standardize on `null` for "no proof uploaded" (matches the
-rest of the schema: `discountIdPhotoUrl`, `guestIdPhotoUrl`,
-`paymentProofUrl` are all `string | null` in the type).
+**Fix applied:**
+
+1. `shared/types/index.ts` + `plan/docs/TYPES.md` widened to
+   `paymentProofUrl: string | null` with a comment citing this
+   finding.
+2. `bookings.ts:505` (online create) — `paymentProofUrl || ""` →
+   `paymentProofUrl || null`.
+3. `bookings.ts:847` (walkin) — `paymentProofUrl: ""` → `null`.
+4. `corporate-inquiries.ts:301` (corporate convert) — `""` → `null`.
+5. `admin-app/src/context/AdminContext.tsx` — booking type
+   `paymentProofUrl: string` → `string | null` + 2 write sites
+   `|| ""` → `|| null`. The store-order type + writes were
+   intentionally left alone (BF-45 is booking-only; store orders
+   keep `""`).
+6. `admin-app/src/pages/BookingsPage.tsx:1276` (walkin admin
+   create) — `paymentProofUrl: ""` → `null`.
+7. `email.ts:755` was skipped because the empty-string fallback
+   there feeds the email template's URL field — coercing to `null`
+   would change template semantics. The booking doc field is the
+   audit target, not the email-template variable.
+
+Read sites (e.g. `bookings.ts:1135`) already use `!!bookingData.paymentProofUrl`
+which works for both `""` and `null`, so no read-site changes were needed.
 
 ---
 
@@ -878,9 +940,8 @@ on the server; the client just checks `!!memberProfile` for UX ✓.
 ---
 
 ### BF-50 — Preallocated ID per page visit
-**Status:** **Open (deferred — janitor cleanup requires non-trivial scheduling without Cloud Functions; see index)**
-**File:** `guest-app/src/pages/BookingPage.tsx:103`,
-`guest-app/src/pages/CorporateBookingPage.tsx:73`
+**Status:** **Fixed in batch 5** (see `plan/CHANGELOG.md` for the fix hash)
+**File:** `guest-app/src/pages/BookingPage.tsx:103`, `guest-app/src/pages/CorporateBookingPage.tsx:73`, `shared/utils/storageJanitor.ts`, `guest-app/server/handlers/janitor.ts`, `guest-app/server/lib/firebase-admin.ts`, `vercel.json`, `guest-app/api/[...route].ts`
 
 ```ts
 const [bookingId] = useState(() => doc(collection(db, "bookings")).id);
@@ -890,8 +951,64 @@ Every page visit creates a candidate Firestore doc ID. If 10k users hit
 `/book` and abandon, you have 10k "tombstone" IDs. Not a bug, but be
 aware: the storage paths `bookings/{bookingId}/payment-proof/...` and
 `bookings/{bookingId}/discount-id/...` are reserved for the lifetime
-of the client tab and may never be filled. A janitor that deletes
-empty Storage subfolders after 24h would help.
+of the client tab and may never be filled.
+
+**Fix applied (Vercel Cron janitor — no Cloud Functions):**
+
+1. **Pure sweep logic in `shared/utils/storageJanitor.ts`** —
+   `sweepBookingsStorage({ bucket, db, prefix?, maxItems?, dryRun?,
+   pageToken? })` lists the `bookings/` prefix (with
+   `delimiter: "/"` so subfolders come back as a flat list of
+   `bookings/{id}/` names), checks Firestore for the matching
+   `bookings/{id}` doc, and deletes the subfolder via
+   `bucket.deleteFiles({ prefix: "bookings/{id}/", force: true })`
+   if no doc exists. Returns `{ scanned, deleted, kept, errors,
+   nextPageToken, dryRun, durationMs }` so a continuation token can
+   be threaded through on runs that hit the 500-item cap.
+
+2. **HTTP wrapper in `guest-app/server/handlers/janitor.ts`** —
+   `handleJanitorStorageSweep` auth-gates the route with the
+   `CRON_SECRET` header (or `Authorization: Bearer`), returns 401
+   on missing/wrong secret, 405 on non-GET/POST, 500 if the secret
+   is not configured server-side, and 500 if the storage bucket is
+   not configured. Otherwise calls the pure function and returns
+   `{ success: true, data: result }`.
+
+3. **`adminStorage` exposed in `guest-app/server/lib/firebase-
+   admin.ts`** — `getStorage(app)` import added; `adminStorage`
+   export added.
+
+4. **Route wired in `guest-app/api/[...route].ts`** — new
+   `domain === "janitor" && action === "storage-sweep"` branch
+   accepts `POST` and `GET` (Vercel sends GET by default).
+
+5. **Vercel Cron entry in `vercel.json`** — added
+   `{ "path": "/api/janitor/storage-sweep", "schedule": "0 19 * * *"
+   }` (19:00 UTC = 03:00 Asia/Manila, off-peak relative to the
+   00:00 UTC check-in reminder).
+
+6. **Tests** — 10 in `shared/__tests__/storage-janitor.test.ts`
+   (delete / keep / continuation token / dryRun / prefix filter /
+   error capture / maxItems cap / etc.) + 8 in
+   `tests/api/janitor-storage-sweep.test.ts` (401 / 405 / 500 / 200
+   for both `x-cron-secret` and `Bearer` paths / body forwarding).
+
+**Operational notes:**
+
+- The sweep is idempotent — re-running it is a no-op (the doc now
+  exists).
+- `dryRun: true` can be passed in the body to preview which
+  subfolders would be deleted.
+- Vercel cron sends `GET` by default; the handler accepts both
+  `GET` and `POST` to support manual invocations from
+  `vercel dev` / `curl` tests.
+- `bucket.deleteFiles({ force: true })` is used so the sweep
+  tolerates any sub-folder that contains objects the storage
+  service would otherwise refuse to delete (e.g. archive
+  subfolders added later).
+- The default 500-item cap fits the Vercel Hobby cron timeout
+  (10s); a continuation-token pass on the next run picks up where
+  this one left off.
 
 ---
 
@@ -932,7 +1049,7 @@ is correct — do not add per-route files.
 | BF-18 | S3 | Voucher `applicableRoomTypes` uses `roomData.type` (post-assignment) | `bookings.ts:335` | **Fixed in `ffef46f`** |
 | BF-19 | S3 | Redundant `applicableRoomTypes` guard | `bookings.ts:335` | **Fixed in `403e9a4`** |
 | BF-20 | S3 | Stacking var names mislead | `bookings.ts:382-392` | **Fixed in `403e9a4`** |
-| BF-21 | S3 | `BookingLookupPage` needs dedicated audit | `BookingLookupPage.tsx` | Open (deferred) |
+| BF-21 | S3 | `BookingLookupPage` needs dedicated audit | `BookingLookupPage.tsx`, `bookings.ts:1375` | **Fixed in batch 5** (Zod validation + `BOOKING_REF_REGEX`; 13 new tests) |
 | BF-22 | S3 | `handleRoomAvailability` does a full collection scan | `rooms.ts:71-93` | **Fixed in `ffef46f`** |
 | BF-23 | S3 | Missing composite indexes will break at scale | `firestore.indexes.json` | **Fixed in `ffef46f`** |
 | BF-24 | S1 | Turnstile test-key fallback in non-allowlisted origins | `[...route].ts:146-179` | **Fixed in `8891dce`** (production-without-secret now fails closed; origin check tightened) |
@@ -953,15 +1070,15 @@ is correct — do not add per-route files.
 | BF-39 | S2 | Confirmation `total` from local calc, not server | `CorporateBookingPage.tsx:541` | **Fixed in `a441b82`** |
 | BF-40 | S3 | Voucher increment atomic | `bookings.ts:347-350` | ✓ Verified |
 | BF-41 | S3 | Date math correct | `bookings.ts:103-113` | ✓ Verified |
-| BF-42 | S3 | Manila-date logic duplicated | `bookings.ts:53-65,669` | **Open** (deferred to a future batch — non-trivial refactor) |
+| BF-42 | S3 | Manila-date logic duplicated | `bookings.ts:53-65,669` | **Fixed in batch 5** (moved to `shared/utils/bookingDates.ts`; 4 new tests) |
 | BF-43 | S3 | Walkin has no honeypot | `bookings.ts:550` | ✓ Verified |
 | BF-44 | S3 | Honeypot echoes bot's preallocated id | `[...route].ts:262` | **Fixed in `403e9a4`** |
-| BF-45 | S3 | `paymentProofUrl: ""` vs `null` inconsistency | `bookings.ts:446` | **Open** (deferred — covered by the broader Booking-schema refactor tracked separately) |
+| BF-45 | S3 | `paymentProofUrl: ""` vs `null` inconsistency | `bookings.ts:446,847`, `corporate-inquiries.ts:301`, admin walkin | **Fixed in batch 5** (TYPES.md + 5 write sites now use `null`) |
 | BF-46 | S1 | Walkin capacity check dead post-migration (same as BF-02) | `bookings.ts:614` | **Covered by BF-02** (rolled into batch 1) |
 | BF-47 | S3 | (placeholder) | — | — |
 | BF-48 | S3 | Member check server-authoritative | `bookings.ts:142-148` | ✓ Verified |
 | BF-49 | S3 | `emailNotificationsSent` not in TYPES schema (same as BF-37) | `TYPES.md` | **Covered by BF-37** (rolled into batch 2) |
-| BF-50 | S3 | Preallocated ID per page visit | `BookingPage.tsx:103` | **Open (deferred — janitor cleanup is non-trivial without Cloud Functions; see BF-50 below)** |
+| BF-50 | S3 | Preallocated ID per page visit | `BookingPage.tsx:103`, `vercel.json` | **Fixed in batch 5** (Vercel-Cron janitor at `/api/janitor/storage-sweep`; 18 new tests) |
 
 ---
 

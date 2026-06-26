@@ -1273,7 +1273,9 @@ export function BookingsPage() {
         specialRequests: "Walk-in registration.",
         status: immediateCheckIn ? "checked-in" : "confirmed",
         paymentMethod: walkinPayment,
-        paymentProofUrl: "",
+        // Per BF-45 (booking-flow audit 2026-06-26):
+        // canonical "absent" is `null`, not `""`.
+        paymentProofUrl: null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         memberId: null,
