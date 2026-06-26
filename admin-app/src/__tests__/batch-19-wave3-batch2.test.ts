@@ -49,7 +49,7 @@ describe("Phase 11.6 Batch 19 — Wave 3 batch 2 (chrome + wording)", () => {
         "utf8"
       );
       expect(corpSrc).toMatch(/Simple Integration, Superior Results|Integration Process/i);
-      expect(corpSrc).toMatch(/Partner with us for your next team retreat/);
+      expect(corpSrc).toMatch(/corporate\.retreatDescription|DEFAULT_CORPORATE_PAGE_CONTENT\.retreat\.description/);
     });
   });
 

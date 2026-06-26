@@ -150,8 +150,8 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
       expect(homePageSrc).not.toMatch(/room\.imageUrls/);
     });
 
-    it("RoomsPage uses getRoomTypeImages for the grid cards and the detail modal", () => {
-      expect(roomsPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*room\.type\)/);
+    it("RoomsPage reads imageUrls from the type entry directly", () => {
+      expect(roomsPageSrc).toMatch(/selectedTypeEntry\.imageUrls/);
       expect(roomsPageSrc).not.toMatch(/selectedRoom\.imageUrls/);
     });
 
