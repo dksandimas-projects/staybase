@@ -1308,8 +1308,9 @@ export function BookingsPage() {
   };
 
   return (
-    <div className="space-y-8 font-body">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <>
+      <div className="space-y-8 font-body">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase font-medium">bookings & store orders</h1>
           <p className="text-xs text-gray-500 mt-1">
@@ -1456,6 +1457,8 @@ export function BookingsPage() {
           />
         </>
       )}
+
+      </div>
 
       {/* Booking Detail Drawer (D-01) */}
       <Drawer
@@ -2521,6 +2524,6 @@ export function BookingsPage() {
           </div>
         </form>
       </Modal>
-    </div>
+    </>
   );
 }
