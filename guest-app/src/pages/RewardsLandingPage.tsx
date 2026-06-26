@@ -104,7 +104,7 @@ export function RewardsLandingPage() {
         <div className="absolute inset-0 z-0 opacity-40">
           {heroPhoto ? (
             <HeroImage
-              className="w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-cover"
               alt="Warm boutique hotel lobby interior at sunset"
               src={heroPhoto}
               placeholder={REWARDS_HERO_LQIP}
