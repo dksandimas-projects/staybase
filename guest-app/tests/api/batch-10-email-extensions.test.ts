@@ -145,11 +145,11 @@ describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => 
 
   describe("Booking handler integration (staff-new-booking + staff-new-payment)", () => {
     it("handleCreateBooking fires staff-new-booking after the transaction commits", () => {
-      // The staff notification must fire after the booking
-      // acknowledgment, guarded by emailNotificationsSent for
-      // idempotency.
+      // Per BF-04 (booking-flow audit 2026-06-26): the dedup
+      // guard now reads the fresh booking doc after commit
+      // (the previous in-memory check was always undefined).
       const fireBlock = bookingsSrc.match(
-        /if\s*\(\s*!computedData\.emailNotificationsSent\?\.staffNewBooking\s*\)\s*\{/
+        /freshBookingSnap\.exists[\s\S]{0,200}emailNotificationsSent\?\.staffNewBooking/
       );
       expect(fireBlock, "expected to find the staff-new-booking fire block").toBeTruthy();
       expect(bookingsSrc).toMatch(/sendStaffNewBookingTrigger/);
