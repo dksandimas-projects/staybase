@@ -14,7 +14,8 @@ import config from "@config";
 // kind of light/sky-to-ground falloff a real hotel hero photo has.
 function buildHeroLqip(top: string, bottom: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bottom}"/></linearGradient></defs><rect width="16" height="9" fill="url(%23g)"/></svg>`;
-  return `data:image/svg+xml;utf8,${svg}`;
+  const escaped = svg.replace(/#/g, "%23");
+  return `data:image/svg+xml;utf8,${escaped}`;
 }
 
 // Default LQIP palette: warm sky → earth. Used when the page does

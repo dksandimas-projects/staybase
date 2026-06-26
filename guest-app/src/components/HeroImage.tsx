@@ -76,6 +76,7 @@ export function HeroImage({
   priority = true
 }: HeroImageProps): ReactElement {
   const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   // Tracks the last `src` we injected a preload tag for, so we can
   // remove the stale tag when the URL changes (e.g. admin swaps the
   // hero photo) without thrashing the head on every render.
@@ -95,11 +96,22 @@ export function HeroImage({
     };
   }, [priority, src]);
 
-  // Reset the loaded state when the src changes so the fade-in
-  // plays again for the new image.
+  // Check if image is already complete when mounting or when src changes,
+  // otherwise reset loaded state so the fade-in plays.
   useEffect(() => {
-    setLoaded(false);
+    if (imgRef.current?.complete) {
+      setLoaded(true);
+    } else {
+      setLoaded(false);
+    }
   }, [src]);
+
+  const handleRef = (node: HTMLImageElement | null) => {
+    imgRef.current = node;
+    if (node?.complete) {
+      setLoaded(true);
+    }
+  };
 
   const lqipStyle: CSSProperties | undefined = placeholder
     ? {
@@ -117,6 +129,7 @@ export function HeroImage({
         <div aria-hidden="true" className={className} style={lqipStyle} />
       ) : null}
       <img
+        ref={handleRef}
         src={src}
         srcSet={srcSet}
         sizes={sizes}
