@@ -1,4 +1,4 @@
-import { generateStoreOrderRef } from "@spark-inn/shared";
+import { generateStoreOrderRef, getManilaDateInfo } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
 import { sendStoreOrderTrigger } from "./email";
 
@@ -29,18 +29,11 @@ interface StoreOrderStatusBody {
   orderRef: string;
 }
 
-function getManilaDateInfo() {
-  const d = new Date();
-  const manilaStr = d.toLocaleString("en-US", { timeZone: "Asia/Manila" });
-  const manilaDate = new Date(manilaStr);
-  const year = manilaDate.getFullYear();
-  const month = String(manilaDate.getMonth() + 1).padStart(2, "0");
-  const day = String(manilaDate.getDate()).padStart(2, "0");
-  return {
-    todayStr: `${year}-${month}-${day}`,
-    manilaDate
-  };
-}
+// Per BF-42 (booking-flow audit 2026-06-26): the
+// `getManilaDateInfo()` helper was duplicated in 5
+// server-side files. The shared implementation lives in
+// `shared/utils/bookingDates.ts` and is imported as
+// `getManilaDateInfo` above. Local definition removed BF-42.
 
 export async function handleCreateStoreOrder(req: any, res: any) {
   if (req.method !== "POST") {

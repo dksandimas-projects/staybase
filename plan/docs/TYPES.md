@@ -118,7 +118,13 @@ Booking {
   specialRequests: string
   status: BookingStatus
   paymentMethod: PaymentMethod
-  paymentProofUrl: string
+  // Per BF-45 (booking-flow audit 2026-06-26): the
+  // canonical "no payment proof" value is `null` (not
+  // `""`). Writes coalesce `""` to `null` so all read
+  // sites can rely on `!!booking.paymentProofUrl` /
+  // `paymentProofUrl === null` checks without a string
+  // comparison.
+  paymentProofUrl: string | null
   source: BookingSource
   linkedInquiryId: string | null     // set when created from a converted corporate inquiry (per `DECISIONS-FEATURES.md #102`)
   louReceived: boolean               // staff-toggled flag for chargeback bookings (per `DECISIONS-FEATURES.md #99`)
