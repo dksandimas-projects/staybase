@@ -139,7 +139,7 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
   return record.count > limit;
 }
 
-async function verifyTurnstile(token: string | undefined): Promise<{ success: boolean; error?: string }> {
+async function verifyTurnstile(token: string | undefined, req?: VercelRequest): Promise<{ success: boolean; error?: string }> {
   // Cloudflare test keys: always verify successfully
   // Bypassed if NODE_ENV is "test"
   if (
@@ -155,7 +155,24 @@ async function verifyTurnstile(token: string | undefined): Promise<{ success: bo
     return { success: false, error: "Bot verification token is missing." };
   }
 
-  const secret = process.env.TURNSTILE_SECRET_KEY;
+  // Check the origin/referer to see if this is a production request
+  const requestOrigin = (req?.headers.origin || req?.headers.referer || "") as string;
+  let isProduction = false;
+  try {
+    if (requestOrigin) {
+      const originHost = new URL(requestOrigin).hostname;
+      if (originHost === config.domain || originHost === `www.${config.domain}`) {
+        isProduction = true;
+      }
+    }
+  } catch (e) {
+    // Fallback if URL parsing fails
+  }
+
+  const secret = isProduction 
+    ? process.env.TURNSTILE_SECRET_KEY
+    : "1x0000000000000000000000000000000AA";
+
   if (!secret) {
     console.warn("⚠️ Missing TURNSTILE_SECRET_KEY in server environment.");
     return { success: true }; // Allow through if key is unconfigured locally
@@ -249,7 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Turnstile Bot Check
-    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
     if (!verification.success) {
       return res.status(400).json({ success: false, error: verification.error });
     }
@@ -346,7 +363,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Turnstile Bot Check
-    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
     if (!verification.success) {
       return res.status(400).json({ success: false, error: verification.error });
     }
@@ -361,7 +378,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Turnstile Bot Check
-    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
     if (!verification.success) {
       return res.status(400).json({ success: false, error: verification.error });
     }
@@ -381,7 +398,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
     if (!verification.success) {
       return res.status(400).json({ success: false, error: verification.error });
     }
@@ -401,7 +418,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const verification = await verifyTurnstile(req.body?.turnstileToken);
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
     if (!verification.success) {
       return res.status(400).json({ success: false, error: verification.error });
     }
