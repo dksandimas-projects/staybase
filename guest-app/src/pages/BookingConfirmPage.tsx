@@ -70,7 +70,12 @@ export function BookingConfirmPage() {
       allDay: true,
       brand: config.brandName
     });
-    downloadIcsFile(`spark-inn-${bookingRef}.ics`, icsContent);
+    // Per BF-11 (booking-flow audit 2026-06-26): the previous
+    // filename hardcoded `spark-inn-`, which violates the
+    // white-label rule (GOTCHAS.md). The bookingRef already
+    // carries the configured prefix (e.g. "SI-...") and the
+    // brand name is in the event title; just use the ref.
+    downloadIcsFile(`${bookingRef}.ics`, icsContent);
   }
 
   const googleCalendarUrl = buildGoogleCalendarUrl({

@@ -7,10 +7,22 @@ export interface PriceInput {
   discountPct?: number;
   voucherDiscount?: number;
   memberDiscountPct?: number;
+  // Per BF-08 (booking-flow audit 2026-06-26): callers that
+  // already walked each night and substituted the weekend rate
+  // (e.g. BookingPage's `roomTotal` useMemo, the server's
+  // handleCreateBooking transaction) can pass a pre-computed
+  // `roomTotal` that overrides the `ratePerNight * numNights`
+  // calculation. This makes the displayed total match the
+  // server's `totalPrice` on stays that include a weekend night.
+  roomTotal?: number;
 }
 
 export function calculateBookingTotal(input: PriceInput) {
-  const roomTotal = input.ratePerNight * input.numNights;
+  // Per BF-08: prefer the pre-computed `roomTotal` when provided
+  // (it accounts for per-night weekend substitution). Fall back
+  // to the flat `ratePerNight * numNights` for callers that don't
+  // need weekend-aware pricing.
+  const roomTotal = input.roomTotal ?? (input.ratePerNight * input.numNights);
   const breakfastTotal =
     input.hasBreakfast && input.breakfastRate && input.numGuests
       ? input.breakfastRate * input.numGuests * input.numNights

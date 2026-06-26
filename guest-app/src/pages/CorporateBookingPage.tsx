@@ -283,9 +283,17 @@ export function CorporateBookingPage() {
   const subtotal = roomTotal + breakfastTotal;
 
   // Calculate total
+  // Per BF-08 (booking-flow audit 2026-06-26): pass the
+  // pre-computed roomTotal so the calc matches the server's
+  // `totalPrice`. Corporate bookings don't apply weekend
+  // rates (server's `!isCorporate` guard on the weekend
+  // branch), so the flat `ratePerNight * nights` is correct
+  // here. Passing it explicitly keeps the calculation in
+  // lockstep with the server.
   const total = calculateBookingTotal({
     ratePerNight,
     numNights: nights,
+    roomTotal,
     numGuests: guests,
     breakfastRate: breakfastRatePerPerson,
     hasBreakfast,
