@@ -245,7 +245,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     expect(res.status).toHaveBeenCalledWith(200);
     const jsonArg = (res.json as any).mock.calls[0][0];
     expect(jsonArg.success).toBe(true);
-    expect(jsonArg.data.bookingRef).toMatch(/^SI-\d{8}-\d{3}$/);
+    expect(jsonArg.data.bookingRef).toMatch(/^SI-\d{8}-\d{5}$/);
     expect(jsonArg.data.roomId).toBe("room_101");
   });
 

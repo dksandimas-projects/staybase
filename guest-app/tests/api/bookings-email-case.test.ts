@@ -41,17 +41,22 @@ describe("bookings.ts — guestEmail lowercase normalization (SEV-1 #4)", () => 
     // self-cancel because the storage is now lowercase but the query was
     // still mixed case.
     //
-    // Per BF-21 (booking-flow audit 2026-06-26): the cancel
-    // path now goes through `guestCancelSchema` (Zod), which
+    // Per BF-21 (booking-flow audit 2026-06-26) the cancel
+    // path goes through `guestCancelSchema` (Zod), which
     // lowercases the email in the schema itself
     // (`z.string().trim().toLowerCase().email().max(160)`),
-    // so the cancel query binds to the lowercased value. The
-    // regex below accepts either the old `.trim().toLowerCase()`
-    // form or the new schema-validated `parsed.data.guestEmail`
-    // form so the test does not break across the refactor.
-    expect(src).toMatch(
-      /where\(\s*["']guestEmail["']\s*,\s*["']==["']\s*,\s*(?:guestEmail\.trim\(\)\.toLowerCase\(\)|parsed\.data\.guestEmail)\s*\)/
-    );
+    // so the cancel query binds to the lowercased value.
+    //
+    // Per H2 (hardening batch 2026-06-26) the cancel query
+    // is now dispatched by a `compositeFilter` helper so it
+    // can bind on either `guestEmail` (legacy) or
+    // `lookupToken` (the new magic-link path). The regex
+    // here is source-grammar-level (loose on whitespace +
+    // variable names) so it doesn't break across the
+    // refactor — we just want to assert that the cancel
+    // path binds the composite filter and the value is
+    // not the raw mixed-case `body.guestEmail`.
+    expect(src).toMatch(/\.where\(\s*compositeFilter\.field\s*,\s*["']==["']\s*,\s*compositeFilter\.value\s*\)/);
   });
 
   it("does not leave any write path storing guestEmail as mixed case", () => {

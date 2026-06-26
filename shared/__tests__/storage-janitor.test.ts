@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { sweepBookingsStorage } from "../utils/storageJanitor";
+import { sweepBookingsStorage, recordSweepResult, getSweepHistory, clearSweepHistory } from "../utils/storageJanitor";
 
 const { mockBucket, mockDb, mockDoc, mockFirestore } = vi.hoisted(() => {
   const mockDoc = vi.fn();
@@ -196,6 +196,63 @@ describe("sweepBookingsStorage (BF-50)", () => {
     expect(mockBucket.deleteFiles).toHaveBeenCalledWith({
       prefix: "discounts/abc/",
       force: true
+    });
+  });
+
+  // Per H5 (hardening batch 2026-06-26): the in-memory
+  // sweep history buffer is what the `/api/janitor/stats`
+  // endpoint reads from. The buffer caps at 50 entries
+  // and is FIFO (newest first).
+  describe("sweep history (H5)", () => {
+    test("records + returns the most recent run first", () => {
+      clearSweepHistory();
+      const base = {
+        scanned: 1,
+        deleted: 1,
+        kept: 0,
+        errors: [],
+        nextPageToken: null,
+        dryRun: false,
+        durationMs: 5
+      } as const;
+      recordSweepResult({ ...base } as any);
+      recordSweepResult({ ...base, scanned: 2, deleted: 2 } as any);
+      const history = getSweepHistory();
+      expect(history.length).toBe(2);
+      expect(history[0].scanned).toBe(2);
+      expect(history[1].scanned).toBe(1);
+    });
+
+    test("caps the buffer at 50 entries", () => {
+      clearSweepHistory();
+      for (let i = 0; i < 60; i++) {
+        recordSweepResult({
+          scanned: i,
+          deleted: 0,
+          kept: 0,
+          errors: [],
+          nextPageToken: null,
+          dryRun: false,
+          durationMs: 0
+        });
+      }
+      expect(getSweepHistory().length).toBe(50);
+    });
+
+    test("clearSweepHistory empties the buffer", () => {
+      clearSweepHistory();
+      recordSweepResult({
+        scanned: 1,
+        deleted: 1,
+        kept: 0,
+        errors: [],
+        nextPageToken: null,
+        dryRun: false,
+        durationMs: 1
+      });
+      expect(getSweepHistory().length).toBe(1);
+      clearSweepHistory();
+      expect(getSweepHistory().length).toBe(0);
     });
   });
 });

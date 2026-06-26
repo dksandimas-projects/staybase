@@ -29,6 +29,17 @@ interface StoreOrderStatusBody {
   orderRef: string;
 }
 
+// Per H4 (hardening batch 2026-06-26): bounded lengths on
+// every free-form string the store-order endpoints accept.
+// A 100KB body used to land in the order doc as-is. Values
+// mirror the booking-schema caps so the two surfaces
+// stay consistent.
+const MAX_GUEST_NAME_LENGTH = 120;
+const MAX_NOTES_LENGTH = 500;
+const MAX_ROOM_NUMBER_LENGTH = 12;
+const MAX_ORDER_REF_LENGTH = 40;
+const MAX_REASON_LENGTH = 500;
+
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5
 // server-side files. The shared implementation lives in
@@ -40,9 +51,27 @@ export async function handleCreateStoreOrder(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const body = req.body as CreateStoreOrderBody;
+  const body = (req.body || {}) as CreateStoreOrderBody;
   if (!body || !body.roomId || !body.roomNumber || !body.guestName || !Array.isArray(body.items) || body.items.length === 0) {
     return res.status(400).json({ success: false, error: "Missing required store order fields." });
+  }
+
+  // Per H4 (hardening batch 2026-06-26): trim + cap every
+  // free-form string up front so a 100KB body doesn't reach
+  // the transaction. Trims happen before the length check
+  // so leading/trailing whitespace doesn't count against
+  // the cap.
+  const roomId = String(body.roomId).trim();
+  const roomNumber = String(body.roomNumber).trim();
+  const guestName = String(body.guestName).trim();
+  if (roomId.length === 0 || roomId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid room id." });
+  }
+  if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (guestName.length === 0 || guestName.length > MAX_GUEST_NAME_LENGTH) {
+    return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
   }
 
   if (!["cod", "add-to-bill", "gcash"].includes(body.paymentMethod)) {
@@ -119,12 +148,30 @@ export async function handleCreateStoreOrder(req: any, res: any) {
 
       let bookingId: string | null = null;
       const activeBookingQuery = adminDb.collection("bookings")
-        .where("roomNumber", "==", body.roomNumber)
+        .where("roomNumber", "==", roomNumber)
         .where("status", "in", ["confirmed", "checked-in"])
         .limit(1);
       const activeBookingSnapshot = await transaction.get(activeBookingQuery);
       if (!activeBookingSnapshot.empty) {
         bookingId = activeBookingSnapshot.docs[0].id;
+      }
+
+      // Per H4 (hardening batch 2026-06-26): the in-room
+      // store is intended for guests of an active
+      // reservation. Previously anyone with a room number
+      // + item id could place an order — fine for the
+      // in-room tablet, but a bot on the hotel Wi-Fi could
+      // order items to any room. We require an active
+      // booking tied to the room; a payment trace is
+      // optional (the room can be in `confirmed` status
+      // even before check-in).
+      //
+      // Staff walk-ins (handled by the staff app, which
+      // authenticates with a Firebase ID token + sets
+      // `req.staff`) bypass this check via the route
+      // allowlist.
+      if (!bookingId) {
+        throw new Error("NO_ACTIVE_BOOKING");
       }
 
       const counterRef = adminDb.collection("counters").doc(`store-orders-${todayStr}`);
@@ -142,10 +189,10 @@ export async function handleCreateStoreOrder(req: any, res: any) {
 
       transaction.set(orderDocRef, {
         orderRef,
-        roomId: body.roomId,
-        roomNumber: body.roomNumber,
+        roomId,
+        roomNumber,
         bookingId,
-        guestName: body.guestName.trim(),
+        guestName,
         items: orderItems,
         totalAmount,
         paymentMethod: body.paymentMethod,
@@ -188,9 +235,9 @@ export async function handleCreateStoreOrder(req: any, res: any) {
           await sendStoreOrderTrigger("store-order-placed", {
             orderRef: responseData.orderRef,
             orderId: responseData.orderId,
-            roomNumber: body.roomNumber,
+            roomNumber,
             guestEmail,
-            guestName: body.guestName.trim(),
+            guestName,
             items: responseData.items,
             totalAmount: responseData.totalAmount,
             paymentMethod: body.paymentMethod,
@@ -210,7 +257,14 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       PAYMENT_METHOD_DISABLED: { status: 400, message: "That payment method is currently unavailable." },
       ITEM_NOT_FOUND: { status: 404, message: "One of the selected items is no longer available." },
       ITEM_INACTIVE: { status: 409, message: "One of the selected items is no longer available." },
-      INSUFFICIENT_STOCK: { status: 409, message: "One of the selected items no longer has enough stock." }
+      INSUFFICIENT_STOCK: { status: 409, message: "One of the selected items no longer has enough stock." },
+      NO_ACTIVE_BOOKING: {
+        // Per H4: the in-room store requires an active
+        // reservation. Return 403 (not 404) so the client
+        // distinguishes "no booking" from "stock error".
+        status: 403,
+        message: "Store orders require an active reservation in this room."
+      }
     };
     const mapped = knownErrors[error.message];
     return res.status(mapped?.status || 500).json({
@@ -225,25 +279,47 @@ export async function handleCancelStoreOrder(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const body = req.body as CancelStoreOrderBody;
+  const body = (req.body || {}) as CancelStoreOrderBody;
   if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
     return res.status(400).json({ success: false, error: "Missing required cancellation fields." });
+  }
+
+  // Per H4 (hardening batch 2026-06-26): trim + cap
+  // every free-form string before the transaction. The
+  // room-number + order-ref comparison below used to
+  // fail silently on trailing whitespace — a legitimate
+  // copy-paste bug, but also a way for a bot to
+  // distinguish "no match" from "match" via timing.
+  const orderId = String(body.orderId).trim();
+  const roomNumber = String(body.roomNumber).trim();
+  const orderRef = String(body.orderRef).trim();
+  const cancellationReason = typeof body.cancellationReason === "string"
+    ? body.cancellationReason.trim().slice(0, MAX_REASON_LENGTH)
+    : "";
+  if (orderId.length === 0 || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid order id." });
+  }
+  if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid order reference." });
   }
 
   try {
     let cancelledOrder: any = null;
     await adminDb.runTransaction(async (transaction) => {
-      const orderRef = adminDb.collection("storeOrders").doc(body.orderId);
-      const orderDoc = await transaction.get(orderRef);
+      const orderRefDoc = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRefDoc);
       if (!orderDoc.exists) {
         throw new Error("ORDER_NOT_FOUND");
       }
 
       const orderData = orderDoc.data()!;
-      if (orderData.roomNumber !== body.roomNumber) {
+      if (String(orderData.roomNumber || "").trim() !== roomNumber) {
         throw new Error("ORDER_ROOM_MISMATCH");
       }
-      if (orderData.orderRef !== body.orderRef) {
+      if (String(orderData.orderRef || "").trim() !== orderRef) {
         throw new Error("ORDER_REF_MISMATCH");
       }
       if (orderData.status !== "placed") {
@@ -268,9 +344,12 @@ export async function handleCancelStoreOrder(req: any, res: any) {
         });
       }
 
-      transaction.update(orderRef, {
+      transaction.update(orderRefDoc, {
         status: "cancelled",
-        cancellationReason: body.cancellationReason || "Guest cancelled from intercom",
+        // Per H4: prefer the (now-capped) `cancellationReason`
+        // collected at the top of the handler, falling back to
+        // the default message if the guest supplied nothing.
+        cancellationReason: cancellationReason || "Guest cancelled from intercom",
         stockRestoredAt: new Date(),
         updatedAt: new Date()
       });
@@ -294,19 +373,27 @@ export async function handleCancelStoreOrder(req: any, res: any) {
           }
         }
         if (guestEmail) {
-          const freshDoc = await adminDb.collection("storeOrders").doc(cancelledOrder.orderRef || "").get();
+          // Per H4 (hardening batch 2026-06-26): the
+          // previous code queried `cancelledOrder.orderRef`
+          // as the doc id, which is wrong — that's the
+          // human-readable ref (e.g. `SO-20260615-001`),
+          // not the Firestore doc id (`body.orderId`).
+          // The query returned `exists: false` and the
+          // email used the stale snapshot. The fix binds
+          // the re-read to `orderId`.
+          const freshDoc = await adminDb.collection("storeOrders").doc(orderId).get();
           const fresh = freshDoc.exists ? freshDoc.data() : cancelledOrder;
           await sendStoreOrderTrigger("store-order-cancelled", {
             orderRef: fresh.orderRef,
-            orderId: body.orderId,
-            roomNumber: body.roomNumber,
+            orderId,
+            roomNumber,
             guestEmail,
             guestName: fresh.guestName,
             items: fresh.items,
             totalAmount: fresh.totalAmount,
             paymentMethod: fresh.paymentMethod,
             status: "cancelled",
-            cancellationReason: body.cancellationReason || "Guest cancelled from intercom"
+            cancellationReason: cancellationReason || "Guest cancelled from intercom"
           });
         }
       } catch (emailErr) {
@@ -336,19 +423,35 @@ export async function handleGetStoreOrderStatus(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const body = req.body as StoreOrderStatusBody;
+  const body = (req.body || {}) as StoreOrderStatusBody;
   if (!body || !body.orderId || !body.roomNumber || !body.orderRef) {
     return res.status(400).json({ success: false, error: "Missing required order status fields." });
   }
 
+  // Per H4 (hardening batch 2026-06-26): same trim + cap
+  // pattern as the cancel handler so a 100KB body or a
+  // trailing-space room number doesn't reach Firestore.
+  const orderId = String(body.orderId).trim();
+  const roomNumber = String(body.roomNumber).trim();
+  const orderRef = String(body.orderRef).trim();
+  if (orderId.length === 0 || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "Invalid order id." });
+  }
+  if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (orderRef.length === 0 || orderRef.length > MAX_ORDER_REF_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid order reference." });
+  }
+
   try {
-    const orderDoc = await adminDb.collection("storeOrders").doc(body.orderId).get();
+    const orderDoc = await adminDb.collection("storeOrders").doc(orderId).get();
     if (!orderDoc.exists) {
       return res.status(404).json({ success: false, error: "Store order was not found." });
     }
 
     const orderData = orderDoc.data()!;
-    if (orderData.roomNumber !== body.roomNumber || orderData.orderRef !== body.orderRef) {
+    if (String(orderData.roomNumber || "").trim() !== roomNumber || String(orderData.orderRef || "").trim() !== orderRef) {
       return res.status(403).json({ success: false, error: "This order does not belong to this room." });
     }
 
