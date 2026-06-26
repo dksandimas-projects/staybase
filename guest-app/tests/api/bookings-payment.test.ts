@@ -20,7 +20,8 @@ vi.mock("../../server/handlers/email", () => ({
 vi.mock("../../server/lib/firebase-admin", () => {
   const bookingDocRef = (path: string) => {
     const docId = path.split("/").pop() || "";
-    return {
+    const ref = {
+      id: docId,
       path,
       get: async () => {
         const booking = mockBookings[docId];
@@ -38,6 +39,12 @@ vi.mock("../../server/lib/firebase-admin", () => {
       collection: (sub: string) => {
         if (sub === "payments") {
           return {
+            doc: () => ({
+              id: `payment_${mockPayments.length + 1}`,
+              set: async (data: any) => {
+                mockPayments.push(data);
+              }
+            }),
             add: async (data: any) => {
               mockPayments.push(data);
               return { id: `payment_${mockPayments.length}` };
@@ -55,13 +62,37 @@ vi.mock("../../server/lib/firebase-admin", () => {
         };
       }
     };
+    return ref;
+  };
+
+  // Per BF-14 (booking-flow audit 2026-06-26): handleAddPayment
+  // now wraps the payment append + re-sum + status decision in
+  // a Firestore transaction. The mock transaction mirrors the
+  // calls the handler makes: get() reads from the underlying
+  // ref's get(), set() routes writes to the doc/subcollection,
+  // update() merges into the booking.
+  const mockTransaction = {
+    get: vi.fn().mockImplementation(async (ref: any) => {
+      if (ref && typeof ref.get === "function") return ref.get();
+      return { exists: false };
+    }),
+    set: vi.fn().mockImplementation((ref: any, data: any) => {
+      if (ref && typeof ref.set === "function") return ref.set(data);
+      if (ref?.path) mockUpdates.push({ path: ref.path, data });
+    }),
+    update: vi.fn().mockImplementation((ref: any, data: any) => {
+      if (ref && typeof ref.update === "function") return ref.update(data);
+    })
   };
 
   return {
     adminDb: {
       collection: vi.fn().mockImplementation((collName: string) => ({
         doc: (docId: string) => bookingDocRef(`${collName}/${docId}`)
-      }))
+      })),
+      runTransaction: vi.fn().mockImplementation(async (callback: any) => {
+        return await callback(mockTransaction);
+      })
     },
     adminAuth: {}
   };
