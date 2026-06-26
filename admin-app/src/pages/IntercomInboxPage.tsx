@@ -265,8 +265,9 @@ export function IntercomInboxPage() {
   };
 
   return (
-    <div className="space-y-8 font-body">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <>
+      <div className="space-y-8 font-body">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase">intercom & reception</h1>
           <p className="text-xs text-gray-500 mt-1">Review active room chat logs, dispatch quick-request orders, and process voice signaling calls.</p>
@@ -456,6 +457,8 @@ export function IntercomInboxPage() {
         )}
       </div>
 
+      </div>
+
       {/* Mobile chat drawer — full-screen bottom sheet with a
           'Back to threads' button. The bottom tab bar still
           floats over it (per the persistent-inside-drawers rule). */}
@@ -479,6 +482,6 @@ export function IntercomInboxPage() {
           variant="drawer"
         />
       </Drawer>
-    </div>
+    </>
   );
 }
