@@ -89,6 +89,9 @@ const baseBooking = {
   guestName: "Maria Santos",
   guestEmail: "maria@example.test",
   guestPhone: "+63 917 000 0000",
+  // Per H2 (hardening batch 2026-06-26): the lookup
+  // deep-link token. 32-char lowercase hex.
+  lookupToken: "000102030405060708090a0b0c0d0e0f",
   roomId: "room_101",
   roomNumber: "101",
   roomType: "standard-double",
@@ -303,6 +306,123 @@ describe("/api/bookings/lookup", () => {
         res
       );
       expect(res.status).toHaveBeenCalledWith(400);
+    });
+  });
+
+  // Per H2 (hardening batch 2026-06-26): the public
+  // lookup now accepts either `guestEmail` (legacy) OR
+  // `token` (the per-booking `lookupToken`). Exactly one
+  // is required.
+  describe("token-based lookup (H2)", () => {
+    test("looks up by bookingRef + token", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "000102030405060708090a0b0c0d0e0f" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.bookingRef).toBe("SI-20260615-001");
+    });
+
+    test("accepts uppercase hex token (case-insensitive)", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "000102030405060708090A0B0C0D0E0F" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("returns 404 when the token does not match the doc", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "ffffffffffffffffffffffffffffffff" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("returns 400 when neither email nor token is provided", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 when both email and token are provided", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: {
+            bookingRef: "SI-20260615-001",
+            guestEmail: "maria@example.test",
+            token: "000102030405060708090a0b0c0d0e0f"
+          }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 on a malformed token (too short)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "abc" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("returns 400 on a malformed token (non-hex chars)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "g".repeat(32) }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    test("does NOT return lookupToken in the response payload", async () => {
+      // Per H2: the lookup endpoint must not leak the
+      // token back to the client, otherwise an attacker
+      // who can see the response (e.g. via shared
+      // device) could exfiltrate the token.
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "000102030405060708090a0b0c0d0e0f" }
+        },
+        res
+      );
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data).not.toHaveProperty("lookupToken");
     });
   });
 });
