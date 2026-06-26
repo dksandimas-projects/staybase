@@ -25,10 +25,16 @@ export function BookingConfirmPage() {
   const { roomTypes } = useRoomTypes();
 
   // Read query params from URL
-  const bookingRef = searchParams.get("bookingRef") ?? `SI-${new Date().getFullYear()}0612-042`;
-  const checkIn = searchParams.get("checkIn") ?? "2026-06-12";
-  const checkOut = searchParams.get("checkOut") ?? "2026-06-14";
-  const guests = Number(searchParams.get("guests") ?? 2);
+  // Per BF-27 (booking-flow audit 2026-06-26): the previous
+  // fallbacks hardcoded mock data (e.g. `2026-06-12` /
+  // `2026-06-14` / `total: 6400`) which produced a convincing-
+  // looking but fake confirmation page if a user landed on the
+  // bare URL. Now we surface a friendly "no booking details"
+  // state when any required param is missing.
+  const bookingRef = searchParams.get("bookingRef") ?? "";
+  const checkIn = searchParams.get("checkIn") ?? "";
+  const checkOut = searchParams.get("checkOut") ?? "";
+  const guests = Number(searchParams.get("guests") ?? 0);
   // Per the room-type booking refactor: confirmation page receives
   // the chosen `roomType` and the server-assigned `roomNumber`
   // (passed through from /api/bookings/create response). Falls back
@@ -38,7 +44,8 @@ export function BookingConfirmPage() {
   const roomTypeEntry = roomTypes.find((t) => t.value === roomTypeParam);
   const roomDisplayLabel = roomTypeEntry?.label ?? roomTypeParam;
   const rawPaymentMethod = searchParams.get("paymentMethod") ?? "gcash";
-  const total = Number(searchParams.get("total") ?? 6400);
+  const total = Number(searchParams.get("total") ?? 0);
+  const hasAllParams = !!(bookingRef && checkIn && checkOut && guests > 0);
 
   const paymentLabels: Record<string, string> = {
     gcash: "Digital Wallet (GCash/Maya)",
@@ -102,6 +109,33 @@ export function BookingConfirmPage() {
         initial: "hidden",
         animate: "visible"
       };
+
+  // Per BF-27: when the URL is missing required booking details
+  // (user landed on /book/confirm directly, or the redirect was
+  // lost), render a friendly empty state instead of fake data.
+  if (!hasAllParams) {
+    return (
+      <main className="min-h-screen bg-gray-50 pb-20 font-body text-gray-900">
+        <Navbar />
+        <section className="mx-auto max-w-[620px] px-4 pt-20 text-center">
+          <h1 className="font-heading text-3xl text-gray-950 sm:text-4xl">
+            No booking details found
+          </h1>
+          <p className="mt-4 text-base text-gray-600">
+            We couldn't find your booking in the link. Please return to the
+            homepage and start a new booking, or check your email for the
+            original confirmation.
+          </p>
+          <div className="mt-8">
+            <PrimaryButton to="/" className="sm:min-w-56">
+              <Home size={18} />
+              Return to Homepage
+            </PrimaryButton>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-50 pb-20 font-body text-gray-900">
