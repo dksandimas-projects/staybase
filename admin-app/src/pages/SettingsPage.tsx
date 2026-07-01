@@ -919,7 +919,19 @@ export function SettingsPage() {
   const [checkInTime, setCheckInTime] = useState(hotelConfig.checkInTime);
   const [checkOutTime, setCheckOutTime] = useState(hotelConfig.checkOutTime);
   const [missionStatement, setMissionStatement] = useState(hotelConfig.missionStatement);
+  const [visionStatement, setVisionStatement] = useState(hotelConfig.visionStatement);
   const [hotelStory, setHotelStory] = useState(hotelConfig.hotelStory);
+  // Phase 11.8 PR 3 — the 6 hotel contact details become admin-
+  // editable runtime overrides. Each falls back to the deploy-time
+  // `hotel.config.ts` value via `pickString` in the public hook
+  // when these state values are empty (i.e. the admin hasn't
+  // overridden yet).
+  const [address, setAddress] = useState(hotelConfig.address);
+  const [frontDeskPhone, setFrontDeskPhone] = useState(hotelConfig.frontDeskPhone);
+  const [supportEmail, setSupportEmail] = useState(hotelConfig.supportEmail);
+  const [dpoEmail, setDpoEmail] = useState(hotelConfig.dpoEmail);
+  const [facebookUrl, setFacebookUrl] = useState(hotelConfig.facebookUrl);
+  const [instagramUrl, setInstagramUrl] = useState(hotelConfig.instagramUrl);
 
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
@@ -1157,11 +1169,18 @@ export function SettingsPage() {
     e.preventDefault();
     await updateSettings("hotelConfig", {
       hotelName,
+      address,
+      frontDeskPhone,
+      supportEmail,
+      dpoEmail,
+      facebookUrl,
+      instagramUrl,
       contactEmail,
       contactPhone,
       checkInTime,
       checkOutTime,
       missionStatement,
+      visionStatement,
       hotelStory
     });
   };
@@ -1596,6 +1615,16 @@ export function SettingsPage() {
               </label>
 
               <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Hotel Vision Statement
+                <textarea
+                  value={visionStatement}
+                  onChange={(e) => setVisionStatement(e.target.value)}
+                  rows={2}
+                  className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                 The Spark Story History
                 <textarea
                   value={hotelStory}
@@ -1604,6 +1633,86 @@ export function SettingsPage() {
                   className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
                 />
               </label>
+
+              {/* Phase 11.8 PR 3 — hotel contact details. Each field
+                  is admin-editable from this form; the public hook
+                  falls back to the deploy-time `hotel.config.ts`
+                  value when these are empty. The address stays a
+                  single text input (matches the existing TYPES.md
+                  schema — structured address is deferred to a
+                  future phase). */}
+              <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Hotel Contact Details
+                </div>
+                <p className="text-[11px] text-gray-500 -mt-2">
+                  Optional runtime overrides of the deploy-time white-label values. Leave a field blank to use the white-label default.
+                </p>
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Address
+                  <input
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder={config.address.street + ", " + config.address.city + ", " + config.address.region + " " + config.address.postalCode}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                  />
+                </label>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Front Desk Phone
+                    <input
+                      type="tel"
+                      value={frontDeskPhone}
+                      onChange={(e) => setFrontDeskPhone(e.target.value)}
+                      placeholder={config.frontDeskPhone}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Support Email
+                    <input
+                      type="email"
+                      value={supportEmail}
+                      onChange={(e) => setSupportEmail(e.target.value)}
+                      placeholder={config.supportEmail}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  DPO Email
+                  <input
+                    type="email"
+                    value={dpoEmail}
+                    onChange={(e) => setDpoEmail(e.target.value)}
+                    placeholder={config.dpoEmail}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                  />
+                </label>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Facebook URL
+                    <input
+                      type="url"
+                      value={facebookUrl}
+                      onChange={(e) => setFacebookUrl(e.target.value)}
+                      placeholder={config.facebookUrl}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Instagram URL
+                    <input
+                      type="url"
+                      value={instagramUrl}
+                      onChange={(e) => setInstagramUrl(e.target.value)}
+                      placeholder={config.instagramUrl}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+              </div>
 
               <div className="pt-2 border-t border-gray-150 flex justify-end">
                 <button

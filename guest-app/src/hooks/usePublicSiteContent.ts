@@ -70,6 +70,21 @@ export interface PublicAboutContent {
   hotelStory: string;
 }
 
+// Runtime hotel contact details (Phase 11.8 PR 3). Each field
+// falls back to the deploy-time `hotel.config.ts` value via
+// `pickString` so the public site keeps rendering the brand's
+// white-label values until the owner overrides them from
+// Settings → Hotel. Mirrors the safe-default chain the hero
+// fields use.
+export interface PublicContactContent {
+  address: string;
+  frontDeskPhone: string;
+  supportEmail: string;
+  dpoEmail: string;
+  facebookUrl: string;
+  instagramUrl: string;
+}
+
 export interface PublicCorporateContent extends PublicHeroContent {
   perks: ContentItem[];
   // Rooms overview section on /corporate. All fields fall back
@@ -101,6 +116,7 @@ export interface PublicSiteContent {
   loading: boolean;
   homepage: PublicHomepageContent;
   about: PublicAboutContent;
+  contact: PublicContactContent;
   corporate: PublicCorporateContent;
   rewards: PublicRewardsContent;
   branding: PublicBranding;
@@ -210,6 +226,23 @@ function buildFallback(): PublicSiteContent {
       visionStatement: FALLBACK_ABOUT_VISION(config.brandName),
       hotelStory: FALLBACK_ABOUT_STORY(config.brandName)
     },
+    contact: {
+      // Same pattern as `homepage.heroEyebrow` (PR 1): the deploy-
+      // time `hotel.config.ts` values are the safe fallback so the
+      // public site never goes blank during the cold-load window
+      // before the Firestore `settings/hotelConfig` doc resolves.
+      // The hook returns "" when the doc carries no override, and
+      // the consumer pages (Footer / Contact / Privacy) layer a
+      // `|| config.X` on top of the hook value at render time.
+      address: config.address
+        ? `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`
+        : "",
+      frontDeskPhone: config.frontDeskPhone,
+      supportEmail: config.supportEmail,
+      dpoEmail: config.dpoEmail,
+      facebookUrl: config.facebookUrl,
+      instagramUrl: config.instagramUrl
+    },
     corporate: {
       heroEyebrow: corporateHeroEyebrow,
       heroHeading: FALLBACK_CORPORATE_HERO_HEADING,
@@ -283,6 +316,19 @@ function buildEmptyState(): PublicSiteContent {
       missionStatement: "",
       visionStatement: "",
       hotelStory: ""
+    },
+    contact: {
+      // Empty until the Firestore doc carries an override — the
+      // consumer pages fall back to `config.*` on their own when
+      // the hook returns "" so the page never renders a blank
+      // field during the brief cold-load window before Firestore
+      // resolves.
+      address: "",
+      frontDeskPhone: "",
+      supportEmail: "",
+      dpoEmail: "",
+      facebookUrl: "",
+      instagramUrl: ""
     },
     corporate: {
       heroEyebrow: "",
@@ -472,6 +518,21 @@ export function usePublicSiteContent(): PublicSiteContent {
             (typeof hc.hotelStory === "string" && hc.hotelStory.length > 0
               ? hc.hotelStory
               : FALLBACK_ABOUT_STORY(brandName))
+        },
+        contact: {
+          // Phase 11.8 PR 3 — the 6 hotel contact details live on
+          // `settings/hotelConfig` (per `TYPES.md §HotelConfig`).
+          // Each falls back to the deploy-time `hotel.config.ts`
+          // value via `fb.contact.*` so the public site never
+          // renders a blank phone / email / URL when the Firestore
+          // doc is partial. The admin writes them from
+          // Settings → Hotel Info.
+          address: pickString(hc, "address", fb.contact.address),
+          frontDeskPhone: pickString(hc, "frontDeskPhone", fb.contact.frontDeskPhone),
+          supportEmail: pickString(hc, "supportEmail", fb.contact.supportEmail),
+          dpoEmail: pickString(hc, "dpoEmail", fb.contact.dpoEmail),
+          facebookUrl: pickString(hc, "facebookUrl", fb.contact.facebookUrl),
+          instagramUrl: pickString(hc, "instagramUrl", fb.contact.instagramUrl)
         },
         corporate: {
           heroEyebrow: pickString(corporateRaw, "heroEyebrow", fb.corporate.heroEyebrow),

@@ -178,7 +178,7 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
+Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings → Hotel Info; each falls back to the deploy-time `hotel.config.ts` value when empty in the public hook): `hotelName`, `address`, `contactEmail`, `contactPhone`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
 
 > **`paymentMethods[]`** — fully dynamic booking payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, and `isEnabled` flag. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
 

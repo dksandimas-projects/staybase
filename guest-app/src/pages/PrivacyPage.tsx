@@ -6,10 +6,19 @@ import config from "@config";
 import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
 import { Navbar } from "../components/Navbar";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 export function PrivacyPage() {
   const [customBody, setCustomBody] = useState<string | null>(null);
   const [customLastUpdated, setCustomLastUpdated] = useState<string | null>(null);
+  // Per Phase 11.8 PR 3: the address and DPO email are admin-editable
+  // from Settings → Hotel Info. The hook value wins when set; the
+  // deploy-time `hotel.config.ts` value is the safe fallback.
+  const { contact } = usePublicSiteContent();
+  const dpoEmail = contact.dpoEmail || config.dpoEmail;
+  const addressLine = contact.address
+    ? contact.address
+    : `${config.address.street}, ${config.address.city}, ${config.address.region}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -110,7 +119,7 @@ export function PrivacyPage() {
             <section className="space-y-3">
               <h2 className="text-base font-bold text-gray-950 border-l-2 border-primary pl-2.5">1. Who We Are</h2>
               <p>
-                {config.legalName} is a registered hospitality corporation in the Philippines, operating a boutique lodging facility located at {config.address.street}, {config.address.city}, {config.address.region}. For the purpose of data processing, we act as the Personal Information Controller (PIC).
+                {config.legalName} is a registered hospitality corporation in the Philippines, operating a boutique lodging facility located at {addressLine}. For the purpose of data processing, we act as the Personal Information Controller (PIC).
               </p>
             </section>
 
@@ -186,8 +195,8 @@ export function PrivacyPage() {
                 <p className="text-sm font-semibold text-gray-900">{config.legalName} DPO Office</p>
                 <p className="text-xs text-gray-600 flex items-center gap-2">
                   <Mail size={16} className="text-primary" />
-                  <a href={`mailto:${config.dpoEmail}`} className="font-bold text-primary hover:underline">
-                    {config.dpoEmail}
+                  <a href={`mailto:${dpoEmail}`} className="font-bold text-primary hover:underline">
+                    {dpoEmail}
                   </a>
                 </p>
               </div>

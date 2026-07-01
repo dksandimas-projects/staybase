@@ -331,10 +331,19 @@ PaymentMethodConfig {
 
 HotelConfig {
   hotelName: string
-  address: string         // display string for UI
+  // Phase 11.8 PR 3 — every field below is now admin-editable
+  // from Settings → Hotel Info. Each is a runtime override of
+  // the deploy-time `hotel.config.ts` value. The public hook
+  // (`usePublicSiteContent.contact.*`) returns the override when
+  // set, falling back to `config.*` when the Firestore value is
+  // empty. Address stays a single display string (structured
+  // address is deferred).
+  address: string         // display string for UI (single-line)
   contactEmail: string
   contactPhone: string
   frontDeskPhone: string  // used as tel: fallback in WebRTC intercom call
+  supportEmail: string    // public-facing support email (Footer / Contact)
+  dpoEmail: string        // Data Protection Officer email (Privacy page)
   facebookUrl: string
   instagramUrl: string
   checkInTime: string
