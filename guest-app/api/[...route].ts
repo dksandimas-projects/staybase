@@ -11,7 +11,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const mod = await import("./_handler");
+    const mod = await import("./_handler.js");
     return await mod.default(req, res);
   } catch (err: any) {
     console.error("Critical boot error in guest-app handler:", err);
