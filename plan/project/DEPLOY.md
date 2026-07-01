@@ -218,13 +218,15 @@ curl -X POST https://<guest-app-staging-url>/api/admin/create-staff \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <existing-admin-id-token>" \
   -d '{
+    "fullName": "Hotel Owner",
     "email": "owner@sparkinnbohol.com",
     "password": "<strong-password>",
-    "displayName": "Hotel Owner",
     "role": "admin",
     "phone": "+63 ..."
   }'
 ```
+
+The body must use `fullName` (not `displayName`) — the handler's Zod schema is `.strict()` and rejects unknown fields with a 400. `displayName` on the created Firebase Auth user is derived from `fullName` server-side and is not part of the request payload.
 
 This creates:
 - Firebase Auth user with `role: admin` custom claim
