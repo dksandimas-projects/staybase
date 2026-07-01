@@ -8,9 +8,21 @@ import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { cn } from "../utils/cn";
 import { fadeUp } from "@spark-inn/shared";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 export function ContactPage() {
   const shouldReduceMotion = useReducedMotion();
+  // Per Phase 11.8 PR 3: address / phone / email / socials are
+  // admin-editable from Settings → Hotel Info. The hook value
+  // wins when set; the deploy-time `hotel.config.ts` value is
+  // the safe fallback. Mirrors the Footer change.
+  const { contact } = usePublicSiteContent();
+  const addressString = contact.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  const phone = contact.frontDeskPhone || config.frontDeskPhone;
+  const supportEmail = contact.supportEmail || config.supportEmail;
+  const facebook = contact.facebookUrl || config.facebookUrl;
+  const instagram = contact.instagramUrl || config.instagramUrl;
+  const mapQuery = encodeURIComponent(addressString);
 
   // Contact Form states
   const [name, setName] = useState("");
@@ -20,9 +32,6 @@ export function ContactPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [submitError, setSubmitError] = useState("");
-
-  const addressString = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
-  const mapQuery = encodeURIComponent(addressString);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,11 +123,11 @@ export function ContactPage() {
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone Number</p>
-                      <a 
-                        href={`tel:${config.frontDeskPhone}`} 
+                      <a
+                        href={`tel:${phone}`}
                         className="block text-sm font-medium text-gray-900 mt-1 hover:text-primary hover:underline transition-all"
                       >
-                        {config.frontDeskPhone}
+                        {phone}
                       </a>
                       <p className="text-[10px] text-gray-400 mt-0.5">Available 24/7 for guest services</p>
                     </div>
@@ -131,11 +140,11 @@ export function ContactPage() {
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Email Address</p>
-                      <a 
-                        href={`mailto:${config.supportEmail}`} 
+                      <a
+                        href={`mailto:${supportEmail}`}
                         className="block text-sm font-medium text-gray-900 mt-1 hover:text-primary hover:underline transition-all"
                       >
-                        {config.supportEmail}
+                        {supportEmail}
                       </a>
                       <p className="text-[10px] text-gray-400 mt-0.5">Response within 24 hours</p>
                     </div>
@@ -149,19 +158,19 @@ export function ContactPage() {
                     <div>
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Follow Us</p>
                       <div className="flex gap-3 mt-2">
-                        <a 
+                        <a
                           aria-label={`${config.brandName} on Facebook`}
-                          href={config.facebookUrl}
-                          target="_blank" 
+                          href={facebook}
+                          target="_blank"
                           rel="noreferrer"
                           className="h-8 w-8 rounded-full border border-gray-250 hover:border-primary hover:text-primary flex items-center justify-center text-gray-600 transition"
                         >
                           <Facebook size={14} />
                         </a>
-                        <a 
+                        <a
                           aria-label={`${config.brandName} on Instagram`}
-                          href={config.instagramUrl}
-                          target="_blank" 
+                          href={instagram}
+                          target="_blank"
                           rel="noreferrer"
                           className="h-8 w-8 rounded-full border border-gray-250 hover:border-primary hover:text-primary flex items-center justify-center text-gray-600 transition"
                         >

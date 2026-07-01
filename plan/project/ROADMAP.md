@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 1, 2026 (Phase 11.8 PR 1 shipped — `feat/content-tier-a-hero-eyebrows` adds homepage heroEyebrow + about heroEyebrow/heroSubtext to Settings → Branding, wires payment-method card labels on the confirm page, and ships the cross-tab cache-bust mechanism; +25 tests; on `dev` branch, pending merge)
+> Last updated: July 1, 2026 (Phase 11.8 PR 3 shipped — `feat/content-tier-a-hotel` adds 6 hotel contact details (address, frontDeskPhone, supportEmail, dpoEmail, facebookUrl, instagramUrl) + the missing `visionStatement` field to Settings → Hotel Info, with the safe-default `pickString` chain + 3 consumer pages (Footer, Contact, Privacy) reading from the hook; +18 tests; on `dev` branch, pending merge)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -909,8 +909,8 @@ Tests: `shared/__tests__/publicSiteCache.test.ts` (new — 11 tests), `admin-app
 
 Docs: `plan/docs/TYPES.md` (about + homepage comments), `plan/docs/BACKEND.md` (per-page hero fallback table + cache-bust paragraph), `plan/features/SETTINGS.md` (Branding → Hero Copy section).
 
-### PR 2 — `feat/content-tier-a-website` (M effort, ~2 days)
-Extends **Settings → Website Content** with new sub-objects for the rest of the public-facing pages. ~80 new fields, but most are simple `string` mirrors of existing list-editor patterns.
+### PR 2 — `feat/content-tier-a-website` *(deferred to post-launch, ~2 days, M effort — open after first 30 days of real data)*
+Extends **Settings → Website Content** with new sub-objects for the rest of the public-facing pages. ~35 new fields (after Q1–Q4 deferrals). Most are simple `string` mirrors of existing list-editor patterns.
 
 - [ ] `homepage.sectionHeaders` — eyebrow + title + lead per section (Stay with us, Amenities, Services, Spark Rewards, Location)
 - [ ] `roomsCatalog` — eyebrow, title, lead, empty state, card labels (Beds / Capacity / Weekend / Amenities / Book this type)
@@ -918,29 +918,31 @@ Extends **Settings → Website Content** with new sub-objects for the rest of th
 - [ ] `corporate.perksSectionEyebrow` + `corporate.perksSectionTitle` + `corporate.cardLabels` + `corporate.inquiryForm` (labels, placeholders, button, success, error)
 - [ ] `corporate.onboardingSteps[]` — new list editor for the 3-step process (mirrors `perks[]`)
 - [ ] `rewards.howItWorks` — eyebrow + title + 3-step list editor
-- [ ] `rewards.privileges` — eyebrow + title + lead + 4-perk list editor (replaces the hardcoded "Member Privileges" cards)
 - [ ] `rewards.ctaBanner` — heading + body
-- [ ] `bookingFlow` — step labels, section headers, field labels, placeholders, validation messages, voucher error messages, payment method cards, all CTAs (book stay / view rooms / continue / ready / incomplete)
 - [ ] `bookingConfirm` — headlines, subtext, details card labels, payment method display labels, calendar buttons, Spark Rewards upsell block, empty state
 - [ ] `notFound` — eyebrow, title, body, CTA
 - [ ] `termsLastUpdated` (string) + `termsBody` (full-text override, mirrors `privacyPolicyBody`)
+- [ ] (Q2) `bookingFlow` — only if the owner answers the audit's Q2 with a yes
+- [ ] (Q4) `rewards.privileges` — only if the owner answers the audit's Q4 with a yes
 
-Files: same as PR 1, plus reuse the existing `ListEditor` component (no new editor component).
+Files: same as PR 3, plus reuse the existing `ListEditor` component (no new editor component).
 
 Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `guest-app/src/__tests__/content-tier-a-render.test.ts` covering each new field's `pickString` chain end-to-end.
 
-### PR 3 — `feat/content-tier-a-hotel` (S effort, ~1 day)
-Extends **Settings → Hotel** with the contact details + social URLs that are currently only in `hotel.config.ts`. (Optional: merge into PR 1 if too small to justify a separate PR.)
+### PR 3 — `feat/content-tier-a-hotel` *(shipped 2026-07-01 — branch: `feat/content-tier-a-hotel`)*
+S effort, ~1 day. Adds the Tier 1 hotel contact editability to the public site — 6 new runtime-editable contact fields + 1 missing `visionStatement` field, sourced from `settings/hotelConfig` with the deploy-time `hotel.config.ts` value as the safe default in the public hook.
 
-- [ ] `hotelConfig.address: { street, city, region, postalCode }` — fallback to `config.address.*`
-- [ ] `hotelConfig.frontDeskPhone` — fallback to `config.frontDeskPhone`
-- [ ] `hotelConfig.supportEmail` — fallback to `config.supportEmail`
-- [ ] `hotelConfig.dpoEmail` — fallback to `config.dpoEmail`
-- [ ] `hotelConfig.facebookUrl` + `hotelConfig.instagramUrl` — fallback to `config.facebookUrl` / `config.instagramUrl`
+- [x] `PublicContactContent` interface added to `usePublicSiteContent` with all 6 fields (address, frontDeskPhone, supportEmail, dpoEmail, facebookUrl, instagramUrl).
+- [x] `buildFallback` seeds the new section from `config.*` so the public site never goes blank during the cold-load window.
+- [x] Firestore merge uses `pickString(hc, "field", fb.contact.field)` for each — same safe-default pattern as PR 1.
+- [x] **Footer** + **ContactPage** consume the hook instead of `config.*`; layer a `|| config.X` at render time as belt-and-suspenders.
+- [x] **PrivacyPage** reads `dpoEmail` + `address` from the hook with the same fallback pattern.
+- [x] **Settings → Hotel Info** form gets 7 new inputs in a "Hotel Contact Details" card (visionStatement + address + frontDeskPhone + supportEmail + dpoEmail + facebookUrl + instagramUrl); `handleSaveHotel` writes all 7 alongside the existing fields.
+- [x] Structured `address: { street, city, region, postalCode }` deferred (single-string ships; structured form is a follow-up).
 
-Files: `hotel.config.ts` (no change — still serves as the deploy-time default), `admin-app/src/pages/SettingsPage.tsx`, `admin-app/src/context/AdminContext.tsx`, `guest-app/src/hooks/usePublicSiteContent.ts`, all footer / navbar / `/contact` / `/privacy` / `/terms` reads.
+Files: `guest-app/src/hooks/usePublicSiteContent.ts` (interface + chain + fallback), `guest-app/src/components/Footer.tsx`, `guest-app/src/pages/ContactPage.tsx`, `guest-app/src/pages/PrivacyPage.tsx`, `admin-app/src/pages/SettingsPage.tsx` (7 new state hooks + 7 new inputs + handleSaveHotel), `plan/docs/TYPES.md` (HotelConfig + admin-editable comment), `plan/docs/BACKEND.md` (settings/hotelConfig list), `plan/features/SETTINGS.md` (Hotel Contact Details card).
 
-Test: `admin-app/src/__tests__/hotel-contact-fields.test.ts` + render tests in `guest-app/`.
+Tests: `admin-app/src/__tests__/phase-11.8-tier-1-hotel-contacts.test.ts` (new — 18 tests). 929/929 total green.
 
 ### Non-Tier-A fixes surfaced by the audit (defer to existing settings tabs, no new fields)
 
@@ -1000,7 +1002,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
 | 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
-| 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** | ~100 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
+| 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **359** | **325** | **~134** |
