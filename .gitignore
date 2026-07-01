@@ -10,6 +10,7 @@ dist/
 node_modules/
 .vercel/
 *.tsbuildinfo
+guest-app/api/[...route].js
 
 # Legacy (renamed to project/)
 .project/
