@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "prepare": "command -v husky >/dev/null 2>&1 && husky || true",
-    "dev:guest": "npm run dev -w guest-app",
+    "dev:guest": "npm run dev:vercel -w guest-app",
     "dev:admin": "npm run dev -w admin-app",
     "build:guest": "npm run build -w guest-app",
     "build:admin": "npm run build -w admin-app",
