@@ -208,9 +208,12 @@ Default items: Tour Packages, Car Rentals. CTA always links to `/contact`. Hide 
 
 | Section | Field | Fallback constant in `guest-app/src/data/homepage.ts` |
 |---|---|---|
+| `homepage` | `heroEyebrow` | `config.tagline` (per Phase 11.8 PR 1 — admin-editable from Settings → Branding; falls back to the deploy-time `config.tagline` when empty) |
 | `homepage` | `heroHeading` / `heroSubtext` | "Your sanctuary in Bohol" / "A warm, minimalist stay..." (defined in `usePublicSiteContent.ts`) |
 | `homepage` | `heroPhotoUrl` | `homepageHeroImage` |
+| `about` | `heroEyebrow` | "Our Story" (per Phase 11.8 PR 1 — admin-editable from Settings → Branding; falls back to the page's hard-coded pill when empty) |
 | `about` | `heroHeading` | `aboutHeroHeading` ("about us") |
+| `about` | `heroSubtext` | "Discover the vision and heart behind {config.brandName}..." (per Phase 11.8 PR 1 — admin-editable; falls back to the deploy-time subtext when empty) |
 | `about` | `heroPhotoUrl` | `aboutHeroImage` |
 | `corporate` | `heroEyebrow` | `corporateHeroEyebrow` |
 | `corporate` | `heroPhotoUrl` | `corporateHeroImage` |
@@ -228,6 +231,8 @@ branding: {
 ```
 
 Logo selection in the Navbar is contextual: when `solid === true` (scrolled, non-hero page) use `logoNavbar`; when `solid === false` (over hero, transparent) use `logoNavbarOnDark`. If only one variant has been uploaded by the admin it is mirrored across both states. Uploads go to Firebase Storage at `assets/branding/branding/{fieldName}/{filename}`; download URL is written to `settings/websiteContent.branding.{fieldName}`. Public read + staff write — see `firebase/storage.rules` `match /assets/branding/{fileName}`.
+
+**Cross-tab cache invalidation** (per Phase 11.8 PR 1) — the public site caches `settings/websiteContent` + `settings/hotelConfig` in localStorage for `PUBLIC_SITE_CONTENT_CACHE_TTL_MS` (5 minutes) so returning visitors render instantly. The admin app writes the current timestamp to `localStorage["publicSiteContent:bust"]` on every successful `settings/websiteContent` or `settings/hotelConfig` save (via `bustPublicSiteContentCache` in `shared/utils/publicSiteCache.ts`); the guest hook subscribes to the `storage` event for that key and refetches + drops its in-memory + localStorage cache on the next tick. Same-browser demos reflect admin edits in real time; cross-device (admin on desktop, guest on phone) still falls back to the 5-minute TTL.
 
 Additional legal/policy fields (editable by hotel admin from Settings):
 - `privacyPolicyBody` — full privacy policy text (plain text or light markdown)

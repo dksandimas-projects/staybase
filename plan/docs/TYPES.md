@@ -385,7 +385,7 @@ SparkRewardsPromo {
 
 WebsiteContent {
   homepage: {
-    heroEyebrow: string         // unused on homepage — config.tagline is used
+    heroEyebrow: string         // optional override of `config.tagline` (admin-editable from Settings → Branding)
     heroHeading: string
     heroSubtext: string
     heroPhotoUrl: string
@@ -403,7 +403,9 @@ WebsiteContent {
     sparkRewards: SparkRewardsPromo
   }
   about: {
+    heroEyebrow: string         // optional override of the page's hard-coded "Our Story" pill
     heroHeading: string
+    heroSubtext: string          // optional override of the page's deploy-time subtext
     heroPhotoUrl: string
   }
   corporate: {
