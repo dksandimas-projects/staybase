@@ -871,7 +871,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const bookingDocRef = doc(db, "bookings", bookingId);
 
       if (status === "cancelled") {
-        const token = await auth.currentUser?.getIdToken();
+        const token = await auth.currentUser?.getIdToken(true);
         const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
           ? "http://localhost:3000"
           : import.meta.env.VITE_GUEST_APP_URL || "";
@@ -892,7 +892,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
       } else if (status === "checked-out") {
-        const token = await auth.currentUser?.getIdToken();
+        const token = await auth.currentUser?.getIdToken(true);
         const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
           ? "http://localhost:3000"
           : import.meta.env.VITE_GUEST_APP_URL || "";
@@ -936,7 +936,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const addOnsitePayment = async (bookingId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await auth.currentUser?.getIdToken(true);
       const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
         ? "http://localhost:3000"
         : import.meta.env.VITE_GUEST_APP_URL || "";
@@ -967,7 +967,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const addWalkinBooking = async (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await auth.currentUser?.getIdToken(true);
       const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
         ? "http://localhost:3000"
         : import.meta.env.VITE_GUEST_APP_URL || "";
@@ -1066,7 +1066,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       // override the recipient.
       if (voucher.guestEmail && voucher.guestEmail.trim()) {
         try {
-          const token = await auth.currentUser?.getIdToken();
+          const token = await auth.currentUser?.getIdToken(true);
           const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
             ? "http://localhost:3000"
             : import.meta.env.VITE_GUEST_APP_URL || "";
@@ -1258,7 +1258,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     ratePerNightOverride?: number | null;
   }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await auth.currentUser?.getIdToken(true);
       const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
         ? "http://localhost:3000"
         : import.meta.env.VITE_GUEST_APP_URL || "";
@@ -2636,7 +2636,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     role: StaffRole;
   }): Promise<{ success: boolean; error?: string }> => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/create-staff`, {
         method: "POST",
         headers: {
@@ -2665,7 +2665,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const disableStaff = async (uid: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/disable-staff`, {
         method: "POST",
         headers: {
