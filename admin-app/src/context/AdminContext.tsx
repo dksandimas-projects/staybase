@@ -17,6 +17,7 @@ import {
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
   PaymentMethodConfig,
+  bustPublicSiteContentCache,
   compressImageFile,
   type RoomTypeEntry
 } from "@spark-inn/shared";
@@ -2230,6 +2231,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     try {
       const docRef = doc(db, "settings", section);
       await setDoc(docRef, data, { merge: true });
+      // The public site caches `settings/websiteContent` +
+      // `settings/hotelConfig` for 5 minutes per returning visitor.
+      // Bump the cross-tab invalidation key so a parallel guest tab
+      // refetches the new value immediately (see
+      // `bustPublicSiteContentCache` in `shared/utils/publicSiteCache.ts`).
+      if (section === "websiteContent" || section === "hotelConfig") {
+        bustPublicSiteContentCache();
+      }
     } catch (error) {
       console.error(`Error updating ${section}:`, error);
       notify.error("Failed to save settings", error instanceof Error ? error.message : "Unknown error");

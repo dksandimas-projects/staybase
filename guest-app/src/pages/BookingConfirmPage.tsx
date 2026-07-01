@@ -1,6 +1,9 @@
 import { CalendarPlus, CheckCircle2, ExternalLink, Home, Mail, Sparkles, Star } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../firebase/config";
 import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
@@ -23,6 +26,55 @@ export function BookingConfirmPage() {
   const [searchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes } = useRoomTypes();
+
+  // The payment-method label shown to the guest is now sourced
+  // from `settings/hotelConfig.paymentMethods[].label` (admin-
+  // editable) so the confirm page never hardcodes "Digital Wallet"
+  // / "Bank Transfer" / "Pay at Hotel". The previous `paymentLabels`
+  // object literal is kept as a last-resort fallback for an
+  // unmount before Firestore resolves or for legacy methods
+  // (e.g. `paypal`) the admin hasn't surfaced on this deployment.
+  const [dynamicPaymentMethodLabel, setDynamicPaymentMethodLabel] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const rawPaymentMethodForLabel = searchParams.get("paymentMethod") ?? "";
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "hotelConfig"));
+        if (cancelled) return;
+        const methods = snap.exists() ? (snap.data() as { paymentMethods?: Array<{ method: string; label: string }> }).paymentMethods : null;
+        const match = Array.isArray(methods) ? methods.find((m) => m.method === rawPaymentMethodForLabel) : null;
+        if (match) {
+          setDynamicPaymentMethodLabel(match.label);
+        } else {
+          // Last-resort fallback for legacy methods (e.g. "paypal")
+          // the admin hasn't surfaced in `paymentMethods[]` yet.
+          const legacy: Record<string, string> = {
+            gcash: "Digital Wallet (GCash/Maya)",
+            bank: "Bank Transfer (Direct Deposit)",
+            "pay-at-hotel": "Pay at Hotel"
+          };
+          setDynamicPaymentMethodLabel(legacy[rawPaymentMethodForLabel] ?? rawPaymentMethodForLabel);
+        }
+      } catch {
+        if (cancelled) return;
+        setDynamicPaymentMethodLabel(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+  const fallbackPaymentMethodLabel = (() => {
+    const raw = searchParams.get("paymentMethod") ?? "gcash";
+    const legacy: Record<string, string> = {
+      gcash: "Digital Wallet (GCash/Maya)",
+      bank: "Bank Transfer (Direct Deposit)",
+      "pay-at-hotel": "Pay at Hotel"
+    };
+    return legacy[raw] ?? raw;
+  })();
+  const resolvedPaymentMethodLabel = dynamicPaymentMethodLabel ?? fallbackPaymentMethodLabel;
 
   // Read query params from URL
   // Per BF-27 (booking-flow audit 2026-06-26): the previous
@@ -47,13 +99,7 @@ export function BookingConfirmPage() {
   const total = Number(searchParams.get("total") ?? 0);
   const hasAllParams = !!(bookingRef && checkIn && checkOut && guests > 0);
 
-  const paymentLabels: Record<string, string> = {
-    gcash: "Digital Wallet (GCash/Maya)",
-    bank: "Bank Transfer (Direct Deposit)",
-    "pay-at-hotel": "Pay at Hotel"
-  };
-
-  const paymentMethodLabel = paymentLabels[rawPaymentMethod] ?? rawPaymentMethod;
+  const paymentMethodLabel = resolvedPaymentMethodLabel;
 
   function handleAddToCalendar() {
     const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
