@@ -31,6 +31,9 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
     resolve(__dirname, "../../../api/[...route].ts"),
     "utf8"
   );
+  const vercelConfig = JSON.parse(
+    readFileSync(resolve(__dirname, "../../vercel.json"), "utf8")
+  ) as { rewrites?: Array<{ source: string; destination: string }> };
 
   it("no longer uses Access-Control-Allow-Origin: *", () => {
     expect(src).not.toMatch(/setHeader\(\s*["']Access-Control-Allow-Origin["']\s*,\s*["']\*["']/);
@@ -66,6 +69,13 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
 
   it("exposes the guest-app API from the repo root for root-directory Vercel deployments", () => {
     expect(rootApiSrc).toMatch(/export\s+\{\s*default\s*\}\s+from\s+["']\.\.\/guest-app\/api\/\[\.\.\.route\]["']/);
+  });
+
+  it("does not rewrite /api routes through the SPA fallback", () => {
+    expect(vercelConfig.rewrites || []).not.toContainEqual({
+      source: "/api/:path*",
+      destination: "/api/:path*"
+    });
   });
 
   it("answers admin create-staff preflight with the admin origin allow header", async () => {
