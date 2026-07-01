@@ -65,7 +65,9 @@ export const config = {
   adminDomain: "admin.sparkinnbohol.com",
   supportEmail: "sparkinn.dev@gmail.com",
   facebookUrl: "https://www.facebook.com/sparkinnbohol",
-  instagramUrl: "https://www.instagram.com/sparkinnbohol"
+  instagramUrl: "https://www.instagram.com/sparkinnbohol",
+  checkInTime: "14:00",
+  checkOutTime: "12:00"
 } as const;
 
 export type HotelConfig = typeof config;

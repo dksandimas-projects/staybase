@@ -165,8 +165,8 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       if (roomData.status === "blocked") {
         const blockedFrom = toDateOrNull(roomData.blockedFrom);
         const blockedTo = toDateOrNull(roomData.blockedTo);
-        const checkInDate = new Date(`${inquiry.preferredDates.split(" to ")[0] || inquiry.preferredDates}T00:00:00Z`);
-        const checkOutDate = new Date(`${inquiry.preferredDates.split(" to ")[1] || inquiry.preferredDates}T00:00:00Z`);
+        const checkInDate = new Date(`${inquiryData.preferredDates.split(" to ")[0] || inquiryData.preferredDates}T00:00:00Z`);
+        const checkOutDate = new Date(`${inquiryData.preferredDates.split(" to ")[1] || inquiryData.preferredDates}T00:00:00Z`);
         const windowActive = blockedFrom && blockedTo
           ? checkInDate < blockedTo && checkOutDate > blockedFrom
           : true;

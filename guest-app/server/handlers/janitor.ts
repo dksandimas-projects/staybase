@@ -142,7 +142,7 @@ export async function handleJanitorStats(
   // (last 50, sorted desc). The in-memory ring buffer is
   // a warm-instance-only fallback for the brief window
   // before the first Firestore write settles.
-  let history: Array<any> = [];
+  let history: ReadonlyArray<any> = [];
   try {
     const snap = await adminDb
       .collection("janitor")

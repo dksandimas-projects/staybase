@@ -29,7 +29,7 @@ export interface SweepBucket {
     autoPaginate?: boolean;
     maxResults?: number;
     pageToken?: string;
-  }): Promise<[Array<{ name: string }>, string | undefined]>;
+  }): Promise<[Array<{ name: string }>, (string | undefined | null)?, ...any[]]>;
   deleteFiles(query: { prefix: string; force?: boolean }): Promise<void>;
 }
 
