@@ -18,9 +18,9 @@ vi.mock("../../server/lib/firebase-admin", () => ({
 // Regression test for SEV-1 #2: the CORS headers used to be `*` +
 // `Access-Control-Allow-Credentials: true`, which browsers reject.
 // Per W4.6 / W1.13 / decision #106, the fix is an explicit allowlist
-// from config.domain + config.adminDomain + dev origins, and the
-// credentials header is removed (Firebase ID tokens ride in the
-// Authorization header, not cookies).
+// from explicit production + dev origins, and the credentials header
+// is removed (Firebase ID tokens ride in the Authorization header,
+// not cookies).
 
 describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
   const src = readFileSync(
@@ -43,10 +43,11 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
     expect(src).not.toMatch(/setHeader\(\s*["']Access-Control-Allow-Credentials["']\s*,\s*["']true["']/);
   });
 
-  it("defines an ALLOWED_ORIGINS Set built from config.domain + config.adminDomain + dev origins", () => {
+  it("defines an ALLOWED_ORIGINS Set built from production + dev origins", () => {
     expect(src).toMatch(/ALLOWED_ORIGINS\s*=\s*new Set/);
-    expect(src).toMatch(/config\.domain/);
-    expect(src).toMatch(/config\.adminDomain/);
+    expect(src).toMatch(/https:\/\/sparkinnbohol\.com/);
+    expect(src).toMatch(/https:\/\/www\.sparkinnbohol\.com/);
+    expect(src).toMatch(/https:\/\/admin\.sparkinnbohol\.com/);
     // Dev origins
     expect(src).toMatch(/localhost:5173/); // guest-app
     expect(src).toMatch(/localhost:5174/); // admin-app
@@ -62,9 +63,10 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
     expect(src).toMatch(/setHeader\(\s*["']Vary["']\s*,\s*["']Origin["']\s*\)/);
   });
 
-  it("does not use Vite-only path aliases inside the Node API route", () => {
+  it("keeps the API entrypoint free of risky runtime imports before preflight", () => {
     expect(src).not.toMatch(/from\s+["']@config["']/);
-    expect(src).toMatch(/from\s+["']\.\.\/\.\.\/hotel\.config["']/);
+    expect(src).not.toMatch(/from\s+["']\.\.\/\.\.\/hotel\.config["']/);
+    expect(src).not.toMatch(/from\s+["']@spark-inn\/shared["']/);
   });
 
   it("exposes the guest-app API from the repo root for root-directory Vercel deployments", () => {
