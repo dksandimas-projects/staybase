@@ -25,7 +25,7 @@ import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
-import { ROOM_TYPE_IMAGES, CORPORATE_HERO_LQIP } from "../data/homepage";
+import { CORPORATE_HERO_LQIP } from "../data/homepage";
 import { useRooms } from "../hooks/useRooms";
 import { useRoomTypes } from "../hooks/useRoomTypes";
 import { brandAsset } from "../utils/brand";
@@ -483,13 +483,13 @@ export function CorporateStaysPage() {
             {...entranceProps}
           >
             {accommodationTypes.map((type) => {
-              // Image fallback chain: live `type.imageUrls[0]` from
-              // `useRoomTypes` → static `ROOM_TYPE_IMAGES` map from
-              // `data/homepage.ts` for types that haven't been given
-              // an upload yet. Same pattern as `resolveTypeImages`
-              // but inlined since we already have the `RoomTypeEntry`
-              // — no need to look it up by string key.
-              const heroImage = type.imageUrls[0] || ROOM_TYPE_IMAGES[type.value]?.[0];
+              // The corporate page shows only live uploads from
+              // `useRoomTypes` — there is no curated static fallback.
+              // When a type has no photo yet, the conditional render
+              // below shows a "Photo coming soon" placeholder so the
+              // fallback URLs in `data/homepage.ts` are never fetched
+              // by the guest app.
+              const heroImage = type.imageUrls[0];
               return (
                 <motion.article
                   key={type.value}
@@ -802,7 +802,7 @@ export function CorporateStaysPage() {
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
               {(() => {
-                const heroImage = selectedType.imageUrls[0] || ROOM_TYPE_IMAGES[selectedType.value]?.[0];
+                const heroImage = selectedType.imageUrls[0];
                 return heroImage ? (
                   <img
                     src={heroImage}
