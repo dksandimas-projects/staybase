@@ -35,9 +35,29 @@ const reportsPageSrc = readFileSync(
 );
 
 describe("Phase 11.6 Batch 18 — Wave 3 batch 1 (settings + reports)", () => {
-  describe("W3.1 — SETTINGS.md cross-references Rates for payment methods", () => {
-    it("SETTINGS.md header mentions Rates for booking payment methods", () => {
-      expect(settingsMd).toMatch(/Booking payment methods are managed in Rates/i);
+  describe("W3.1 — Payment methods live in Settings (per decision #108)", () => {
+    // Per `DECISIONS-FEATURES.md #108` (Phase 11.7 batch 2 / payment
+    // methods feature) booking payment methods moved from the
+    // Rates page to a dedicated "Payment Methods" tab in
+    // Settings. The old W3.1 cross-reference (payment methods in
+    // Rates) was replaced with a self-reference in SETTINGS.md
+    // §2 + a "Manage payment methods" deep link in RatesPage.
+    it("SETTINGS.md §2 documents the dynamic payment methods UI", () => {
+      expect(settingsMd).toMatch(/###\s*2\.\s*Payment Methods[\s\S]{0,200}dynamic CRUD/i);
+    });
+    it("SETTINGS.md no longer says payment methods are managed in Rates", () => {
+      expect(settingsMd).not.toMatch(/Booking payment methods are managed in Rates/i);
+    });
+    it("SettingsPage renders the dynamic Payment Methods tab body", () => {
+      expect(settingsPageSrc).toMatch(/PaymentMethodsTabBody/);
+    });
+    it("RatesPage no longer renders the Booking Payment Gateways panel", () => {
+      const ratesPageSrc = readFileSync(
+        resolve(__dirname, "../../../admin-app/src/pages/RatesPage.tsx"),
+        "utf8"
+      );
+      expect(ratesPageSrc).not.toMatch(/Booking Payment Gateways/);
+      expect(ratesPageSrc).toMatch(/\/settings\?tab=payment/);
     });
   });
 

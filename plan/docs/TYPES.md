@@ -321,10 +321,12 @@ CorporateInquiry {
 
 ```
 PaymentMethodConfig {
-  method: string
-  qrUrl: string
-  accountInfo: string
-  isEnabled: boolean
+  method: string          // unique key, e.g. "gcash", "bank", "paypal", "pay-at-hotel"; the schema is open so admins can add custom keys
+  label: string           // display name shown to guests (e.g. "GCash", "Bank Transfer", "Pay at Hotel")
+  accountName: string     // recipient name shown to guests beside the QR (e.g. "Spark Inn Hotel Corp")
+  accountNumber: string   // account number / PayPal email / digital wallet number
+  qrUrl: string           // public Firebase Storage URL; empty string = no QR uploaded
+  isEnabled: boolean      // when false, the method is hidden from the guest booking page
 }
 
 HotelConfig {
@@ -340,8 +342,14 @@ HotelConfig {
   missionStatement: string
   visionStatement: string
   hotelStory: string
+  // Dynamic booking payment methods. Per
+  // `plan/features/SETTINGS.md §Payment Methods` the list is
+  // fully admin-managed from the Payment Methods tab. "Pay at
+  // Hotel" is just another method (`method: "pay-at-hotel"`,
+  // `isEnabled: true/false`); the previous standalone
+  // `payAtHotelEnabled` flag was removed in favour of the
+  // per-method `isEnabled` toggle.
   paymentMethods: PaymentMethodConfig[]
-  payAtHotelEnabled: boolean
   intercomQuickRequests: string[]
   notificationSoundUrl: string
 }
