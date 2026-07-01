@@ -76,6 +76,14 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
       source: "/api/:path*",
       destination: "/api/:path*"
     });
+    expect(vercelConfig.rewrites || []).not.toContainEqual({
+      source: "/(.*)",
+      destination: "/index.html"
+    });
+    expect(vercelConfig.rewrites || []).toContainEqual({
+      source: "/((?!api/).*)",
+      destination: "/index.html"
+    });
   });
 
   it("answers admin create-staff preflight with the admin origin allow header", async () => {

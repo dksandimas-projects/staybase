@@ -40,6 +40,6 @@
     { "source": "/registerSW.js", "destination": "/registerSW.js" },
     { "source": "/workbox-:hash.js", "destination": "/workbox-:hash.js" },
     { "source": "/manifest.webmanifest", "destination": "/manifest.webmanifest" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
