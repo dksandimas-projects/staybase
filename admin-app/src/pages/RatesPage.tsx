@@ -9,7 +9,7 @@ import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   Plus, Tag, Gift, Trash2, Calendar, ShieldCheck,
-  Landmark, Save, ShieldAlert, CreditCard, Landmark as BankIcon, Smartphone
+  Landmark, Save, ShieldAlert, CreditCard
 } from "lucide-react";
 import config from "@config";
 
@@ -114,14 +114,10 @@ export function RatesPage() {
   // Local breakfast rate state
   const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
 
-  // Local payment gateways states
-  const [paymentMethods, setPaymentMethods] = useState<any[]>(() => {
-    return hotelConfig.bookingPaymentMethods || [
-      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "" },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "" },
-      { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
-    ];
-  });
+  // Booking payment methods are managed in Settings → Payment
+  // Methods (per `plan/features/SETTINGS.md §Payment Methods`).
+  // This page deep-links there from the "Manage payment methods"
+  // button at the bottom of the page.
 
   // Toggle applicable room checkbox
   const handleRoomCheckbox = (typeVal: string) => {
@@ -217,25 +213,6 @@ export function RatesPage() {
       ...breakfastConfig,
       ratePerPersonPerNight: parseFloat(bfRate) || 300
     });
-  };
-
-  // Save payment config changes
-  const handleSavePayments = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await updateSettings("hotelConfig", {
-      ...hotelConfig,
-      bookingPaymentMethods: paymentMethods
-    });
-  };
-
-  // Toggle payment method enabled/disabled
-  const handleTogglePaymentMethod = (method: string) => {
-    setPaymentMethods(prev => prev.map(m => m.method === method ? { ...m, isEnabled: !m.isEnabled } : m));
-  };
-
-  // Update payment method account details text
-  const handleUpdateAccountInfo = (method: string, text: string) => {
-    setPaymentMethods(prev => prev.map(m => m.method === method ? { ...m, accountInfo: text } : m));
   };
 
   // Voucher Columns
@@ -619,72 +596,31 @@ export function RatesPage() {
         </div>
       </div>
 
-      {/* Payment methods section */}
-      <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
-        <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5 border-b border-gray-100 pb-3">
-          <CreditCard size={18} className="text-primary" />
-          Booking Payment Gateways
-        </h2>
-
-        <form onSubmit={handleSavePayments} className="space-y-4">
-          <div className="grid gap-6 md:grid-cols-3">
-            {paymentMethods.map((pm) => {
-              const Icon = pm.method === "bank" ? BankIcon : pm.method === "gcash" ? Smartphone : CreditCard;
-              return (
-                <div key={pm.method} className={`rounded-xl border p-5 space-y-3.5 transition ${
-                  pm.isEnabled ? "bg-white border-primary/20 ring-1 ring-primary/5" : "bg-gray-50/50 border-gray-200 opacity-60"
-                }`}>
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2 font-bold text-xs text-gray-800">
-                      <Icon size={16} className="text-primary" />
-                      {pm.label}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePaymentMethod(pm.method)}
-                      className={`h-5 w-9 rounded-full p-0.5 transition shrink-0 ${
-                        pm.isEnabled ? "bg-primary" : "bg-gray-300"
-                      }`}
-                    >
-                      <div className={`h-4 w-4 rounded-full bg-white transition transform ${
-                        pm.isEnabled ? "translate-x-4" : "translate-x-0"
-                      }`} />
-                    </button>
-                  </div>
-
-                  <label className="flex flex-col gap-1.5 text-[9px] font-bold text-gray-400 uppercase">
-                    Account Info & Instructions
-                    <input
-                      type="text"
-                      disabled={!pm.isEnabled}
-                      value={pm.accountInfo}
-                      onChange={(e) => handleUpdateAccountInfo(pm.method, e.target.value)}
-                      className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs text-gray-800 font-medium mt-1 disabled:opacity-50"
-                    />
-                  </label>
-
-                  {pm.method !== "pay-at-hotel" && (
-                    <div className="text-[10px] text-gray-500 font-semibold flex items-center gap-1.5">
-                      <Smartphone size={12} className="text-gray-400" />
-                      Remittance QR upload enabled
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+      {/* Booking payment methods are now managed in Settings →
+          Payment Methods. Per `plan/features/SETTINGS.md §Payment
+          Methods` the full CRUD (add / remove / reorder / enable /
+          disable / per-method QR upload) lives there. This page
+          only owns the rate matrix, vouchers, corporate codes,
+          breakfast rate, and OSCA discounts. */}
+      <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5">
+              <CreditCard size={18} className="text-primary" />
+              Booking Payment Methods
+            </h2>
+            <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
+              GCash, Maya, Bank Transfer, PayPal, and Pay at Hotel are all managed from one place — including per-method QR upload. Changes reflect on the guest booking page on the next snapshot.
+            </p>
           </div>
-
-          <div className="flex justify-end pt-2 border-t border-gray-100">
-            <button
-              type="submit"
-              className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-            >
-              <Save size={14} />
-              Save Payment Gateways
-            </button>
-          </div>
-        </form>
+          <a
+            href="/settings?tab=payment"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 shrink-0"
+          >
+            <CreditCard size={13} aria-hidden="true" />
+            Manage payment methods
+          </a>
+        </div>
       </div>
 
       {/* Vouchers Panel */}

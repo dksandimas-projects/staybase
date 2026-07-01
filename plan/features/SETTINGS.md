@@ -6,7 +6,7 @@
 
 ## Overview
 
-Admin-only page at `/settings`. Organized into tabs. Covers hotel information, email configuration, staff account management, discount rules, intercom quick requests, and website content editing for all public pages. **Booking payment methods are managed in Rates** — see `plan/features/RATE-MANAGEMENT.md` (per W3.1).
+Admin-only page at `/settings`. Organized into tabs. Covers hotel information, booking payment methods, email configuration, staff account management, discount rules, intercom quick requests, and website content editing for all public pages.
 
 ---
 
@@ -39,13 +39,54 @@ Admin-only page at `/settings`. Organized into tabs. Covers hotel information, e
 
 ### 2. Payment Methods
 
-- [ ] List of payment methods with enable/disable toggle
-- [ ] Per method: name, QR code upload, account info text field
-- [ ] Pay at Hotel global toggle
-- [ ] Add payment method form — name, QR, account info
-- [ ] Delete payment method (with confirmation)
-- [ ] Source: `settings/hotelConfig.paymentMethods[]`
-- See `plan/features/RATE-MANAGEMENT.md` for rate-related settings
+Fully dynamic CRUD for the booking payment list. The list rendered on `/book` Step 3 is sourced directly from `settings/hotelConfig.paymentMethods[]`, filtered to `isEnabled` — add / remove / reorder / toggle from this tab and the guest site reflects the change on the next snapshot tick. The previous per-method `accountInfo` text field and the separate `payAtHotelEnabled` global toggle have been replaced by structured `accountName` + `accountNumber` fields and a per-method `isEnabled` flag (so "Pay at Hotel" is just another method).
+
+**Persistent callout (top of the tab)**
+
+- [ ] Amber callout listing the supported methods: **GCash, Maya, Bank Transfer (InstaPay), PayPal, Pay at Hotel** — and explicitly calling out **Pesonet as not supported** (batch-based with T+1 settlement, incompatible with instant booking confirmation). Not dismissible — it is policy, not a tip.
+- [ ] Helpers sourced from `SUPPORTED_PAYMENT_METHODS` in `shared/constants` (single source of truth).
+
+**Method list**
+
+- [ ] One card per method: icon, label, method key pill, "Hidden" pill when disabled, "Unsupported" pill for Pesonet etc., enable toggle, edit (pencil), delete (trash, two-click confirm), up/down reorder arrows.
+- [ ] Disabled rows are dimmed and show a "Hidden" pill.
+- [ ] Empty state when `paymentMethods[]` is empty — CTA "Add payment method" with copy explaining why data is missing.
+- [ ] Reorder via up/down arrows (no full drag library — same pattern as Intercom quick requests). Up arrow disabled on the first row, down arrow disabled on the last.
+
+**Add / Edit modal**
+
+- [ ] **Method key** (text) — unique identifier stored in `paymentMethod` on each booking. Lowercase letters, numbers, and hyphens only. Immutable after creation (renaming would break existing booking records).
+- [ ] **Label** (text) — display name shown to guests (e.g. "GCash", "Bank Transfer", "Pay at Hotel").
+- [ ] **Account name** (text) — recipient name shown beside the QR. Leave empty for "Pay at Hotel" or methods that don't need it.
+- [ ] **Account number** (text) — for PayPal, use the PayPal email address.
+- [ ] **Enable toggle** — `isEnabled: boolean`; hidden methods are not shown to guests.
+- [ ] **QR uploader** (only on edit, not add — the new method's storage path requires a saved method key) — file input, preview, "Upload QR" / "Replace QR" / "Remove QR" buttons, status pill ("Custom override" / "No QR"), error inline. Uploads to `assets/payment-methods/{method}/{timestamp}-{filename}` in Firebase Storage. Accepts `image/png`, `image/jpeg`, `image/webp` (max 2 MB). Best-effort deletes the previous QR on replace.
+- [ ] **Pesonet warning** — inline warning when the typed method key matches `UNSUPPORTED_PAYMENT_METHODS` (case-insensitive). The Save button label flips to "I understand, save anyway" for 5 seconds; the second click persists. Schema is not hard-blocked — the friction is policy, not enforcement.
+- [ ] **Save / Cancel** — single "Save" button in the modal footer.
+
+**Delete**
+
+- [ ] Two-click confirm: first click arms the button ("Tap again to confirm"), second click within 3 seconds executes. Auto-cancels after 3 seconds.
+- [ ] **Block delete when bookings reference the method** — one-shot `getDocs(query(bookings, where("paymentMethod", "==", method), limit(1)))`. Toast surfaces the booking count and tells the admin to reassign or close those bookings first.
+- [ ] Best-effort cleanup of the method's QR files in Storage (`listAll` + `deleteObject` under `assets/payment-methods/{method}/`).
+
+**Source / persistence**
+
+- [ ] All writes go through `setDoc(settings/hotelConfig, { paymentMethods: next }, { merge: true })` so the `onSnapshot` listener in `AdminContext` updates the UI in place.
+- [ ] The admin URL is `/settings?tab=payment` (deep link from `/rates` and the sidebar both work).
+- [ ] QR files are compressed client-side via `compressImageFile(file, { maxWidth: 800, maxHeight: 800, quality: 0.9, mimeType: "image/png" })` — PNG is critical because QR codes are sharp monochrome and JPEG artifacts destroy scannability. Maximum file size `MAX_PAYMENT_METHOD_QR_BYTES` (2 MB) enforced pre-compression with a clear error toast.
+- [ ] Source: `settings/hotelConfig.paymentMethods[]`. Storage path: `assets/payment-methods/{method}/{timestamp}-{filename}`.
+
+**One-time read migration (handled in `AdminContext`)**
+
+- [ ] On first snapshot, if the doc carries the legacy `bookingPaymentMethods` key (the pre-feature field name) and no `paymentMethods` key, the entries are reshaped in place: `accountInfo` (single free-text field) is split into `accountName` (first line) + `accountNumber` (the rest, or empty when only one line). The legacy key is left in place on the doc — `setDoc(..., { merge: true })` cannot remove fields, and the few KB of dead data are harmless.
+- [ ] The migration is gated by a `useRef` so it runs at most once per session and is idempotent.
+
+**See also**
+
+- Schema: `plan/docs/TYPES.md §PaymentMethodConfig` and `plan/docs/BACKEND.md §settings/hotelConfig`.
+- Storage rule: `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` (public read, staff write).
+- Constants: `SUPPORTED_PAYMENT_METHODS` and `UNSUPPORTED_PAYMENT_METHODS` exported from `shared/constants`.
 
 ---
 
@@ -303,6 +344,6 @@ Editable by hotel admin — no redeploy required. Changes reflect on guest site 
 - Hotel config schema: `plan/docs/BACKEND.md §settings/hotelConfig`
 - Website content schema: `plan/docs/BACKEND.md §settings/websiteContent`
 - Voucher management: `plan/features/VOUCHERS.md`
-- Payment methods (rates): `plan/features/RATE-MANAGEMENT.md`
+- Payment methods: `plan/features/SETTINGS.md §2 Payment Methods` (this doc) — also referenced by `plan/features/RATE-MANAGEMENT.md` via the "Manage payment methods" deep link
 - Auth guard (admin-only): `plan/features/AUTH-ROLES.md`
 - Intercom usage: `plan/features/INTERCOM-INBOX.md`, `plan/features/INTERCOM-GUEST.md`

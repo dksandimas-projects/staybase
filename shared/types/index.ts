@@ -13,6 +13,25 @@ export type BookingSource = (typeof BOOKING_SOURCES)[number];
 export type DiscountType = "" | "senior" | "pwd";
 export type PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string;
 
+// Per-method configuration for the dynamic booking payment list
+// managed from Settings → Payment Methods. The admin can add, remove,
+// reorder, enable/disable, and edit any method — including "Pay at
+// Hotel" which is just another method (no separate global toggle).
+// QR codes are uploaded to `assets/payment-methods/{method}/{fileName}`
+// in Firebase Storage. The Zod schema lives in
+// `shared/schemas/paymentMethod.ts`; derive the TS type from there
+// for any new code, but keep this interface in sync — the two
+// declarations are mirrored (TypeScript cannot `z.infer` across the
+// shared/admin boundary without a workspace import).
+export interface PaymentMethodConfig {
+  method: string;
+  label: string;
+  accountName: string;
+  accountNumber: string;
+  qrUrl: string;
+  isEnabled: boolean;
+}
+
 export interface Room {
   id: string;
   name: string;

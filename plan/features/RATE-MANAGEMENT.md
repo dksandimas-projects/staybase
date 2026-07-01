@@ -32,9 +32,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] Save button writes one `updateRoomType(t.value, { pricePerNight, weekendRate, corporateRate })` per type; toast on save: "Rates saved — Rate matrix updated for all room types"
 - [ ] Breakfast rate section — single rate per person per night input; note: "Rate applies to all room types. Guests × nights × rate = breakfast total."
 - [ ] Discount rules section — Senior Citizen (20%) and PWD (20%) displayed as read-only (OSCA-mandated, not editable) with explanatory note. Also cross-reference: **Spark Rewards member discount** is configured separately in `settings/rewardsConfig.memberDiscountEnabled` + `memberDiscountPct` (see `plan/features/SETTINGS.md §11. Spark Rewards`); admins should treat the Rate Management page as the single source of truth for *all* stacking discount sources in use at the property.
-- [ ] Payment methods section — list of payment methods with enable/disable toggle, QR code upload, account info text field per method
-- [ ] Pay at Hotel toggle — global enable/disable
-- [ ] Add payment method — allow adding custom method name + QR + account info
+- [ ] **Booking payment methods** are managed in Settings → Payment Methods (per `plan/features/SETTINGS.md §2 Payment Methods`), not on this page. A "Manage payment methods" link at the bottom of the page deep-links to `/settings?tab=payment` for convenience.
 - [ ] Save button per section or global save
 - [ ] Admin-only — front desk cannot access this page (see `plan/features/AUTH-ROLES.md`)
 
@@ -51,8 +49,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] **Max occupancy stored on `settings/hotelConfig.roomTypes[].maxCapacity`** — edited in Settings → Room Types when creating the type
 - [ ] **Weekend rate logic: applied automatically in booking flow when stay includes Saturday or Sunday nights**
 - [ ] **Discount rules: hardcoded 20% for Senior and PWD — stored in `settings/hotelConfig` for reference but not user-editable**
-- [ ] **Payment methods: stored in `settings/hotelConfig.paymentMethods[]` — `updateDoc` on `settings/hotelConfig`**
-- [ ] **QR code image: `uploadBytes` to Firebase Storage, `getDownloadURL`, stored in payment method `qrUrl`**
+- [ ] **Payment methods: stored in `settings/hotelConfig.paymentMethods[]` and edited from Settings → Payment Methods (see `plan/features/SETTINGS.md §2`). `updateDoc` (or `setDoc` with merge) on `settings/hotelConfig`. QR code images: `uploadBytes` to Firebase Storage at `assets/payment-methods/{method}/{filename}`, `getDownloadURL`, stored in payment method `qrUrl`.**
 - [ ] **Rate changes do NOT retroactively update existing bookings — `ratePerNight` and `breakfastRate` both locked on booking creation**
 - [ ] **Breakfast rate saved to `settings/breakfastConfig.ratePerPersonPerNight`**
 - [ ] **Breakfast pricing model: add-on only** (per `DECISIONS-FEATURES.md #75`). Booking flow Step 1 toggles "Room Only" vs "Room + Breakfast"; the latter adds `breakfastRate × guests × nights` to the room total. No `includedInRoomRate` field on `breakfastConfig` — if a future client needs "breakfast always included" as a differentiator, add it then.
@@ -63,8 +60,6 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] Loading state — skeleton while fetching current rates
 - [ ] Save fails — show error, preserve unsaved values in form
 - [ ] Rate set to 0 — warn staff ("Are you sure? This will show as free for guests.")
-- [ ] QR upload fails — show error per method, allow retry
-- [ ] All payment methods disabled — warn staff ("Guests will have no payment option.")
 - [ ] Corporate rate lower than standard rate — allow, no warning needed
 
 ## Manual QA
@@ -73,8 +68,6 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] Update weekend rate — booking total reflects weekend rate for stays including Saturday/Sunday
 - [ ] Update corporate rate — new rate appears on `/corporate/book` for flat-rate bookings
 - [ ] Update rates — reflected in RoomsPage card "Base Rate" line and in the room detail modal
-- [ ] Disable a payment method — method no longer appears in guest booking flow Step 3
-- [ ] Upload QR code for GCash — QR displays correctly in guest booking flow
 - [ ] Existing confirmed bookings unaffected by rate change (check `ratePerNight` field)
 - [ ] Front desk account cannot access `/rates` — sees access denied
 
