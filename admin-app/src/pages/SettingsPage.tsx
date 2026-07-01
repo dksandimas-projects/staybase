@@ -2724,7 +2724,11 @@ export function SettingsPage() {
                     let successCount = 0;
                     for (const file of accepted) {
                       try {
-                        const compressed = await compressImageFile(file);
+                        const compressed = await compressImageFile(file, {
+                          maxWidth: 1600,
+                          maxHeight: 1200,
+                          quality: 0.85
+                        });
                         const result = await uploadRoomTypePhoto(photoTarget.value, compressed.file);
                         if (result.success) successCount += 1;
                       } catch (err) {
@@ -2742,6 +2746,9 @@ export function SettingsPage() {
                 />
                 <p className="text-xs text-gray-600">
                   {photoTarget.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos. All rooms of this type share the same gallery — the first photo is the hero image on the public rooms page.
+                </p>
+                <p className="text-[10px] leading-relaxed text-gray-500">
+                  Recommended 1600x1200 (4:3). Compressed to JPEG automatically. The first photo is the hero image shown on the corporate and rooms pages.
                 </p>
 
                 {photoTarget.imageUrls.length === 0 ? (
