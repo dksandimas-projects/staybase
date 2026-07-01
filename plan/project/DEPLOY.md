@@ -90,17 +90,16 @@ Expected: `npm test` → 90+ tests passing; both builds succeed; typecheck clean
 
 ## 4. Vercel deployment
 
-### Single project, two apps
-Both `guest-app/` and `admin-app/` are deployed from the same Vercel project. Vercel auto-detects each app's framework from its `package.json` and builds independently.
+### Two Vercel projects
+Deploy `guest-app/` and `admin-app/` as two separate Vercel projects from the same monorepo. Each project must set its own root directory so Vercel detects the correct app, build output, and project-local `vercel.json`.
 
 ### Project settings
-- **Root directory**: not set (build from monorepo root)
-- **Build command (guest-app)**: leave default; Vercel uses the `guest-app/package.json` build script
-- **Build command (admin-app)**: configure via `vercel.json` or per-app build settings
-- **Output directory (guest-app)**: `guest-app/dist`
-- **Output directory (admin-app)**: `admin-app/dist`
+- **Root directory (guest-app project)**: `guest-app` (critical: this is where the public site and `api/` functions live)
+- **Root directory (admin-app project)**: `admin-app`
+- **Build command**: leave default; Vercel uses the respective `package.json` build script
+- **Output directory**: leave default (`dist`)
 
-In practice, configure **two Vercel projects** for the same monorepo (one per app) if you need different domain mappings, env vars, or preview URLs. The Vercel monorepo auto-detection works since v3.
+Do not leave the root directory unset. If the guest project is deployed from the monorepo root instead of `guest-app`, Vercel can serve the SPA for `/api/*` instead of invoking the serverless function.
 
 ### Custom domains
 - `www.sparkinnbohol.com` → `guest-app` production
@@ -108,9 +107,9 @@ In practice, configure **two Vercel projects** for the same monorepo (one per ap
 - Vercel auto-issues TLS via Let's Encrypt.
 
 ### Headers and cron
-The single `vercel.json` at monorepo root configures:
-- `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` on all routes
-- Daily checkin-reminder cron at `0 0 * * *` (midnight UTC) → `/api/email/checkin-reminder` with `CRON_SECRET` auth
+Each Vercel project reads the `vercel.json` in its configured root directory:
+- `guest-app/vercel.json` configures the guest/API project headers, SPA fallback, and daily checkin-reminder cron at `0 0 * * *` (midnight UTC) → `/api/email/checkin-reminder` with `CRON_SECRET` auth
+- `admin-app/vercel.json` configures the admin dashboard headers and SPA fallback
 
 ---
 
