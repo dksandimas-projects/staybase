@@ -21,7 +21,7 @@ import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin"
 import { handleRoomAvailability } from "../server/handlers/rooms";
 import { handleJanitorStorageSweep, handleJanitorStats, handleH2LookupTokenBackfill, handleH2BackfillStatus } from "../server/handlers/janitor";
 import { adminAuth } from "../server/lib/firebase-admin";
-import config from "@config";
+import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",
@@ -52,6 +52,39 @@ const publicEmailActions = new Set([
   "discount-rejected",
   "early-checkin-request"
 ]);
+
+const ALLOWED_ORIGINS = new Set<string>([
+  `https://${config.domain}`,
+  `https://${config.adminDomain}`,
+  `https://www.${config.domain}`,
+  "http://localhost:5173", // guest-app dev (Vite)
+  "http://localhost:5174", // admin-app dev (Vite)
+  "http://localhost:3000", // generic CRA / Next.js dev
+]);
+
+function resolveAllowedOrigin(originHeader: string | string[] | undefined): string {
+  const requestOrigin = Array.isArray(originHeader) ? originHeader[0] : originHeader;
+  if (!requestOrigin) return "";
+
+  try {
+    const parsedOrigin = new URL(requestOrigin).origin;
+    return ALLOWED_ORIGINS.has(parsedOrigin) ? parsedOrigin : "";
+  } catch (parseErr) {
+    console.debug("CORS origin parse failed:", parseErr);
+    return "";
+  }
+}
+
+function setCorsHeaders(req: VercelRequest, res: VercelResponse) {
+  const allowOrigin = resolveAllowedOrigin(req.headers.origin);
+  if (allowOrigin) res.setHeader("Access-Control-Allow-Origin", allowOrigin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, X-Cron-Secret"
+  );
+}
 
 async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; role?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
@@ -283,36 +316,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // `Access-Control-Allow-Credentials` is removed — Firebase ID tokens ride in the
   // Authorization header, not cookies, so credentials are not needed.
   // (Closes SEV-1 #2 cross-cutting + 1.7 SEV-1 from the audit.)
-  const ALLOWED_ORIGINS = new Set<string>([
-    `https://${config.domain}`,
-    `https://${config.adminDomain}`,
-    `https://www.${config.domain}`,
-    "http://localhost:5173", // guest-app dev (Vite)
-    "http://localhost:5174", // admin-app dev (Vite)
-    "http://localhost:3000", // generic CRA / Next.js dev
-  ]);
-  const requestOrigin = (req.headers.origin || req.headers.referer || "") as string;
-  let allowOrigin = "";
-  try {
-    const originHost = new URL(requestOrigin).host;
-    if (ALLOWED_ORIGINS.has(requestOrigin) || ALLOWED_ORIGINS.has(`https://${originHost}`) || ALLOWED_ORIGINS.has(`http://${originHost}`)) {
-      allowOrigin = requestOrigin;
-    }
-  } catch (parseErr) {
-    // Per BF-25 (booking-flow audit 2026-06-26): the CORS
-    // origin parse also swallowed errors silently. Log at
-    // debug level so the issue is visible in Vercel logs
-    // (no behavior change — an unparseable origin is not in
-    // the allowlist, so no allow-origin is the right output).
-    console.debug("CORS origin parse failed:", parseErr);
-  }
-  if (allowOrigin) res.setHeader("Access-Control-Allow-Origin", allowOrigin);
-  res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, X-Cron-Secret"
-  );
+  setCorsHeaders(req, res);
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();

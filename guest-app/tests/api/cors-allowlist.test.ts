@@ -1,6 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import handler from "../../api/[...route]";
+
+vi.mock("../../server/lib/firebase-admin", () => ({
+  adminAuth: {
+    verifyIdToken: vi.fn()
+  },
+  adminDb: {
+    collection: vi.fn()
+  },
+  adminStorage: {
+    bucket: vi.fn()
+  }
+}));
 
 // Regression test for SEV-1 #2: the CORS headers used to be `*` +
 // `Access-Control-Allow-Credentials: true`, which browsers reject.
@@ -12,6 +25,10 @@ import { resolve } from "node:path";
 describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
   const src = readFileSync(
     resolve(__dirname, "../../api/[...route].ts"),
+    "utf8"
+  );
+  const rootApiSrc = readFileSync(
+    resolve(__dirname, "../../../api/[...route].ts"),
     "utf8"
   );
 
@@ -34,11 +51,53 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
 
   it("echoes the request Origin only if it matches the allowlist", () => {
     // The fix uses a Set lookup; the response header is set conditionally
-    expect(src).toMatch(/if\s*\(\s*ALLOWED_ORIGINS\.has\(/);
+    expect(src).toMatch(/ALLOWED_ORIGINS\.has\(\s*parsedOrigin\s*\)/);
     expect(src).toMatch(/setHeader\(\s*["']Access-Control-Allow-Origin["']\s*,\s*allowOrigin\s*\)/);
   });
 
   it("sets the Vary: Origin header so caches don't poison the response", () => {
     expect(src).toMatch(/setHeader\(\s*["']Vary["']\s*,\s*["']Origin["']\s*\)/);
+  });
+
+  it("does not use Vite-only path aliases inside the Node API route", () => {
+    expect(src).not.toMatch(/from\s+["']@config["']/);
+    expect(src).toMatch(/from\s+["']\.\.\/\.\.\/hotel\.config["']/);
+  });
+
+  it("exposes the guest-app API from the repo root for root-directory Vercel deployments", () => {
+    expect(rootApiSrc).toMatch(/export\s+\{\s*default\s*\}\s+from\s+["']\.\.\/guest-app\/api\/\[\.\.\.route\]["']/);
+  });
+
+  it("answers admin create-staff preflight with the admin origin allow header", async () => {
+    const req = {
+      method: "OPTIONS",
+      url: "/api/admin/create-staff",
+      headers: {
+        host: "www.sparkinnbohol.com",
+        origin: "https://admin.sparkinnbohol.com",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,content-type"
+      },
+      socket: {
+        remoteAddress: "127.0.0.1"
+      }
+    } as any;
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      setHeader: vi.fn().mockReturnThis(),
+      end: vi.fn().mockReturnThis()
+    };
+
+    await handler(req, res);
+
+    expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Origin", "https://admin.sparkinnbohol.com");
+    expect(res.setHeader).toHaveBeenCalledWith("Vary", "Origin");
+    expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
+    expect(res.setHeader).toHaveBeenCalledWith(
+      "Access-Control-Allow-Headers",
+      expect.stringContaining("Authorization")
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.end).toHaveBeenCalled();
   });
 });
