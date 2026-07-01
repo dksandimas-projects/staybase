@@ -128,9 +128,9 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
       email: decodedToken.email,
       role: decodedToken.role
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error("Token verification failed:", err);
-    return { success: false, error: getTokenVerificationFailureMessage(token) };
+    return { success: false, error: `Unauthorized: Token verification failed: ${err.message || err}` };
   }
 }
 
