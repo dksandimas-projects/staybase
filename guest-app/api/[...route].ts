@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",
@@ -31,10 +30,14 @@ const publicEmailActions = new Set([
   "early-checkin-request"
 ]);
 
+const PRODUCTION_GUEST_HOSTS = new Set([
+  "sparkinnbohol.com",
+  "www.sparkinnbohol.com"
+]);
 const ALLOWED_ORIGINS = new Set<string>([
-  `https://${config.domain}`,
-  `https://${config.adminDomain}`,
-  `https://www.${config.domain}`,
+  "https://sparkinnbohol.com",
+  "https://www.sparkinnbohol.com",
+  "https://admin.sparkinnbohol.com",
   "http://localhost:5173", // guest-app dev (Vite)
   "http://localhost:5174", // admin-app dev (Vite)
   "http://localhost:3000", // generic CRA / Next.js dev
@@ -171,11 +174,40 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
 // (3 attempts / IP / hour × 24 = 72 attempts/day/IP).
 //
 // The state lives in module memory (same as the
-// per-minute rate-limit cache) and is exposed as a
-// shared `FailureBackoffState` so the unit tests can
-// drive it deterministically with an injected clock.
-import { createFailureBackoffState } from "@spark-inn/shared";
-const lookupFailures = createFailureBackoffState();
+// per-minute rate-limit cache). Keep it local to avoid
+// loading workspace packages before CORS preflight can run.
+const lookupFailures = (() => {
+  const failures = new Map<string, { count: number; resetTime: number }>();
+
+  return {
+    isInBackoff(key: string, threshold: number): boolean {
+      const now = Date.now();
+      const record = failures.get(key);
+      if (!record) return false;
+
+      if (now > record.resetTime) {
+        failures.delete(key);
+        return false;
+      }
+
+      return record.count >= threshold;
+    },
+    record(key: string, windowMs: number): void {
+      const now = Date.now();
+      const record = failures.get(key);
+      if (!record || now > record.resetTime) {
+        failures.set(key, { count: 1, resetTime: now + windowMs });
+        return;
+      }
+
+      record.count++;
+      record.resetTime = now + windowMs;
+    },
+    clear(key: string): void {
+      failures.delete(key);
+    }
+  };
+})();
 const LOOKUP_FAILURE_THRESHOLD = 3;
 const LOOKUP_FAILURE_WINDOW_MS = 3600000;
 
@@ -214,7 +246,7 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
   try {
     if (requestOrigin) {
       const originHost = new URL(requestOrigin).hostname;
-      if (originHost === config.domain || originHost === `www.${config.domain}`) {
+      if (PRODUCTION_GUEST_HOSTS.has(originHost)) {
         isProduction = true;
         originAllowed = true;
       }
