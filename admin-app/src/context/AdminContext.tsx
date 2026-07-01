@@ -750,6 +750,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const bookingsRef = collection(db, "bookings");
     const unsubscribe = onSnapshot(
       bookingsRef,
@@ -863,7 +864,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const updateBookingStatus = async (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
     try {
@@ -1013,6 +1014,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const vouchersRef = collection(db, "vouchers");
     const unsubscribe = onSnapshot(
       vouchersRef,
@@ -1045,7 +1047,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const addVoucher = async (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => {
     try {
@@ -1178,6 +1180,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [corporateInquiries, setCorporateInquiries] = useState<CorporateInquiry[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const inquiriesRef = collection(db, "corporateInquiries");
     const unsubscribe = onSnapshot(
       inquiriesRef,
@@ -1211,7 +1214,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const updateInquiryStatus = async (inquiryId: string, status: CorporateInquiry["status"]) => {
     try {
@@ -1690,6 +1693,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!currentUser) return;
     const storeOrdersQuery = query(collection(db, "storeOrders"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       storeOrdersQuery,
@@ -1725,7 +1729,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
     if (status === "cancelled" || status === "confirmed") {
@@ -1831,6 +1835,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!currentUser) return;
     const storeItemsQuery = query(collection(db, "storeItems"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       storeItemsQuery,
@@ -1856,7 +1861,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const addStoreItem = async (item: Omit<StoreItem, "id" | "createdAt">) => {
     try {
@@ -2175,6 +2180,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to all settings documents from Firestore
   useEffect(() => {
+    if (!currentUser) return;
     const settingsRef = collection(db, "settings");
     const unsubscribe = onSnapshot(
       settingsRef,
@@ -2207,7 +2213,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
     );
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const updateSettings = async (section: string, data: any) => {
     try {
@@ -2253,6 +2259,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // `heroPhotoUrl` field empty when no custom upload exists.
   const hasBackfilledCorporateRef = useRef(false);
   useEffect(() => {
+    if (!currentUser || currentUser.role !== "admin") return;
     if (hasBackfilledCorporateRef.current) return;
     // Wait until the initial Firestore snapshot has delivered
     // `websiteContent` with at least the homepage sub-object
@@ -2277,7 +2284,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     if (Object.keys(updates).length > 0) {
       void updateSettings("websiteContent", { corporate: updates });
     }
-  }, [websiteContent, updateSettings]);
+  }, [websiteContent, updateSettings, currentUser]);
 
   // Room Types State — sourced from settings/hotelConfig.roomTypes
   // (per W3.3). The hotelConfig onSnapshot writes to the local
@@ -2561,6 +2568,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const staffRef = query(
       collection(db, "guests"),
       where("role", "in", ["front-desk", "admin"])
@@ -2608,7 +2616,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const getApiBaseUrl = () => {
     if (typeof window === "undefined") return "";
@@ -2616,7 +2624,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     if (hostname === "localhost" || hostname === "127.0.0.1") {
       return "http://localhost:3000";
     }
-    return import.meta.env.VITE_GUEST_APP_URL || "";
+    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
   };
 
   const createStaff = async (input: {
