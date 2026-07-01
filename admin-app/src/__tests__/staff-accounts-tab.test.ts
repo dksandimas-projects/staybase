@@ -46,7 +46,7 @@ describe("Admin Staff Accounts (audit S5.2)", () => {
 
     it("wires the staff listener inside useEffect with proper cleanup", () => {
       expect(adminContextSrc).toMatch(
-        /useEffect\(\(\)\s*=>\s*\{[\s\S]*?onSnapshot\([\s\S]*?staffRef[\s\S]*?return\s+unsubscribe;\s*\}\s*,\s*\[\]\)/
+        /useEffect\(\(\)\s*=>\s*\{[\s\S]*?onSnapshot\([\s\S]*?staffRef[\s\S]*?return\s+unsubscribe;\s*\}\s*,\s*\[currentUser\]\)/
       );
     });
 
@@ -57,7 +57,7 @@ describe("Admin Staff Accounts (audit S5.2)", () => {
       // Path may appear inside a template literal: `${base}/api/admin/create-staff`
       expect(adminContextSrc).toMatch(/api\/admin\/create-staff/);
       expect(adminContextSrc).toMatch(
-        /getIdToken\(\)/
+        /getIdToken\(true\)/
       );
       expect(adminContextSrc).toMatch(
         /Authorization["']:\s*token\s*\?\s*`Bearer\s+\$\{token\}`\s*:\s*["']["']/

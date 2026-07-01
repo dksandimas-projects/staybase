@@ -67,6 +67,34 @@ function setCorsHeaders(req: VercelRequest, res: VercelResponse) {
   );
 }
 
+function getJwtAudience(token: string): string | undefined {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return undefined;
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const paddedPayload = normalizedPayload.padEnd(Math.ceil(normalizedPayload.length / 4) * 4, "=");
+    const decodedPayload = JSON.parse(Buffer.from(paddedPayload, "base64").toString("utf8")) as { aud?: unknown };
+    return typeof decodedPayload.aud === "string" ? decodedPayload.aud : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getTokenVerificationFailureMessage(token: string) {
+  const expectedProjectId = process.env.FIREBASE_PROJECT_ID;
+  const tokenAudience = getJwtAudience(token);
+
+  if (expectedProjectId && tokenAudience && tokenAudience !== expectedProjectId) {
+    console.error("Firebase token project mismatch:", {
+      expectedProjectId,
+      tokenAudience
+    });
+    return "Unauthorized: Signed in to the wrong Firebase project. Please sign out and sign in again.";
+  }
+
+  return "Unauthorized: Invalid or expired token.";
+}
+
 async function getAdminAuth() {
   const { adminAuth } = await import("../server/lib/firebase-admin");
   return adminAuth;
@@ -102,7 +130,7 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
     };
   } catch (err) {
     console.error("Token verification failed:", err);
-    return { success: false, error: "Unauthorized: Invalid or expired token." };
+    return { success: false, error: getTokenVerificationFailureMessage(token) };
   }
 }
 
@@ -134,7 +162,7 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
     };
   } catch (err) {
     console.error("Token verification failed:", err);
-    return { success: false, error: "Unauthorized: Invalid or expired token." };
+    return { success: false, error: getTokenVerificationFailureMessage(token) };
   }
 }
 
