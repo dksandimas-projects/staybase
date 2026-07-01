@@ -63,6 +63,19 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
+    // Per `plan/features/SETTINGS.md §Payment Methods`: QR codes for
+    // each booking payment method. Uploaded to Firebase Storage at
+    // `assets/payment-methods/{method}/{timestamp}-{filename}` by
+    // the admin from Settings → Payment Methods. Public read —
+    // the guest booking page renders the QR inline. Staff-only
+    // write. The `{method}` segment scopes the path so deleting one
+    // method's QR (via `listAll` + `deleteObject`) cannot
+    // accidentally touch another method's object.
+    match /assets/payment-methods/{method}/{fileName} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     match /store-items/{itemId}/{fileName} {
       allow read: if true;
       allow write: if isStaff();

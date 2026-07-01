@@ -178,7 +178,9 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `payAtHotelEnabled`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
+Key fields: `hotelName`, `address`, `contactEmail`, `contactPhone`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
+
+> **`paymentMethods[]`** — fully dynamic booking payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, and `isEnabled` flag. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
 
 > **`roomTypes[]`** — array of `RoomTypeEntry` records. Each entry owns its photos, occupancy cap, rate matrix, bed description, and amenities; rooms reference the type via the `type` field and inherit these properties. See `plan/docs/TYPES.md §RoomType` for the full shape. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`). The full edit surface is the Settings → Room Types table; see `plan/features/SETTINGS.md §Room Types` for the add / edit / photos / delete flow.
 

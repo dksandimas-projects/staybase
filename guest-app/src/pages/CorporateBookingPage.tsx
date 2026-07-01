@@ -149,9 +149,31 @@ export function CorporateBookingPage() {
 
   // Step 3 State
   const [billingFile, setBillingFile] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank">("gcash");
+  const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
   const [termsConsent, setTermsConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
+  // payment list is dynamic. Sourced from
+  // `settings/hotelConfig.paymentMethods[]` and filtered to the
+  // admin-enabled subset. The corporate page only shows the GCash
+  // and Bank Transfer options; the admin can configure their
+  // account details from Settings → Payment Methods.
+  const [paymentMethodsConfig, setPaymentMethodsConfig] = useState<
+    Array<{ method: string; label: string; accountName: string; accountNumber: string; qrUrl: string; isEnabled: boolean }>
+  >([]);
+  useEffect(() => {
+    const db = getFirestore();
+    getDoc(doc(db, "settings", "hotelConfig"))
+      .then((snap) => {
+        if (!snap.exists()) return;
+        const d = snap.data() as { paymentMethods?: unknown } | undefined;
+        if (Array.isArray(d?.paymentMethods)) {
+          setPaymentMethodsConfig(d!.paymentMethods as any);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Sync companyName from state when it validates
   useEffect(() => {
@@ -1296,44 +1318,55 @@ export function CorporateBookingPage() {
                   </p>
                   
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg border p-4 text-left transition",
-                        paymentMethod === "gcash" ? "border-primary bg-primary-light/50 ring-1 ring-primary" : "border-gray-200 hover:bg-gray-50"
-                      )}
-                      onClick={() => setPaymentMethod("gcash")}
-                    >
-                      <Wallet className="text-primary shrink-0" size={24} />
-                      <div>
-                        <p className="font-semibold text-gray-950 text-sm">GCash Transfer</p>
-                        <p className="text-xs text-gray-500">Instant validation</p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg border p-4 text-left transition",
-                        paymentMethod === "bank" ? "border-primary bg-primary-light/50 ring-1 ring-primary" : "border-gray-200 hover:bg-gray-50"
-                      )}
-                      onClick={() => setPaymentMethod("bank")}
-                    >
-                      <Landmark className="text-primary shrink-0" size={24} />
-                      <div>
-                        <p className="font-semibold text-gray-950 text-sm">Bank Deposit (BDO)</p>
-                        <p className="text-xs text-gray-500">1-2 hours validation</p>
-                      </div>
-                    </button>
+                    {paymentMethodsConfig
+                      .filter((pm) => pm.isEnabled && (pm.method === "gcash" || pm.method === "maya" || pm.method === "bank"))
+                      .map((pm) => {
+                        const Icon = pm.method === "gcash" || pm.method === "maya" ? Wallet : Landmark;
+                        return (
+                          <button
+                            key={pm.method}
+                            type="button"
+                            className={cn(
+                              "flex items-center gap-3 rounded-lg border p-4 text-left transition",
+                              paymentMethod === pm.method ? "border-primary bg-primary-light/50 ring-1 ring-primary" : "border-gray-200 hover:bg-gray-50"
+                            )}
+                            onClick={() => setPaymentMethod(pm.method)}
+                          >
+                            <Icon className="text-primary shrink-0" size={24} />
+                            <div>
+                              <p className="font-semibold text-gray-950 text-sm">{pm.label}</p>
+                              <p className="text-xs text-gray-500">
+                                {pm.method === "bank" ? "1-2 hours validation" : "Instant validation"}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
                   </div>
 
-                  <div className="mt-6 rounded-lg bg-gray-50 p-4 text-xs text-gray-700 space-y-2">
-                    <p className="font-semibold text-gray-900">Transfer accounts details:</p>
-                    {paymentMethod === "gcash" ? (
-                      <p>GCash Account: <span className="font-bold text-gray-950">0917-000-0000</span> ({config.legalName})</p>
-                    ) : (
-                      <p>BDO Account Number: <span className="font-bold text-gray-950">1234-5678-9012</span> Account Name: <span className="font-bold text-gray-950">{config.legalName}</span></p>
-                    )}
-                  </div>
+                  {(() => {
+                    const pm = paymentMethodsConfig.find((m) => m.method === paymentMethod);
+                    if (!pm) return null;
+                    return (
+                      <div className="mt-6 rounded-lg bg-gray-50 p-4 text-xs text-gray-700 space-y-2">
+                        <p className="font-semibold text-gray-900">Transfer account details:</p>
+                        {pm.accountName && (
+                          <p>Account name: <span className="font-bold text-gray-950">{pm.accountName}</span></p>
+                        )}
+                        {pm.accountNumber && (
+                          <p>{pm.method === "paypal" ? "PayPal email" : pm.method === "bank" ? "Account number" : "GCash number"}: <span className="font-bold text-gray-950">{pm.accountNumber}</span></p>
+                        )}
+                        {pm.qrUrl && (
+                          <div className="mt-3 flex justify-center">
+                            <img src={pm.qrUrl} alt={`${pm.label} QR code`} className="h-32 w-32 rounded-lg border border-gray-200 bg-white object-contain p-2" />
+                          </div>
+                        )}
+                        {!pm.accountName && !pm.accountNumber && !pm.qrUrl && (
+                          <p className="text-gray-500">No payment details configured yet. Please contact the front desk for the deposit slip.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Proof upload */}
                   <div className="mt-6">

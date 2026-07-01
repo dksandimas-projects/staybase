@@ -224,6 +224,39 @@ export const DEFAULT_CORPORATE_PAGE_CONTENT = {
 export const MAX_FEATURED_TYPES = 3;
 export const MAX_FEATURED_ROOMS = MAX_FEATURED_TYPES;
 
+// Per `plan/features/SETTINGS.md §Payment Methods`: the canonical
+// list of booking payment method keys the platform supports out
+// of the box. Single source of truth shared between the admin
+// UI's persistent Pesonet callout, the add/edit modal's inline
+// warning, and (optionally) guest-side helpers. The schema itself
+// stays open (`method: string`) so the admin can add custom
+// methods — this list is policy, not enforcement.
+export const SUPPORTED_PAYMENT_METHODS = [
+  "gcash",
+  "maya",
+  "bank",
+  "paypal",
+  "pay-at-hotel"
+] as const;
+
+export type SupportedPaymentMethod = (typeof SUPPORTED_PAYMENT_METHODS)[number];
+
+// Methods the admin UI must surface a warning for. Pesonet is a
+// batch-based bank transfer system with cut-off windows and T+1
+// settlement — incompatible with our instant-reservation
+// confirmation flow. The schema is not hard-blocked so future
+// business changes don't require a code deploy; the friction is
+// a two-step confirm, not a server-side rejection.
+export const UNSUPPORTED_PAYMENT_METHODS = ["pesonet"] as const;
+
+export type UnsupportedPaymentMethod = (typeof UNSUPPORTED_PAYMENT_METHODS)[number];
+
+// Maximum accepted QR image size in bytes (2 MB pre-compression).
+// QR PNGs are usually < 100 KB; this cap catches the "I uploaded
+// my entire photo roll" case before we burn Storage bandwidth.
+// Enforced in the admin Payment Methods tab's file input.
+export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
+
 // localStorage cache key + TTL for the public site content
 // (`usePublicSiteContent`). Returning visitors get an instant
 // render from the cache while Firestore validates in the
