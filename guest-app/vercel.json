@@ -33,6 +33,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/%5B...route%5D?route=:path*" },
     { "source": "/assets/:path*", "destination": "/assets/:path*" },
     { "source": "/brand/:path*", "destination": "/brand/:path*" },
     { "source": "/offline.html", "destination": "/offline.html" },
