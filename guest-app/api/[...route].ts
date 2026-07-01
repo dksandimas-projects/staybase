@@ -1,26 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import {
-  handleCreateBooking,
-  handleCreateWalkin,
-  handleAddPayment,
-  handleRejectDiscount,
-  handleCancelBooking,
-  handleConfirmBooking,
-  handleCheckoutBooking,
-  handleLookupBooking
-} from "../server/handlers/bookings";
-import { handleValidateVoucher } from "../server/handlers/vouchers";
-import { handleValidateCorporateCode } from "../server/handlers/corporate-codes";
-import { handleCreateCorporateInquiry, handleConvertInquiryToBooking } from "../server/handlers/corporate-inquiries";
-import { handleCreateContactInquiry } from "../server/handlers/contact";
-import { handleGenerateReference } from "../server/handlers/reference";
-import { handleRegisterMember, handleRedeemMemberPoints, handleUndoMemberPointsRedemption, handleEraseMemberAccount } from "../server/handlers/members";
-import { handleEmailTrigger } from "../server/handlers/email";
-import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
-import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
-import { handleRoomAvailability } from "../server/handlers/rooms";
-import { handleJanitorStorageSweep, handleJanitorStats, handleH2LookupTokenBackfill, handleH2BackfillStatus } from "../server/handlers/janitor";
-import { adminAuth } from "../server/lib/firebase-admin";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -86,6 +64,11 @@ function setCorsHeaders(req: VercelRequest, res: VercelResponse) {
   );
 }
 
+async function getAdminAuth() {
+  const { adminAuth } = await import("../server/lib/firebase-admin");
+  return adminAuth;
+}
+
 async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; role?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
     return {
@@ -103,6 +86,7 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
 
   const token = authHeader.split("Bearer ")[1];
   try {
+    const adminAuth = await getAdminAuth();
     const decodedToken = await adminAuth.verifyIdToken(token);
     if (decodedToken.role !== "admin" && decodedToken.role !== "front-desk") {
       return { success: false, error: "Forbidden: Access restricted to staff members." };
@@ -136,6 +120,7 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
 
   const token = authHeader.split("Bearer ")[1];
   try {
+    const adminAuth = await getAdminAuth();
     const decodedToken = await adminAuth.verifyIdToken(token);
     return {
       success: true,
@@ -370,6 +355,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
+    const { handleCreateBooking } = await import("../server/handlers/bookings");
     return await handleCreateBooking(req, res);
   }
 
@@ -379,6 +365,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleCreateWalkin } = await import("../server/handlers/bookings");
     return await handleCreateWalkin(req, res);
   }
 
@@ -388,6 +375,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleAddPayment } = await import("../server/handlers/bookings");
     return await handleAddPayment(req, res);
   }
 
@@ -397,6 +385,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleRejectDiscount } = await import("../server/handlers/bookings");
     return await handleRejectDiscount(req, res);
   }
 
@@ -410,6 +399,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleConfirmBooking } = await import("../server/handlers/bookings");
     return await handleConfirmBooking(req, res);
   }
 
@@ -423,6 +413,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleCheckoutBooking } = await import("../server/handlers/bookings");
     return await handleCheckoutBooking(req, res);
   }
 
@@ -447,6 +438,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    const { handleCancelBooking } = await import("../server/handlers/bookings");
     return await handleCancelBooking(req, res);
   }
 
@@ -478,6 +470,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
+    const { handleLookupBooking } = await import("../server/handlers/bookings");
     const lookupResult = await handleLookupBooking(req, res);
 
     // S2: a 404 increments the per-IP failure counter; a
@@ -505,6 +498,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`rooms-availability:${ip}`, 30, 60000)) {
       return res.status(429).json({ success: false, error: "Too many availability requests. Please try again in a minute." });
     }
+    const { handleRoomAvailability } = await import("../server/handlers/rooms");
     return await handleRoomAvailability(req, res);
   }
 
@@ -520,6 +514,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
+    const { handleValidateVoucher } = await import("../server/handlers/vouchers");
     return await handleValidateVoucher(req, res);
   }
 
@@ -535,6 +530,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
+    const { handleValidateCorporateCode } = await import("../server/handlers/corporate-codes");
     return await handleValidateCorporateCode(req, res);
   }
 
@@ -555,6 +551,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
+    const { handleCreateCorporateInquiry } = await import("../server/handlers/corporate-inquiries");
     return await handleCreateCorporateInquiry(req, res);
   }
 
@@ -575,6 +572,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ success: false, error: verification.error });
     }
 
+    const { handleCreateContactInquiry } = await import("../server/handlers/contact");
     return await handleCreateContactInquiry(req, res);
   }
 
@@ -591,6 +589,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleConvertInquiryToBooking } = await import("../server/handlers/corporate-inquiries");
     return await handleConvertInquiryToBooking(req, res);
   }
 
@@ -600,6 +599,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleGenerateReference } = await import("../server/handlers/reference");
     return await handleGenerateReference(req, res);
   }
 
@@ -613,6 +613,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ success: false, error: authResult.error });
     }
     (req as any).user = authResult;
+    const { handleRegisterMember } = await import("../server/handlers/members");
     return await handleRegisterMember(req, res);
   }
 
@@ -622,6 +623,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
+    const { handleRedeemMemberPoints } = await import("../server/handlers/members");
     return await handleRedeemMemberPoints(req, res);
   }
 
@@ -634,6 +636,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ success: false, error: "Only admins can undo points redemption." });
     }
     (req as any).staff = authResult;
+    const { handleUndoMemberPointsRedemption } = await import("../server/handlers/members");
     return await handleUndoMemberPointsRedemption(req, res);
   }
 
@@ -647,6 +650,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ success: false, error: authResult.error });
     }
     (req as any).user = authResult;
+    const { handleEraseMemberAccount } = await import("../server/handlers/members");
     return await handleEraseMemberAccount(req, res);
   }
 
@@ -666,6 +670,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ success: false, error: "Only admins can create staff accounts." });
     }
     (req as any).staff = authResult;
+    const { handleCreateStaff } = await import("../server/handlers/admin");
     return await handleCreateStaff(req, res);
   }
 
@@ -681,6 +686,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(403).json({ success: false, error: "Only admins can disable staff accounts." });
     }
     (req as any).staff = authResult;
+    const { handleDisableStaff } = await import("../server/handlers/admin");
     return await handleDisableStaff(req, res);
   }
 
@@ -689,6 +695,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
 
+    const { handleCreateStoreOrder } = await import("../server/handlers/store");
     return await handleCreateStoreOrder(req, res);
   }
 
@@ -697,6 +704,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store cancellation requests. Please try again in a minute." });
     }
 
+    const { handleCancelStoreOrder } = await import("../server/handlers/store");
     return await handleCancelStoreOrder(req, res);
   }
 
@@ -705,6 +713,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store status requests. Please try again in a minute." });
     }
 
+    const { handleGetStoreOrderStatus } = await import("../server/handlers/store");
     return await handleGetStoreOrderStatus(req, res);
   }
 
@@ -742,7 +751,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       (req as any).staff = authResult;
     }
 
-    return await handleEmailTrigger(req, res, action as Parameters<typeof handleEmailTrigger>[2]);
+    const { handleEmailTrigger } = await import("../server/handlers/email");
+    return await handleEmailTrigger(req, res, action as any);
   }
 
   // Per BF-50 (booking-flow audit 2026-06-26): Vercel
@@ -751,6 +761,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Firestore doc was never written (user abandoned the
   // form). Auth-gated by `CRON_SECRET`.
   if (domain === "janitor" && action === "storage-sweep" && (req.method === "POST" || req.method === "GET")) {
+    const { handleJanitorStorageSweep } = await import("../server/handlers/janitor");
     return await handleJanitorStorageSweep(req, res);
   }
 
@@ -758,6 +769,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // returns the in-memory sweep history (last 50 runs).
   // Same CRON_SECRET auth as the sweep itself.
   if (domain === "janitor" && action === "stats" && req.method === "GET") {
+    const { handleJanitorStats } = await import("../server/handlers/janitor");
     return await handleJanitorStats(req, res);
   }
 
@@ -767,9 +779,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // post-H2 bookings. Resumable (cursor persisted in
   // Firestore). CRON_SECRET-gated.
   if (domain === "janitor" && action === "h2-backfill" && (req.method === "POST" || req.method === "GET")) {
+    const { handleH2LookupTokenBackfill } = await import("../server/handlers/janitor");
     return await handleH2LookupTokenBackfill(req, res);
   }
   if (domain === "janitor" && action === "h2-status" && req.method === "GET") {
+    const { handleH2BackfillStatus } = await import("../server/handlers/janitor");
     return await handleH2BackfillStatus(req, res);
   }
 

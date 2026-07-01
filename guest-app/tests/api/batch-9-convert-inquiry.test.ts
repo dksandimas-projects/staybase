@@ -31,9 +31,9 @@ const inquiryPageSrc = readFileSync(
 
 describe("Phase 11.6 Batch 9 — convert corporate inquiry to booking (audit S4.2)", () => {
   describe("server route + handler", () => {
-    it("imports the new handleConvertInquiryToBooking handler", () => {
+    it("loads the new handleConvertInquiryToBooking handler", () => {
       expect(routeSrc).toMatch(
-        /import\s*\{\s*handleCreateCorporateInquiry\s*,\s*handleConvertInquiryToBooking\s*\}\s*from\s*["']\.\.\/server\/handlers\/corporate-inquiries["']/
+        /const\s+\{\s*handleConvertInquiryToBooking\s*\}\s*=\s*await\s+import\(["']\.\.\/server\/handlers\/corporate-inquiries["']\)/
       );
     });
 
