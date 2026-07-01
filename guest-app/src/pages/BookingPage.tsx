@@ -17,7 +17,8 @@ import {
   UploadCloud,
   UserRound,
   Users,
-  Wallet
+  Wallet,
+  Banknote
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -202,7 +203,16 @@ export function BookingPage() {
   const [discountIdUpload, setDiscountIdUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
 
-  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "bank" | "paypal" | "pay-at-hotel">("gcash");
+  // The payment method list is dynamic — managed from Settings →
+  // Payment Methods in the admin app (per `plan/features/SETTINGS.md
+  // §Payment Methods`). The admin can add, remove, reorder, and
+  // toggle any method. We default to the first enabled method's
+  // `method` key, falling back to "gcash" if the config hasn't
+  // loaded yet or no methods are enabled. The actual current
+  // selection is re-validated in the render below so a method that
+  // gets disabled (or the config that gets updated) while the page
+  // is open cannot leave the user with an unselectable option.
+  const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
   const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
 
@@ -254,6 +264,34 @@ export function BookingPage() {
       ),
     [typeAvailability, guests]
   );
+
+  // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
+  // payment list is dynamic. Sourced from
+  // `settings/hotelConfig.paymentMethods[]` and filtered to the
+  // admin-enabled subset. "Pay at Hotel" is just another entry
+  // here (no separate global `payAtHotelEnabled` flag).
+  const availablePaymentMethods = useMemo(() => {
+    const raw = hotelConfig?.paymentMethods;
+    if (!Array.isArray(raw)) return [] as Array<{ method: string; label: string; accountName: string; accountNumber: string; qrUrl: string; isEnabled: boolean }>;
+    return raw.filter((p: any) => p && p.isEnabled !== false);
+  }, [hotelConfig?.paymentMethods]);
+
+  const currentPaymentMethod = useMemo(
+    () => availablePaymentMethods.find((p) => p.method === paymentMethod) ?? null,
+    [availablePaymentMethods, paymentMethod]
+  );
+
+  const isPayAtHotel = currentPaymentMethod?.method === "pay-at-hotel";
+
+  // Re-validate the current selection: if the admin disabled the
+  // chosen method (or the config just loaded) while the page is
+  // open, fall back to the first available. The default
+  // `paymentMethod` is "gcash" which may not be enabled.
+  useEffect(() => {
+    if (availablePaymentMethods.length === 0) return;
+    if (currentPaymentMethod) return;
+    setPaymentMethod(availablePaymentMethods[0].method);
+  }, [availablePaymentMethods, currentPaymentMethod, setPaymentMethod]);
 
   const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
     ?? availableRoomTypes[0]?.type
@@ -946,9 +984,6 @@ export function BookingPage() {
   const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUpload;
     const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry);
 
-    // Retrieve active payment method details from hotelConfig
-    const activePaymentConfig = hotelConfig?.paymentMethods?.find((p: any) => p.method === paymentMethod);
-
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
@@ -1086,190 +1121,129 @@ export function BookingPage() {
               )}
             </div>
 
-            {/* Payment Method Section */}
+            {/* Payment Method Section — dynamic, per
+                `plan/features/SETTINGS.md §Payment Methods`. The
+                list is sourced from
+                `settings/hotelConfig.paymentMethods[]` and filtered
+                to `isEnabled`. The "Pay at Hotel" method is just
+                another entry — there is no separate global
+                `payAtHotelEnabled` flag. If no methods are enabled
+                (or the config hasn't loaded), the booking is
+                blocked at the Confirm button. */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Payment Method</h3>
               <p className="mt-1 text-sm text-gray-600">Select how you would like to pay for your reservation.</p>
 
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {/* GCash */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("gcash")}
-                  className={cn(
-                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
-                    paymentMethod === "gcash"
-                      ? "border-primary bg-primary-light ring-1 ring-primary"
-                      : "border-gray-200 bg-white hover:border-primary"
-                  )}
-                >
-                  <Wallet size={20} className={paymentMethod === "gcash" ? "text-primary" : "text-gray-500"} />
-                  <span className="mt-3 block text-sm font-bold text-gray-900">Digital Wallet</span>
-                  <span className="mt-0.5 block text-xs text-gray-500">GCash or Maya</span>
-                </button>
-
-                {/* Bank Transfer */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("bank")}
-                  className={cn(
-                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
-                    paymentMethod === "bank"
-                      ? "border-primary bg-primary-light ring-1 ring-primary"
-                      : "border-gray-200 bg-white hover:border-primary"
-                  )}
-                >
-                  <Landmark size={20} className={paymentMethod === "bank" ? "text-primary" : "text-gray-500"} />
-                  <span className="mt-3 block text-sm font-bold text-gray-900">Bank Transfer</span>
-                  <span className="mt-0.5 block text-xs text-gray-500">Direct Deposit</span>
-                </button>
-
-                {/* PayPal — per BF-10 (booking-flow audit 2026-06-26):
-                   the spec (`BACKEND.md`, `API-ROUTES.md`) allows
-                   `"paypal"` as a `PaymentMethod` value, but the UI
-                   didn't expose it. Added as a fourth option; admin
-                   configures the PayPal account details in
-                   `settings/hotelConfig.paymentMethods[]` like the
-                   other methods. */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod("paypal")}
-                  className={cn(
-                    "flex flex-col items-start p-4 rounded-lg border text-left transition",
-                    paymentMethod === "paypal"
-                      ? "border-primary bg-primary-light ring-1 ring-primary"
-                      : "border-gray-200 bg-white hover:border-primary"
-                  )}
-                >
-                  <CreditCard size={20} className={paymentMethod === "paypal" ? "text-primary" : "text-gray-500"} />
-                  <span className="mt-3 block text-sm font-bold text-gray-900">PayPal</span>
-                  <span className="mt-0.5 block text-xs text-gray-500">International card / PayPal balance</span>
-                </button>
-
-                {/* Pay at Hotel */}
-                {(!hotelConfig || hotelConfig.payAtHotelEnabled) && (
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("pay-at-hotel")}
-                    className={cn(
-                      "flex flex-col items-start p-4 rounded-lg border text-left transition",
-                      paymentMethod === "pay-at-hotel"
-                        ? "border-primary bg-primary-light ring-1 ring-primary"
-                        : "border-gray-200 bg-white hover:border-primary"
-                    )}
-                  >
-                    <CreditCard size={20} className={paymentMethod === "pay-at-hotel" ? "text-primary" : "text-gray-500"} />
-                    <span className="mt-3 block text-sm font-bold text-gray-900">Pay at Hotel</span>
-                    <span className="mt-0.5 block text-xs text-gray-500">Upon arrival</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Conditional Instructions Panel */}
-              <div className="mt-6 rounded-xl border border-primary-light bg-section-bg overflow-hidden">
-                {paymentMethod === "gcash" && (
-                  <div className="grid sm:grid-cols-5">
-                    <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
-                      {activePaymentConfig?.qrUrl ? (
-                        <img
-                          src={activePaymentConfig.qrUrl}
-                          alt="GCash / Maya QR Code"
-                          className="h-40 w-40 object-contain rounded"
-                        />
-                      ) : (
-                        <p className="text-xs text-gray-500 text-center px-4">
-                          QR code not yet configured. Please contact the front desk for payment details.
-                        </p>
-                      )}
-                    </div>
-                    <div className="sm:col-span-3 p-5 flex flex-col justify-center">
-                      <h4 className="font-semibold text-primary text-base">Scan to Pay</h4>
-                      <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                        Please use your digital wallet (GCash or Maya) to scan the QR code. Ensure the recipient name is <span className="font-bold text-gray-800">{activePaymentConfig?.accountName || config.legalName}</span>.
-                      </p>
-                      <p className="mt-1 text-xs font-semibold text-gray-800">
-                        Number: {activePaymentConfig?.accountNumber || config.frontDeskPhone}
-                      </p>
-                      <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
-                        <li className="flex items-center gap-1.5">
-                          <Info size={14} className="text-primary" />
-                          Your booking is held for 30 minutes.
-                        </li>
-                        <li className="flex items-center gap-1.5">
-                          <ShieldCheck size={14} className="text-primary" />
-                          Secure transaction via local digital wallets.
-                        </li>
-                      </ul>
-                    </div>
+              {availablePaymentMethods.length === 0 ? (
+                <div className="mt-4 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center">
+                  <p className="text-sm font-semibold text-gray-700">No payment methods available</p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Please contact the front desk to complete your reservation.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {availablePaymentMethods.map((pm) => {
+                      const Icon =
+                        pm.method === "gcash" || pm.method === "maya"
+                          ? Wallet
+                          : pm.method === "bank"
+                          ? Landmark
+                          : pm.method === "pay-at-hotel"
+                          ? Banknote
+                          : CreditCard;
+                      return (
+                        <button
+                          key={pm.method}
+                          type="button"
+                          onClick={() => setPaymentMethod(pm.method)}
+                          className={cn(
+                            "flex flex-col items-start p-4 rounded-lg border text-left transition",
+                            paymentMethod === pm.method
+                              ? "border-primary bg-primary-light ring-1 ring-primary"
+                              : "border-gray-200 bg-white hover:border-primary"
+                          )}
+                        >
+                          <Icon size={20} className={paymentMethod === pm.method ? "text-primary" : "text-gray-500"} />
+                          <span className="mt-3 block text-sm font-bold text-gray-900">{pm.label}</span>
+                          <span className="mt-0.5 block text-xs text-gray-500">
+                            {pm.method === "gcash"
+                              ? "Digital wallet"
+                              : pm.method === "maya"
+                              ? "Digital wallet"
+                              : pm.method === "bank"
+                              ? "Direct deposit"
+                              : pm.method === "paypal"
+                              ? "International card / PayPal balance"
+                              : pm.method === "pay-at-hotel"
+                              ? "Upon arrival"
+                              : "Online payment"}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
 
-                {paymentMethod === "bank" && (
-                  <div className="p-5">
-                    <h4 className="font-semibold text-primary text-base">Direct Bank Deposit Details</h4>
-                    <div className="mt-3 grid gap-3 text-xs text-gray-600 sm:grid-cols-3">
-                      <div>
-                        <p className="font-bold text-gray-500 uppercase tracking-wide">Bank Name</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.label || "—"}</p>
+                  {/* Conditional instructions panel — one unified
+                      layout for every online method. "Pay at Hotel"
+                      gets a separate, simpler panel. */}
+                  <div className="mt-6 rounded-xl border border-primary-light bg-section-bg overflow-hidden">
+                    {isPayAtHotel ? (
+                      <div className="p-5 flex items-start gap-3">
+                        <Info size={20} className="text-primary shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="font-semibold text-primary text-base">Pay upon Check-in</h4>
+                          <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                            Present your booking reference at the front desk upon arrival. We accept cash, major credit cards, and digital wallet payments.
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-gray-500 uppercase tracking-wide">Account Name</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountName || config.legalName}</p>
+                    ) : currentPaymentMethod ? (
+                      <div className="grid sm:grid-cols-5">
+                        <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
+                          {currentPaymentMethod.qrUrl ? (
+                            <img
+                              src={currentPaymentMethod.qrUrl}
+                              alt={`${currentPaymentMethod.label} QR code`}
+                              className="h-40 w-40 object-contain rounded"
+                            />
+                          ) : (
+                            <p className="text-xs text-gray-500 text-center px-4">
+                              QR code not yet configured. Please contact the front desk for payment details.
+                            </p>
+                          )}
+                        </div>
+                        <div className="sm:col-span-3 p-5 flex flex-col justify-center">
+                          <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
+                              <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(total)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
+                              </p>
+                          {currentPaymentMethod.accountNumber && (
+                            <p className="mt-1 text-xs font-semibold text-gray-800">
+                              {currentPaymentMethod.method === "paypal" ? "PayPal email" : "Account number"}: {currentPaymentMethod.accountNumber}
+                            </p>
+                          )}
+                          <ul className="mt-3 space-y-1.5 text-xs text-gray-500">
+                            <li className="flex items-center gap-1.5">
+                              <Info size={14} className="text-primary" />
+                              Your booking is held for 30 minutes.
+                            </li>
+                            <li className="flex items-center gap-1.5">
+                              <ShieldCheck size={14} className="text-primary" />
+                              Secure transaction via {currentPaymentMethod.label}.
+                            </li>
+                          </ul>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-bold text-gray-500 uppercase tracking-wide">Account Number</p>
-                        <p className="mt-1 font-semibold text-gray-800 text-sm">{activePaymentConfig?.accountNumber || "—"}</p>
-                      </div>
-                    </div>
-                    <p className="mt-4 text-xs text-gray-500">
-                      Bank details not yet configured. Please contact the front desk at <span className="font-semibold text-gray-800">{config.frontDeskPhone}</span> for the deposit slip.
-                    </p>
-                    <ul className="mt-2 space-y-1.5 text-xs text-gray-500">
-                      <li className="flex items-center gap-1.5">
-                        <Info size={14} className="text-primary" />
-                        Please complete transfer within 30 minutes to hold room.
-                      </li>
-                    </ul>
+                    ) : null}
                   </div>
-                )}
+                </>
+              )}
+            </div>
 
-                {paymentMethod === "paypal" && (
-                  <div className="p-5">
-                    <h4 className="font-semibold text-primary text-base">PayPal Payment Details</h4>
-                    <p className="mt-2 text-xs text-gray-600 leading-relaxed">
-                      Send your payment to our PayPal account: <span className="font-bold text-gray-800">{activePaymentConfig?.accountName || config.legalName}</span>.
-                    </p>
-                    <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                      PayPal email: <span className="font-bold text-gray-800">{activePaymentConfig?.accountNumber || config.supportEmail}</span>
-                    </p>
-                    <ul className="mt-4 space-y-1.5 text-xs text-gray-500">
-                      <li className="flex items-center gap-1.5">
-                        <Info size={14} className="text-primary" />
-                        Use "Friends & Family" for non-Philippine bank transfers when possible to avoid fees.
-                      </li>
-                      <li className="flex items-center gap-1.5">
-                        <ShieldCheck size={14} className="text-primary" />
-                        Secure transaction via PayPal — no card details shared with the hotel.
-                      </li>
-                    </ul>
-                  </div>
-                )}
-
-                {paymentMethod === "pay-at-hotel" && (
-                  <div className="p-5 flex items-start gap-3">
-                    <Info size={20} className="text-primary shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="font-semibold text-primary text-base">Pay upon Check-in</h4>
-                      <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                        Present your booking reference at the front desk upon arrival. We accept cash, major credit cards, and digital wallet payments.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Proof of Payment Upload box */}
-              {paymentMethod !== "pay-at-hotel" && (
+            {/* Proof of Payment Upload box */}
+            {paymentMethod !== "pay-at-hotel" && (
                 <div className="mt-5">
                   <p className="text-sm font-semibold text-gray-700">
                     Upload Proof of Payment <span className="text-red-500">*</span>
@@ -1312,7 +1286,6 @@ export function BookingPage() {
                   </div>
                 </div>
               )}
-            </div>
 
             {/* Honeypot field (hidden from user) */}
             <input

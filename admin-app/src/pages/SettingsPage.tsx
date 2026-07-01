@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAdmin, type StoreItem } from "../context/AdminContext";
-import { compressImageFile, MAX_ROOM_TYPE_PHOTOS, DEFAULT_CORPORATE_PAGE_CONTENT, type RoomTypeEntry } from "@spark-inn/shared";
+import {
+  compressImageFile,
+  DEFAULT_CORPORATE_PAGE_CONTENT,
+  MAX_PAYMENT_METHOD_QR_BYTES,
+  MAX_ROOM_TYPE_PHOTOS,
+  UNSUPPORTED_PAYMENT_METHODS,
+  type PaymentMethodConfig,
+  type RoomTypeEntry
+} from "@spark-inn/shared";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
-  Award, Star
+  Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote
 } from "lucide-react";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -17,7 +26,53 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
+type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
+
+const VALID_TAB_IDS: TabId[] = [
+  "hotel",
+  "payment",
+  "roomtypes",
+  "branding",
+  "website",
+  "rewards",
+  "breakfast",
+  "store",
+  "email",
+  "intercom",
+  "legal",
+  "staff"
+];
+
+// Per `plan/features/SETTINGS.md §Payment Methods`: the booking
+// payment list is a fully dynamic admin-managed array. The schema
+// stays open (`method: string`) so the admin can add custom
+// keys, but the UI surfaces two policies:
+//   1. `SUPPORTED_PAYMENT_METHODS` is the canonical list of
+//      methods the platform ships with. The persistent callout
+//      at the top of the tab lists them.
+//   2. `UNSUPPORTED_PAYMENT_METHODS` triggers an inline warning
+//      + two-step save confirm when the admin types one of
+//      these keys. The schema is not hard-blocked, so future
+//      business changes don't require a code deploy.
+
+// Map a payment method key to a `lucide-react` icon. Used in
+// the tab list and the QR previews so admins can scan methods
+// visually without reading every label.
+function paymentMethodIcon(method: string) {
+  switch (method) {
+    case "gcash":
+    case "maya":
+      return Wallet;
+    case "bank":
+      return Landmark;
+    case "paypal":
+      return CreditCard;
+    case "pay-at-hotel":
+      return Banknote;
+    default:
+      return CreditCard;
+  }
+}
 type StoreCategory = StoreItem["category"];
 type StorePaymentMethodSetting = {
   method: string;
@@ -179,6 +234,610 @@ function BrandingAssetRow({
   );
 }
 
+// Per `plan/features/SETTINGS.md §Payment Methods` — the body of
+// the Payment Methods tab. Owns the local Add/Edit modal state,
+// the per-row reorder/toggle/delete state, the QR uploader
+// (mirrors `BrandingAssetRow`), and the Pesonet two-step confirm.
+//
+// Persistence is delegated to the parent via the
+// `onAdd` / `onUpdate` / `onReorder` / `onDelete` /
+// `onUploadQr` / `onResetQr` callbacks from `useAdmin()` so the
+// Firestore writes live in `AdminContext` (single source of
+// truth for the data path).
+interface PaymentMethodsTabBodyProps {
+  paymentMethods: PaymentMethodConfig[];
+  onAdd: (config: PaymentMethodConfig) => Promise<void>;
+  onUpdate: (method: string, updates: Partial<PaymentMethodConfig>) => Promise<void>;
+  onReorder: (next: PaymentMethodConfig[]) => Promise<void>;
+  onDelete: (method: string) => Promise<void>;
+  onUploadQr: (method: string, file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
+  onResetQr: (method: string) => Promise<{ success: boolean; error?: string }>;
+}
+
+type EditModalState =
+  | { open: false }
+  | { open: true; isNew: boolean; method: PaymentMethodConfig };
+
+function emptyPaymentMethod(): PaymentMethodConfig {
+  return { method: "", label: "", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true };
+}
+
+function PaymentMethodsTabBody({
+  paymentMethods,
+  onAdd,
+  onUpdate,
+  onReorder,
+  onDelete,
+  onUploadQr,
+  onResetQr
+}: PaymentMethodsTabBodyProps) {
+  const toast = useToast();
+  const [editModal, setEditModal] = useState<EditModalState>({ open: false });
+  // Two-step confirm state for `pay-at-hotel`-style destructive
+  // actions. Set to the method key being confirmed; click 2
+  // within 3s executes the action. Mirrors the corporate-code
+  // delete pattern in `RatesPage.tsx:39-45`.
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingArmPesonet, setPendingArmPesonet] = useState(false);
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(() => setPendingDelete(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete]);
+  useEffect(() => {
+    if (!pendingArmPesonet) return;
+    const timer = setTimeout(() => setPendingArmPesonet(false), 5000);
+    return () => clearTimeout(timer);
+  }, [pendingArmPesonet]);
+
+  const isUnsupportedMethod = (m: string) =>
+    UNSUPPORTED_PAYMENT_METHODS.includes(m.toLowerCase() as (typeof UNSUPPORTED_PAYMENT_METHODS)[number]);
+
+  const handleToggle = (method: string) => {
+    const target = paymentMethods.find((p) => p.method === method);
+    if (!target) return;
+    void onUpdate(method, { isEnabled: !target.isEnabled });
+  };
+
+  const handleReorder = (method: string, direction: "up" | "down") => {
+    const idx = paymentMethods.findIndex((p) => p.method === method);
+    if (idx === -1) return;
+    const target = direction === "up" ? idx - 1 : idx + 1;
+    if (target < 0 || target >= paymentMethods.length) return;
+    const next = [...paymentMethods];
+    const [moved] = next.splice(idx, 1);
+    next.splice(target, 0, moved);
+    void onReorder(next);
+  };
+
+  const handleDelete = async (method: string) => {
+    if (pendingDelete !== method) {
+      setPendingDelete(method);
+      toast.info("Confirm delete", "Click the trash button again within 3 seconds to confirm.");
+      return;
+    }
+    setPendingDelete(null);
+    await onDelete(method);
+  };
+
+  const openAddModal = () => {
+    setPendingArmPesonet(false);
+    setEditModal({ open: true, isNew: true, method: emptyPaymentMethod() });
+  };
+
+  const openEditModal = (pm: PaymentMethodConfig) => {
+    setPendingArmPesonet(false);
+    setEditModal({ open: true, isNew: false, method: { ...pm } });
+  };
+
+  const closeModal = () => {
+    setEditModal({ open: false });
+    setPendingArmPesonet(false);
+  };
+
+  const handleSaveModal = async () => {
+    if (!editModal.open) return;
+    const pm = editModal.method;
+    const trimmedMethod = pm.method.trim();
+    const trimmedLabel = pm.label.trim();
+    if (!trimmedMethod) {
+      toast.error("Method key is required", "Use a short, unique identifier (e.g. \"gcash\", \"maya\", \"custom-bank\").");
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(trimmedMethod)) {
+      toast.error("Invalid method key", "Use lowercase letters, numbers, and hyphens only (e.g. \"gcash\", \"maya\", \"custom-bank\").");
+      return;
+    }
+    if (!trimmedLabel) {
+      toast.error("Label is required", "This is the display name shown to guests (e.g. \"GCash\", \"Bank Transfer\").");
+      return;
+    }
+    const unsupported = isUnsupportedMethod(trimmedMethod);
+    if (unsupported && !pendingArmPesonet) {
+      setPendingArmPesonet(true);
+      toast.warning(
+        "Pesonet is not supported",
+        "Pesonet is a batch-based system with cut-off windows and T+1 settlement — incompatible with instant booking confirmation. Click Save again within 5 seconds to add this method anyway."
+      );
+      return;
+    }
+    const normalized: PaymentMethodConfig = {
+      method: trimmedMethod,
+      label: trimmedLabel,
+      accountName: pm.accountName.trim(),
+      accountNumber: pm.accountNumber.trim(),
+      qrUrl: pm.qrUrl,
+      isEnabled: pm.isEnabled
+    };
+    if (editModal.isNew) {
+      await onAdd(normalized);
+    } else {
+      await onUpdate(editModal.method.method, normalized);
+    }
+    closeModal();
+  };
+
+  const handleModalField = (field: keyof PaymentMethodConfig, value: string | boolean) => {
+    if (!editModal.open) return;
+    setEditModal({
+      open: true,
+      isNew: editModal.isNew,
+      method: { ...editModal.method, [field]: value as never }
+    });
+  };
+
+  const handleModalQrUpload = async (file: File) => {
+    if (!editModal.open) return { success: false, error: "Modal not open" };
+    return onUploadQr(editModal.method.method, file);
+  };
+
+  const handleModalQrReset = async () => {
+    if (!editModal.open) return { success: false, error: "Modal not open" };
+    return onResetQr(editModal.method.method);
+  };
+
+  return (
+    <div className="space-y-6 text-xs">
+      <div>
+        <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking Payment Methods</h3>
+        <p className="text-[10px] text-gray-500 mt-0.5">
+          Add, edit, and remove the payment methods shown to guests on <code>/book</code> Step 3. QR codes are uploaded once per method and rendered inline in the booking page.
+        </p>
+      </div>
+
+      {/* Persistent Pesonet warning callout — not dismissible
+          because it is policy, not a tip. Per the plan
+          recommendation, the callout also lists the supported
+          methods explicitly so admins know what to add. */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+        <div className="flex items-start gap-3">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1.5">
+            <p className="text-xs font-bold">Payment methods we currently support</p>
+            <p className="text-[11px] leading-relaxed">
+              <span className="font-semibold">GCash</span>, <span className="font-semibold">Maya</span>, <span className="font-semibold">Bank Transfer (InstaPay)</span>, <span className="font-semibold">PayPal</span>, and <span className="font-semibold">Pay at Hotel</span>. You can also add custom methods, but please do not add <span className="font-bold underline decoration-amber-400 decoration-2 underline-offset-2">Pesonet</span> — it is a batch-based bank transfer system with cut-off windows and T+1 settlement, which is incompatible with our instant-reservation confirmation flow. The schema is not hard-blocked, so an unscheduled business change can be reflected here without a code deploy.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Method list */}
+      {paymentMethods.length === 0 ? (
+        <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-8 text-center">
+          <CreditCard size={28} className="mx-auto text-gray-300" aria-hidden="true" />
+          <p className="mt-3 text-sm font-semibold text-gray-700">No payment methods yet</p>
+          <p className="mt-1 text-[11px] text-gray-500">Add your first payment method to make it available to guests on the booking page.</p>
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="mt-4 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+          >
+            <Plus size={14} />
+            Add payment method
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {paymentMethods.map((pm, idx) => {
+            const Icon = paymentMethodIcon(pm.method);
+            const armed = pendingDelete === pm.method;
+            const unsupported = isUnsupportedMethod(pm.method);
+            return (
+              <div
+                key={pm.method}
+                className={`rounded-xl border bg-white p-4 shadow-sm transition ${
+                  pm.isEnabled ? "border-gray-200" : "border-gray-200 opacity-60"
+                }`}
+              >
+                <div className="grid gap-4 lg:grid-cols-[80px_1fr_auto] lg:items-center">
+                  {/* Icon + QR preview */}
+                  <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-section-bg">
+                    {pm.qrUrl ? (
+                      <img
+                        src={pm.qrUrl}
+                        alt={`${pm.label} QR code`}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <Icon size={26} className="text-gray-400" aria-hidden="true" />
+                    )}
+                  </div>
+                  {/* Label + key + unsupported tag */}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-bold text-gray-900">{pm.label || pm.method}</p>
+                      <code className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-mono text-gray-600">{pm.method}</code>
+                      {unsupported && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800">
+                          <AlertTriangle size={10} aria-hidden="true" />
+                          Unsupported
+                        </span>
+                      )}
+                      {!pm.isEnabled && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                          Hidden
+                        </span>
+                      )}
+                    </div>
+                    {(pm.accountName || pm.accountNumber) && (
+                      <p className="mt-1 truncate text-[11px] text-gray-600">
+                        {pm.accountName}
+                        {pm.accountName && pm.accountNumber ? " · " : ""}
+                        {pm.accountNumber}
+                      </p>
+                    )}
+                    {pm.qrUrl ? (
+                      <p className="mt-0.5 text-[10px] text-gray-400">QR uploaded</p>
+                    ) : (
+                      <p className="mt-0.5 text-[10px] text-gray-400">No QR uploaded — guests see the account name &amp; number only</p>
+                    )}
+                  </div>
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    {/* Enable toggle */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(pm.method)}
+                      aria-label={pm.isEnabled ? `Disable ${pm.label}` : `Enable ${pm.label}`}
+                      className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        pm.isEnabled ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div
+                        className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                          pm.isEnabled ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                    {/* Reorder up */}
+                    <button
+                      type="button"
+                      onClick={() => handleReorder(pm.method, "up")}
+                      disabled={idx === 0}
+                      aria-label={`Move ${pm.label} up`}
+                      className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ArrowUp size={14} aria-hidden="true" />
+                    </button>
+                    {/* Reorder down */}
+                    <button
+                      type="button"
+                      onClick={() => handleReorder(pm.method, "down")}
+                      disabled={idx === paymentMethods.length - 1}
+                      aria-label={`Move ${pm.label} down`}
+                      className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ArrowDown size={14} aria-hidden="true" />
+                    </button>
+                    {/* Edit */}
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(pm)}
+                      aria-label={`Edit ${pm.label}`}
+                      className="min-h-[36px] px-3 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+                    >
+                      <Pencil size={13} aria-hidden="true" />
+                      Edit
+                    </button>
+                    {/* Delete — two-step confirm */}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(pm.method)}
+                      aria-label={armed ? `Confirm delete ${pm.label}` : `Delete ${pm.label}`}
+                      className={`min-h-[36px] px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 ${
+                        armed
+                          ? "border-red-300 bg-red-100 text-red-700"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
+                      }`}
+                    >
+                      <Trash2 size={13} aria-hidden="true" />
+                      {armed ? "Tap again to confirm" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add button — always visible at the bottom of the tab */}
+      {paymentMethods.length > 0 && (
+        <div className="flex justify-end pt-2">
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add payment method
+          </button>
+        </div>
+      )}
+
+      {/* Add / Edit modal */}
+      {editModal.open && (
+        <Modal
+          open
+          onClose={closeModal}
+          title={editModal.isNew ? "Add payment method" : `Edit "${editModal.method.label || editModal.method.method}"`}
+          footer={
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-gray-200 bg-white px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveModal}
+                className={`inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg px-5 text-xs font-semibold text-white shadow-sm transition active:scale-95 ${
+                  pendingArmPesonet
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-primary hover:bg-primary-dark"
+                }`}
+              >
+                <Save size={14} aria-hidden="true" />
+                {pendingArmPesonet ? "I understand, save anyway" : "Save"}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4 text-xs">
+            {/* Method key + Label — side by side on desktop */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Method key
+                <input
+                  type="text"
+                  value={editModal.method.method}
+                  onChange={(event) => handleModalField("method", event.target.value.toLowerCase())}
+                  disabled={!editModal.isNew}
+                  placeholder="e.g. gcash, maya, custom-bank"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 font-mono text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                />
+                <span className="text-[10px] font-normal text-gray-500">
+                  {editModal.isNew
+                    ? "Unique identifier stored in `paymentMethod` on each booking. Lowercase letters, numbers, and hyphens."
+                    : "Cannot be changed after creation — used as the `paymentMethod` value on existing booking records."}
+                </span>
+              </label>
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Label
+                <input
+                  type="text"
+                  value={editModal.method.label}
+                  onChange={(event) => handleModalField("label", event.target.value)}
+                  placeholder="e.g. GCash, Bank Transfer, Pay at Hotel"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                />
+                <span className="text-[10px] font-normal text-gray-500">Display name shown to guests on the booking page.</span>
+              </label>
+            </div>
+
+            {/* Account name + Account number */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Account name
+                <input
+                  type="text"
+                  value={editModal.method.accountName}
+                  onChange={(event) => handleModalField("accountName", event.target.value)}
+                  placeholder="e.g. Spark Inn Hotel Corp"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                />
+                <span className="text-[10px] font-normal text-gray-500">Shown beside the QR code. Leave empty if not applicable.</span>
+              </label>
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Account number
+                <input
+                  type="text"
+                  value={editModal.method.accountNumber}
+                  onChange={(event) => handleModalField("accountNumber", event.target.value)}
+                  placeholder="e.g. 0917-000-0000"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                />
+                <span className="text-[10px] font-normal text-gray-500">For PayPal, use the PayPal email address.</span>
+              </label>
+            </div>
+
+            {/* Enable toggle */}
+            <label className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-gray-700">
+              <button
+                type="button"
+                onClick={() => handleModalField("isEnabled", !editModal.method.isEnabled)}
+                aria-label={editModal.method.isEnabled ? "Disable method" : "Enable method"}
+                className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                  editModal.method.isEnabled ? "bg-primary" : "bg-gray-200"
+                }`}
+              >
+                <div
+                  className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                    editModal.method.isEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              Visible to guests on the booking page
+            </label>
+
+            {/* QR code uploader — visible only on edit, not add.
+                For new methods the admin must save first so we have
+                a method key for the Storage path
+                `assets/payment-methods/{method}/`. The QR uploader
+                then appears in the same modal. */}
+            {!editModal.isNew && (
+              <PaymentMethodQrUploader
+                method={editModal.method.method}
+                label={editModal.method.label}
+                qrUrl={editModal.method.qrUrl}
+                onUpload={handleModalQrUpload}
+                onReset={handleModalQrReset}
+              />
+            )}
+
+            {/* Pesonet inline warning */}
+            {isUnsupportedMethod(editModal.method.method) && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold">Pesonet is not supported</p>
+                    <p className="text-[11px] leading-relaxed">
+                      Pesonet is a batch-based bank transfer system with cut-off windows and T+1 settlement — incompatible with our instant-reservation confirmation flow. Click <span className="font-semibold">Save</span> again within 5 seconds to add this method anyway.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// QR uploader for the Payment Methods tab — mirrors the
+// `BrandingAssetRow` semantics (file input + preview + Upload /
+// Replace / Reset + status pill). Inlined here rather than
+// abstracted because the surrounding layout is different and the
+// reset/delete flow is unique to the payment methods context.
+interface PaymentMethodQrUploaderProps {
+  method: string;
+  label: string;
+  qrUrl: string;
+  onUpload: (file: File) => Promise<{ success: boolean; error?: string; url?: string }>;
+  onReset: () => Promise<{ success: boolean; error?: string }>;
+}
+
+function PaymentMethodQrUploader({ method, label, qrUrl, onUpload, onReset }: PaymentMethodQrUploaderProps) {
+  const [status, setStatus] = useState<"idle" | "uploading" | "resetting">("idle");
+  const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const hasOverride = qrUrl.length > 0;
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    setError("");
+    setStatus("uploading");
+    const result = await onUpload(file);
+    if (!result.success) {
+      setError(result.error || "Upload failed");
+    }
+    setStatus("idle");
+  }
+
+  async function handleReset() {
+    if (!hasOverride) return;
+    setError("");
+    setStatus("resetting");
+    const result = await onReset();
+    if (!result.success) {
+      setError(result.error || "Reset failed");
+    }
+    setStatus("idle");
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-gray-800">QR code</p>
+          <p className="mt-0.5 text-[10px] text-gray-500">
+            Upload a PNG / JPEG / WebP image (max {Math.round(MAX_PAYMENT_METHOD_QR_BYTES / 1024 / 1024)} MB). QR codes are sharp monochrome — PNG is recommended to avoid JPEG artifacts that can break scanners.
+          </p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide shrink-0 ${
+            hasOverride
+              ? "bg-primary-light text-primary-dark"
+              : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          {hasOverride ? "Custom override" : "No QR"}
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-[120px_1fr] sm:items-start">
+        <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white sm:h-24 sm:w-24">
+          {hasOverride ? (
+            <img src={qrUrl} alt={`${label} QR code preview`} className="h-full w-full object-contain" />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200 text-center text-[10px] text-gray-500">
+              <ImagePlus size={20} className="opacity-50" aria-hidden="true" />
+              <p className="mt-1 font-semibold opacity-70">No QR yet</p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={handleFileChange}
+            disabled={status === "uploading"}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={status !== "idle"}
+              onClick={() => fileInputRef.current?.click()}
+              className="min-h-[44px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Upload size={13} aria-hidden="true" />
+              {status === "uploading" ? "Uploading..." : hasOverride ? "Replace QR" : "Upload QR"}
+            </button>
+            {hasOverride && (
+              <button
+                type="button"
+                disabled={status !== "idle"}
+                onClick={handleReset}
+                className="min-h-[44px] px-3.5 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RotateCcw size={13} aria-hidden="true" />
+                {status === "resetting" ? "Removing..." : "Remove QR"}
+              </button>
+            )}
+          </div>
+          {error && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-semibold text-red-700">
+              {error}
+            </p>
+          )}
+          <p className="text-[10px] text-gray-400">
+            Saved to <code className="font-mono">assets/payment-methods/{method || "<method-key>"}/</code> in Firebase Storage.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const {
     hotelConfig,
@@ -205,13 +864,36 @@ export function SettingsPage() {
     currentUser,
     staff,
     createStaff,
-    disableStaff
+    disableStaff,
+    paymentMethods,
+    addPaymentMethod,
+    updatePaymentMethod,
+    reorderPaymentMethods,
+    deletePaymentMethod,
+    uploadPaymentMethodQr,
+    resetPaymentMethodQr
   } = useAdmin();
   const toast = useToast();
   const { isMobile } = useBreakpoint();
 
-  // Active Settings Section Tab
-  const [activeTab, setActiveTab] = useState<TabId>("hotel");
+  // Active Settings Section Tab — driven by the `?tab=` query
+  // param so deep links (e.g. `/settings?tab=payment` from
+  // `/rates`) jump straight to the right section. Unknown /
+  // missing values fall back to `"hotel"`.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = (VALID_TAB_IDS as string[]).includes(tabParam || "")
+    ? (tabParam as TabId)
+    : "hotel";
+  const setActiveTab = (next: TabId) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "hotel") {
+      params.delete("tab");
+    } else {
+      params.set("tab", next);
+    }
+    setSearchParams(params, { replace: true });
+  };
 
   // On mobile, auto-scroll the horizontal tab bar to the active tab so
   // it's always visible. The user can still scroll the bar sideways to
@@ -752,6 +1434,7 @@ export function SettingsPage() {
   // Nav item tabs helper
   const tabs = [
     { id: "hotel" as const, label: "Hotel Settings", icon: Landmark },
+    { id: "payment" as const, label: "Payment Methods", icon: CreditCard },
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
     { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
@@ -924,6 +1607,34 @@ export function SettingsPage() {
               </div>
             </form>
           )}
+
+          {/* TAB: PAYMENT METHODS — dynamic CRUD + per-method QR
+              upload. Per `plan/features/SETTINGS.md §Payment Methods`.
+              The booking payment list on `/book` Step 3 renders
+              directly from this array — add, remove, reorder, and
+              toggle from here and the guest site reflects it on
+              the next snapshot tick.
+
+              UX structure:
+                1. Persistent amber callout listing the supported
+                   methods + the explicit "no Pesonet" warning.
+                2. Method list — one card per method with: icon,
+                   label, key pill, enable toggle, QR preview,
+                   edit, delete, up/down reorder buttons.
+                3. "Add payment method" button at the bottom.
+                4. Add/Edit modal with QR uploader (mirrors
+                   `BrandingAssetRow` semantics). Pesonet triggers
+                   a two-step save confirm.
+           */}
+          {activeTab === "payment" && <PaymentMethodsTabBody
+            paymentMethods={paymentMethods}
+            onAdd={addPaymentMethod}
+            onUpdate={updatePaymentMethod}
+            onReorder={reorderPaymentMethods}
+            onDelete={deletePaymentMethod}
+            onUploadQr={uploadPaymentMethodQr}
+            onResetQr={resetPaymentMethodQr}
+          />}
 
           {/* TAB 2: BRANDING — hero photos, hero copy, and logo
               overrides. Per `plan/features/SETTINGS.md §Branding`.

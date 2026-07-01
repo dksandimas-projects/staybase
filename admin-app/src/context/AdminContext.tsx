@@ -14,7 +14,10 @@ import {
   DEFAULT_CORPORATE_PERKS,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_ROOM_TYPES,
+  MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
+  PaymentMethodConfig,
+  compressImageFile,
   type RoomTypeEntry
 } from "@spark-inn/shared";
 import config from "@config";
@@ -444,6 +447,19 @@ export interface AdminContextType {
     file: File
   ) => Promise<{ success: boolean; error?: string; url?: string }>;
   resetBrandingAsset: (key: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Payment Methods — dynamic CRUD + per-method QR upload. See
+  // `plan/features/SETTINGS.md §Payment Methods` for the UX spec.
+  paymentMethods: PaymentMethodConfig[];
+  addPaymentMethod: (config: PaymentMethodConfig) => Promise<void>;
+  updatePaymentMethod: (method: string, updates: Partial<PaymentMethodConfig>) => Promise<void>;
+  reorderPaymentMethods: (next: PaymentMethodConfig[]) => Promise<void>;
+  deletePaymentMethod: (method: string) => Promise<void>;
+  uploadPaymentMethodQr: (
+    method: string,
+    file: File
+  ) => Promise<{ success: boolean; error?: string; url?: string }>;
+  resetPaymentMethodQr: (method: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -1920,12 +1936,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     hotelStory: "A hospitality story built on consistency...",
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
-    roomTypes: [...DEFAULT_ROOM_TYPES],
-    bookingPaymentMethods: [
-      { method: "bank", label: "Bank Transfer", isEnabled: true, qrUrl: "bank-qr.png", accountInfo: "" },
-      { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "gcash-qr.png", accountInfo: "" },
-      { method: "pay-at-hotel", label: "Pay at Hotel", isEnabled: true, qrUrl: "", accountInfo: "Pay in cash/card on arrival" }
-    ]
+    roomTypes: [...DEFAULT_ROOM_TYPES]
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -2285,6 +2296,269 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       void updateSettings("websiteContent", { corporate: updates });
     }
   }, [websiteContent, updateSettings, currentUser]);
+
+  // Payment Methods State — sourced from
+  // `settings/hotelConfig.paymentMethods[]`. Per
+  // `plan/features/SETTINGS.md §Payment Methods` the booking payment
+  // list is a fully dynamic admin-managed array. The admin can add,
+  // remove, reorder, enable/disable, and edit any method — including
+  // "Pay at Hotel" which is just another method (no separate global
+  // `payAtHotelEnabled` flag anymore). QR images live in Firebase
+  // Storage at `assets/payment-methods/{method}/{fileName}` (public
+  // read, staff write — see `firebase/storage.rules`).
+  //
+  // One-time read migration: if the doc carries the legacy
+  // `bookingPaymentMethods` key (the pre-feature field name) and no
+  // `paymentMethods` key, the entries are reshaped in place:
+  //   - `accountInfo` (single free-text field) → split into
+  //     `accountName` (first line) + `accountNumber` (the rest, or
+  //     empty when only one line). If the new field is already
+  //     present on the entry, the legacy value is dropped (avoids
+  //     silent data loss when the admin typed one and the code split
+  //     it the other way).
+  //   - default `label` to the method key when missing
+  //   - default `qrUrl` to "" when missing
+  //   - default `isEnabled` to true when missing
+  // The reshaped array is then written back via
+  // `setDoc(..., { paymentMethods: reshaped }, { merge: true })`.
+  // The legacy `bookingPaymentMethods` key is left in place on the
+  // doc — Firestore `merge: true` cannot remove fields, and the
+  // few KB of dead data are harmless. The migration is gated by a
+  // ref so it runs at most once per session and is idempotent.
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>(() => [
+    { method: "gcash", label: "GCash", accountName: "Spark Inn Hotel Corp", accountNumber: "0917-000-0000", qrUrl: "", isEnabled: true },
+    { method: "bank", label: "Bank Transfer", accountName: "BDO", accountNumber: "00-000-000", qrUrl: "", isEnabled: true },
+    { method: "paypal", label: "PayPal", accountName: "paypal@sparkinn.com", accountNumber: "", qrUrl: "", isEnabled: true },
+    { method: "pay-at-hotel", label: "Pay at Hotel", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }
+  ]);
+
+  const hasMigratedPaymentMethodsRef = useRef(false);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (hasMigratedPaymentMethodsRef.current) return;
+    const raw = (hotelConfig as Record<string, unknown>) || {};
+    const next = raw.paymentMethods;
+    const legacy = raw.bookingPaymentMethods;
+    if (!Array.isArray(next) && Array.isArray(legacy)) {
+      const reshaped: PaymentMethodConfig[] = (legacy as any[]).map((entry) => {
+        const method = typeof entry?.method === "string" ? entry.method : "";
+        const label = typeof entry?.label === "string" && entry.label ? entry.label : method;
+        const accountInfo = typeof entry?.accountInfo === "string" ? entry.accountInfo : "";
+        // Split accountInfo into name (first line) + number (rest).
+        // If `accountName` is already set on the entry prefer it.
+        const explicitName = typeof entry?.accountName === "string" ? entry.accountName : "";
+        const explicitNumber = typeof entry?.accountNumber === "string" ? entry.accountNumber : "";
+        let accountName = explicitName;
+        let accountNumber = explicitNumber;
+        if (!explicitName && !explicitNumber && accountInfo) {
+          const [firstLine, ...rest] = accountInfo.split("\n");
+          accountName = (firstLine || "").trim();
+          accountNumber = rest.join("\n").trim();
+        }
+        return {
+          method,
+          label,
+          accountName,
+          accountNumber,
+          qrUrl: typeof entry?.qrUrl === "string" ? entry.qrUrl : "",
+          isEnabled: entry?.isEnabled !== false
+        };
+      });
+      hasMigratedPaymentMethodsRef.current = true;
+      setPaymentMethods(reshaped);
+      // Write the new shape. The legacy `bookingPaymentMethods` key
+      // is intentionally left in place — see the comment above.
+      void updateSettings("hotelConfig", { paymentMethods: reshaped });
+      return;
+    }
+    if (Array.isArray(next)) {
+      setPaymentMethods(
+        (next as any[]).map((entry) => ({
+          method: typeof entry?.method === "string" ? entry.method : "",
+          label: typeof entry?.label === "string" && entry.label ? entry.label : (entry?.method || ""),
+          accountName: typeof entry?.accountName === "string" ? entry.accountName : "",
+          accountNumber: typeof entry?.accountNumber === "string" ? entry.accountNumber : "",
+          qrUrl: typeof entry?.qrUrl === "string" ? entry.qrUrl : "",
+          isEnabled: entry?.isEnabled !== false
+        }))
+      );
+      hasMigratedPaymentMethodsRef.current = true;
+    }
+  }, [hotelConfig, currentUser, updateSettings]);
+
+  const persistPaymentMethods = async (next: PaymentMethodConfig[]) => {
+    setPaymentMethods(next);
+    try {
+      await updateSettings("hotelConfig", { paymentMethods: next });
+    } catch (error) {
+      console.error("Failed to save payment methods:", error);
+      notify.error("Failed to save payment methods", error instanceof Error ? error.message : "Unknown error");
+    }
+  };
+
+  const addPaymentMethod = async (config: PaymentMethodConfig) => {
+    const normalized: PaymentMethodConfig = {
+      method: config.method.trim(),
+      label: config.label.trim(),
+      accountName: config.accountName.trim(),
+      accountNumber: config.accountNumber.trim(),
+      qrUrl: config.qrUrl,
+      isEnabled: config.isEnabled
+    };
+    if (!normalized.method) {
+      notify.error("Cannot add payment method", "Method key is required.");
+      return;
+    }
+    if (paymentMethods.some((p) => p.method === normalized.method)) {
+      notify.error("Method key already exists", `A payment method with key "${normalized.method}" is already configured.`);
+      return;
+    }
+    await persistPaymentMethods([...paymentMethods, normalized]);
+  };
+
+  const updatePaymentMethod = async (method: string, updates: Partial<PaymentMethodConfig>) => {
+    const next = paymentMethods.map((p) => (p.method === method ? { ...p, ...updates, method: p.method } : p));
+    await persistPaymentMethods(next);
+  };
+
+  const reorderPaymentMethods = async (next: PaymentMethodConfig[]) => {
+    await persistPaymentMethods(next);
+  };
+
+  // Count bookings that reference a given payment method key so
+  // the admin UI can block deletion with a clear message. One-shot
+  // `getDocs` — not subscribed, since the count is only read when
+  // the admin clicks Delete.
+  const countBookingsUsingPaymentMethod = async (method: string): Promise<number> => {
+    try {
+      const match = query(collection(db, "bookings"), where("paymentMethod", "==", method));
+      const snap = await getDocs(match);
+      return snap.size;
+    } catch (error) {
+      console.error("Failed to count bookings for payment method:", error);
+      return 0;
+    }
+  };
+
+  // Best-effort Storage cleanup of the QR for a given method. The
+  // listing catches every file under
+  // `assets/payment-methods/{method}/`. Failures are non-fatal —
+  // the file just becomes orphaned.
+  const deletePaymentMethodQrStorage = async (method: string) => {
+    try {
+      const folderRef = storageRef(storage, `assets/payment-methods/${method}`);
+      const listed = await listAll(folderRef);
+      await Promise.all(listed.items.map((item) => deleteObject(item).catch(() => undefined)));
+    } catch (storageErr) {
+      console.warn(`Storage cleanup for payment method ${method} QR skipped:`, storageErr);
+    }
+  };
+
+  const deletePaymentMethod = async (method: string) => {
+    const bookingCount = await countBookingsUsingPaymentMethod(method);
+    if (bookingCount > 0) {
+      notify.error(
+        "Cannot delete payment method",
+        `${bookingCount} ${bookingCount === 1 ? "booking references" : "bookings reference"} "${method}". Reassign or close those bookings first.`
+      );
+      return;
+    }
+    await deletePaymentMethodQrStorage(method);
+    await persistPaymentMethods(paymentMethods.filter((p) => p.method !== method));
+  };
+
+  // Per `plan/features/SETTINGS.md §Payment Methods` — upload (or
+  // replace) a QR code image for a single payment method. Compresses
+  // client-side via `compressImageFile` (PNG, max 800x800, quality
+  // 0.9 — QR codes are sharp monochrome and JPEG artifacts destroy
+  // scannability, so the default JPEG path is explicitly overridden).
+  // The download URL is written into
+  // `settings/hotelConfig.paymentMethods[i].qrUrl` via merged
+  // `setDoc`. The previous QR is best-effort deleted from Storage.
+  const uploadPaymentMethodQr = async (
+    method: string,
+    file: File
+  ): Promise<{ success: boolean; error?: string; url?: string }> => {
+    const target = paymentMethods.find((p) => p.method === method);
+    if (!target) {
+      const err = `Unknown payment method: ${method}`;
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    if (!file.type.startsWith("image/")) {
+      const err = "Please choose an image file.";
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    if (file.size > MAX_PAYMENT_METHOD_QR_BYTES) {
+      const err = `Image must be smaller than ${Math.round(MAX_PAYMENT_METHOD_QR_BYTES / 1024 / 1024)} MB.`;
+      notify.error("File too large", err);
+      return { success: false, error: err };
+    }
+    const previousUrl = target.qrUrl;
+    try {
+      const compressed = await compressImageFile(file, {
+        maxWidth: 800,
+        maxHeight: 800,
+        quality: 0.9,
+        mimeType: "image/png"
+      });
+      const safeName = compressed.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `assets/payment-methods/${method}/${Date.now()}-${safeName}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, compressed.file);
+      const url = await getDownloadURL(fileRef);
+      await updatePaymentMethod(method, { qrUrl: url });
+      if (previousUrl) {
+        try {
+          await deleteObject(storageRef(storage, previousUrl));
+        } catch (storageErr) {
+          console.warn(`Storage delete for previous QR ${previousUrl} skipped:`, storageErr);
+        }
+      }
+      notify.success("QR uploaded", `${target.label} QR code updated.`);
+      return { success: true, url };
+    } catch (error) {
+      console.error("Error uploading payment method QR:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to upload QR", message);
+      return { success: false, error: message };
+    }
+  };
+
+  // Reset the QR for a given method — clear the URL in Firestore and
+  // best-effort delete the previous Storage object. Mirrors
+  // `resetBrandingAsset` semantics. The guest booking page falls
+  // back to the per-method `accountName` / `accountNumber` text
+  // (and the global `config.legalName` / `config.frontDeskPhone`
+  // fallbacks) when the QR is empty.
+  const resetPaymentMethodQr = async (method: string): Promise<{ success: boolean; error?: string }> => {
+    const target = paymentMethods.find((p) => p.method === method);
+    if (!target) {
+      const err = `Unknown payment method: ${method}`;
+      notify.error("Reset failed", err);
+      return { success: false, error: err };
+    }
+    const previousUrl = target.qrUrl;
+    try {
+      await updatePaymentMethod(method, { qrUrl: "" });
+      if (previousUrl) {
+        try {
+          await deleteObject(storageRef(storage, previousUrl));
+        } catch (storageErr) {
+          console.warn(`Storage delete for QR ${previousUrl} skipped:`, storageErr);
+        }
+      }
+      notify.success("QR cleared", `${target.label} QR code removed.`);
+      return { success: true };
+    } catch (error) {
+      console.error("Error resetting payment method QR:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      notify.error("Failed to clear QR", message);
+      return { success: false, error: message };
+    }
+  };
 
   // Room Types State — sourced from settings/hotelConfig.roomTypes
   // (per W3.3). The hotelConfig onSnapshot writes to the local
@@ -2750,6 +3024,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         reorderRoomTypePhotos,
         uploadBrandingAsset,
         resetBrandingAsset,
+        paymentMethods,
+        addPaymentMethod,
+        updatePaymentMethod,
+        reorderPaymentMethods,
+        deletePaymentMethod,
+        uploadPaymentMethodQr,
+        resetPaymentMethodQr,
         staff,
         createStaff,
         disableStaff
