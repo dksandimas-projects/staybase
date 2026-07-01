@@ -324,8 +324,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 2. Parse Path Segments
   const parsedUrl = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
-  const pathSegments = parsedUrl.pathname
-    .replace(/^\/api\//, "")
+  const rewrittenRoute = (req.query as any)?.route ?? parsedUrl.searchParams.get("route");
+  const routePath = Array.isArray(rewrittenRoute)
+    ? rewrittenRoute.join("/")
+    : typeof rewrittenRoute === "string"
+      ? rewrittenRoute
+      : parsedUrl.pathname.replace(/^\/api\//, "");
+  const pathSegments = routePath
     .split("/")
     .filter(Boolean);
 

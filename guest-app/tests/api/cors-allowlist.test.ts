@@ -72,9 +72,9 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
   });
 
   it("does not rewrite /api routes through the SPA fallback", () => {
-    expect(vercelConfig.rewrites || []).not.toContainEqual({
+    expect(vercelConfig.rewrites || []).toContainEqual({
       source: "/api/:path*",
-      destination: "/api/:path*"
+      destination: "/api/%5B...route%5D?route=:path*"
     });
     expect(vercelConfig.rewrites || []).not.toContainEqual({
       source: "/(.*)",
@@ -89,7 +89,10 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
   it("answers admin create-staff preflight with the admin origin allow header", async () => {
     const req = {
       method: "OPTIONS",
-      url: "/api/admin/create-staff",
+      url: "/api/%5B...route%5D?route=admin/create-staff",
+      query: {
+        route: "admin/create-staff"
+      },
       headers: {
         host: "www.sparkinnbohol.com",
         origin: "https://admin.sparkinnbohol.com",
