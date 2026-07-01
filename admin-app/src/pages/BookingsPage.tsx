@@ -437,7 +437,7 @@ export function BookingsPage() {
   const handleRejectDiscount = async (reason: string) => {
     if (!selectedBooking) return;
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await auth.currentUser?.getIdToken(true);
       const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
         ? "http://localhost:3000"
         : import.meta.env.VITE_GUEST_APP_URL || "";
