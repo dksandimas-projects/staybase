@@ -101,7 +101,7 @@ export interface HeroImageProps {
   priority?: boolean;
 }
 
-function injectPreload(src: string, resolvedSrcSet?: string): HTMLLinkElement | null {
+export function injectPreload(src: string, resolvedSrcSet?: string): HTMLLinkElement | null {
   if (typeof document === "undefined") return null;
   const link = document.createElement("link");
   link.rel = "preload";
@@ -121,7 +121,7 @@ function injectPreload(src: string, resolvedSrcSet?: string): HTMLLinkElement | 
   return link;
 }
 
-function removePreload() {
+export function removePreload() {
   if (typeof document === "undefined") return;
   const existing = document.querySelectorAll<HTMLLinkElement>(
     `link[data-hero-image-preload="true"]`

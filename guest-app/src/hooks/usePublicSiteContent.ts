@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import config from "@config";
+import { swapHeroPreload } from "../utils/heroPrefetch";
 import {
   PUBLIC_SITE_CONTENT_CACHE_KEY,
   PUBLIC_SITE_CONTENT_CACHE_TTL_MS,
@@ -452,6 +453,23 @@ export function usePublicSiteContent(): PublicSiteContent {
       };
 
       setContent(next);
+
+      // Now that we know the real hero URL for the current page, tell
+      // the prefetch module to swap the static-fallback preload tag
+      // for the correct one (no-op if the URL hasn't changed).
+      if (typeof window !== "undefined") {
+        const path = window.location.pathname;
+        if (path.startsWith("/about")) {
+          swapHeroPreload(next.about.heroPhotoUrl);
+        } else if (path.startsWith("/corporate")) {
+          swapHeroPreload(next.corporate.heroPhotoUrl);
+        } else if (path.startsWith("/rewards")) {
+          swapHeroPreload(next.rewards.heroPhotoUrl);
+        } else {
+          swapHeroPreload(next.homepage.heroPhotoUrl);
+        }
+      }
+
       // Write the resolved shape to localStorage so the next
       // mount is instant. We strip `loading` (transient) and
       // write the full resolved content (with fallback URLs
