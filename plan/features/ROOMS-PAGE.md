@@ -53,7 +53,7 @@ The `/rooms` page is the public room type catalog. It renders one card per room 
 - [ ] Missing type photo — show brand placeholder ("Photo coming soon") on the card
 - [ ] Homepage Search handoff — `HomePage.tsx searchAvailability` now navigates to `/book?checkIn=...&checkOut=...&guests=...` (not `/rooms?…`). Per-card Book on this page is the only `/book` entry from the rooms surface
 
-> **Photos are resolved per room TYPE, not per room** *(per `plan/features/SETTINGS.md §Room Type Photos`)*. The hero image is the first entry of the joined `roomType.imageUrls[]` from `useRoomTypes`. The "Missing room photo" branch fires when the type's `imageUrls[]` is empty AND the static `ROOM_TYPE_IMAGES` fallback (in `guest-app/src/data/homepage.ts`) has no entry for that type.
+> **Photos are resolved per room TYPE, not per room** *(per `plan/features/SETTINGS.md §Room Type Photos`)*. The hero image is the first entry of the joined `roomType.imageUrls[]` from `useRoomTypes`. There is no curated static fallback in the guest app — the "Missing room photo" branch fires when the type's `imageUrls[]` is empty and shows a "Photo coming soon" placeholder.
 >
 > **Pricing + max occupancy are resolved per room TYPE** *(per W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`)*. The card "Up to N guests" + "From ₱X" values come directly from the `roomType` entry. The detail modal's Capacity and Weekend fields are also type-driven.
 >

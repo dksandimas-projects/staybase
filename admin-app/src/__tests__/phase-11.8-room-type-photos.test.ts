@@ -163,9 +163,15 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
       expect(bookingPageSrc).toMatch(/getRoomTypeImages\(roomTypes,\s*selectedTypeEntry\.value\)/);
     });
 
-    it("CorporateStaysPage falls back to ROOM_TYPE_IMAGES when no live type is found", () => {
-      expect(corporateStaysPageSrc).toMatch(/ROOM_TYPE_IMAGES/);
-      expect(corporateStaysPageSrc).toMatch(/resolveTypeImages/);
+    it("CorporateStaysPage does NOT use a static ROOM_TYPE_IMAGES fallback", () => {
+      // Per the corporate-page no-static-fallback refactor: the page
+      // must resolve the hero image strictly from `type.imageUrls[0]`.
+      // When the type has no photo, the conditional render shows a
+      // 'Photo coming soon' placeholder — no curated fallback is
+      // loaded. Regression guard against re-introducing the
+      // `ROOM_TYPE_IMAGES` import or the `||` fallback expression.
+      expect(corporateStaysPageSrc).not.toMatch(/ROOM_TYPE_IMAGES/);
+      expect(corporateStaysPageSrc).not.toMatch(/resolveTypeImages/);
     });
 
     it("CorporateBookingPage uses type images in both the room list and the review aside", () => {
@@ -190,15 +196,18 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
       expect(dataRoomsSrc).not.toMatch(/imageUrls:/);
     });
 
-    it("data/homepage.ts ships a ROOM_TYPE_IMAGES map keyed by type value", () => {
-      expect(dataHomepageSrc).toMatch(/export const ROOM_TYPE_IMAGES/);
-      expect(dataHomepageSrc).toMatch(/Record<string,\s*string\[\]>/);
-      // The default Spark Inn types should be covered. The keys may be
-      // either quoted or unquoted depending on whether the value is a
-      // valid JS identifier, so we match either form.
-      for (const key of ["executive", "standard-double", "family", "standard-twin", "single"]) {
-        const rx = new RegExp(`(?:^|[{,\\s])(["']?)${key.replace(/-/g, "-")}\\1\\s*:`);
-        expect(rx.test(dataHomepageSrc), `expected ROOM_TYPE_IMAGES to key ${key}`).toBe(true);
+    it("data/homepage.ts does NOT ship a ROOM_TYPE_IMAGES map", () => {
+      // Per the corporate-page no-static-fallback refactor: the
+      // guest app no longer ships curated per-type fallback images.
+      // The page hero image is resolved strictly from the live
+      // `type.imageUrls[0]` returned by `useRoomTypes()`. Regression
+      // guard against re-introducing either the map export or any
+      // of the underlying `roomImageOne` / `roomImageTwo` /
+      // `roomImageThree` / `twinImage` / `singleImage` URL constants.
+      expect(dataHomepageSrc).not.toMatch(/ROOM_TYPE_IMAGES/);
+      expect(dataHomepageSrc).not.toMatch(/Record<string,\s*string\[\]>/);
+      for (const name of ["roomImageOne", "roomImageTwo", "roomImageThree", "twinImage", "singleImage"]) {
+        expect(dataHomepageSrc, `expected data/homepage.ts to no longer declare ${name}`).not.toMatch(new RegExp(`\\b${name}\\b`));
       }
     });
   });

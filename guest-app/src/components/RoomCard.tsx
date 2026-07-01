@@ -13,9 +13,8 @@ interface RoomCardProps {
   // Per `plan/features/SETTINGS.md §Room Types` and `plan/features/ROOMS-PAGE.md`:
   // the gallery, description, bed, amenities, and rate matrix are
   // owned by the room type, not the individual room. The caller
-  // resolves all of these (live from `useRoomTypes()` or the static
-  // `ROOM_TYPE_IMAGES` / `ROOM_TYPE_RATES` fallbacks) and passes the
-  // data here.
+  // resolves all of these from `useRoomTypes()` and passes the data
+  // here — there is no curated static fallback in the guest app.
   typeImageUrls?: string[];
   // Per W3.6 + W3.7: pricing, max occupancy, bed, description, and
   // amenities are sourced from the type.
