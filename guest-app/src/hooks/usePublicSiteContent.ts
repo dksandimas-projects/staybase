@@ -10,6 +10,7 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   readCacheWithTtl,
   writeCache,
+  subscribeToPublicSiteContentBust,
   type ContentItem
 } from "@spark-inn/shared";
 import {
@@ -60,7 +61,9 @@ export interface PublicHomepageContent extends PublicHeroContent {
 }
 
 export interface PublicAboutContent {
+  heroEyebrow: string;
   heroHeading: string;
+  heroSubtext: string;
   heroPhotoUrl: string;
   missionStatement: string;
   visionStatement: string;
@@ -194,7 +197,14 @@ function buildFallback(): PublicSiteContent {
       sparkRewards: FALLBACK_SPARK_REWARDS
     },
     about: {
+      // The about page reads `heroEyebrow` + `heroSubtext` only when
+      // the admin has set them in Settings → Branding; otherwise the
+      // page renders the deploy-time hardcoded copy it has shipped
+      // with. Empty string here means "no admin override" — the page
+      // falls back to its own hardcoded default at render time.
+      heroEyebrow: "",
       heroHeading: aboutHeroHeading,
+      heroSubtext: "",
       heroPhotoUrl: aboutHeroImage,
       missionStatement: FALLBACK_ABOUT_MISSION,
       visionStatement: FALLBACK_ABOUT_VISION(config.brandName),
@@ -266,7 +276,9 @@ function buildEmptyState(): PublicSiteContent {
       }
     },
     about: {
+      heroEyebrow: "",
       heroHeading: "",
+      heroSubtext: "",
       heroPhotoUrl: "",
       missionStatement: "",
       visionStatement: "",
@@ -347,8 +359,31 @@ export function usePublicSiteContent(): PublicSiteContent {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Cross-tab cache invalidation. The admin app writes a bust
+    // timestamp on every successful settings save (see
+    // `bustPublicSiteContentCache`); the `storage` event fires in
+    // every other tab. Drop the in-memory promise + the cached
+    // localStorage entry and refetch so the guest page reflects
+    // the admin's edit immediately.
+    function refetch() {
+      cachedPromise = null;
+      loadFromFirestore().then(({ websiteContent, hotelConfig }) => {
+        if (cancelled) return;
+        applyFirestoreData(websiteContent, hotelConfig);
+      });
+    }
+    const unsubscribeBust = subscribeToPublicSiteContentBust(refetch);
+
     loadFromFirestore().then(({ websiteContent, hotelConfig }) => {
       if (cancelled) return;
+      applyFirestoreData(websiteContent, hotelConfig);
+    });
+
+    function applyFirestoreData(
+      websiteContent: Record<string, unknown> | null,
+      hotelConfig: Record<string, unknown> | null
+    ) {
       const fb = buildFallback();
 
       const homepageRaw =
@@ -401,7 +436,11 @@ export function usePublicSiteContent(): PublicSiteContent {
       const next: PublicSiteContent = {
         loading: false,
         homepage: {
-          heroEyebrow: "", // homepage eyebrow remains hardcoded (uses config.tagline)
+          // Homepage hero eyebrow falls back to `config.tagline` when
+          // the admin hasn't overridden it. The Settings → Branding
+          // form exposes this field so the hotel owner can swap the
+          // tagline without a redeploy.
+          heroEyebrow: pickString(homepageRaw, "heroEyebrow", config.tagline),
           heroHeading: pickString(homepageRaw, "heroHeading", fb.homepage.heroHeading),
           heroSubtext: pickString(homepageRaw, "heroSubtext", fb.homepage.heroSubtext),
           heroPhotoUrl: pickString(homepageRaw, "heroPhotoUrl", fb.homepage.heroPhotoUrl),
@@ -411,7 +450,15 @@ export function usePublicSiteContent(): PublicSiteContent {
           sparkRewards: homepageRaw ? buildSparkRewards(homepageRaw.sparkRewards) : fb.homepage.sparkRewards
         },
         about: {
+          // About hero eyebrow + subtext fall back to "" when the
+          // admin hasn't overridden them — the page renders its own
+          // deploy-time hardcoded copy in that case. Reading from
+          // the public site content hook (rather than a separate
+          // `usePublicSiteContent` query) keeps the single-fetch
+          // pattern the rest of the page uses.
+          heroEyebrow: pickString(aboutRaw, "heroEyebrow", fb.about.heroEyebrow),
           heroHeading: pickString(aboutRaw, "heroHeading", fb.about.heroHeading),
+          heroSubtext: pickString(aboutRaw, "heroSubtext", fb.about.heroSubtext),
           heroPhotoUrl: pickString(aboutRaw, "heroPhotoUrl", fb.about.heroPhotoUrl),
           missionStatement:
             (typeof hc.missionStatement === "string" && hc.missionStatement.length > 0
@@ -477,9 +524,11 @@ export function usePublicSiteContent(): PublicSiteContent {
       const { loading: _loading, ...toCache } = next;
       void _loading;
       writeCache(PUBLIC_SITE_CONTENT_CACHE_KEY, toCache);
-    });
+    }
+
     return () => {
       cancelled = true;
+      unsubscribeBust();
     };
   }, []);
 

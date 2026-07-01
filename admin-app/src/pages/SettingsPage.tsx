@@ -927,9 +927,12 @@ export function SettingsPage() {
   // The `?? ""` guards are belt-and-suspenders: AdminContext already
   // normalizes partial Firestore documents to the full shape, but
   // any regression there should not crash this page.
+  const [homepageHeroEyebrow, setHomepageHeroEyebrow] = useState(websiteContent.homepage?.heroEyebrow ?? "");
   const [homepageHeroHeading, setHomepageHeroHeading] = useState(websiteContent.homepage?.heroHeading ?? "");
   const [homepageHeroSubtext, setHomepageHeroSubtext] = useState(websiteContent.homepage?.heroSubtext ?? "");
+  const [aboutHeroEyebrow, setAboutHeroEyebrow] = useState(websiteContent.about?.heroEyebrow ?? "");
   const [aboutHeroHeading, setAboutHeroHeading] = useState(websiteContent.about?.heroHeading ?? "");
+  const [aboutHeroSubtext, setAboutHeroSubtext] = useState(websiteContent.about?.heroSubtext ?? "");
   const [corporateHeroEyebrow, setCorporateHeroEyebrow] = useState(websiteContent.corporate?.heroEyebrow ?? "");
   const [corporateHeroHeading, setCorporateHeroHeading] = useState(websiteContent.corporate?.heroHeading ?? "");
   const [corporateHeroSubtext, setCorporateHeroSubtext] = useState(websiteContent.corporate?.heroSubtext ?? "");
@@ -1096,9 +1099,12 @@ export function SettingsPage() {
     setMemberDiscountPct(String(rewardsConfig.memberDiscountPct ?? 10));
     setRewardsName(rewardsConfig.rewardsName || "Spark Rewards");
     setRewardsTagline(rewardsConfig.rewardsTagline || "");
+    setHomepageHeroEyebrow(websiteContent.homepage?.heroEyebrow || "");
     setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
     setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
+    setAboutHeroEyebrow(websiteContent.about?.heroEyebrow || "");
     setAboutHeroHeading(websiteContent.about?.heroHeading || "");
+    setAboutHeroSubtext(websiteContent.about?.heroSubtext || "");
     // Per `feat/corporate-content-editable` — the four corporate
     // hero fields are pre-populated from the shared
     // `DEFAULT_CORPORATE_PAGE_CONTENT` constant when the Firestore
@@ -1208,12 +1214,15 @@ export function SettingsPage() {
     await updateSettings("websiteContent", {
       homepage: {
         ...(websiteContent.homepage || {}),
+        heroEyebrow: homepageHeroEyebrow,
         heroHeading: homepageHeroHeading,
         heroSubtext: homepageHeroSubtext
       },
       about: {
         ...(websiteContent.about || {}),
-        heroHeading: aboutHeroHeading
+        heroEyebrow: aboutHeroEyebrow,
+        heroHeading: aboutHeroHeading,
+        heroSubtext: aboutHeroSubtext
       },
       corporate: {
         ...(websiteContent.corporate || {}),
@@ -1712,8 +1721,18 @@ export function SettingsPage() {
               <div className="space-y-5">
                 <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Hero Copy</h4>
 
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-3">
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Homepage eyebrow
+                    <input
+                      type="text"
+                      value={homepageHeroEyebrow}
+                      onChange={(e) => setHomepageHeroEyebrow(e.target.value)}
+                      placeholder={config.tagline}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
                     Homepage heading
                     <input
                       type="text"
@@ -1723,28 +1742,56 @@ export function SettingsPage() {
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
                     />
                   </label>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Homepage subtext
-                    <input
-                      type="text"
-                      required
-                      value={homepageHeroSubtext}
-                      onChange={(e) => setHomepageHeroSubtext(e.target.value)}
-                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                    />
-                  </label>
                 </div>
 
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  About hero heading
+                  Homepage subtext
                   <input
                     type="text"
                     required
-                    value={aboutHeroHeading}
-                    onChange={(e) => setAboutHeroHeading(e.target.value)}
+                    value={homepageHeroSubtext}
+                    onChange={(e) => setHomepageHeroSubtext(e.target.value)}
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
                   />
                 </label>
+
+                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    About hero
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow
+                      <input
+                        type="text"
+                        value={aboutHeroEyebrow}
+                        onChange={(e) => setAboutHeroEyebrow(e.target.value)}
+                        placeholder="Our Story"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Heading
+                      <input
+                        type="text"
+                        required
+                        value={aboutHeroHeading}
+                        onChange={(e) => setAboutHeroHeading(e.target.value)}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      rows={2}
+                      value={aboutHeroSubtext}
+                      onChange={(e) => setAboutHeroSubtext(e.target.value)}
+                      placeholder={`Discover the vision and heart behind ${config.brandName}'s intentional hospitality in Bohol.`}
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
 
                 <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
                   <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">

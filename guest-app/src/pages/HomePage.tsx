@@ -168,7 +168,7 @@ export function HomePage() {
               reads on any background. lg on the headline, md on
               the supporting copy. */}
           <p className="font-heading text-lg italic text-white/90 drop-shadow-md sm:text-2xl">
-            {config.tagline}
+            {homepage.heroEyebrow || config.tagline}
           </p>
           <h1 className="mt-6 font-heading text-5xl leading-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)] sm:text-7xl">
             {homepage.heroHeading}

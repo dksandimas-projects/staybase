@@ -13,6 +13,7 @@ export * from "./utils/dates";
 export * from "./utils/images";
 export * from "./utils/points";
 export * from "./utils/pricing";
+export * from "./utils/publicSiteCache";
 export * from "./utils/references";
 export * from "./utils/storageJanitor";
 export * from "./utils/vouchers";

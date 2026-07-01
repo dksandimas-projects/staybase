@@ -271,3 +271,13 @@ export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v2";
 export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// Cross-tab cache-invalidation signal for the public site content
+// hook. The admin app writes the current timestamp to this key on
+// every successful `settings/websiteContent` / `settings/hotelConfig`
+// save; the guest hook subscribes to the `storage` event for this
+// key and refetches + drops its in-memory + localStorage cache when
+// the timestamp advances. Keeps the 5-minute TTL for returning
+// visitors but makes admin edits reflect on a parallel guest tab
+// in real time.
+export const PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
+

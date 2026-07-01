@@ -57,7 +57,9 @@ export const HomepageContentSchema = PublicHeroSchema.extend({
 });
 
 export const AboutContentSchema = z.object({
+  heroEyebrow: z.string().default(""),
   heroHeading: z.string().default(""),
+  heroSubtext: z.string().default(""),
   heroPhotoUrl: z.string().default(""),
   missionStatement: z.string().default(""),
   visionStatement: z.string().default(""),
