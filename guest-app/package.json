@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vercel dev --listen 3000",
     "dev:vite": "vite --host 0.0.0.0 --port 3000",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && esbuild \"api/[...route].ts\" --bundle --platform=node --target=node18 --outfile=\"api/[...route].js\" && ( [ \"$VERCEL\" != \"1\" ] || rm \"api/[...route].ts\" )",
     "preview": "vercel preview",
     "typecheck": "tsc -b",
     "test:api": "vitest run tests/api"
