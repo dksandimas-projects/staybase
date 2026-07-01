@@ -152,11 +152,12 @@ The single edit surface for everything the guest sees at the top of every public
 - [ ] Download URL written to `settings/websiteContent` via merged `setDoc`.
 
 **Hero Copy** (text inputs grouped by page, one "Save Hero Copy" button at the bottom):
-- [ ] Homepage — heading + subtext
-- [ ] About — heading
+- [ ] Homepage — eyebrow + heading + subtext (per Phase 11.8 PR 1, the eyebrow overrides `config.tagline`; falls back to `config.tagline` on the public site when empty)
+- [ ] About — eyebrow + heading + subtext (per Phase 11.8 PR 1, the eyebrow overrides the page's hard-coded "Our Story" pill and the subtext overrides the page's deploy-time "Discover the vision and heart behind {config.brandName}…" line)
 - [ ] Corporate — eyebrow + heading + subtext
 - [ ] Rewards — eyebrow pill (e.g. "Loyalty Program") + heading + subtext
 - [ ] Helper text under the rewards eyebrow: "Renders as '{config.rewardsName} {rewards.heroEyebrow}' in the pill."
+- [ ] Helper text under the homepage eyebrow: "Optional override of the deploy-time tagline. Leave blank to use the white-label config."
 
 **Logo Overrides** (upload + preview + reset-to-default per variant):
 - [ ] **Navbar logo (solid background)** — used in the sticky/scrolled state and on every non-hero page. Colored version on a light background.
@@ -170,8 +171,9 @@ The single edit surface for everything the guest sees at the top of every public
 - [ ] Photo upload fails — show error inline under the uploader, leave existing override intact
 - [ ] Reset button only visible when an override is set
 - [ ] Reset writes empty string to Firestore + best-effort deletes the Storage object
-- [ ] Hero eyebrow on homepage is not editable — it remains the deploy-time `config.tagline` (preserves W3.10 design intent)
+- [ ] Hero eyebrow on homepage is editable as of Phase 11.8 PR 1 — it overrides the deploy-time `config.tagline` (W3.10 design intent is preserved via the safe-default `pickString` chain in `usePublicSiteContent.ts`)
 - [ ] All uploads require Admin role (Storage rule `match /assets/branding/{fileName}` is `isStaff`; the page itself is admin-only by the sidebar guard)
+- [ ] Edits reflect on a parallel guest tab in real time via the cross-tab bust mechanism (`bustPublicSiteContentCache` writes `localStorage["publicSiteContent:bust"]`; the public hook subscribes to the `storage` event and refetches). Same-browser demos see updates within ~200 ms; cross-device updates still rely on the 5-minute TTL.
 
 Source: `settings/websiteContent` — `setDoc` on save (copy fields) or per-upload merged `setDoc` (photos + logos).
 

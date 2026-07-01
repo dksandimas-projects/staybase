@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 1, 2026 (Phase 11.8 added — Public Content Editability Audit; spec landed in `plan/project/AUDIT-PUBLIC-CONTENT-2026-07-01.md`; on `dev` at v0.90.0)
+> Last updated: July 1, 2026 (Phase 11.8 PR 1 shipped — `feat/content-tier-a-hero-eyebrows` adds homepage heroEyebrow + about heroEyebrow/heroSubtext to Settings → Branding, wires payment-method card labels on the confirm page, and ships the cross-tab cache-bust mechanism; +25 tests; on `dev` branch, pending merge)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -895,19 +895,19 @@ Branch: `feature/phase-11.6-batch-20`.
 - 🔴 **Q3.** Does the owner want to customize email subject + body for the 7 transactional triggers? If yes, scope a separate "Email Templates" tab in Phase 12 (out of scope for this phase).
 - 🔴 **Q4.** Does the owner want the Spark Rewards "Member Privileges" copy to be different from the current 4 hardcoded cards? If yes → Tier A. If no → keep hardcoded.
 
-### PR 1 — `feat/content-tier-a-branding` (S effort, ~1 day)
-Extends **Settings → Branding** with ~12 new fields. All read from `settings/websiteContent.*` via the existing `usePublicSiteContent` hook — no new Firestore collections, no new hooks.
+### PR 1 — `feat/content-tier-a-hero-eyebrows` *(shipped 2026-07-01 — branch: `feat/content-tier-a-hero-eyebrows`)*
+S effort, ~1 day. Adds the Tier 1 hero eyebrow / subtext editability to the public site + the cross-tab cache-invalidation mechanism so admin edits reflect on a parallel guest tab in real time. Scope was tightened from the original ~12 fields in `AUDIT-PUBLIC-CONTENT-2026-07-01.md` to the 3 fields that actually needed code changes (the rest were already wired on the read side per Batch 11).
 
-- [ ] `homepage.heroEyebrow` — optional override of `config.tagline` for the home hero
-- [ ] `about.heroEyebrow` ("Our Story") + `about.heroSubtext`
-- [ ] `about.missionFooterLabel` + `visionFooterLabel` ("Intentional Care & Consistency" / "A Premium Sanctuary in Bohol")
-- [ ] `about.heritageEyebrow` + `heritageHeading` ("Heritage & Growth" / "The Spark of Hospitality")
-- [ ] `corporate.heroCtaBook` + `corporate.heroCtaInquiry` ("Book with Corporate Rate" / "Submit an Inquiry")
-- [ ] `rewards.heroCtaJoin` + `rewards.heroCtaSignIn` + `rewards.heroCtaEnroll` + `rewards.heroCtaMember`
+- [x] `homepage.heroEyebrow` — replaces the hard-coded `""` in the hook with a `pickString(homepageRaw, "heroEyebrow", config.tagline)` chain. `HomePage` renders `{homepage.heroEyebrow || config.tagline}` so the deploy-time tagline is the safe default. `Settings → Branding` exposes the new input.
+- [x] `about.heroEyebrow` + `about.heroSubtext` — added to `AboutContentSchema` + `PublicAboutContent` + the hook's `pickString` chain + `AboutPage` (with "Our Story" + "Discover the vision and heart behind {brandName}..." as the deploy-time fallbacks). `Settings → Branding` exposes both inputs in a new "About hero" card.
+- [x] **Cross-tab cache bust** — new `shared/utils/publicSiteCache.ts` exports `bustPublicSiteContentCache` + `subscribeToPublicSiteContentBust`. `AdminContext.updateSettings` calls the bust after every `settings/websiteContent` / `settings/hotelConfig` save; the guest hook subscribes to the `storage` event and refetches. The 5-minute TTL is preserved for cold reloads; same-browser demos see updates in < 1 s.
+- [x] **XS hotfix folded in** — `BookingConfirmPage` no longer hard-codes "Digital Wallet (GCash/Maya)" / "Bank Transfer (Direct Deposit)" / "Pay at Hotel". It now fetches `settings/hotelConfig.paymentMethods[].label` (the same dynamic list the booking page already uses) and falls back to a small `gcash` / `bank` / `pay-at-hotel` legacy map only for unconfigured methods. Closes the "PayPal" hardcode gap on the confirm page.
 
-Files: `admin-app/src/pages/SettingsPage.tsx`, `admin-app/src/context/AdminContext.tsx` (`mergeWebsiteContent` + `setWebsiteContent` seed), `guest-app/src/hooks/usePublicSiteContent.ts` (interface + `buildFallback` + `pickString`), 4 page files.
+Files: `shared/utils/publicSiteCache.ts` (new), `shared/constants/index.ts` (`PUBLIC_SITE_CONTENT_CACHE_BUST_KEY`), `shared/index.ts` (re-export), `shared/schemas/websiteContent.ts` (about fields), `guest-app/src/hooks/usePublicSiteContent.ts` (chain + subscription + interface), `guest-app/src/pages/HomePage.tsx`, `guest-app/src/pages/AboutPage.tsx`, `guest-app/src/pages/BookingConfirmPage.tsx`, `admin-app/src/pages/SettingsPage.tsx` (3 new inputs + handleSaveBranding), `admin-app/src/context/AdminContext.tsx` (bust on save).
 
-Test: extend `admin-app/src/__tests__/branding-content-fields.test.ts` + `guest-app/src/__tests__/usePublicSiteContent.test.ts`.
+Tests: `shared/__tests__/publicSiteCache.test.ts` (new — 11 tests), `admin-app/src/__tests__/phase-11.8-tier-1-hero-eyebrows.test.ts` (new — 14 tests). 911/911 total green.
+
+Docs: `plan/docs/TYPES.md` (about + homepage comments), `plan/docs/BACKEND.md` (per-page hero fallback table + cache-bust paragraph), `plan/features/SETTINGS.md` (Branding → Hero Copy section).
 
 ### PR 2 — `feat/content-tier-a-website` (M effort, ~2 days)
 Extends **Settings → Website Content** with new sub-objects for the rest of the public-facing pages. ~80 new fields, but most are simple `string` mirrors of existing list-editor patterns.
@@ -1000,7 +1000,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11 — Staging & Launch | 16 | 2 | 14 (operational) |
 | 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
-| 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 | ~100 fields + 4 Qs to close with owner |
+| 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** | ~100 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **359** | **325** | **~134** |
