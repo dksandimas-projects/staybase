@@ -486,7 +486,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
-    let authResult = { success: false, uid: "", email: "" };
+    let authResult: { success: boolean; uid?: string; email?: string } = { success: false };
     if (req.headers.authorization) {
       const staffAuth = await authenticateStaff(req);
       if (staffAuth.success) {
