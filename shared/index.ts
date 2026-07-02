@@ -16,6 +16,7 @@ export * from "./utils/pricing";
 export * from "./utils/publicSiteCache";
 export * from "./utils/references";
 export * from "./utils/storageJanitor";
+export * from "./utils/storePaymentMethods";
 export * from "./utils/vouchers";
 export * from "./utils/corporate-codes";
 export * from "./utils/failureBackoff";

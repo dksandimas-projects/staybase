@@ -538,7 +538,14 @@ StoreOrderItem {
 }
 
 StoreOrderStatus = "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled"
-StorePaymentMethod = "cod" | "add-to-bill" | "gcash"
+// `paymentMethod` is the open string key the admin configured
+// for the store. The hardcoded 3-key union below is the legacy
+// default; when `StoreConfig.useBookingPaymentMethods === true`
+// the key may be any enabled booking method (GCash, Maya,
+// PayPal, etc.). The server-side allowlist is computed by
+// `getEffectiveStorePaymentMethods(...)` in
+// `shared/utils/storePaymentMethods.ts` — no hardcoded list.
+StorePaymentMethod = "cod" | "add-to-bill" | "gcash" | string
 
 StoreOrder {
   id: string
@@ -550,6 +557,10 @@ StoreOrder {
   items: StoreOrderItem[]
   totalAmount: number
   paymentMethod: StorePaymentMethod
+  // Payment proof is required for any non-`cod`/non-`add-to-bill`
+  // method (any "online" method). Empty string for `cod` and
+  // `add-to-bill`. The server enforces this rule — see
+  // `guest-app/server/handlers/store.ts → handleCreateStoreOrder`.
   paymentProofUrl: string
   status: StoreOrderStatus
   stockRestoredAt: Date | null
@@ -563,7 +574,7 @@ StoreOrder {
 }
 
 StorePaymentMethodConfig {
-  method: StorePaymentMethod
+  method: string
   label: string
   qrUrl: string
   accountInfo: string
@@ -574,6 +585,15 @@ StoreConfig {
   isEnabled: boolean
   lowStockThreshold: number
   paymentMethods: StorePaymentMethodConfig[]
+  // Per #110 (store toggle). When `true`, the store inherits
+  // the enabled methods from `settings/hotelConfig.paymentMethods[]`
+  // (filtered to `isEnabled: true`, excluding `pay-at-hotel`).
+  // The 2 store-specific methods (`cod` + `add-to-bill`) are
+  // always appended. The de-duped list is computed at read time
+  // by `getEffectiveStorePaymentMethods` in
+  // `shared/utils/storePaymentMethods.ts`. Default `false`
+  // preserves the legacy 3-method UX exactly.
+  useBookingPaymentMethods: boolean
 }
 ```
 
