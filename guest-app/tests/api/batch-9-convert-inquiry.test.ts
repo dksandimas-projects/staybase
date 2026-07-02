@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 // client wiring.
 
 const routeSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/[...route].ts"),
+  resolve(__dirname, "../../../guest-app/server/apiRouter.ts"),
   "utf8"
 );
 const handlerSrc = readFileSync(

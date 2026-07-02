@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import handler from "../../api/[...route]";
+import handler from "../../server/apiRouter";
 
 vi.mock("../../server/lib/firebase-admin", () => ({
   adminAuth: {
@@ -24,7 +24,7 @@ vi.mock("../../server/lib/firebase-admin", () => ({
 
 describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
   const src = readFileSync(
-    resolve(__dirname, "../../api/[...route].ts"),
+    resolve(__dirname, "../../server/apiRouter.ts"),
     "utf8"
   );
   const rootApiSrc = readFileSync(

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import handler from "../../api/[...route]";
+import handler from "../../server/apiRouter";
 
 // Global mock state
 let mockRooms: Record<string, any> = {};
