@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 1, 2026 (Phase 11.8 PR 3 shipped — `feat/content-tier-a-hotel` adds 6 hotel contact details (address, frontDeskPhone, supportEmail, dpoEmail, facebookUrl, instagramUrl) + the missing `visionStatement` field to Settings → Hotel Info, with the safe-default `pickString` chain + 3 consumer pages (Footer, Contact, Privacy) reading from the hook; +18 tests; on `dev` branch, pending merge)
+> Last updated: July 2, 2026 (Phase 11.8 fully shipped on `dev` — PR 1 + PR 2 (docs) + PR 3 `feat/content-tier-a-hotel` all merged; 1 docs PR (`7eafbea`) recording the missing Firestore composite index for `/api/rooms/availability`; 1 test fix (`38884ee`) repairing a stale regex path in `batch-9-convert-inquiry.test.ts` that was silently failing on every `npm test` since the api-router was relocated to `guest-app/server/`; 579/579 tests passing, typecheck clean, preflight clean)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---

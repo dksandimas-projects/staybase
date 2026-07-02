@@ -4,6 +4,7 @@
 > Read-only. No code changes shipped. Successor to the broader 2026-06-15 E2E audit
 > (`plan/project/AUDIT-E2E-2026-06-15.md`); this one drills deeper into the booking
 > creation path now that the 5 Top-5 launch-blockers from that audit are closed.
+> Last status sync: 2026-07-02 (4 stale "Open" status lines for BF-28 / BF-42 / BF-47 / BF-49 updated to reflect the actual Phase 11.6 Batch 1-5 fixes — the per-finding index row was already correct; the body text was stale)
 >
 > Workspace: staybase
 > Audited: 2026-06-26
@@ -653,7 +654,7 @@ hardcoded placeholder.
 ---
 
 ### BF-28 — Client `roomTotal` (correct) ≠ client `total` (wrong)
-**Status:** Open (covered by BF-08)
+**Status:** **Covered by BF-08** (Fixed in `31ca546` — `calculateBookingTotal` now accepts a pre-computed `roomTotal`; both `BookingPage.tsx` and `CorporateBookingPage.tsx` pass `roomTotal` explicitly)
 **File:** `guest-app/src/pages/BookingPage.tsx:235-276`
 
 The `roomTotal` computed locally on lines 235-251 is correct
@@ -841,7 +842,7 @@ If the booking creation succeeds, the transaction has incremented
 ---
 
 ### BF-42 — Manila-date logic duplicated
-**Status:** **Open (deferred — non-trivial refactor; see index)**
+**Status:** **Fixed in batch 5** (moved to `shared/utils/bookingDates.ts`; `bookings.ts:4` and `reference.ts:2` now `import { getManilaDateInfo } from "@spark-inn/shared"`; 4 new tests in `shared/__tests__/booking-dates.test.ts`)
 **File:** `guest-app/server/handlers/bookings.ts:53-65, 669`,
 `guest-app/server/handlers/reference.ts`
 
@@ -919,7 +920,7 @@ which works for both `""` and `null`, so no read-site changes were needed.
 ---
 
 ### BF-47 — Walkin capacity check dead post-migration
-**Status:** Open (covered by BF-02)
+**Status:** **Covered by BF-02** (Fixed in `8891dce` — walkin now looks up the room type by `roomData.type` from `hotelConfig.roomTypes[]`; capacity check uses the type entry's `maxCapacity`, not the dead room-doc field)
 **File:** `guest-app/server/handlers/bookings.ts:614`
 
 Same fix as BF-02.
@@ -935,7 +936,7 @@ on the server; the client just checks `!!memberProfile` for UX ✓.
 ---
 
 ### BF-49 — `emailNotificationsSent` not in TYPES schema
-**Status:** Open (same as BF-37)
+**Status:** **Covered by BF-37** (Fixed in `ffef46f` — `emailNotificationsSent.{staffNewBooking, staffNewPayment}` now declared on the `Booking` type in `plan/docs/TYPES.md` and the `shared/types/index.ts` re-export; 8 new tests in `guest-app/api/__tests__/batch-10-email-extensions.test.ts`)
 
 ---
 

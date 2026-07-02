@@ -188021,6 +188021,48 @@ async function runBackfill(options) {
   };
 }
 
+// ../shared/utils/storePaymentMethods.ts
+var STORE_SPECIFIC_METHODS = ["cod", "add-to-bill"];
+function getEffectiveStorePaymentMethods(storeConfig, bookingMethods) {
+  const storeMethods = Array.isArray(storeConfig?.paymentMethods) ? storeConfig.paymentMethods : [];
+  const useBooking = storeConfig?.useBookingPaymentMethods === true;
+  const safeBookingMethods = Array.isArray(bookingMethods) ? bookingMethods : [];
+  if (!useBooking) {
+    return storeMethods.filter((m2) => !!m2 && typeof m2.method === "string" && m2.isEnabled !== false).map((m2) => ({
+      method: m2.method,
+      label: m2.label || m2.method,
+      isEnabled: m2.isEnabled !== false,
+      source: "store",
+      qrUrl: m2.qrUrl,
+      accountInfo: m2.accountInfo
+    }));
+  }
+  const storeSpecificKeys = new Set(STORE_SPECIFIC_METHODS);
+  const storeSpecific = storeMethods.filter(
+    (m2) => !!m2 && typeof m2.method === "string" && storeSpecificKeys.has(m2.method) && m2.isEnabled !== false
+  ).map((m2) => ({
+    method: m2.method,
+    label: m2.label || m2.method,
+    isEnabled: true,
+    source: "store",
+    qrUrl: m2.qrUrl,
+    accountInfo: m2.accountInfo
+  }));
+  const seenMethods = new Set(storeSpecific.map((m2) => m2.method));
+  const inherited = safeBookingMethods.filter(
+    (m2) => m2 && typeof m2.method === "string" && m2.method !== "pay-at-hotel" && !seenMethods.has(m2.method) && m2.isEnabled !== false
+  ).map((m2) => ({
+    method: m2.method,
+    label: m2.label || m2.method,
+    isEnabled: true,
+    source: "booking",
+    qrUrl: m2.qrUrl,
+    accountName: m2.accountName,
+    accountNumber: m2.accountNumber
+  }));
+  return [...storeSpecific, ...inherited];
+}
+
 // ../shared/utils/vouchers.ts
 function validateVoucher(voucher, roomType, now = /* @__PURE__ */ new Date()) {
   if (!voucher.isActive) {
@@ -191142,7 +191184,7 @@ async function handleCreateStoreOrder(req, res) {
   if (guestName.length === 0 || guestName.length > MAX_GUEST_NAME_LENGTH) {
     return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
   }
-  if (!["cod", "add-to-bill", "gcash"].includes(body.paymentMethod)) {
+  if (typeof body.paymentMethod !== "string" || body.paymentMethod.length === 0) {
     return res.status(400).json({ success: false, error: "Invalid store payment method." });
   }
   const parsedItems = body.items.map((item) => ({
@@ -191152,8 +191194,9 @@ async function handleCreateStoreOrder(req, res) {
   if (parsedItems.some((item) => !item.itemId || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99)) {
     return res.status(400).json({ success: false, error: "Invalid store order item quantity." });
   }
-  if (body.paymentMethod === "gcash" && !body.paymentProofUrl) {
-    return res.status(400).json({ success: false, error: "GCash payment proof is required." });
+  const isOnlinePaymentMethod = body.paymentMethod !== "cod" && body.paymentMethod !== "add-to-bill";
+  if (isOnlinePaymentMethod && !body.paymentProofUrl) {
+    return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
   const normalizedItems = Array.from(
     parsedItems.reduce((itemsById, item) => {
@@ -191172,11 +191215,20 @@ async function handleCreateStoreOrder(req, res) {
       if (storeConfig.isEnabled === false) {
         throw new Error("STORE_DISABLED");
       }
-      if (Array.isArray(storeConfig.paymentMethods) && storeConfig.paymentMethods.length > 0) {
-        const paymentMethodConfig = storeConfig.paymentMethods.find((method) => method.method === body.paymentMethod);
-        if (paymentMethodConfig && paymentMethodConfig.isEnabled === false) {
-          throw new Error("PAYMENT_METHOD_DISABLED");
-        }
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      const hotelConfigData = hotelConfigDoc.exists ? hotelConfigDoc.data() : null;
+      const bookingMethods = Array.isArray(hotelConfigData?.paymentMethods) ? hotelConfigData.paymentMethods : [];
+      const effectiveMethods = getEffectiveStorePaymentMethods(
+        {
+          useBookingPaymentMethods: storeConfig.useBookingPaymentMethods === true,
+          paymentMethods: Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []
+        },
+        bookingMethods
+      );
+      const effectiveSet = new Set(effectiveMethods.map((m2) => m2.method));
+      if (!effectiveSet.has(body.paymentMethod)) {
+        throw new Error("PAYMENT_METHOD_DISABLED");
       }
       const itemRefs = normalizedItems.map((item) => adminDb.collection("storeItems").doc(item.itemId));
       const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));

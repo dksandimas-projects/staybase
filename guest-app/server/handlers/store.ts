@@ -1,4 +1,4 @@
-import { generateStoreOrderRef, getManilaDateInfo } from "@spark-inn/shared";
+import { generateStoreOrderRef, getEffectiveStorePaymentMethods, getManilaDateInfo } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
 import { sendStoreOrderTrigger } from "./email";
 
@@ -12,7 +12,15 @@ interface CreateStoreOrderBody {
   roomNumber: string;
   guestName: string;
   items: StoreOrderItemInput[];
-  paymentMethod: "cod" | "add-to-bill" | "gcash";
+  // `paymentMethod` is the open string key the admin configured
+  // for the store — see `plan/features/SETTINGS.md §11 Store`.
+  // When `useBookingPaymentMethods === true` the key may be any
+  // enabled booking method (GCash, Maya, PayPal, etc.). The
+  // hardcoded `["cod", "add-to-bill", "gcash"]` allowlist that
+  // lived here pre-#110 was replaced with a derived check
+  // against `getEffectiveStorePaymentMethods(...)` inside the
+  // Firestore transaction below.
+  paymentMethod: string;
   paymentProofUrl?: string;
 }
 
@@ -74,7 +82,7 @@ export async function handleCreateStoreOrder(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
   }
 
-  if (!["cod", "add-to-bill", "gcash"].includes(body.paymentMethod)) {
+  if (typeof body.paymentMethod !== "string" || body.paymentMethod.length === 0) {
     return res.status(400).json({ success: false, error: "Invalid store payment method." });
   }
 
@@ -87,8 +95,15 @@ export async function handleCreateStoreOrder(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Invalid store order item quantity." });
   }
 
-  if (body.paymentMethod === "gcash" && !body.paymentProofUrl) {
-    return res.status(400).json({ success: false, error: "GCash payment proof is required." });
+  // Per #110 (store toggle): any non-`cod`/non-`add-to-bill`
+  // method is an "online" payment that requires a proof of
+  // transfer screenshot. Mirrors the client-side check in
+  // `IntercomPage.tsx → isOnlinePaymentMethod`. `paymentProofUrl`
+  // may be an empty string for `cod` / `add-to-bill` (we
+  // coalesce to `""` when writing the order doc).
+  const isOnlinePaymentMethod = body.paymentMethod !== "cod" && body.paymentMethod !== "add-to-bill";
+  if (isOnlinePaymentMethod && !body.paymentProofUrl) {
+    return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
 
   const normalizedItems = Array.from(
@@ -112,11 +127,34 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         throw new Error("STORE_DISABLED");
       }
 
-      if (Array.isArray(storeConfig.paymentMethods) && storeConfig.paymentMethods.length > 0) {
-        const paymentMethodConfig = storeConfig.paymentMethods.find((method: any) => method.method === body.paymentMethod);
-        if (paymentMethodConfig && paymentMethodConfig.isEnabled === false) {
-          throw new Error("PAYMENT_METHOD_DISABLED");
-        }
+      // Per #110 (store toggle): when the admin has enabled
+      // `useBookingPaymentMethods`, the store inherits the
+      // enabled methods from `settings/hotelConfig.paymentMethods[]`
+      // (filtered to `isEnabled: true`, excluding `pay-at-hotel`).
+      // The 2 store-specific methods (`cod` + `add-to-bill`) are
+      // always appended. The de-duped list is computed at read
+      // time by `getEffectiveStorePaymentMethods` in
+      // `shared/utils/storePaymentMethods.ts` — no
+      // denormalization, no migration risk when toggling.
+      // Reading `hotelConfig` inside the transaction (rather
+      // than before) keeps the allowlist in sync with any
+      // concurrent admin edits.
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      const hotelConfigData = hotelConfigDoc.exists ? hotelConfigDoc.data() : null;
+      const bookingMethods = Array.isArray(hotelConfigData?.paymentMethods)
+        ? hotelConfigData.paymentMethods
+        : [];
+      const effectiveMethods = getEffectiveStorePaymentMethods(
+        {
+          useBookingPaymentMethods: storeConfig.useBookingPaymentMethods === true,
+          paymentMethods: Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []
+        },
+        bookingMethods
+      );
+      const effectiveSet = new Set<string>(effectiveMethods.map((m) => m.method));
+      if (!effectiveSet.has(body.paymentMethod)) {
+        throw new Error("PAYMENT_METHOD_DISABLED");
       }
 
       const itemRefs = normalizedItems.map((item) => adminDb.collection("storeItems").doc(item.itemId));
