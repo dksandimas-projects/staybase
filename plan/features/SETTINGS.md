@@ -68,6 +68,7 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 **Delete**
 
 - [ ] Two-click confirm: first click arms the button ("Tap again to confirm"), second click within 3 seconds executes. Auto-cancels after 3 seconds.
+- [ ] **Protected methods** — entries whose key is in `PROTECTED_PAYMENT_METHODS` (currently `["pay-at-hotel"]`) render NO delete button. A blue "Required" pill with a lock icon is shown next to the label instead. The underlying `deletePaymentMethod` in `AdminContext` also blocks deletion as a second line of defense, so a future code path cannot remove the entry either. Only the on/off `isEnabled` toggle is exposed. Rationale: walk-in creation, corporate inquiry conversion, and the booking step-3 fallback all default to `pay-at-hotel`; removing the entry would orphan new bookings. To remove the protection, edit `PROTECTED_PAYMENT_METHODS` in `shared/constants`.
 - [ ] **Block delete when bookings reference the method** — one-shot `getDocs(query(bookings, where("paymentMethod", "==", method), limit(1)))`. Toast surfaces the booking count and tells the admin to reassign or close those bookings first.
 - [ ] Best-effort cleanup of the method's QR files in Storage (`listAll` + `deleteObject` under `assets/payment-methods/{method}/`).
 
@@ -82,12 +83,13 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 
 - [ ] On first snapshot, if the doc carries the legacy `bookingPaymentMethods` key (the pre-feature field name) and no `paymentMethods` key, the entries are reshaped in place: `accountInfo` (single free-text field) is split into `accountName` (first line) + `accountNumber` (the rest, or empty when only one line). The legacy key is left in place on the doc — `setDoc(..., { merge: true })` cannot remove fields, and the few KB of dead data are harmless.
 - [ ] The migration is gated by a `useRef` so it runs at most once per session and is idempotent.
+- [ ] **One-shot protected-method backfill** — On first snapshot, if `paymentMethods[]` exists but does not contain every key in `PROTECTED_PAYMENT_METHODS` (currently `["pay-at-hotel"]`), the missing entries are appended with sensible defaults (e.g. `{ method: "pay-at-hotel", label: "Pay at Hotel", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }`) and the merged array is persisted via `setDoc(settings/hotelConfig, { paymentMethods: next }, { merge: true })`. Gated by a separate `useRef` (`hasBackfilledProtectedPaymentMethodsRef`) so it runs at most once per session and is idempotent. This is the safe backfill for deployments that configured their list before "Pay at Hotel" was added to the default seed. Only `pay-at-hotel` is backfilled — `maya` and `bank` are NOT, so an admin who previously removed them keeps their decision. To add more backfill entries, extend `BACKFILL_DEFAULTS` in `AdminContext.tsx` and `PROTECTED_PAYMENT_METHODS` in `shared/constants`.
 
 **See also**
 
 - Schema: `plan/docs/TYPES.md §PaymentMethodConfig` and `plan/docs/BACKEND.md §settings/hotelConfig`.
 - Storage rule: `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` (public read, staff write).
-- Constants: `SUPPORTED_PAYMENT_METHODS` and `UNSUPPORTED_PAYMENT_METHODS` exported from `shared/constants`.
+- Constants: `SUPPORTED_PAYMENT_METHODS`, `UNSUPPORTED_PAYMENT_METHODS`, and `PROTECTED_PAYMENT_METHODS` exported from `shared/constants`.
 
 ---
 

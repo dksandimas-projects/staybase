@@ -328,6 +328,13 @@ PaymentMethodConfig {
   qrUrl: string           // public Firebase Storage URL; empty string = no QR uploaded
   isEnabled: boolean      // when false, the method is hidden from the guest booking page
 }
+// The list of method keys that are protected from admin-side
+// deletion is `PROTECTED_PAYMENT_METHODS` in `shared/constants`
+// (currently `["pay-at-hotel"]`). Protected entries still appear
+// in the UI (with a blue "Required" pill and no delete button)
+// and remain subject to the per-method `isEnabled` toggle. See
+// `plan/features/SETTINGS.md §Payment Methods → Delete` for the
+// full UX spec and rationale.
 
 HotelConfig {
   hotelName: string
