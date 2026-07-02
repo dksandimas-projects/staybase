@@ -6,8 +6,11 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
+  PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
+  getEffectiveStorePaymentMethods,
   type PaymentMethodConfig,
+  type ProtectedPaymentMethod,
   type RoomTypeEntry
 } from "@spark-inn/shared";
 import {
@@ -442,6 +445,7 @@ function PaymentMethodsTabBody({
             const Icon = paymentMethodIcon(pm.method);
             const armed = pendingDelete === pm.method;
             const unsupported = isUnsupportedMethod(pm.method);
+            const isProtected = (PROTECTED_PAYMENT_METHODS as readonly string[]).includes(pm.method);
             return (
               <div
                 key={pm.method}
@@ -471,6 +475,15 @@ function PaymentMethodsTabBody({
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800">
                           <AlertTriangle size={10} aria-hidden="true" />
                           Unsupported
+                        </span>
+                      )}
+                      {isProtected && (
+                        <span
+                          title="This payment method is required and cannot be removed. Use the on/off toggle to hide it from guests."
+                          className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700"
+                        >
+                          <Lock size={10} aria-hidden="true" />
+                          Required
                         </span>
                       )}
                       {!pm.isEnabled && (
@@ -539,20 +552,26 @@ function PaymentMethodsTabBody({
                       <Pencil size={13} aria-hidden="true" />
                       Edit
                     </button>
-                    {/* Delete — two-step confirm */}
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(pm.method)}
-                      aria-label={armed ? `Confirm delete ${pm.label}` : `Delete ${pm.label}`}
-                      className={`min-h-[36px] px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 ${
-                        armed
-                          ? "border-red-300 bg-red-100 text-red-700"
-                          : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
-                      }`}
-                    >
-                      <Trash2 size={13} aria-hidden="true" />
-                      {armed ? "Tap again to confirm" : "Delete"}
-                    </button>
+                    {/* Delete — two-step confirm. Hidden for protected
+                        methods (see PROTECTED_PAYMENT_METHODS in
+                        shared/constants). The underlying
+                        `deletePaymentMethod` in AdminContext also
+                        blocks deletion as a second line of defense. */}
+                    {!isProtected && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(pm.method)}
+                        aria-label={armed ? `Confirm delete ${pm.label}` : `Delete ${pm.label}`}
+                        className={`min-h-[36px] px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 ${
+                          armed
+                            ? "border-red-300 bg-red-100 text-red-700"
+                            : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
+                        }`}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                        {armed ? "Tap again to confirm" : "Delete"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -838,6 +857,131 @@ function PaymentMethodQrUploader({ method, label, qrUrl, onUpload, onReset }: Pa
   );
 }
 
+// Read-only panel rendered in the Store tab when
+// `useBookingPaymentMethods === true`. Shows the de-duped,
+// source-tagged list computed by
+// `getEffectiveStorePaymentMethods` in
+// `shared/utils/storePaymentMethods.ts`. Each row is either a
+// store-sourced method (`cod` / `add-to-bill`, label editable
+// inline) or a booking-sourced method (label + a "Configure →"
+// deep link to the booking tab). Toggling the methods on/off
+// for the booking-sourced entries happens in the booking tab —
+// the store tab never edits the booking list directly.
+interface EffectiveStoreMethodsPanelProps {
+  storeConfig: {
+    useBookingPaymentMethods: true;
+    paymentMethods: Array<{
+      method: string;
+      label: string;
+      isEnabled: boolean;
+      qrUrl?: string;
+      accountInfo?: string;
+    }>;
+  };
+  bookingMethods: Array<{
+    method: string;
+    label: string;
+    isEnabled: boolean;
+    qrUrl?: string;
+    accountName?: string;
+    accountNumber?: string;
+  }>;
+  storeEnabled: boolean;
+  onConfigureBooking: () => void;
+  onEditCodLabel: (label: string) => void;
+  onEditAddToBillLabel: (label: string) => void;
+}
+
+function EffectiveStoreMethodsPanel({
+  storeConfig,
+  bookingMethods,
+  storeEnabled,
+  onConfigureBooking,
+  onEditCodLabel,
+  onEditAddToBillLabel
+}: EffectiveStoreMethodsPanelProps) {
+  const effective = getEffectiveStorePaymentMethods(storeConfig, bookingMethods);
+  if (effective.length === 0) {
+    return (
+      <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center">
+        <p className="text-sm font-semibold text-gray-700">No payment methods available</p>
+        <p className="mt-1 text-[11px] text-gray-500">
+          Enable at least one method in <button type="button" onClick={onConfigureBooking} className="font-semibold text-primary underline">Settings → Payment Methods</button>.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {effective.map((m) => {
+          const isStoreSpecific = m.source === "store";
+          const isCod = m.method === "cod";
+          const isAddToBill = m.method === "add-to-bill";
+          return (
+            <div
+              key={m.method}
+              className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-gray-900 truncate">{m.label}</p>
+                  <p className="mt-0.5 text-[10px] font-mono text-gray-500">{m.method}</p>
+                </div>
+                <span
+                  className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                    isStoreSpecific
+                      ? "bg-gray-100 text-gray-600"
+                      : "bg-blue-50 text-blue-700"
+                  }`}
+                >
+                  {isStoreSpecific ? "Store" : "Booking"}
+                </span>
+              </div>
+              {isCod ? (
+                <label className="mt-3 flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                  Label
+                  <input
+                    type="text"
+                    value={m.label}
+                    onChange={(e) => onEditCodLabel(e.target.value)}
+                    disabled={!storeEnabled}
+                    placeholder="Cash on Delivery"
+                    className="min-h-[36px] w-full rounded border border-gray-250 bg-gray-50/50 px-2.5 text-xs font-medium text-gray-800 focus:bg-white disabled:cursor-not-allowed"
+                  />
+                </label>
+              ) : isAddToBill ? (
+                <label className="mt-3 flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                  Label
+                  <input
+                    type="text"
+                    value={m.label}
+                    onChange={(e) => onEditAddToBillLabel(e.target.value)}
+                    disabled={!storeEnabled}
+                    placeholder="Add to Bill"
+                    className="min-h-[36px] w-full rounded border border-gray-250 bg-gray-50/50 px-2.5 text-xs font-medium text-gray-800 focus:bg-white disabled:cursor-not-allowed"
+                  />
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onConfigureBooking}
+                  className="mt-3 inline-flex min-h-[36px] items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+                >
+                  Configure in Payment Methods →
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-gray-500">
+        Toggle each method on/off in <button type="button" onClick={onConfigureBooking} className="font-semibold text-primary underline">Settings → Payment Methods</button>. Store-specific labels can be edited inline above.
+      </p>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const {
     hotelConfig,
@@ -1029,6 +1173,20 @@ export function SettingsPage() {
   const [storeEnabled, setStoreEnabled] = useState(storeConfig.isEnabled);
   const [lowStockThreshold, setLowStockThreshold] = useState(String(storeConfig.lowStockThreshold));
   const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodSetting[]>(storeConfig.paymentMethods);
+  // Per `plan/features/SETTINGS.md §11 Store` — when `true`, the
+  // store inherits the enabled methods from
+  // `settings/hotelConfig.paymentMethods[]` (filtered by
+  // `getEffectiveStorePaymentMethods` in
+  // `shared/utils/storePaymentMethods.ts`). The `cod` and
+  // `add-to-bill` entries remain editable for their labels; the
+  // `gcash` QR + accountInfo fields on the legacy
+  // `storeConfig.paymentMethods[]` entry are ignored in this
+  // mode (the booking method's `qrUrl` / `accountName` /
+  // `accountNumber` are used instead). Default `false`
+  // preserves the legacy 3-method UX exactly.
+  const [useBookingPaymentMethods, setUseBookingPaymentMethods] = useState<boolean>(
+    storeConfig.useBookingPaymentMethods === true
+  );
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   const [pendingDeleteStoreItemId, setPendingDeleteStoreItemId] = useState<string | null>(null);
   const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<string | null>(null);
@@ -1096,6 +1254,7 @@ export function SettingsPage() {
     setStoreEnabled(storeConfig.isEnabled !== false);
     setLowStockThreshold(String(storeConfig.lowStockThreshold ?? 3));
     setStorePaymentMethods(Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []);
+    setUseBookingPaymentMethods(storeConfig.useBookingPaymentMethods === true);
     setIntercomQuickRequests(Array.isArray(hotelConfig.intercomQuickRequests) ? hotelConfig.intercomQuickRequests : []);
     setNotificationSoundUrl(hotelConfig.notificationSoundUrl || "");
     setPrivacyPolicyBody(websiteContent.privacyPolicyBody || "");
@@ -1286,7 +1445,8 @@ export function SettingsPage() {
     updateSettings("storeConfig", {
       isEnabled: storeEnabled,
       lowStockThreshold: parseInt(lowStockThreshold) || 3,
-      paymentMethods: storePaymentMethods
+      paymentMethods: storePaymentMethods,
+      useBookingPaymentMethods
     });
   };
 
@@ -2619,92 +2779,142 @@ export function SettingsPage() {
                 <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">
                   Allowed Payment Settlement Methods
                 </h4>
-                
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {storePaymentMethods.map(pm => (
-                    <button
-                      key={pm.method}
-                      type="button"
-                      onClick={() => togglePaymentMethod(pm.method)}
-                      disabled={!storeEnabled}
-                      className={`min-h-[44px] flex items-center justify-between px-3.5 rounded-lg border text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                        pm.isEnabled 
-                          ? "bg-primary/5 border-primary/30 text-primary-dark" 
-                          : "bg-white border-gray-200 text-gray-550 hover:bg-gray-50"
-                      }`}
-                    >
-                      <span>{pm.label}</span>
-                      {pm.isEnabled ? (
-                        <CheckSquare size={16} className="text-primary" />
-                      ) : (
-                        <Square size={16} className="text-gray-300" />
-                      )}
-                    </button>
-                  ))}
-                </div>
 
-                {storePaymentMethods.some(pm => pm.method === "gcash") ? (
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <h5 className="text-xs font-bold text-gray-900">GCash transfer details</h5>
-                        <p className="mt-1 text-[10px] leading-relaxed text-gray-500">
-                          These details appear in the guest store checkout when GCash is enabled.
-                        </p>
-                      </div>
-                      <span className={`w-fit rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                        storePaymentMethods.find(pm => pm.method === "gcash")?.isEnabled
-                          ? "bg-primary-light text-primary-dark"
-                          : "bg-gray-100 text-gray-500"
-                      }`}>
-                        {storePaymentMethods.find(pm => pm.method === "gcash")?.isEnabled ? "Visible to guests" : "Hidden"}
-                      </span>
+                {/* Toggle: use the booking payment list as the
+                    single source of truth. When ON, the store
+                    inherits the enabled methods from
+                    `settings/hotelConfig.paymentMethods[]`
+                    (filtered to `isEnabled: true`, excluding
+                    `pay-at-hotel`) plus the 2 store-specific
+                    methods (`cod` + `add-to-bill`). When OFF,
+                    the legacy 3-method UI below is shown. The
+                    effective list is computed at read time by
+                    `getEffectiveStorePaymentMethods` in
+                    `shared/utils/storePaymentMethods.ts` — no
+                    denormalization, no migration risk when
+                    toggling on/off. See
+                    `plan/features/SETTINGS.md §11 Store`. */}
+                <label className={`flex items-start gap-3 text-xs font-bold ${storeEnabled ? "text-gray-800 cursor-pointer" : "text-gray-400 cursor-not-allowed"}`}>
+                  <button
+                    type="button"
+                    onClick={() => storeEnabled && setUseBookingPaymentMethods(!useBookingPaymentMethods)}
+                    disabled={!storeEnabled}
+                    aria-pressed={useBookingPaymentMethods}
+                    aria-label="Use booking payment methods"
+                    className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                      useBookingPaymentMethods ? "bg-primary" : "bg-gray-200"
+                    } disabled:opacity-50`}
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      useBookingPaymentMethods ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  <span className="flex-1 min-w-0">
+                    Use booking payment methods
+                    <span className="mt-0.5 block text-[10px] font-normal leading-relaxed text-gray-500">
+                      When on, the store inherits the enabled methods from Settings → Payment Methods. "Cash on Delivery" and "Add to Bill" are always available.
+                    </span>
+                  </span>
+                </label>
+
+                {useBookingPaymentMethods ? (
+                  <EffectiveStoreMethodsPanel
+                    storeConfig={{ useBookingPaymentMethods: true, paymentMethods: storePaymentMethods }}
+                    bookingMethods={Array.isArray(hotelConfig?.paymentMethods) ? hotelConfig.paymentMethods : []}
+                    onConfigureBooking={() => setActiveTab("payment")}
+                    onEditCodLabel={(label) => updateStorePaymentMethod("cod", { label })}
+                    onEditAddToBillLabel={(label) => updateStorePaymentMethod("add-to-bill", { label })}
+                    storeEnabled={storeEnabled}
+                  />
+                ) : (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {storePaymentMethods.map(pm => (
+                        <button
+                          key={pm.method}
+                          type="button"
+                          onClick={() => togglePaymentMethod(pm.method)}
+                          disabled={!storeEnabled}
+                          className={`min-h-[44px] flex items-center justify-between px-3.5 rounded-lg border text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                            pm.isEnabled
+                              ? "bg-primary/5 border-primary/30 text-primary-dark"
+                              : "bg-white border-gray-200 text-gray-550 hover:bg-gray-50"
+                          }`}
+                        >
+                          <span>{pm.label}</span>
+                          {pm.isEnabled ? (
+                            <CheckSquare size={16} className="text-primary" />
+                          ) : (
+                            <Square size={16} className="text-gray-300" />
+                          )}
+                        </button>
+                      ))}
                     </div>
 
-                    <div className="mt-4 grid gap-4 lg:grid-cols-[160px_1fr]">
-                      <div className="flex min-h-40 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-3">
-                        {storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl ? (
-                          <img
-                            src={storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl}
-                            alt="Store GCash QR preview"
-                            className="h-32 w-32 rounded-lg border border-gray-200 bg-white object-contain p-2"
-                          />
-                        ) : (
-                          <div className="text-center">
-                            <ImageIcon size={24} className="mx-auto text-gray-400" />
-                            <p className="mt-2 text-[10px] font-semibold text-gray-500">No QR URL set</p>
+                    {storePaymentMethods.some(pm => pm.method === "gcash") ? (
+                      <div className="rounded-xl border border-gray-200 bg-white p-4">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h5 className="text-xs font-bold text-gray-900">GCash transfer details</h5>
+                            <p className="mt-1 text-[10px] leading-relaxed text-gray-500">
+                              These details appear in the guest store checkout when GCash is enabled.
+                            </p>
                           </div>
-                        )}
-                      </div>
+                          <span className={`w-fit rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+                            storePaymentMethods.find(pm => pm.method === "gcash")?.isEnabled
+                              ? "bg-primary-light text-primary-dark"
+                              : "bg-gray-100 text-gray-500"
+                          }`}>
+                            {storePaymentMethods.find(pm => pm.method === "gcash")?.isEnabled ? "Visible to guests" : "Hidden"}
+                          </span>
+                        </div>
 
-                      <div className="grid gap-3">
-                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                          GCash QR image URL
-                          <input
-                            type="url"
-                            value={storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl ?? ""}
-                            onChange={(event) => updateStorePaymentMethod("gcash", { qrUrl: event.target.value })}
-                            disabled={!storeEnabled}
-                            placeholder="https://firebasestorage.googleapis.com/..."
-                            className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
-                          />
-                        </label>
+                        <div className="mt-4 grid gap-4 lg:grid-cols-[160px_1fr]">
+                          <div className="flex min-h-40 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 p-3">
+                            {storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl ? (
+                              <img
+                                src={storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl}
+                                alt="Store GCash QR preview"
+                                className="h-32 w-32 rounded-lg border border-gray-200 bg-white object-contain p-2"
+                              />
+                            ) : (
+                              <div className="text-center">
+                                <ImageIcon size={24} className="mx-auto text-gray-400" />
+                                <p className="mt-2 text-[10px] font-semibold text-gray-500">No QR URL set</p>
+                              </div>
+                            )}
+                          </div>
 
-                        <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                          GCash account info
-                          <textarea
-                            value={storePaymentMethods.find(pm => pm.method === "gcash")?.accountInfo ?? ""}
-                            onChange={(event) => updateStorePaymentMethod("gcash", { accountInfo: event.target.value })}
-                            disabled={!storeEnabled}
-                            rows={3}
-                            placeholder="GCash: 0917 000 0000 - spark inn"
-                            className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
-                          />
-                        </label>
+                          <div className="grid gap-3">
+                            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                              GCash QR image URL
+                              <input
+                                type="url"
+                                value={storePaymentMethods.find(pm => pm.method === "gcash")?.qrUrl ?? ""}
+                                onChange={(event) => updateStorePaymentMethod("gcash", { qrUrl: event.target.value })}
+                                disabled={!storeEnabled}
+                                placeholder="https://firebasestorage.googleapis.com/..."
+                                className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                              />
+                            </label>
+
+                            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                              GCash account info
+                              <textarea
+                                value={storePaymentMethods.find(pm => pm.method === "gcash")?.accountInfo ?? ""}
+                                onChange={(event) => updateStorePaymentMethod("gcash", { accountInfo: event.target.value })}
+                                disabled={!storeEnabled}
+                                rows={3}
+                                placeholder="GCash: 0917 000 0000 - spark inn"
+                                className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                              />
+                            </label>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ) : null}
+                    ) : null}
+                  </>
+                )}
               </div>
 
               <div className="space-y-3 border-t border-gray-150 pt-5">

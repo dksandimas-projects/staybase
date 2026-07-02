@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockBookings, mockStoreOrders, mockStoreItems, sendTrigger } = vi.hoisted(() => {
+const { mockBookings, mockStoreOrders, mockStoreItems, mockSettings, sendTrigger } = vi.hoisted(() => {
   const mockBookings: Record<string, any> = {};
   const mockStoreOrders: Record<string, any> = {};
   const mockStoreItems: Record<string, any> = {};
+  const mockSettings: Record<string, any> = {};
   const sendTrigger = vi.fn().mockResolvedValue(undefined);
-  return { mockBookings, mockStoreOrders, mockStoreItems, sendTrigger };
+  return { mockBookings, mockStoreOrders, mockStoreItems, mockSettings, sendTrigger };
 });
 
 vi.mock("../../server/handlers/email", () => ({
@@ -21,6 +22,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
       const store = collection === "bookings" ? mockBookings
         : collection === "storeOrders" ? mockStoreOrders
         : collection === "storeItems" ? mockStoreItems
+        : collection === "settings" ? mockSettings
         : {};
       const data = store[id];
       return data
@@ -31,12 +33,14 @@ vi.mock("../../server/lib/firebase-admin", () => {
       const store = collection === "bookings" ? mockBookings
         : collection === "storeOrders" ? mockStoreOrders
         : collection === "storeItems" ? mockStoreItems
+        : collection === "settings" ? mockSettings
         : {};
       store[id] = data;
     },
     update: (patch: any) => {
       const store = collection === "storeOrders" ? mockStoreOrders
         : collection === "storeItems" ? mockStoreItems
+        : collection === "settings" ? mockSettings
         : {};
       if (store[id]) Object.assign(store[id], patch);
     }
@@ -59,6 +63,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
         const store = collName === "bookings" ? mockBookings
           : collName === "storeOrders" ? mockStoreOrders
           : collName === "storeItems" ? mockStoreItems
+          : collName === "settings" ? mockSettings
           : {};
         const docs = Object.entries(store)
           .filter(([, data]: [string, any]) =>
@@ -114,12 +119,28 @@ describe("handleCreateStoreOrder (H4)", () => {
     Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
     Object.keys(mockStoreOrders).forEach((k) => delete mockStoreOrders[k]);
     Object.keys(mockStoreItems).forEach((k) => delete mockStoreItems[k]);
+    Object.keys(mockSettings).forEach((k) => delete mockSettings[k]);
     sendTrigger.mockClear();
     mockStoreItems[ITEM_ID] = { name: "Bottled Water", price: 50, isActive: true, stock: 100 };
     mockBookings[ACTIVE_BOOKING_ID] = {
       roomNumber: "101",
       status: "checked-in",
       guestEmail: "guest@example.test"
+    };
+    // Per #110 (store toggle): the create handler now reads
+    // `settings/storeConfig` and computes the effective payment
+    // method list via `getEffectiveStorePaymentMethods`. The
+    // legacy 3-method default is set up here so the test's
+    // `paymentMethod: "cod"` orders pass the allowlist check.
+    mockSettings["storeConfig"] = {
+      isEnabled: true,
+      lowStockThreshold: 5,
+      paymentMethods: [
+        { method: "cod", label: "Cash on Delivery", isEnabled: true, qrUrl: "", accountInfo: "" },
+        { method: "add-to-bill", label: "Add to Bill", isEnabled: true, qrUrl: "", accountInfo: "" },
+        { method: "gcash", label: "GCash", isEnabled: true, qrUrl: "", accountInfo: "" }
+      ],
+      useBookingPaymentMethods: false
     };
   });
 
