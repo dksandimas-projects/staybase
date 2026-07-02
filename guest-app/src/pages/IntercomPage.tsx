@@ -27,6 +27,7 @@ import { db, storage } from "../firebase/config";
 import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
+import { getEffectiveStorePaymentMethods, type EffectiveStorePaymentMethod } from "@spark-inn/shared";
 
 const rtcConfiguration: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -60,15 +61,21 @@ interface CartItem {
   quantity: number;
 }
 
-type StorePaymentMethod = "cod" | "add-to-bill" | "gcash";
+// The store payment method key — see `EffectiveStorePaymentMethod`
+// (re-exported from `@spark-inn/shared`) for the full union
+// shape. The legacy 3 keys (`cod`, `add-to-bill`, `gcash`) are
+// the default set when `useBookingPaymentMethods === false`; any
+// enabled booking method (e.g. `maya`, `paypal`) may also appear
+// when the toggle is `true`. The type stays `string` so the
+// order-create API can accept any configured key.
+type StorePaymentMethod = string;
 
-interface StorePaymentMethodConfig {
-  method: StorePaymentMethod;
-  label: string;
-  qrUrl?: string;
-  accountInfo?: string;
-  isEnabled: boolean;
-}
+// Renamed for clarity — used to render the per-method payment
+// details panel (QR + account info + screenshot upload) for any
+// non-`cod`/non-`add-to-bill` method. The legacy 3-key
+// `StorePaymentMethodConfig` interface is preserved as an alias
+// for backwards compat with the rest of the file.
+type StorePaymentMethodConfig = EffectiveStorePaymentMethod;
 
 interface ActiveOrder {
   orderId: string;
@@ -118,12 +125,18 @@ export function IntercomPage() {
   const [checkoutStep, setCheckoutStep] = useState<"cart" | "payment">("cart");
   const [paymentMethod, setPaymentMethod] = useState<StorePaymentMethod>("cod");
   const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodConfig[]>([
-    { method: "cod", label: "Cash on Delivery", isEnabled: true },
-    { method: "add-to-bill", label: "Room Bill", isEnabled: true },
-    { method: "gcash", label: "GCash Wallet", isEnabled: true }
+    { method: "cod", label: "Cash on Delivery", isEnabled: true, source: "store" },
+    { method: "add-to-bill", label: "Room Bill", isEnabled: true, source: "store" },
+    { method: "gcash", label: "GCash Wallet", isEnabled: true, source: "store" }
   ]);
   
-  // GCash Screenshot State
+  // Payment proof screenshot state — used for any non-`cod` /
+  // non-`add-to-bill` method (GCash, Maya, PayPal, etc.) when
+  // the `useBookingPaymentMethods` toggle is ON, or just for
+  // the legacy GCash method when the toggle is OFF. The state
+  // variables keep the legacy `gcash*` prefix for backwards
+  // compat with the checkout submit handler and the per-method
+  // panel; the field is just used generically now.
   const [gcashFile, setGcashFile] = useState<File | null>(null);
   const [gcashPreview, setGcashPreview] = useState<string | null>(null);
   const [isUploadingProof, setIsUploadingProof] = useState<boolean>(false);
@@ -240,19 +253,31 @@ export function IntercomPage() {
         const storeConfig = storeConfigDoc.exists() ? storeConfigDoc.data() : null;
         setIsStoreEnabled(storeConfig ? storeConfig.isEnabled !== false : true);
         if (storeConfig && Array.isArray(storeConfig.paymentMethods)) {
-          const enabledPaymentMethods = storeConfig.paymentMethods
-            .filter((method: any) => method && method.isEnabled !== false)
-            .map((method: any) => ({
-              method: method.method,
-              label: method.label || method.method,
-              qrUrl: method.qrUrl || "",
-              accountInfo: method.accountInfo || "",
-              isEnabled: true
-            }))
-            .filter((method: StorePaymentMethodConfig) => ["cod", "add-to-bill", "gcash"].includes(method.method));
-          setStorePaymentMethods(enabledPaymentMethods);
-          if (enabledPaymentMethods.length > 0) {
-            setPaymentMethod(enabledPaymentMethods[0].method);
+          // Per `plan/features/SETTINGS.md §11 Store` — when
+          // `useBookingPaymentMethods === true`, the store
+          // inherits the enabled methods from
+          // `settings/hotelConfig.paymentMethods[]` (filtered
+          // to `isEnabled: true`, excluding `pay-at-hotel`).
+          // The 2 store-specific methods (`cod` + `add-to-bill`)
+          // are always appended. The de-duped list is computed
+          // here at read time — no denormalization, no
+          // migration risk when the admin toggles the flag.
+          const hotelConfigData = hotelConfigDoc.exists() ? hotelConfigDoc.data() : null;
+          const bookingMethods = Array.isArray(hotelConfigData?.paymentMethods)
+            ? hotelConfigData.paymentMethods
+            : [];
+          const effective = getEffectiveStorePaymentMethods(
+            {
+              useBookingPaymentMethods: storeConfig.useBookingPaymentMethods === true,
+              paymentMethods: storeConfig.paymentMethods
+            },
+            bookingMethods
+          );
+          setStorePaymentMethods(effective);
+          if (effective.length > 0) {
+            setPaymentMethod(effective[0].method);
+          } else {
+            setPaymentMethod("");
           }
         }
       } catch (error) {
@@ -720,15 +745,33 @@ export function IntercomPage() {
     return cart.reduce((sum, item) => sum + (item.item.price * item.quantity), 0);
   };
 
+  // Methods that don't require a payment proof upload. The
+  // `cod` (cash on delivery) and `add-to-bill` (room folio)
+  // methods are store-specific and never need a screenshot;
+  // every other configured method (GCash, Maya, PayPal, etc.)
+  // is an "online" payment that requires the guest to upload
+  // proof of transfer before the order can be placed. Mirrors
+  // the server-side check in
+  // `guest-app/server/handlers/store.ts`.
+  const isOnlinePaymentMethod = (method: string) => method !== "cod" && method !== "add-to-bill";
+
   const getPaymentLabel = (method: StorePaymentMethod) => {
     const configuredMethod = storePaymentMethods.find(payment => payment.method === method);
     if (configuredMethod?.label) return configuredMethod.label;
     if (method === "cod") return "Cash on Delivery";
-    if (method === "add-to-bill") return "Room Bill";
-    return "GCash Transfer";
+    if (method === "add-to-bill") return "Add to Room Bill";
+    if (method === "gcash") return "GCash Transfer";
+    if (method === "maya") return "Maya Transfer";
+    if (method === "paypal") return "PayPal";
+    if (method === "bank") return "Bank Transfer";
+    return method;
   };
 
-  const gcashPaymentConfig = storePaymentMethods.find(method => method.method === "gcash");
+  // Currently-selected method's config — used to render the
+  // payment details panel (QR + account info + screenshot
+  // upload) for any non-`cod`/non-`add-to-bill` method. Empty
+  // when no method is selected.
+  const currentPaymentMethodConfig = storePaymentMethods.find(method => method.method === paymentMethod);
 
   // GCash file input change
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -749,8 +792,14 @@ export function IntercomPage() {
       return;
     }
 
-    if (paymentMethod === "gcash" && !gcashFile) {
-      alert("Please upload your GCash payment confirmation screenshot.");
+    // Any non-`cod`/non-`add-to-bill` method requires a payment
+    // proof screenshot. The variable name keeps the legacy
+    // `gcashFile` for backwards compat — the field is just
+    // used generically now (works for GCash, Maya, PayPal,
+    // bank transfer, etc. when the useBookingPaymentMethods
+    // toggle is ON).
+    if (isOnlinePaymentMethod(paymentMethod) && !gcashFile) {
+      alert("Please upload your payment confirmation screenshot.");
       return;
     }
 
@@ -759,7 +808,7 @@ export function IntercomPage() {
 
     try {
       let paymentProofUrl = "";
-      if (paymentMethod === "gcash" && gcashFile) {
+      if (isOnlinePaymentMethod(paymentMethod) && gcashFile) {
         const proofRef = ref(storage, `store-orders/${roomNumber}/payment-proof/${Date.now()}-${gcashFile.name}`);
         const uploadResult = await uploadBytes(proofRef, gcashFile);
         paymentProofUrl = await getDownloadURL(uploadResult.ref);
@@ -1562,7 +1611,7 @@ export function IntercomPage() {
                             ? "Pay cash when items are delivered."
                             : method.method === "add-to-bill"
                               ? "This will be added to your room bill and collected at checkout."
-                              : "Instant transfer. Proof upload required.";
+                              : `Send payment via ${method.label}, then upload your receipt screenshot.`;
 
                         return (
                           <label
@@ -1604,29 +1653,49 @@ export function IntercomPage() {
                     </div>
                   )}
 
-                  {/* GCash details and file upload layout */}
-                  {paymentMethod === "gcash" && (
+                  {/* Online payment details + screenshot upload —
+                      shown for ANY non-`cod`/non-`add-to-bill` method
+                      (GCash from the legacy 3-method set, or any
+                      booking method inherited via the
+                      `useBookingPaymentMethods` toggle). The
+                      rendering is identical for every method: the
+                      method's QR (if any) + its account name +
+                      account number + a required screenshot. */}
+                  {isOnlinePaymentMethod(paymentMethod) && currentPaymentMethodConfig && (
                     <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-4">
-                      <div className="text-center space-y-2">
-                        <p className="text-xs font-bold text-gray-700">{gcashPaymentConfig?.label || "GCash Transfer Details"}</p>
-                        {gcashPaymentConfig?.qrUrl && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold text-gray-700 text-center">
+                          {currentPaymentMethodConfig.label} Transfer Details
+                        </p>
+                        {currentPaymentMethodConfig.qrUrl && (
                           <img
-                            src={gcashPaymentConfig.qrUrl}
-                            alt="Store GCash QR"
+                            src={currentPaymentMethodConfig.qrUrl}
+                            alt={`${currentPaymentMethodConfig.label} QR`}
                             className="mx-auto h-36 w-36 rounded-lg border border-gray-200 bg-white object-contain p-2"
                           />
                         )}
-                        <p className="text-[10px] text-gray-500">
-                          {gcashPaymentConfig?.accountInfo || `Account: ${config.legalName}`}
-                        </p>
+                        <div className="text-[10px] text-gray-500 space-y-1">
+                          {currentPaymentMethodConfig.accountName && (
+                            <p>Account name: <span className="font-semibold text-gray-700">{currentPaymentMethodConfig.accountName}</span></p>
+                          )}
+                          {currentPaymentMethodConfig.accountNumber && (
+                            <p>Account number: <span className="font-semibold text-gray-700">{currentPaymentMethodConfig.accountNumber}</span></p>
+                          )}
+                          {currentPaymentMethodConfig.accountInfo && (
+                            <p>{currentPaymentMethodConfig.accountInfo}</p>
+                          )}
+                          {!currentPaymentMethodConfig.accountName && !currentPaymentMethodConfig.accountNumber && !currentPaymentMethodConfig.accountInfo && (
+                            <p>Account: {config.legalName}</p>
+                          )}
+                        </div>
                       </div>
 
                       <div className="space-y-2">
                         <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Upload Receipt screenshot</p>
-                        
+
                         {gcashPreview ? (
                           <div className="relative rounded-lg overflow-hidden border border-gray-200 max-h-36 flex justify-center bg-black">
-                            <img src={gcashPreview} alt="GCash Proof" className="h-full object-contain" />
+                            <img src={gcashPreview} alt="Payment Proof" className="h-full object-contain" />
                             <button
                               type="button"
                               onClick={() => {
@@ -1645,10 +1714,10 @@ export function IntercomPage() {
                               <p className="text-xs font-semibold text-gray-600">Click to upload image</p>
                               <p className="text-[9px] text-gray-400 mt-0.5">JPG, PNG up to 5MB</p>
                             </div>
-                            <input 
-                              type="file" 
-                              accept="image/*" 
-                              className="hidden" 
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
                               onChange={handleFileChange}
                               required
                             />

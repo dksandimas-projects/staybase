@@ -219,6 +219,12 @@ async function seedStoreConfig() {
         isEnabled: true,
       },
     ],
+    // Per #110 (store toggle): when `true`, the store inherits
+    // the enabled methods from `settings/hotelConfig.paymentMethods[]`
+    // (filtered by `getEffectiveStorePaymentMethods` in
+    // `shared/utils/storePaymentMethods.ts`). Default `false`
+    // preserves the legacy 3-method UX exactly.
+    useBookingPaymentMethods: false,
     updatedAt: now,
   });
 }
