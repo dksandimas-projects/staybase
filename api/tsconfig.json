@@ -1,7 +1,8 @@
 {
   "extends": "../guest-app/tsconfig.json",
   "compilerOptions": {
-    "noEmit": false
+    "noEmit": false,
+    "allowJs": true
   },
   "include": ["[...route].ts"]
 }
