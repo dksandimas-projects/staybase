@@ -97,6 +97,8 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 > **Store charges are not denormalized onto the booking document.** The checkout folio in `admin-app/src/pages/BookingsPage.tsx` (`getBookingStoreCharges`) derives the billed store orders for a booking at read time by filtering the `storeOrders` collection on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. This avoids denormalization drift between the booking and store order lifecycles. `storeOrders.isBilled` and `storeOrders.billedAt` are the source of truth (set by the front desk "Add to Booking Bill" action in the admin Bookings drawer).
 
+> **Known bug (found 2026-07-02, not yet fixed): `GET /api/rooms/availability` 500s in production** with a Firestore `FAILED_PRECONDITION: The query requires an index` error on the composite `status` (ASC) + `checkIn` (ASC) query. The index **is** already defined in `firebase/firestore.indexes.json`, but confirmed via `firestore_list_indexes` that no indexes exist at all for the `bookings` collection group on the live project — `firestore.indexes.json` was apparently never deployed (`firebase deploy --only firestore:indexes`). Fix: run that deploy command, or click through the console link in the error. Separately worth confirming with whoever owns the Firebase project config: the live `FIREBASE_PROJECT_ID` used by both the Preview and Production Vercel environments is `spark-inn-stg-7a7ad` (a "stg"-named project serving production traffic) — may be intentional (single project, historically named), but flagging since it reads like a staging/production mixup.
+
 
 ---
 
