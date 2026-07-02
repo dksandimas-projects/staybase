@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import handler from "../../api/[...route]";
+import handler from "../../server/apiRouter";
 
 // Per W2.2 / decision #90: the server is authoritative on the
 // member discount. The handler must (a) verify the Firebase ID

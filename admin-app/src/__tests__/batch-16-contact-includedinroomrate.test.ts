@@ -27,7 +27,7 @@ const emailHandlerSrc = readFileSync(
   "utf8"
 );
 const dispatcherSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/[...route].ts"),
+  resolve(__dirname, "../../../guest-app/server/apiRouter.ts"),
   "utf8"
 );
 const rulesSrc = readFileSync(

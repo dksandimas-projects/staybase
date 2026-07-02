@@ -116,7 +116,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
   };
 });
 
-import handler from "../../api/[...route]";
+import handler from "../../server/apiRouter";
 
 const mockResponse = () => {
   const res: any = {};
