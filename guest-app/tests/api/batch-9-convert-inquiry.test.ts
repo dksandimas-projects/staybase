@@ -33,7 +33,7 @@ describe("Phase 11.6 Batch 9 — convert corporate inquiry to booking (audit S4.
   describe("server route + handler", () => {
     it("loads the new handleConvertInquiryToBooking handler", () => {
       expect(routeSrc).toMatch(
-        /(const\s+\{\s*handleConvertInquiryToBooking\s*\}\s*=\s*await\s+import\(|import\s+[\s\S]*?handleConvertInquiryToBooking[\s\S]*?from\s+["']\.\.\/server\/handlers\/corporate-inquiries["'])/
+        /(const\s+\{\s*handleConvertInquiryToBooking\s*\}\s*=\s*await\s+import\(|import\s+[\s\S]*?handleConvertInquiryToBooking[\s\S]*?from\s+["']\.\/handlers\/corporate-inquiries["'])/
       );
     });
 
