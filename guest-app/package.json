@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
+    "predev:vercel": "npm run build:api",
     "dev:vercel": "vercel dev --listen 3000 --yes",
     "dev:vite": "vite --host 0.0.0.0 --port 3000",
-    "build": "tsc -b && vite build",
+    "build:api": "esbuild \"server/apiRouter.ts\" --bundle --platform=node --target=node18 --outfile=\"api/[...route].js\"",
+    "build": "tsc -b && vite build && npm run build:api",
     "preview": "vercel preview",
     "typecheck": "tsc -b",
     "test:api": "vitest run tests/api"

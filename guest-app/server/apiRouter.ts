@@ -1,17 +1,17 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { adminAuth } from "../server/lib/firebase-admin";
-import { handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "../server/handlers/bookings";
-import { handleRoomAvailability } from "../server/handlers/rooms";
-import { handleValidateVoucher } from "../server/handlers/vouchers";
-import { handleValidateCorporateCode } from "../server/handlers/corporate-codes";
-import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "../server/handlers/corporate-inquiries";
-import { handleCreateContactInquiry } from "../server/handlers/contact";
-import { handleGenerateReference } from "../server/handlers/reference";
-import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleUndoMemberPointsRedemption } from "../server/handlers/members";
-import { handleCreateStaff, handleDisableStaff } from "../server/handlers/admin";
-import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "../server/handlers/store";
-import { handleEmailTrigger } from "../server/handlers/email";
-import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "../server/handlers/janitor";
+import { adminAuth } from "./lib/firebase-admin";
+import { handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
+import { handleRoomAvailability } from "./handlers/rooms";
+import { handleValidateVoucher } from "./handlers/vouchers";
+import { handleValidateCorporateCode } from "./handlers/corporate-codes";
+import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
+import { handleCreateContactInquiry } from "./handlers/contact";
+import { handleGenerateReference } from "./handlers/reference";
+import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
+import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleEmailTrigger } from "./handlers/email";
+import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",

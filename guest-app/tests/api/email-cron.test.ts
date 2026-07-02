@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import handler from "../../api/[...route]";
+import handler from "../../server/apiRouter";
 import { resend } from "../../server/lib/resend";
 
 let mockBookings: any[] = [];

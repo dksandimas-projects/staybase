@@ -17,7 +17,7 @@ const emailSrc = readFileSync(
   "utf8"
 );
 const routeSrc = readFileSync(
-  resolve(__dirname, "../../../guest-app/api/[...route].ts"),
+  resolve(__dirname, "../../../guest-app/server/apiRouter.ts"),
   "utf8"
 );
 const bookingsSrc = readFileSync(
