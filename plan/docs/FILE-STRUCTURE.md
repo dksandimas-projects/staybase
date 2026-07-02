@@ -15,9 +15,11 @@ spark-inn/
 ├── hotel.config.ts              ← Brand identity config (colors, fonts, logos, name) — swap per client
 ├── .gitignore
 │
+├── api/                          ← Repo-root Vercel function shim (see "Vercel Project Setup" below)
+│   └── [...route].ts            ← Thin re-export: `export { default } from "../guest-app/api/[...route]"`
 ├── guest-app/                   ← Public booking website + API routes (deployed together on Vercel)
 │   ├── package.json             ← depends on @spark-inn/shared
-│   └── api/                     ← Vercel serverless API routes — only `[...route].ts` lives here (lives inside guest-app/)
+│   └── api/                     ← only `[...route].js` lives here — a committed, build-generated bundle, not source
 ├── admin-app/                   ← Front desk dashboard (second deployment, same Vercel project)
 │   └── package.json             ← depends on @spark-inn/shared
 ├── shared/                      ← Shared package — types, utils, constants, VERSION
@@ -64,8 +66,9 @@ guest-app/
 │   │   └── useBookings.ts
 │   └── App.tsx
 ├── api/                                ← Vercel serverless API routes (co-located with guest-app) — ONLY the catch-all lives here
-│   └── [...route].ts                   ← Catch-all handler (single Vercel function — see plan/docs/VERCEL-FUNCTION-LIMIT.md)
-├── server/                             ← Server-side modules imported by the catch-all — NOT scanned by Vercel
+│   └── [...route].js                   ← Committed, build-generated bundle of server/apiRouter.ts (single Vercel function — see plan/docs/VERCEL-FUNCTION-LIMIT.md)
+├── server/                             ← Server-side modules — NOT scanned by Vercel
+│   ├── apiRouter.ts                    ← Real catch-all source, bundled into api/[...route].js by `npm run build:api`
 │   ├── handlers/
 │   │   ├── email.ts
 │   │   ├── bookings.ts
@@ -125,12 +128,12 @@ One Vercel project for the entire monorepo. Two deployments configured:
 
 | Deployment | Root Directory | Domain |
 |---|---|---|
-| Guest + API | `guest-app/` | `www.sparkinnbohol.com` |
+| Guest + API | repo root (confirmed via runtime paths like `/var/task/guest-app/server/lib/...` and build logs cloning to `/vercel/path0/guest-app/...`) — **not** `guest-app/` | `www.sparkinnbohol.com` |
 | Admin | `admin-app/` | `admin.sparkinnbohol.com` |
 
-Vercel automatically picks up `guest-app/api/` as serverless functions when root is set to `guest-app/`. No separate project needed. Both deployments share the same env vars set in the single Vercel project dashboard.
+The Guest + API deployment's Root Directory is the **repo root**, with a custom Build Command that runs `guest-app`'s own `npm run build`. Vercel's zero-config function detection scans `api/` at the repo root, which is why a thin shim exists there (`api/[...route].ts` → `export { default } from "../guest-app/api/[...route]"`) — it's what Vercel actually treats as the deployed function, and it resolves to the committed `guest-app/api/[...route].js` bundle. Both deployments share the same env vars set in the single Vercel project dashboard.
 
-> **Hobby plan = 12 serverless functions max.** `guest-app/api/` contains exactly one file (`[...route].ts`) so we deploy with **1 function**. All handler and lib modules live under `guest-app/server/` (not scanned by Vercel). See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for the full rules and verification steps.
+> **Hobby plan = 12 serverless functions max.** The repo-root `api/` and `guest-app/api/` together resolve to exactly **1 function**. All handler and lib modules live under `guest-app/server/` (not scanned by Vercel). See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for the full rules, the reasons behind this exact layout (learned from a production outage), and verification steps.
 
 Root `vercel.json` owns deployment-wide security headers, the build command (`npm run build:guest`), the output directory (`guest-app/dist`), and the scheduled check-in reminder cron entry. Headers include CSP, clickjacking protection, MIME sniffing protection, referrer policy, and permissions policy. The cron entry calls `/api/email/checkin-reminder` daily using the `CRON_SECRET` bearer-token flow documented in `plan/features/EMAIL-PDF-STORAGE.md`.
 
