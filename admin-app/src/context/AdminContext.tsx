@@ -18,6 +18,7 @@ import {
   MAX_ROOM_TYPE_PHOTOS,
   PaymentMethodConfig,
   PROTECTED_PAYMENT_METHODS,
+  StoreConfig,
   bustPublicSiteContentCache,
   compressImageFile,
   type ProtectedPaymentMethod,
@@ -381,7 +382,7 @@ export interface AdminContextType {
   websiteContent: any;
   rewardsConfig: any;
   breakfastConfig: any;
-  storeConfig: any;
+  storeConfig: StoreConfig;
   // `true` until the first `settings/websiteContent` snapshot
   // arrives from Firestore. The Branding tab's asset previews
   // need this to avoid flashing the static fallback logo /
@@ -2182,14 +2183,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     ]
   });
 
-  const [storeConfig, setStoreConfig] = useState({
+  const [storeConfig, setStoreConfig] = useState<StoreConfig>({
     isEnabled: true,
     lowStockThreshold: 3,
     paymentMethods: [
       { method: "cod", label: "Cash on Delivery", isEnabled: true },
       { method: "add-to-bill", label: "Room Bill", isEnabled: true },
       { method: "gcash", label: "GCash Wallet", isEnabled: true, qrUrl: "", accountInfo: "" }
-    ]
+    ],
+    useBookingPaymentMethods: false
   });
 
   // Subscribe to all settings documents from Firestore
