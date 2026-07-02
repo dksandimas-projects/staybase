@@ -17,10 +17,22 @@ const footerLinks = [
 ];
 
 export function Footer() {
-  const { branding } = usePublicSiteContent();
-  const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  const { branding, contact } = usePublicSiteContent();
+  // Per Phase 11.8 PR 3: the contact block is admin-editable
+  // from Settings → Hotel Info. The hook value wins when set; the
+  // deploy-time `hotel.config.ts` is the safe fallback so the
+  // footer never goes blank during the cold-load window before
+  // Firestore resolves (the hook already returns `config.X` as
+  // its own fallback, but the `||` here is belt-and-suspenders
+  // for the brief moment when both are missing during a deploy
+  // race).
+  const address = contact.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  const phone = contact.frontDeskPhone || config.frontDeskPhone;
+  const email = contact.supportEmail || config.supportEmail;
+  const facebook = contact.facebookUrl || config.facebookUrl;
+  const instagram = contact.instagramUrl || config.instagramUrl;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
-  const phoneHref = `tel:${config.frontDeskPhone.replace(/[^\d+]/g, "")}`;
+  const phoneHref = `tel:${phone.replace(/[^\d+]/g, "")}`;
   const footerLogoSrc = resolveLogo(branding.logoFooter, config.logos.white);
 
   return (
@@ -52,18 +64,18 @@ export function Footer() {
             </a>
             <a className="flex gap-3 transition hover:text-primary-light" href={phoneHref}>
               <Phone className="mt-0.5 shrink-0 text-primary" size={16} />
-              {config.frontDeskPhone}
+              {phone}
             </a>
-            <a className="flex gap-3 transition hover:text-primary-light" href={`mailto:${config.supportEmail}`}>
+            <a className="flex gap-3 transition hover:text-primary-light" href={`mailto:${email}`}>
               <Mail className="mt-0.5 shrink-0 text-primary" size={16} />
-              {config.supportEmail}
+              {email}
             </a>
           </div>
           <div className="mt-5 flex gap-3 text-gray-300">
             <a
               aria-label={`${config.brandName} on Facebook`}
               className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 transition hover:border-primary hover:text-primary-light"
-              href={config.facebookUrl}
+              href={facebook}
               target="_blank"
               rel="noreferrer"
             >
@@ -72,7 +84,7 @@ export function Footer() {
             <a
               aria-label={`${config.brandName} on Instagram`}
               className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 transition hover:border-primary hover:text-primary-light"
-              href={config.instagramUrl}
+              href={instagram}
               target="_blank"
               rel="noreferrer"
             >

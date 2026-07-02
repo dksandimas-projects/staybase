@@ -32,6 +32,7 @@ Admin-only page at `/settings`. Organized into tabs. Covers hotel information, b
 - [ ] Mission statement (textarea)
 - [ ] Vision statement (textarea)
 - [ ] Hotel story (textarea or short rich-text)
+- [ ] **Phase 11.8 PR 3 — Hotel Contact Details card**: address (single-line), front-desk phone, support email, DPO email, Facebook URL, Instagram URL — all admin-editable runtime overrides of the deploy-time `hotel.config.ts` values. Each falls back to the white-label config when the input is empty. Renders on Footer, Contact page, and Privacy page via `usePublicSiteContent.contact.*`.
 - [ ] Save button
 - [ ] Source: `settings/hotelConfig` — `updateDoc` on save
 
