@@ -251,6 +251,22 @@ export const UNSUPPORTED_PAYMENT_METHODS = ["pesonet"] as const;
 
 export type UnsupportedPaymentMethod = (typeof UNSUPPORTED_PAYMENT_METHODS)[number];
 
+// Methods the admin cannot delete from the Payment Methods tab.
+// Only the per-row `isEnabled` toggle is exposed. "Pay at Hotel"
+// is protected because the walk-in flow, corporate inquiry
+// conversion, and the booking step-3 fallback all default to it
+// — removing the entry would orphan new bookings and require
+// re-adding it manually. Reorder + edit + QR upload still work
+// for protected methods; only delete is blocked. Defense in
+// depth: the UI hides the Delete button (SettingsPage.tsx), and
+// `AdminContext.deletePaymentMethod` blocks deletion as a second
+// line of defense in case a future code path calls the function
+// directly. To remove the protection, edit this list AND update
+// `plan/features/SETTINGS.md §Payment Methods → Delete`.
+export const PROTECTED_PAYMENT_METHODS = ["pay-at-hotel"] as const;
+
+export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
+
 // Maximum accepted QR image size in bytes (2 MB pre-compression).
 // QR PNGs are usually < 100 KB; this cap catches the "I uploaded
 // my entire photo roll" case before we burn Storage bandwidth.

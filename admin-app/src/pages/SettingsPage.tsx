@@ -6,8 +6,10 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
+  PROTECTED_PAYMENT_METHODS,
   UNSUPPORTED_PAYMENT_METHODS,
   type PaymentMethodConfig,
+  type ProtectedPaymentMethod,
   type RoomTypeEntry
 } from "@spark-inn/shared";
 import {
@@ -442,6 +444,7 @@ function PaymentMethodsTabBody({
             const Icon = paymentMethodIcon(pm.method);
             const armed = pendingDelete === pm.method;
             const unsupported = isUnsupportedMethod(pm.method);
+            const isProtected = (PROTECTED_PAYMENT_METHODS as readonly string[]).includes(pm.method);
             return (
               <div
                 key={pm.method}
@@ -471,6 +474,15 @@ function PaymentMethodsTabBody({
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-800">
                           <AlertTriangle size={10} aria-hidden="true" />
                           Unsupported
+                        </span>
+                      )}
+                      {isProtected && (
+                        <span
+                          title="This payment method is required and cannot be removed. Use the on/off toggle to hide it from guests."
+                          className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-blue-700"
+                        >
+                          <Lock size={10} aria-hidden="true" />
+                          Required
                         </span>
                       )}
                       {!pm.isEnabled && (
@@ -539,20 +551,26 @@ function PaymentMethodsTabBody({
                       <Pencil size={13} aria-hidden="true" />
                       Edit
                     </button>
-                    {/* Delete — two-step confirm */}
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(pm.method)}
-                      aria-label={armed ? `Confirm delete ${pm.label}` : `Delete ${pm.label}`}
-                      className={`min-h-[36px] px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 ${
-                        armed
-                          ? "border-red-300 bg-red-100 text-red-700"
-                          : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
-                      }`}
-                    >
-                      <Trash2 size={13} aria-hidden="true" />
-                      {armed ? "Tap again to confirm" : "Delete"}
-                    </button>
+                    {/* Delete — two-step confirm. Hidden for protected
+                        methods (see PROTECTED_PAYMENT_METHODS in
+                        shared/constants). The underlying
+                        `deletePaymentMethod` in AdminContext also
+                        blocks deletion as a second line of defense. */}
+                    {!isProtected && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(pm.method)}
+                        aria-label={armed ? `Confirm delete ${pm.label}` : `Delete ${pm.label}`}
+                        className={`min-h-[36px] px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-semibold transition active:scale-95 ${
+                          armed
+                            ? "border-red-300 bg-red-100 text-red-700"
+                            : "border-gray-200 bg-white text-gray-600 hover:bg-red-50 hover:text-red-700"
+                        }`}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                        {armed ? "Tap again to confirm" : "Delete"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

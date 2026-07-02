@@ -17,8 +17,10 @@ import {
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
   PaymentMethodConfig,
+  PROTECTED_PAYMENT_METHODS,
   bustPublicSiteContentCache,
   compressImageFile,
+  type ProtectedPaymentMethod,
   type RoomTypeEntry
 } from "@spark-inn/shared";
 import config from "@config";
@@ -2396,6 +2398,49 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   }, [hotelConfig, currentUser, updateSettings]);
 
+  // One-shot backfill for protected payment methods. Deployments
+  // that configured their `paymentMethods[]` before "Pay at Hotel"
+  // was added to the default seed (per the 2026-07-01 `feature/
+  // payment-methods` rollout) do not have a `pay-at-hotel` entry
+  // and would silently lose the walk-in default on the next
+  // admin load. This effect appends the default entry to any
+  // existing array that is missing it, then persists via merged
+  // `setDoc`. Gated by `hasBackfilledProtectedPaymentMethodsRef`
+  // so it runs at most once per session and is idempotent.
+  //
+  // Only `pay-at-hotel` is backfilled — `maya` and `bank` are
+  // NOT, so an admin who previously removed them keeps their
+  // decision. To add more backfill entries, add to the
+  // `PROTECTED_PAYMENT_METHODS` array in `shared/constants` AND
+  // extend the `BACKFILL_DEFAULTS` map below.
+  const hasBackfilledProtectedPaymentMethodsRef = useRef(false);
+  const BACKFILL_DEFAULTS: Record<ProtectedPaymentMethod, PaymentMethodConfig> = {
+    "pay-at-hotel": {
+      method: "pay-at-hotel",
+      label: "Pay at Hotel",
+      accountName: "",
+      accountNumber: "",
+      qrUrl: "",
+      isEnabled: true
+    }
+  };
+  useEffect(() => {
+    if (!currentUser) return;
+    if (hasBackfilledProtectedPaymentMethodsRef.current) return;
+    if (paymentMethods.length === 0) return;
+    const missing = PROTECTED_PAYMENT_METHODS.filter(
+      (key) => !paymentMethods.some((p) => p.method === key)
+    );
+    if (missing.length === 0) {
+      hasBackfilledProtectedPaymentMethodsRef.current = true;
+      return;
+    }
+    const next = [...paymentMethods, ...missing.map((key) => BACKFILL_DEFAULTS[key])];
+    hasBackfilledProtectedPaymentMethodsRef.current = true;
+    setPaymentMethods(next);
+    void updateSettings("hotelConfig", { paymentMethods: next });
+  }, [paymentMethods, currentUser, updateSettings]);
+
   const persistPaymentMethods = async (next: PaymentMethodConfig[]) => {
     setPaymentMethods(next);
     try {
@@ -2465,6 +2510,20 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   const deletePaymentMethod = async (method: string) => {
+    // Defense-in-depth: protected methods (currently `pay-at-hotel`)
+    // cannot be deleted at all, regardless of how many bookings
+    // reference them. The UI hides the Delete button for these
+    // methods; this guard catches any future code path that calls
+    // `deletePaymentMethod` directly (e.g. a bulk import, a
+    // devtools session, etc.). See `PROTECTED_PAYMENT_METHODS` in
+    // `shared/constants` for the full list and rationale.
+    if ((PROTECTED_PAYMENT_METHODS as readonly string[]).includes(method)) {
+      notify.error(
+        "Cannot delete payment method",
+        `"${method}" is required and cannot be removed. Use the on/off toggle to hide it from guests.`
+      );
+      return;
+    }
     const bookingCount = await countBookingsUsingPaymentMethod(method);
     if (bookingCount > 0) {
       notify.error(
