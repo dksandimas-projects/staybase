@@ -92,12 +92,14 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
 
     it("renders address / phone / email / facebook / instagram from the hook with config.* fallback", () => {
       // Each of the 5 contact reads must use the `||` fallback to
-      // the deploy-time config value when the hook returns "".
-      expect(footerSrc).toMatch(/contact\.address\s*\|\|/);
-      expect(footerSrc).toMatch(/contact\.frontDeskPhone\s*\|\|/);
-      expect(footerSrc).toMatch(/contact\.supportEmail\s*\|\|/);
-      expect(footerSrc).toMatch(/contact\.facebookUrl\s*\|\|/);
-      expect(footerSrc).toMatch(/contact\.instagramUrl\s*\|\|/);
+      // the deploy-time config value when the hook returns "". The
+      // `?.` is optional chaining added as defense-in-depth against
+      // a stale localStorage cache missing the `contact` key.
+      expect(footerSrc).toMatch(/contact\??\.address\s*\|\|/);
+      expect(footerSrc).toMatch(/contact\??\.frontDeskPhone\s*\|\|/);
+      expect(footerSrc).toMatch(/contact\??\.supportEmail\s*\|\|/);
+      expect(footerSrc).toMatch(/contact\??\.facebookUrl\s*\|\|/);
+      expect(footerSrc).toMatch(/contact\??\.instagramUrl\s*\|\|/);
     });
   });
 
@@ -107,11 +109,11 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
     });
 
     it("renders address / phone / email / facebook / instagram from the hook with config.* fallback", () => {
-      expect(contactSrc).toMatch(/contact\.address\s*\|\|/);
-      expect(contactSrc).toMatch(/contact\.frontDeskPhone\s*\|\|/);
-      expect(contactSrc).toMatch(/contact\.supportEmail\s*\|\|/);
-      expect(contactSrc).toMatch(/contact\.facebookUrl\s*\|\|/);
-      expect(contactSrc).toMatch(/contact\.instagramUrl\s*\|\|/);
+      expect(contactSrc).toMatch(/contact\??\.address\s*\|\|/);
+      expect(contactSrc).toMatch(/contact\??\.frontDeskPhone\s*\|\|/);
+      expect(contactSrc).toMatch(/contact\??\.supportEmail\s*\|\|/);
+      expect(contactSrc).toMatch(/contact\??\.facebookUrl\s*\|\|/);
+      expect(contactSrc).toMatch(/contact\??\.instagramUrl\s*\|\|/);
     });
   });
 
@@ -121,11 +123,11 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
     });
 
     it("uses contact.dpoEmail with config.* fallback", () => {
-      expect(privacySrc).toMatch(/const\s+dpoEmail\s*=\s*contact\.dpoEmail\s*\|\|/);
+      expect(privacySrc).toMatch(/const\s+dpoEmail\s*=\s*contact\??\.dpoEmail\s*\|\|/);
     });
 
     it("uses contact.address with config.* fallback (replaces the previous config.address.* lines)", () => {
-      expect(privacySrc).toMatch(/contact\.address\s*\?\s*contact\.address\s*:/);
+      expect(privacySrc).toMatch(/contact\??\.address\s*\?\s*contact\.address\s*:/);
     });
   });
 
