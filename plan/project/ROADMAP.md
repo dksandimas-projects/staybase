@@ -314,7 +314,7 @@ The apps are already scaffolded. Both run locally. hotel.config.ts is populated 
 ### Phase 8 follow-up gaps to close or explicitly defer
 
 - ✅ Spark Essentials — live catalog CRUD in Admin Settings → Store tab; guest store already reads live `storeItems`, but admin catalog editing must persist to Firestore before launch
-- ✅ Spark Essentials — store GCash QR/account info management in Admin Settings; guest checkout already consumes `settings/storeConfig.paymentMethods[].qrUrl/accountInfo`
+- ✅ Spark Essentials — store payment methods managed from Settings → Payment Methods; guest checkout consumes `settings/hotelConfig.paymentMethods[]` filtered by `showInStore`
 - ✅ Intercom Inbox — render guest store order messages as rich order cards with item/total/payment summary and a link to Store Management
 - ✅ Guest Intercom — unread pulse and long-thread pagination are deferred to Phase 10 polish; Phase 8 launch keeps real-time chat, auto-scroll, and immediate read marking
 - 📋 **Phase 8 manual QA checklist** *(run on staging before launch — sign off in client training session)*

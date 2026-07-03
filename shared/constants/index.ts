@@ -263,7 +263,7 @@ export type UnsupportedPaymentMethod = (typeof UNSUPPORTED_PAYMENT_METHODS)[numb
 // line of defense in case a future code path calls the function
 // directly. To remove the protection, edit this list AND update
 // `plan/features/SETTINGS.md §Payment Methods → Delete`.
-export const PROTECTED_PAYMENT_METHODS = ["pay-at-hotel"] as const;
+export const PROTECTED_PAYMENT_METHODS = ["pay-at-hotel", "add-to-bill"] as const;
 
 export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
 
@@ -284,7 +284,11 @@ export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 // v2 — `homepage.featuredRoomIds` renamed to
 // `homepage.featuredTypeValues`. Old cached entries are now
 // shape-incompatible and fall through to the empty state.
-export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v2";
+// v3 — added the `contact` section (Phase 11.8 PR 3). v2 entries
+// have no `contact` key at all, which crashed Footer/ContactPage/
+// PrivacyPage on `contact.address` for returning visitors with a
+// pre-existing cache.
+export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v3";
 export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Cross-tab cache-invalidation signal for the public site content
@@ -296,4 +300,3 @@ export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // visitors but makes admin edits reflect on a parallel guest tab
 // in real time.
 export const PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
-

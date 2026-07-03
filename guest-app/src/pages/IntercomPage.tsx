@@ -63,10 +63,9 @@ interface CartItem {
 
 // The store payment method key — see `EffectiveStorePaymentMethod`
 // (re-exported from `@spark-inn/shared`) for the full union
-// shape. The legacy 3 keys (`cod`, `add-to-bill`, `gcash`) are
-// the default set when `useBookingPaymentMethods === false`; any
-// enabled booking method (e.g. `maya`, `paypal`) may also appear
-// when the toggle is `true`. The type stays `string` so the
+// shape. The key is owned by Settings → Payment Methods and can be
+// any configured store-visible method (`cod`, `add-to-bill`,
+// `gcash`, `maya`, etc.). The type stays `string` so the
 // order-create API can accept any configured key.
 type StorePaymentMethod = string;
 
@@ -125,15 +124,13 @@ export function IntercomPage() {
   const [checkoutStep, setCheckoutStep] = useState<"cart" | "payment">("cart");
   const [paymentMethod, setPaymentMethod] = useState<StorePaymentMethod>("cod");
   const [storePaymentMethods, setStorePaymentMethods] = useState<StorePaymentMethodConfig[]>([
-    { method: "cod", label: "Cash on Delivery", isEnabled: true, source: "store" },
-    { method: "add-to-bill", label: "Room Bill", isEnabled: true, source: "store" },
-    { method: "gcash", label: "GCash Wallet", isEnabled: true, source: "store" }
+    { method: "cod", label: "Cash on Delivery", isEnabled: true, source: "payment" },
+    { method: "add-to-bill", label: "Room Bill", isEnabled: true, source: "payment" },
+    { method: "gcash", label: "GCash Wallet", isEnabled: true, source: "payment" }
   ]);
   
   // Payment proof screenshot state — used for any non-`cod` /
-  // non-`add-to-bill` method (GCash, Maya, PayPal, etc.) when
-  // the `useBookingPaymentMethods` toggle is ON, or just for
-  // the legacy GCash method when the toggle is OFF. The state
+  // non-`add-to-bill` method (GCash, Maya, PayPal, etc.). The state
   // variables keep the legacy `gcash*` prefix for backwards
   // compat with the checkout submit handler and the per-method
   // panel; the field is just used generically now.
@@ -250,35 +247,18 @@ export function IntercomPage() {
             ? hotelConfigDoc.data().intercomQuickRequests.filter(Boolean)
             : ["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"]
         );
+        const hotelConfigData = hotelConfigDoc.exists() ? hotelConfigDoc.data() : null;
         const storeConfig = storeConfigDoc.exists() ? storeConfigDoc.data() : null;
         setIsStoreEnabled(storeConfig ? storeConfig.isEnabled !== false : true);
-        if (storeConfig && Array.isArray(storeConfig.paymentMethods)) {
-          // Per `plan/features/SETTINGS.md §11 Store` — when
-          // `useBookingPaymentMethods === true`, the store
-          // inherits the enabled methods from
-          // `settings/hotelConfig.paymentMethods[]` (filtered
-          // to `isEnabled: true`, excluding `pay-at-hotel`).
-          // The 2 store-specific methods (`cod` + `add-to-bill`)
-          // are always appended. The de-duped list is computed
-          // here at read time — no denormalization, no
-          // migration risk when the admin toggles the flag.
-          const hotelConfigData = hotelConfigDoc.exists() ? hotelConfigDoc.data() : null;
-          const bookingMethods = Array.isArray(hotelConfigData?.paymentMethods)
-            ? hotelConfigData.paymentMethods
-            : [];
-          const effective = getEffectiveStorePaymentMethods(
-            {
-              useBookingPaymentMethods: storeConfig.useBookingPaymentMethods === true,
-              paymentMethods: storeConfig.paymentMethods
-            },
-            bookingMethods
-          );
-          setStorePaymentMethods(effective);
-          if (effective.length > 0) {
-            setPaymentMethod(effective[0].method);
-          } else {
-            setPaymentMethod("");
-          }
+        const paymentMethods = Array.isArray(hotelConfigData?.paymentMethods)
+          ? hotelConfigData.paymentMethods
+          : [];
+        const effective = getEffectiveStorePaymentMethods(paymentMethods);
+        setStorePaymentMethods(effective);
+        if (effective.length > 0) {
+          setPaymentMethod(effective[0].method);
+        } else {
+          setPaymentMethod("");
         }
       } catch (error) {
         console.error("Failed to load intercom room settings:", error);
@@ -796,8 +776,7 @@ export function IntercomPage() {
     // proof screenshot. The variable name keeps the legacy
     // `gcashFile` for backwards compat — the field is just
     // used generically now (works for GCash, Maya, PayPal,
-    // bank transfer, etc. when the useBookingPaymentMethods
-    // toggle is ON).
+    // bank transfer, etc.).
     if (isOnlinePaymentMethod(paymentMethod) && !gcashFile) {
       alert("Please upload your payment confirmation screenshot.");
       return;
@@ -1655,9 +1634,7 @@ export function IntercomPage() {
 
                   {/* Online payment details + screenshot upload —
                       shown for ANY non-`cod`/non-`add-to-bill` method
-                      (GCash from the legacy 3-method set, or any
-                      booking method inherited via the
-                      `useBookingPaymentMethods` toggle). The
+                      configured in Settings → Payment Methods. The
                       rendering is identical for every method: the
                       method's QR (if any) + its account name +
                       account number + a required screenshot. */}

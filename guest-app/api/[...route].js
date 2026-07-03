@@ -187695,7 +187695,15 @@ var PaymentMethodConfigSchema = external_exports.object({
   accountName: external_exports.string().max(200),
   accountNumber: external_exports.string().max(200),
   qrUrl: external_exports.string().max(2048),
-  isEnabled: external_exports.boolean()
+  isEnabled: external_exports.boolean(),
+  // Per #111 (per-method surface toggles). Both default to
+  // `true` when omitted — the helper functions read them
+  // permissively (`!== false`) so legacy data is treated as
+  // "visible on all surfaces" without an explicit migration.
+  // Optional on the schema for the same reason: pre-#111
+  // entries do not have these fields.
+  showInStore: external_exports.boolean().optional(),
+  showInCorporate: external_exports.boolean().optional()
 });
 var PaymentMethodsArraySchema = external_exports.array(PaymentMethodConfigSchema).max(20, "Too many payment methods (max 20)");
 var LegacyPaymentMethodConfigSchema = external_exports.object({
@@ -188022,45 +188030,21 @@ async function runBackfill(options) {
 }
 
 // ../shared/utils/storePaymentMethods.ts
-var STORE_SPECIFIC_METHODS = ["cod", "add-to-bill"];
-function getEffectiveStorePaymentMethods(storeConfig, bookingMethods) {
-  const storeMethods = Array.isArray(storeConfig?.paymentMethods) ? storeConfig.paymentMethods : [];
-  const useBooking = storeConfig?.useBookingPaymentMethods === true;
-  const safeBookingMethods = Array.isArray(bookingMethods) ? bookingMethods : [];
-  if (!useBooking) {
-    return storeMethods.filter((m2) => !!m2 && typeof m2.method === "string" && m2.isEnabled !== false).map((m2) => ({
-      method: m2.method,
-      label: m2.label || m2.method,
-      isEnabled: m2.isEnabled !== false,
-      source: "store",
-      qrUrl: m2.qrUrl,
-      accountInfo: m2.accountInfo
-    }));
-  }
-  const storeSpecificKeys = new Set(STORE_SPECIFIC_METHODS);
-  const storeSpecific = storeMethods.filter(
-    (m2) => !!m2 && typeof m2.method === "string" && storeSpecificKeys.has(m2.method) && m2.isEnabled !== false
+function getEffectiveStorePaymentMethods(paymentMethods) {
+  const safePaymentMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
+  const isVisibleInStore = (m2) => m2.showInStore !== false;
+  return safePaymentMethods.filter(
+    (m2) => m2 && typeof m2.method === "string" && m2.method !== "pay-at-hotel" && isVisibleInStore(m2)
   ).map((m2) => ({
     method: m2.method,
     label: m2.label || m2.method,
     isEnabled: true,
-    source: "store",
+    source: "payment",
     qrUrl: m2.qrUrl,
-    accountInfo: m2.accountInfo
-  }));
-  const seenMethods = new Set(storeSpecific.map((m2) => m2.method));
-  const inherited = safeBookingMethods.filter(
-    (m2) => m2 && typeof m2.method === "string" && m2.method !== "pay-at-hotel" && !seenMethods.has(m2.method) && m2.isEnabled !== false
-  ).map((m2) => ({
-    method: m2.method,
-    label: m2.label || m2.method,
-    isEnabled: true,
-    source: "booking",
-    qrUrl: m2.qrUrl,
+    accountInfo: m2.accountInfo,
     accountName: m2.accountName,
     accountNumber: m2.accountNumber
   }));
-  return [...storeSpecific, ...inherited];
 }
 
 // ../shared/utils/vouchers.ts
@@ -191218,14 +191202,8 @@ async function handleCreateStoreOrder(req, res) {
       const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
       const hotelConfigDoc = await transaction.get(hotelConfigRef);
       const hotelConfigData = hotelConfigDoc.exists ? hotelConfigDoc.data() : null;
-      const bookingMethods = Array.isArray(hotelConfigData?.paymentMethods) ? hotelConfigData.paymentMethods : [];
-      const effectiveMethods = getEffectiveStorePaymentMethods(
-        {
-          useBookingPaymentMethods: storeConfig.useBookingPaymentMethods === true,
-          paymentMethods: Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []
-        },
-        bookingMethods
-      );
+      const paymentMethods = Array.isArray(hotelConfigData?.paymentMethods) ? hotelConfigData.paymentMethods : [];
+      const effectiveMethods = getEffectiveStorePaymentMethods(paymentMethods);
       const effectiveSet = new Set(effectiveMethods.map((m2) => m2.method));
       if (!effectiveSet.has(body.paymentMethod)) {
         throw new Error("PAYMENT_METHOD_DISABLED");

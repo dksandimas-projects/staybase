@@ -159,8 +159,23 @@ export function CorporateBookingPage() {
   // admin-enabled subset. The corporate page only shows the GCash
   // and Bank Transfer options; the admin can configure their
   // account details from Settings → Payment Methods.
+  //
+  // Per #111 (per-method surface toggles): each entry also
+  // carries a `showInCorporate` flag. Methods where the flag is
+  // explicitly `false` are filtered out of the corporate
+  // personal-pay selector. The flag defaults to `true` when
+  // missing (pre-#111 entries are treated as "visible on all
+  // surfaces"), so no migration is required.
   const [paymentMethodsConfig, setPaymentMethodsConfig] = useState<
-    Array<{ method: string; label: string; accountName: string; accountNumber: string; qrUrl: string; isEnabled: boolean }>
+    Array<{
+      method: string;
+      label: string;
+      accountName: string;
+      accountNumber: string;
+      qrUrl: string;
+      isEnabled: boolean;
+      showInCorporate?: boolean;
+    }>
   >([]);
   useEffect(() => {
     const db = getFirestore();
@@ -1319,7 +1334,12 @@ export function CorporateBookingPage() {
                   
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
                     {paymentMethodsConfig
-                      .filter((pm) => pm.isEnabled && (pm.method === "gcash" || pm.method === "maya" || pm.method === "bank"))
+                      .filter(
+                        (pm) =>
+                          pm.isEnabled &&
+                          pm.showInCorporate !== false &&
+                          (pm.method === "gcash" || pm.method === "maya" || pm.method === "bank")
+                      )
                       .map((pm) => {
                         const Icon = pm.method === "gcash" || pm.method === "maya" ? Wallet : Landmark;
                         return (

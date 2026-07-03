@@ -60,7 +60,12 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 - [ ] **Label** (text) — display name shown to guests (e.g. "GCash", "Bank Transfer", "Pay at Hotel").
 - [ ] **Account name** (text) — recipient name shown beside the QR. Leave empty for "Pay at Hotel" or methods that don't need it.
 - [ ] **Account number** (text) — for PayPal, use the PayPal email address.
-- [ ] **Enable toggle** — `isEnabled: boolean`; hidden methods are not shown to guests.
+- [ ] **Enable toggle** — `isEnabled: boolean`; hidden methods are not shown to guests. Per #111, this is now the **regular-booking** surface switch (the leftmost of the three inline pills in the row).
+- [ ] **Per-method surface pills** (per #111) — three inline pill toggles in each row control which surfaces the method is offered on:
+  - **Booking** (leftmost, the existing `isEnabled` toggle) — visibility on `/book` Step 3.
+  - **Store** — visibility on the in-room store checkout (`/intercom/:roomId` Shop tab). Persists as `showInStore: boolean`. `cod` and `add-to-bill` are store-only entries backfilled into this same list; `pay-at-hotel` is excluded from the store because `add-to-bill` is the folio option.
+  - **Corp** — visibility on the corporate booking personal-pay selector (`/corporate/book` Step 3). The company charge-back path is unaffected. Persists as `showInCorporate: boolean`.
+  - All three default to `true` when missing (pre-#111 entries are treated as "visible on all surfaces" — no migration required). Tooltip on each pill explains the surface name.
 - [ ] **QR uploader** (only on edit, not add — the new method's storage path requires a saved method key) — file input, preview, "Upload QR" / "Replace QR" / "Remove QR" buttons, status pill ("Custom override" / "No QR"), error inline. Uploads to `assets/payment-methods/{method}/{timestamp}-{filename}` in Firebase Storage. Accepts `image/png`, `image/jpeg`, `image/webp` (max 2 MB). Best-effort deletes the previous QR on replace.
 - [ ] **Pesonet warning** — inline warning when the typed method key matches `UNSUPPORTED_PAYMENT_METHODS` (case-insensitive). The Save button label flips to "I understand, save anyway" for 5 seconds; the second click persists. Schema is not hard-blocked — the friction is policy, not enforcement.
 - [ ] **Save / Cancel** — single "Save" button in the modal footer.
@@ -68,7 +73,7 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 **Delete**
 
 - [ ] Two-click confirm: first click arms the button ("Tap again to confirm"), second click within 3 seconds executes. Auto-cancels after 3 seconds.
-- [ ] **Protected methods** — entries whose key is in `PROTECTED_PAYMENT_METHODS` (currently `["pay-at-hotel"]`) render NO delete button. A blue "Required" pill with a lock icon is shown next to the label instead. The underlying `deletePaymentMethod` in `AdminContext` also blocks deletion as a second line of defense, so a future code path cannot remove the entry either. Only the on/off `isEnabled` toggle is exposed. Rationale: walk-in creation, corporate inquiry conversion, and the booking step-3 fallback all default to `pay-at-hotel`; removing the entry would orphan new bookings. To remove the protection, edit `PROTECTED_PAYMENT_METHODS` in `shared/constants`.
+- [ ] **Protected methods** — entries whose key is in `PROTECTED_PAYMENT_METHODS` (currently `["pay-at-hotel", "add-to-bill"]`) render NO delete button. A blue "Required" pill with a lock icon is shown next to the label instead. The underlying `deletePaymentMethod` in `AdminContext` also blocks deletion as a second line of defense, so a future code path cannot remove the entry either. `pay-at-hotel` is protected because walk-in creation, corporate inquiry conversion, and booking step-3 fallback depend on it. `add-to-bill` is protected because checkout folios and reports derive billed store charges from `storeOrders.paymentMethod === "add-to-bill"`. To remove the protection, edit `PROTECTED_PAYMENT_METHODS` in `shared/constants`.
 - [ ] **Block delete when bookings reference the method** — one-shot `getDocs(query(bookings, where("paymentMethod", "==", method), limit(1)))`. Toast surfaces the booking count and tells the admin to reassign or close those bookings first.
 - [ ] Best-effort cleanup of the method's QR files in Storage (`listAll` + `deleteObject` under `assets/payment-methods/{method}/`).
 
@@ -260,34 +265,24 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 - [ ] Enable/disable store globally — toggle
 - [ ] Product catalog management — see `plan/features/STORE-MANAGEMENT.md §Catalog Management` for full checklist
-- [x] **Store payment methods — single source of truth via `useBookingPaymentMethods` toggle**. See `§Store Payment Methods` below.
+- [x] **Store payment methods — managed only from Payment Methods**. See `§Store Payment Methods` below.
 - [ ] Low stock threshold — number input (default 5)
 - [ ] Both Admin and Front Desk can access this tab
 - [ ] Source: `settings/storeConfig`
 
 #### §Store Payment Methods
 
-The store can either own its own 3-method list (legacy behavior) or inherit the enabled methods from Settings → Payment Methods via a single toggle. The two surfaces stay in sync at read time — no denormalization, no migration risk when toggling.
+The store no longer owns a separate payment-method list. Settings → Payment Methods (`settings/hotelConfig.paymentMethods[]`) is the only edit surface for booking, in-room store, and corporate payment visibility.
 
-**Toggle: "Use booking payment methods"** (`settings/storeConfig.useBookingPaymentMethods`, default `false`)
+**Effective list computation** — `getEffectiveStorePaymentMethods(hotelConfig.paymentMethods)` in `shared/utils/storePaymentMethods.ts`. The helper is called by the guest store checkout (`guest-app/src/pages/IntercomPage.tsx`) and the server-side `/api/store/create-order` handler (`guest-app/server/handlers/store.ts`).
 
-- **OFF (default)** — Store uses its own 3 hardcoded methods (`cod`, `add-to-bill`, `gcash`) configured directly on this tab. The existing per-method toggle (enable/disable) and the GCash QR + account info inputs are shown.
-- **ON** — Store inherits the enabled methods from `settings/hotelConfig.paymentMethods[]` (filtered to `isEnabled: true`, excluding `pay-at-hotel` — that's for booking check-in, not in-room delivery; the store's `add-to-bill` already covers the "I'll pay at checkout" case). The 2 store-specific methods (`cod` + `add-to-bill`) are always appended; their labels remain admin-customizable inline. Per-method toggles for the inherited entries are managed in the booking tab — the store tab shows a read-only list with a "Configure →" link that deep-links to `/settings?tab=payment`. The legacy store-side GCash QR + account info fields are ignored in this mode (the booking method's `qrUrl` / `accountName` / `accountNumber` are used instead).
-
-**Effective list computation** — `getEffectiveStorePaymentMethods(storeConfig, hotelConfig.paymentMethods)` in `shared/utils/storePaymentMethods.ts`. The same helper is called by:
-- The admin Store tab UI (`SettingsPage.tsx → EffectiveStoreMethodsPanel`)
-- The guest store checkout (`guest-app/src/pages/IntercomPage.tsx`)
-- The server-side `/api/store/create-order` handler (`guest-app/server/handlers/store.ts`)
-
-The server reads both `storeConfig` and `hotelConfig` inside the Firestore transaction so the allowlist stays in sync with any concurrent admin edits. Unknown `paymentMethod` keys are rejected with `PAYMENT_METHOD_DISABLED` (400).
+The server reads `hotelConfig` inside the Firestore transaction so the allowlist stays in sync with any concurrent admin edits. Unknown `paymentMethod` keys are rejected with `PAYMENT_METHOD_DISABLED` (400).
 
 **Proof of payment** — any non-`cod`/non-`add-to-bill` method requires a screenshot upload (mirrored on the server: `paymentProofUrl` is required for any such method). The client-side check uses an `isOnlinePaymentMethod()` helper that mirrors the server's check exactly.
 
-**De-dup rules** — if the booking list happens to contain a method with key `cod` or `add-to-bill` (admin's choice), the booking-sourced entry is ignored; the store-sourced entry always wins. Disabled methods are filtered out before rendering so the UI only shows selectable options.
+**Store-only methods** — `cod` and `add-to-bill` are backfilled into `paymentMethods[]` if missing. They default to `isEnabled: false`, `showInStore: true`, and `showInCorporate: false`, so they appear in the store but not the regular booking or corporate personal-pay selectors. `add-to-bill` is protected from deletion because it powers the folio action.
 
-**Persistence** — toggle is saved via `setDoc(settings/storeConfig, { ...rest, useBookingPaymentMethods }, { merge: true })` on the existing "Save" button. The `handleSaveStore` in `SettingsPage.tsx` writes the new flag alongside the existing fields.
-
-**Source / persistence** — `settings/storeConfig.useBookingPaymentMethods: boolean`. The other fields (`isEnabled`, `lowStockThreshold`, `paymentMethods[]`) are unchanged.
+**Source / persistence** — payment method visibility lives on `settings/hotelConfig.paymentMethods[]`. `settings/storeConfig` now only owns `isEnabled`, `lowStockThreshold`, and catalog-related store settings. Legacy `paymentMethods[]` / `useBookingPaymentMethods` fields may remain on old documents but are ignored by checkout.
 
 ---
 
