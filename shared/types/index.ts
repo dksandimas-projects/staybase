@@ -30,11 +30,9 @@ export type PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string;
 //   - `isEnabled` — controls visibility on the **regular booking**
 //     flow (`/book` Step 3). The original master toggle.
 //   - `showInStore` — controls visibility on the **in-room store**
-//     checkout (`/intercom/:roomId` Shop tab). Only effective when
-//     `storeConfig.useBookingPaymentMethods === true`; when the
-//     store uses its own 3 hardcoded methods (`cod`, `add-to-bill`,
-//     `gcash`) this flag is ignored for those three but applies to
-//     any other method that might leak in. Defaults to `true`.
+//     checkout (`/intercom/:roomId` Shop tab). Defaults to `true`
+//     for legacy custom methods; built-in methods are normalized
+//     by `AdminContext`.
 //   - `showInCorporate` — controls visibility on the **corporate
 //     booking** personal-pay selector. The company charge-back path
 //     is unaffected (it doesn't show a method picker). Defaults
@@ -50,22 +48,10 @@ export interface PaymentMethodConfig {
   showInCorporate?: boolean;
 }
 
-// Per-method configuration for the in-room store ("Spark Essentials"
-// for Spark Inn — display name is always `config.storeName`). The
-// admin manages the 3 hardcoded methods (`cod`, `add-to-bill`,
-// `gcash`) from Settings → Store when `useBookingPaymentMethods` is
-// `false`. When that flag is `true`, the store inherits the enabled
-// methods from the booking payment list (see
-// `getEffectiveStorePaymentMethods` in
-// `shared/utils/storePaymentMethods.ts`) — only the `cod` and
-// `add-to-bill` labels remain admin-customizable. The `gcash` QR +
-// account info come from the booking method's `qrUrl` /
-// `accountName` / `accountNumber` when the toggle is on; the
-// store-side `qrUrl` / `accountInfo` fields on the legacy
-// `gcash` entry are ignored in that mode. The `method` key is a
-// plain `string` to match the open-schema policy of
-// `PaymentMethodConfig`; the helper enforces the 3-key policy at
-// read time.
+// Legacy per-method configuration for the in-room store. These
+// fields may still exist on older `settings/storeConfig` documents,
+// but new code uses `settings/hotelConfig.paymentMethods[]` plus
+// each method's `showInStore` flag as the single source of truth.
 export interface StorePaymentMethodConfig {
   method: string;
   label: string;
@@ -75,30 +61,17 @@ export interface StorePaymentMethodConfig {
 }
 
 // Runtime-editable configuration for the in-room store, stored at
-// `settings/storeConfig`. Mirrors the Firestore document — the
-// `useBookingPaymentMethods` flag is the new toggle that switches
-// the store's payment-method source between the hardcoded list
-// (default) and the dynamic booking payment list. See
-// `plan/features/SETTINGS.md §11 Store` and
-// `plan/features/STORE-MANAGEMENT.md §Catalog Management` for the
-// full UX spec.
+// `settings/storeConfig`. Payment methods are intentionally not
+// configured here anymore; the store checkout reads
+// `settings/hotelConfig.paymentMethods[]` and filters by
+// `showInStore !== false`.
 export interface StoreConfig {
   isEnabled: boolean;
   lowStockThreshold: number;
+  // Legacy fields retained for old Firestore documents. The admin
+  // UI no longer writes them and the guest/server checkout ignores
+  // them.
   paymentMethods: StorePaymentMethodConfig[];
-  // When `true`, the store inherits the enabled methods from
-  // `settings/hotelConfig.paymentMethods[]` (filtered to
-  // `isEnabled === true`, excluding `pay-at-hotel` — that key
-  // is for booking check-in, not in-room delivery; the store's
-  // `add-to-bill` already covers the "I'll pay at checkout" case
-  // for store orders). The 2 store-specific methods (`cod` +
-  // `add-to-bill`) are always appended regardless of toggle, with
-  // their labels read from `storeConfig.paymentMethods[]`. The
-  // de-duped, source-tagged list is computed at read time by
-  // `getEffectiveStorePaymentMethods` in
-  // `shared/utils/storePaymentMethods.ts` — no denormalization,
-  // no migration risk when toggling on/off. Default: `false`
-  // (preserves the legacy 3-method UX exactly).
   useBookingPaymentMethods: boolean;
 }
 

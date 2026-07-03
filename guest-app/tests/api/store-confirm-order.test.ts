@@ -124,13 +124,15 @@ describe("/api/store/order-status", () => {
     };
     mockState.bookings = [{ id: "booking_123" }];
     mockState.settings = {
-      storeConfig: {
-        isEnabled: true,
+      hotelConfig: {
         paymentMethods: [
-          { method: "cod", isEnabled: true },
-          { method: "gcash", isEnabled: true },
-          { method: "add-to-bill", isEnabled: true }
+          { method: "cod", label: "Cash on Delivery", isEnabled: false, showInStore: true, qrUrl: "", accountName: "", accountNumber: "" },
+          { method: "gcash", label: "GCash", isEnabled: true, showInStore: true, qrUrl: "", accountName: "", accountNumber: "" },
+          { method: "add-to-bill", label: "Add to Bill", isEnabled: false, showInStore: true, qrUrl: "", accountName: "", accountNumber: "" }
         ]
+      },
+      storeConfig: {
+        isEnabled: true
       }
     };
     mockState.counters = {

@@ -14,12 +14,11 @@ interface CreateStoreOrderBody {
   items: StoreOrderItemInput[];
   // `paymentMethod` is the open string key the admin configured
   // for the store — see `plan/features/SETTINGS.md §11 Store`.
-  // When `useBookingPaymentMethods === true` the key may be any
-  // enabled booking method (GCash, Maya, PayPal, etc.). The
-  // hardcoded `["cod", "add-to-bill", "gcash"]` allowlist that
-  // lived here pre-#110 was replaced with a derived check
-  // against `getEffectiveStorePaymentMethods(...)` inside the
-  // Firestore transaction below.
+  // Open string key from `settings/hotelConfig.paymentMethods[]`.
+  // Store visibility is controlled by each method's `showInStore`
+  // flag; the server validates the key against
+  // `getEffectiveStorePaymentMethods(...)` inside the Firestore
+  // transaction below.
   paymentMethod: string;
   paymentProofUrl?: string;
 }
@@ -127,31 +126,17 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         throw new Error("STORE_DISABLED");
       }
 
-      // Per #110 (store toggle): when the admin has enabled
-      // `useBookingPaymentMethods`, the store inherits the
-      // enabled methods from `settings/hotelConfig.paymentMethods[]`
-      // (filtered to `isEnabled: true`, excluding `pay-at-hotel`).
-      // The 2 store-specific methods (`cod` + `add-to-bill`) are
-      // always appended. The de-duped list is computed at read
-      // time by `getEffectiveStorePaymentMethods` in
-      // `shared/utils/storePaymentMethods.ts` — no
-      // denormalization, no migration risk when toggling.
-      // Reading `hotelConfig` inside the transaction (rather
-      // than before) keeps the allowlist in sync with any
-      // concurrent admin edits.
+      // Store payment methods now come from the single Payment
+      // Methods list (`settings/hotelConfig.paymentMethods[]`).
+      // Reading `hotelConfig` inside the transaction keeps the
+      // allowlist in sync with any concurrent admin edits.
       const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
       const hotelConfigDoc = await transaction.get(hotelConfigRef);
       const hotelConfigData = hotelConfigDoc.exists ? hotelConfigDoc.data() : null;
-      const bookingMethods = Array.isArray(hotelConfigData?.paymentMethods)
+      const paymentMethods = Array.isArray(hotelConfigData?.paymentMethods)
         ? hotelConfigData.paymentMethods
         : [];
-      const effectiveMethods = getEffectiveStorePaymentMethods(
-        {
-          useBookingPaymentMethods: storeConfig.useBookingPaymentMethods === true,
-          paymentMethods: Array.isArray(storeConfig.paymentMethods) ? storeConfig.paymentMethods : []
-        },
-        bookingMethods
-      );
+      const effectiveMethods = getEffectiveStorePaymentMethods(paymentMethods);
       const effectiveSet = new Set<string>(effectiveMethods.map((m) => m.method));
       if (!effectiveSet.has(body.paymentMethod)) {
         throw new Error("PAYMENT_METHOD_DISABLED");
