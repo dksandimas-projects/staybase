@@ -78,6 +78,8 @@ async function seedHotelConfig() {
         accountNumber: "0917-000-0000",
         qrUrl: "",
         isEnabled: true,
+        showInStore: true,
+        showInCorporate: true,
       },
       {
         method: "paypal",
@@ -86,6 +88,38 @@ async function seedHotelConfig() {
         accountNumber: "",
         qrUrl: "",
         isEnabled: true,
+        showInStore: true,
+        showInCorporate: false,
+      },
+      {
+        method: "pay-at-hotel",
+        label: "Pay at Hotel",
+        accountName: "",
+        accountNumber: "",
+        qrUrl: "",
+        isEnabled: true,
+        showInStore: false,
+        showInCorporate: false,
+      },
+      {
+        method: "cod",
+        label: "Cash on Delivery",
+        accountName: "",
+        accountNumber: "",
+        qrUrl: "",
+        isEnabled: false,
+        showInStore: true,
+        showInCorporate: false,
+      },
+      {
+        method: "add-to-bill",
+        label: "Add to Room Bill",
+        accountName: "",
+        accountNumber: "",
+        qrUrl: "",
+        isEnabled: false,
+        showInStore: true,
+        showInCorporate: false,
       },
     ],
     payAtHotelEnabled: true,
@@ -208,6 +242,9 @@ async function seedStoreConfig() {
   await setDoc("settings", "storeConfig", {
     isEnabled: false,
     lowStockThreshold: 5,
+    // Legacy fields retained only so older deployments can be
+    // inspected after seeding. Store checkout uses
+    // settings/hotelConfig.paymentMethods[].showInStore.
     paymentMethods: [
       { method: "cod", label: "Cash on Delivery", qrUrl: "", accountInfo: "", isEnabled: true },
       { method: "add-to-bill", label: "Add to Bill", qrUrl: "", accountInfo: "", isEnabled: true },
@@ -219,11 +256,6 @@ async function seedStoreConfig() {
         isEnabled: true,
       },
     ],
-    // Per #110 (store toggle): when `true`, the store inherits
-    // the enabled methods from `settings/hotelConfig.paymentMethods[]`
-    // (filtered by `getEffectiveStorePaymentMethods` in
-    // `shared/utils/storePaymentMethods.ts`). Default `false`
-    // preserves the legacy 3-method UX exactly.
     useBookingPaymentMethods: false,
     updatedAt: now,
   });

@@ -31,8 +31,8 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 - [x] Edit item modal — same fields as add
 - [x] Delete item — confirmation prompt ("Orders referencing this item will not be affected")
 - [x] Enable/disable store globally — toggle at top of Store settings tab
-- [x] **Store payment methods** — single source of truth via `useBookingPaymentMethods` toggle (default OFF). When OFF, the 3 hardcoded methods (`cod`, `add-to-bill`, `gcash`) are configured on this tab with per-method enable toggles. When ON, the store inherits the enabled methods from `settings/hotelConfig.paymentMethods[]` (filtered to `isEnabled: true`, excluding `pay-at-hotel`). The de-duped, source-tagged list is computed at read time by `getEffectiveStorePaymentMethods` in `shared/utils/storePaymentMethods.ts` — no denormalization, no migration risk when toggling. See `plan/features/SETTINGS.md §11 Store → §Store Payment Methods` for the full spec.
-- [x] GCash QR URL and account info for store payments (only used when toggle is OFF; ignored when ON)
+- [x] **Store payment methods** — single source of truth is Settings → Payment Methods (`settings/hotelConfig.paymentMethods[]`). Store visibility is controlled per method via `showInStore`; `cod` and `add-to-bill` are backfilled into the main list as store-only methods. The Store tab only links to the Payment Methods tab and does not own a second payment-method editor.
+- [x] Online payment QR/account info for store payments comes from the canonical payment method entry.
 
 ### Data & Logic Checklist
 - [x] `addDoc` / `updateDoc` / soft-delete on `storeItems` collection

@@ -263,7 +263,7 @@ export type UnsupportedPaymentMethod = (typeof UNSUPPORTED_PAYMENT_METHODS)[numb
 // line of defense in case a future code path calls the function
 // directly. To remove the protection, edit this list AND update
 // `plan/features/SETTINGS.md §Payment Methods → Delete`.
-export const PROTECTED_PAYMENT_METHODS = ["pay-at-hotel"] as const;
+export const PROTECTED_PAYMENT_METHODS = ["pay-at-hotel", "add-to-bill"] as const;
 
 export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
 
@@ -296,4 +296,3 @@ export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // visitors but makes admin edits reflect on a parallel guest tab
 // in real time.
 export const PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
-

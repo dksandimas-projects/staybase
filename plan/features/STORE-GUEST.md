@@ -33,10 +33,10 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Cart — add/remove items, quantity selector per item, running total
 - [x] Checkout panel:
   - [x] Order summary (items, quantities, total)
-  - [x] Payment method selector — options sourced from `getEffectiveStorePaymentMethods(storeConfig, hotelConfig.paymentMethods)` in `shared/utils/storePaymentMethods.ts`. When the admin's `useBookingPaymentMethods` toggle is OFF (default), the 3 hardcoded methods (`cod`, `add-to-bill`, `gcash`) are shown. When ON, the list is the union of the 2 store-specific methods + the enabled booking methods (excluding `pay-at-hotel`).
+  - [x] Payment method selector — options sourced from `getEffectiveStorePaymentMethods(hotelConfig.paymentMethods)` in `shared/utils/storePaymentMethods.ts`. Settings → Payment Methods is the single edit surface; methods appear in the in-room store when `showInStore !== false`, except `pay-at-hotel` which is always excluded because `add-to-bill` is the store folio option.
   - [x] CoD: no extra input needed
   - [x] Add to Bill: note "This will be added to your room bill — payment collected at checkout"
-  - [x] Any non-`cod`/non-`add-to-bill` method (GCash from the legacy 3-method set, or any inherited booking method): show the configured QR + account name + account number + screenshot upload field. The same generic UI renders for every "online" method.
+  - [x] Any non-`cod`/non-`add-to-bill` method: show the configured QR + account name + account number + screenshot upload field. The same generic UI renders for every "online" method.
 - [x] Place Order button (primary color)
 - [x] Order confirmation — order reference number, estimated delivery note, "Track your order" link
 - [x] Order status tracker — shows current status of most recent order (Placed → Confirmed → Out for Delivery → Delivered)
@@ -54,7 +54,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Order confirmation message: `addDoc` to `intercoms/{roomId}/messages` with `isStoreOrder: true`, styled summary of items ordered
 - [x] Cancel order: API route sets status to `"cancelled"` — only allowed when `status === "placed"` and room/order ref match
 - [x] Order status refresh: API route returns guest-safe `status` only when room/order ref match; intercom tracker polls while order is active
-- [x] Payment methods for store fetched from `getEffectiveStorePaymentMethods(storeConfig, hotelConfig.paymentMethods)` — see `shared/utils/storePaymentMethods.ts` and `plan/features/SETTINGS.md §11 Store → §Store Payment Methods`. The helper also filters by the per-method `showInStore` flag (per #111) — methods where the admin has explicitly set `showInStore: false` are excluded from the store checkout. Pre-#111 methods are treated as `showInStore: true` (permissive read).
+- [x] Payment methods for store fetched from `getEffectiveStorePaymentMethods(hotelConfig.paymentMethods)` — see `shared/utils/storePaymentMethods.ts` and `plan/features/SETTINGS.md §11 Store → §Store Payment Methods`. The helper filters by the per-method `showInStore` flag (per #111) — methods where the admin has explicitly set `showInStore: false` are excluded from the store checkout. Pre-#111 methods are treated as `showInStore: true` (permissive read), and `pay-at-hotel` is excluded.
 
 ## Edge Cases & States
 

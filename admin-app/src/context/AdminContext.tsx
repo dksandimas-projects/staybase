@@ -2339,13 +2339,50 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // few KB of dead data are harmless. The migration is gated by a
   // ref so it runs at most once per session and is idempotent.
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>(() => [
-    { method: "gcash", label: "GCash", accountName: "Spark Inn Hotel Corp", accountNumber: "0917-000-0000", qrUrl: "", isEnabled: true },
-    { method: "bank", label: "Bank Transfer", accountName: "BDO", accountNumber: "00-000-000", qrUrl: "", isEnabled: true },
-    { method: "paypal", label: "PayPal", accountName: "paypal@sparkinn.com", accountNumber: "", qrUrl: "", isEnabled: true },
-    { method: "pay-at-hotel", label: "Pay at Hotel", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }
+    { method: "gcash", label: "GCash", accountName: "Spark Inn Hotel Corp", accountNumber: "0917-000-0000", qrUrl: "", isEnabled: true, showInStore: true, showInCorporate: true },
+    { method: "bank", label: "Bank Transfer", accountName: "BDO", accountNumber: "00-000-000", qrUrl: "", isEnabled: true, showInStore: true, showInCorporate: true },
+    { method: "paypal", label: "PayPal", accountName: "paypal@sparkinn.com", accountNumber: "", qrUrl: "", isEnabled: true, showInStore: true, showInCorporate: false },
+    { method: "pay-at-hotel", label: "Pay at Hotel", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true, showInStore: false, showInCorporate: false },
+    { method: "cod", label: "Cash on Delivery", accountName: "", accountNumber: "", qrUrl: "", isEnabled: false, showInStore: true, showInCorporate: false },
+    { method: "add-to-bill", label: "Add to Room Bill", accountName: "", accountNumber: "", qrUrl: "", isEnabled: false, showInStore: true, showInCorporate: false }
   ]);
 
   const hasMigratedPaymentMethodsRef = useRef(false);
+
+  const normalizePaymentMethodConfig = (entry: any): PaymentMethodConfig => {
+    const method = typeof entry?.method === "string" ? entry.method.trim() : "";
+    const label = typeof entry?.label === "string" && entry.label.trim() ? entry.label.trim() : method;
+    const accountInfo = typeof entry?.accountInfo === "string" ? entry.accountInfo : "";
+    const explicitName = typeof entry?.accountName === "string" ? entry.accountName : "";
+    const explicitNumber = typeof entry?.accountNumber === "string" ? entry.accountNumber : "";
+    let accountName = explicitName;
+    let accountNumber = explicitNumber;
+    if (!explicitName && !explicitNumber && accountInfo) {
+      const [firstLine, ...rest] = accountInfo.split("\n");
+      accountName = (firstLine || "").trim();
+      accountNumber = rest.join("\n").trim();
+    }
+    return {
+      method,
+      label,
+      accountName,
+      accountNumber,
+      qrUrl: typeof entry?.qrUrl === "string" ? entry.qrUrl : "",
+      isEnabled: entry?.isEnabled !== false,
+      showInStore: typeof entry?.showInStore === "boolean"
+        ? entry.showInStore
+        : method === "pay-at-hotel"
+          ? false
+          : method === "cod" || method === "add-to-bill"
+            ? true
+            : undefined,
+      showInCorporate: typeof entry?.showInCorporate === "boolean"
+        ? entry.showInCorporate
+        : method === "pay-at-hotel" || method === "cod" || method === "add-to-bill"
+          ? false
+          : undefined
+    };
+  };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -2354,30 +2391,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     const next = raw.paymentMethods;
     const legacy = raw.bookingPaymentMethods;
     if (!Array.isArray(next) && Array.isArray(legacy)) {
-      const reshaped: PaymentMethodConfig[] = (legacy as any[]).map((entry) => {
-        const method = typeof entry?.method === "string" ? entry.method : "";
-        const label = typeof entry?.label === "string" && entry.label ? entry.label : method;
-        const accountInfo = typeof entry?.accountInfo === "string" ? entry.accountInfo : "";
-        // Split accountInfo into name (first line) + number (rest).
-        // If `accountName` is already set on the entry prefer it.
-        const explicitName = typeof entry?.accountName === "string" ? entry.accountName : "";
-        const explicitNumber = typeof entry?.accountNumber === "string" ? entry.accountNumber : "";
-        let accountName = explicitName;
-        let accountNumber = explicitNumber;
-        if (!explicitName && !explicitNumber && accountInfo) {
-          const [firstLine, ...rest] = accountInfo.split("\n");
-          accountName = (firstLine || "").trim();
-          accountNumber = rest.join("\n").trim();
-        }
-        return {
-          method,
-          label,
-          accountName,
-          accountNumber,
-          qrUrl: typeof entry?.qrUrl === "string" ? entry.qrUrl : "",
-          isEnabled: entry?.isEnabled !== false
-        };
-      });
+      const reshaped: PaymentMethodConfig[] = (legacy as any[]).map(normalizePaymentMethodConfig);
       hasMigratedPaymentMethodsRef.current = true;
       setPaymentMethods(reshaped);
       // Write the new shape. The legacy `bookingPaymentMethods` key
@@ -2386,16 +2400,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (Array.isArray(next)) {
-      setPaymentMethods(
-        (next as any[]).map((entry) => ({
-          method: typeof entry?.method === "string" ? entry.method : "",
-          label: typeof entry?.label === "string" && entry.label ? entry.label : (entry?.method || ""),
-          accountName: typeof entry?.accountName === "string" ? entry.accountName : "",
-          accountNumber: typeof entry?.accountNumber === "string" ? entry.accountNumber : "",
-          qrUrl: typeof entry?.qrUrl === "string" ? entry.qrUrl : "",
-          isEnabled: entry?.isEnabled !== false
-        }))
-      );
+      setPaymentMethods((next as any[]).map(normalizePaymentMethodConfig));
       hasMigratedPaymentMethodsRef.current = true;
     }
   }, [hotelConfig, currentUser, updateSettings]);
@@ -2437,7 +2442,31 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       accountName: "",
       accountNumber: "",
       qrUrl: "",
-      isEnabled: true
+      isEnabled: true,
+      showInStore: false,
+      showInCorporate: false
+    },
+    "add-to-bill": {
+      method: "add-to-bill",
+      label: "Add to Room Bill",
+      accountName: "",
+      accountNumber: "",
+      qrUrl: "",
+      isEnabled: false,
+      showInStore: true,
+      showInCorporate: false
+    }
+  };
+  const STORE_PAYMENT_BACKFILL_DEFAULTS: Record<string, PaymentMethodConfig> = {
+    cod: {
+      method: "cod",
+      label: "Cash on Delivery",
+      accountName: "",
+      accountNumber: "",
+      qrUrl: "",
+      isEnabled: false,
+      showInStore: true,
+      showInCorporate: false
     }
   };
   useEffect(() => {
@@ -2446,19 +2475,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     const raw = (hotelConfig as Record<string, unknown>) || {};
     const persisted = raw.paymentMethods;
     if (!Array.isArray(persisted)) return; // wait for the Firestore snapshot
-    const missing = PROTECTED_PAYMENT_METHODS.filter(
+    const missingProtected = PROTECTED_PAYMENT_METHODS.filter(
       (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
     );
-    if (missing.length === 0) {
+    const missingStore = Object.keys(STORE_PAYMENT_BACKFILL_DEFAULTS).filter(
+      (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
+    );
+    if (missingProtected.length === 0 && missingStore.length === 0) {
       hasBackfilledProtectedPaymentMethodsRef.current = true;
       return;
     }
     const next = [
       ...persisted,
-      ...missing.map((key) => BACKFILL_DEFAULTS[key])
+      ...missingProtected.map((key) => BACKFILL_DEFAULTS[key]),
+      ...missingStore.map((key) => STORE_PAYMENT_BACKFILL_DEFAULTS[key])
     ];
     hasBackfilledProtectedPaymentMethodsRef.current = true;
-    setPaymentMethods(next as PaymentMethodConfig[]);
+    setPaymentMethods((next as any[]).map(normalizePaymentMethodConfig));
     void updateSettings("hotelConfig", { paymentMethods: next });
   }, [hotelConfig, currentUser, updateSettings]);
 
@@ -2479,7 +2512,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       accountName: config.accountName.trim(),
       accountNumber: config.accountNumber.trim(),
       qrUrl: config.qrUrl,
-      isEnabled: config.isEnabled
+      isEnabled: config.isEnabled,
+      showInStore: config.showInStore,
+      showInCorporate: config.showInCorporate
     };
     if (!normalized.method) {
       notify.error("Cannot add payment method", "Method key is required.");

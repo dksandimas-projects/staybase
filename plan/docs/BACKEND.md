@@ -182,7 +182,7 @@ Single document. See `plan/docs/TYPES.md` for full type.
 
 Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings → Hotel Info; each falls back to the deploy-time `hotel.config.ts` value when empty in the public hook): `hotelName`, `address`, `contactEmail`, `contactPhone`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
 
-> **`paymentMethods[]`** — fully dynamic booking payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, and `isEnabled` flag. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
+> **`paymentMethods[]`** — fully dynamic payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, `isEnabled`, `showInStore`, and `showInCorporate` flags. `isEnabled` controls the regular booking flow; `showInStore` controls the in-room store; `showInCorporate` controls corporate personal-pay. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. `cod` and `add-to-bill` are store-only entries in this same list. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
 
 > **`roomTypes[]`** — array of `RoomTypeEntry` records. Each entry owns its photos, occupancy cap, rate matrix, bed description, and amenities; rooms reference the type via the `type` field and inherit these properties. See `plan/docs/TYPES.md §RoomType` for the full shape. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`). The full edit surface is the Settings → Room Types table; see `plan/features/SETTINGS.md §Room Types` for the add / edit / photos / delete flow.
 
@@ -382,8 +382,8 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `guestName` | string | From intercom name prompt |
 | `items` | `{itemId, name, price, quantity}[]` | Snapshot of items at order time |
 | `totalAmount` | number | Computed at order creation |
-| `paymentMethod` | string | `"cod"` \| `"add-to-bill"` \| `"gcash"` |
-| `paymentProofUrl` | string | Firebase Storage URL (GCash screenshot, if applicable) |
+| `paymentMethod` | string | Open key from `settings/hotelConfig.paymentMethods[]` where `showInStore !== false`; `pay-at-hotel` excluded |
+| `paymentProofUrl` | string | Firebase Storage URL (required for any non-`cod`/non-`add-to-bill` method) |
 | `status` | string | `"placed"` \| `"confirmed"` \| `"out-for-delivery"` \| `"delivered"` \| `"cancelled"` |
 | `stockRestoredAt` | timestamp \| null | Set once when reserved stock is restored after a placed order cancellation |
 | `isBilled` | boolean | `true` if added to booking bill |
@@ -420,7 +420,8 @@ Single document.
 |---|---|---|
 | `isEnabled` | boolean | Global store on/off toggle |
 | `lowStockThreshold` | number | Default 5 — triggers low stock alert in reports |
-| `paymentMethods` | `{method, label, qrUrl, accountInfo, isEnabled}[]` | CoD, Add to Bill, GCash |
+| `paymentMethods` | `{method, label, qrUrl, accountInfo, isEnabled}[]` | Legacy only — ignored by checkout; canonical methods live on `settings/hotelConfig.paymentMethods[]` |
+| `useBookingPaymentMethods` | boolean | Legacy only — ignored by checkout |
 
 ---
 

@@ -336,12 +336,12 @@ PaymentMethodConfig {
   // method from that surface. The optional Zod fields and
   // permissive TypeScript reads let pre-#111 entries
   // continue to work without a migration.
-  showInStore?: boolean   // per #111: visibility on the IN-ROOM STORE surface. Only effective when `storeConfig.useBookingPaymentMethods === true`. Filtered by `getEffectiveStorePaymentMethods` in `shared/utils/storePaymentMethods.ts`.
+  showInStore?: boolean   // per #111: visibility on the IN-ROOM STORE surface. Filtered by `getEffectiveStorePaymentMethods` in `shared/utils/storePaymentMethods.ts`.
   showInCorporate?: boolean // per #111: visibility on the CORPORATE BOOKING personal-pay surface. The company charge-back path is unaffected. Filtered by `CorporateBookingPage.tsx`.
 }
 // The list of method keys that are protected from admin-side
 // deletion is `PROTECTED_PAYMENT_METHODS` in `shared/constants`
-// (currently `["pay-at-hotel"]`). Protected entries still appear
+// (currently `["pay-at-hotel", "add-to-bill"]`). Protected entries still appear
 // in the UI (with a blue "Required" pill and no delete button)
 // and remain subject to the per-method `isEnabled` toggle. See
 // `plan/features/SETTINGS.md §Payment Methods → Delete` for the
@@ -549,11 +549,10 @@ StoreOrderItem {
 }
 
 StoreOrderStatus = "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled"
-// `paymentMethod` is the open string key the admin configured
-// for the store. The hardcoded 3-key union below is the legacy
-// default; when `StoreConfig.useBookingPaymentMethods === true`
-// the key may be any enabled booking method (GCash, Maya,
-// PayPal, etc.). The server-side allowlist is computed by
+// `paymentMethod` is the open string key from
+// `settings/hotelConfig.paymentMethods[]`. The in-room store
+// filters that list by `showInStore !== false`, excluding
+// `pay-at-hotel`. The server-side allowlist is computed by
 // `getEffectiveStorePaymentMethods(...)` in
 // `shared/utils/storePaymentMethods.ts` — no hardcoded list.
 StorePaymentMethod = "cod" | "add-to-bill" | "gcash" | string
@@ -585,6 +584,9 @@ StoreOrder {
 }
 
 StorePaymentMethodConfig {
+  // Legacy shape retained only for old `settings/storeConfig`
+  // documents. New store payment configuration lives in
+  // `settings/hotelConfig.paymentMethods[]`.
   method: string
   label: string
   qrUrl: string
@@ -595,15 +597,8 @@ StorePaymentMethodConfig {
 StoreConfig {
   isEnabled: boolean
   lowStockThreshold: number
+  // Legacy fields. Checkout ignores them.
   paymentMethods: StorePaymentMethodConfig[]
-  // Per #110 (store toggle). When `true`, the store inherits
-  // the enabled methods from `settings/hotelConfig.paymentMethods[]`
-  // (filtered to `isEnabled: true`, excluding `pay-at-hotel`).
-  // The 2 store-specific methods (`cod` + `add-to-bill`) are
-  // always appended. The de-duped list is computed at read time
-  // by `getEffectiveStorePaymentMethods` in
-  // `shared/utils/storePaymentMethods.ts`. Default `false`
-  // preserves the legacy 3-method UX exactly.
   useBookingPaymentMethods: boolean
 }
 ```

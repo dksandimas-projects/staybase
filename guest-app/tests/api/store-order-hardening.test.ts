@@ -127,20 +127,19 @@ describe("handleCreateStoreOrder (H4)", () => {
       status: "checked-in",
       guestEmail: "guest@example.test"
     };
-    // Per #110 (store toggle): the create handler now reads
-    // `settings/storeConfig` and computes the effective payment
-    // method list via `getEffectiveStorePaymentMethods`. The
-    // legacy 3-method default is set up here so the test's
-    // `paymentMethod: "cod"` orders pass the allowlist check.
+    // Store checkout payment methods are sourced from
+    // `settings/hotelConfig.paymentMethods[]` and filtered by
+    // `showInStore`.
+    mockSettings["hotelConfig"] = {
+      paymentMethods: [
+        { method: "cod", label: "Cash on Delivery", isEnabled: false, showInStore: true, showInCorporate: false, qrUrl: "", accountName: "", accountNumber: "" },
+        { method: "add-to-bill", label: "Add to Bill", isEnabled: false, showInStore: true, showInCorporate: false, qrUrl: "", accountName: "", accountNumber: "" },
+        { method: "gcash", label: "GCash", isEnabled: true, showInStore: true, showInCorporate: true, qrUrl: "", accountName: "", accountNumber: "" }
+      ]
+    };
     mockSettings["storeConfig"] = {
       isEnabled: true,
-      lowStockThreshold: 5,
-      paymentMethods: [
-        { method: "cod", label: "Cash on Delivery", isEnabled: true, qrUrl: "", accountInfo: "" },
-        { method: "add-to-bill", label: "Add to Bill", isEnabled: true, qrUrl: "", accountInfo: "" },
-        { method: "gcash", label: "GCash", isEnabled: true, qrUrl: "", accountInfo: "" }
-      ],
-      useBookingPaymentMethods: false
+      lowStockThreshold: 5
     };
   });
 
