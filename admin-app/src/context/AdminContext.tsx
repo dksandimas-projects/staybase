@@ -537,50 +537,57 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [rooms, setRooms] = useState<Room[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const roomsRef = collection(db, "rooms");
-    const unsubscribe = onSnapshot(roomsRef, (snapshot) => {
-      const roomsData: Room[] = [];
-      const parseDateString = (val: any) => {
-        if (!val) return null;
-        if (typeof val.toDate === "function") {
-          return val.toDate().toISOString().split("T")[0];
-        }
-        if (val instanceof Date) {
-          return val.toISOString().split("T")[0];
-        }
-        if (typeof val === "string") {
-          return val.split("T")[0];
-        }
-        return null;
-      };
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        roomsData.push({
-          id: doc.id,
-          name: data.name || "",
-          roomNumber: data.roomNumber || "",
-          type: data.type || "",
-          isActive: data.isActive !== false,
-          status: data.status || "available",
-          housekeepingStatus: data.housekeepingStatus || "clean",
-          blockedFrom: parseDateString(data.blockedFrom),
-          blockedTo: parseDateString(data.blockedTo),
-          blockReason: data.blockReason || "",
-          remarks: data.remarks || "",
-          qrToken: data.qrToken || ""
+    const unsubscribe = onSnapshot(
+      roomsRef,
+      (snapshot) => {
+        const roomsData: Room[] = [];
+        const parseDateString = (val: any) => {
+          if (!val) return null;
+          if (typeof val.toDate === "function") {
+            return val.toDate().toISOString().split("T")[0];
+          }
+          if (val instanceof Date) {
+            return val.toISOString().split("T")[0];
+          }
+          if (typeof val === "string") {
+            return val.split("T")[0];
+          }
+          return null;
+        };
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          roomsData.push({
+            id: doc.id,
+            name: data.name || "",
+            roomNumber: data.roomNumber || "",
+            type: data.type || "",
+            isActive: data.isActive !== false,
+            status: data.status || "available",
+            housekeepingStatus: data.housekeepingStatus || "clean",
+            blockedFrom: parseDateString(data.blockedFrom),
+            blockedTo: parseDateString(data.blockedTo),
+            blockReason: data.blockReason || "",
+            remarks: data.remarks || "",
+            qrToken: data.qrToken || ""
+          });
         });
-      });
 
-      // Consistent natural sort by room number
-      roomsData.sort((a, b) =>
-        a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
-      );
+        // Consistent natural sort by room number
+        roomsData.sort((a, b) =>
+          a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
+        );
 
-      setRooms(roomsData);
-    });
+        setRooms(roomsData);
+      },
+      (error) => {
+        console.error("Error listening to rooms collection:", error);
+      }
+    );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const toggleHousekeepingStatus = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
@@ -1323,33 +1330,40 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // mock that hid all real members from the admin UI. Cleanup on unmount.
   const [members, setMembers] = useState<Member[]>([]);
   useEffect(() => {
+    if (!currentUser) return;
     const membersRef = collection(db, "members");
-    const unsubscribe = onSnapshot(membersRef, (snapshot) => {
-      const membersData: Member[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        membersData.push({
-          id: doc.id,
-          memberNumber: data.memberNumber || "",
-          fullName: data.fullName || "",
-          email: data.email || "",
-          phone: data.phone || "",
-          photoUrl: data.photoUrl || "",
-          authProvider: data.authProvider || "email",
-          isMember: data.isMember !== false,
-          memberSince: data.memberSince || "",
-          rewardsPoints: data.rewardsPoints || 0,
-          tier: data.tier || "standard",
-          isActive: data.isActive !== false,
-          pointsHistory: data.pointsHistory || []
+    const unsubscribe = onSnapshot(
+      membersRef,
+      (snapshot) => {
+        const membersData: Member[] = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          membersData.push({
+            id: doc.id,
+            memberNumber: data.memberNumber || "",
+            fullName: data.fullName || "",
+            email: data.email || "",
+            phone: data.phone || "",
+            photoUrl: data.photoUrl || "",
+            authProvider: data.authProvider || "email",
+            isMember: data.isMember !== false,
+            memberSince: data.memberSince || "",
+            rewardsPoints: data.rewardsPoints || 0,
+            tier: data.tier || "standard",
+            isActive: data.isActive !== false,
+            pointsHistory: data.pointsHistory || []
+          });
         });
-      });
-      // Sort by member number for stable display
-      membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
-      setMembers(membersData);
-    });
+        // Sort by member number for stable display
+        membersData.sort((a, b) => a.memberNumber.localeCompare(b.memberNumber));
+        setMembers(membersData);
+      },
+      (error) => {
+        console.error("Error listening to members collection:", error);
+      }
+    );
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const updateMemberPoints = (memberId: string, amount: number, type: PointsLog["type"], reason: string) => {
     setMembers(prev => prev.map(mem => {
