@@ -2496,9 +2496,22 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [hotelConfig, currentUser, updateSettings]);
 
   const persistPaymentMethods = async (next: PaymentMethodConfig[]) => {
-    setPaymentMethods(next);
+    const sanitized = next.map((method) => {
+      const clean: PaymentMethodConfig = {
+        method: method.method,
+        label: method.label,
+        accountName: method.accountName,
+        accountNumber: method.accountNumber,
+        qrUrl: method.qrUrl,
+        isEnabled: method.isEnabled
+      };
+      if (typeof method.showInStore === "boolean") clean.showInStore = method.showInStore;
+      if (typeof method.showInCorporate === "boolean") clean.showInCorporate = method.showInCorporate;
+      return clean;
+    });
+    setPaymentMethods(sanitized);
     try {
-      await updateSettings("hotelConfig", { paymentMethods: next });
+      await updateSettings("hotelConfig", { paymentMethods: sanitized });
     } catch (error) {
       console.error("Failed to save payment methods:", error);
       notify.error("Failed to save payment methods", error instanceof Error ? error.message : "Unknown error");
