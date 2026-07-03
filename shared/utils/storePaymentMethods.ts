@@ -55,6 +55,11 @@ export interface StorePaymentMethodLike {
   accountInfo?: string;
   accountName?: string;
   accountNumber?: string;
+  // Per #111 (per-method surface toggles). Both default to
+  // `true` when omitted — pre-#111 entries are treated as
+  // "visible on all surfaces" without an explicit migration.
+  showInStore?: boolean;
+  showInCorporate?: boolean;
 }
 export interface StoreConfigLike {
   useBookingPaymentMethods?: boolean;
@@ -99,9 +104,22 @@ export function getEffectiveStorePaymentMethods(
   const useBooking = storeConfig?.useBookingPaymentMethods === true;
   const safeBookingMethods = Array.isArray(bookingMethods) ? bookingMethods : [];
 
+  // Per #111 (per-method surface toggles): a method is only
+  // eligible for the store checkout when its per-method
+  // `showInStore` flag is not explicitly `false`. The field
+  // defaults to `true` when missing (pre-#111 entries without
+  // the flag are treated as "visible"). The store-specific
+  // methods (`cod` + `add-to-bill`) are also subject to this
+  // check so the admin can hide "Cash on Delivery" or "Add to
+  // Bill" from the store if needed.
+  const isVisibleInStore = (m: StorePaymentMethodLike) => m.showInStore !== false;
+
   if (!useBooking) {
     return storeMethods
-      .filter((m): m is StorePaymentMethodLike => !!m && typeof m.method === "string" && m.isEnabled !== false)
+      .filter(
+        (m): m is StorePaymentMethodLike =>
+          !!m && typeof m.method === "string" && m.isEnabled !== false && isVisibleInStore(m)
+      )
       .map((m) => ({
         method: m.method,
         label: m.label || m.method,
@@ -119,7 +137,8 @@ export function getEffectiveStorePaymentMethods(
         !!m &&
         typeof m.method === "string" &&
         storeSpecificKeys.has(m.method) &&
-        m.isEnabled !== false
+        m.isEnabled !== false &&
+        isVisibleInStore(m)
     )
     .map((m) => ({
       method: m.method,
@@ -138,7 +157,8 @@ export function getEffectiveStorePaymentMethods(
         typeof m.method === "string" &&
         m.method !== "pay-at-hotel" &&
         !seenMethods.has(m.method) &&
-        m.isEnabled !== false
+        m.isEnabled !== false &&
+        isVisibleInStore(m)
     )
     .map((m) => ({
       method: m.method,

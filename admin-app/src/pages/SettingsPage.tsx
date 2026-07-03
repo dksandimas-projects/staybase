@@ -302,6 +302,24 @@ function PaymentMethodsTabBody({
     void onUpdate(method, { isEnabled: !target.isEnabled });
   };
 
+  // Per #111 (per-method surface toggles): each method owns
+  // two extra boolean flags — `showInStore` and
+  // `showInCorporate` — that hide the method from those
+  // surfaces independently. Both default to `true` when
+  // missing (pre-#111 entries). The click toggles the flag
+  // and persists via the same `onUpdate` path used by the
+  // existing `isEnabled` toggle.
+  const handleToggleSurface = (
+    method: string,
+    surface: "showInStore" | "showInCorporate"
+  ) => {
+    const target = paymentMethods.find((p) => p.method === method);
+    if (!target) return;
+    const current = (target as unknown as Record<string, unknown>)[surface];
+    const next = current === false ? true : false;
+    void onUpdate(method, { [surface]: next } as Partial<PaymentMethodConfig>);
+  };
+
   const handleReorder = (method: string, direction: "up" | "down") => {
     const idx = paymentMethods.findIndex((p) => p.method === method);
     if (idx === -1) return;
@@ -507,21 +525,68 @@ function PaymentMethodsTabBody({
                   </div>
                   {/* Actions */}
                   <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                    {/* Enable toggle */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggle(pm.method)}
-                      aria-label={pm.isEnabled ? `Disable ${pm.label}` : `Enable ${pm.label}`}
-                      className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                        pm.isEnabled ? "bg-primary" : "bg-gray-200"
-                      }`}
-                    >
-                      <div
-                        className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                          pm.isEnabled ? "translate-x-5" : "translate-x-0"
+                    {/* Per #111 (per-method surface toggles):
+                        three independent switches control which
+                        surfaces the method is shown on. The leftmost
+                        switch is the existing `isEnabled` (the
+                        regular-booking surface). The next two pills
+                        toggle `showInStore` and `showInCorporate`.
+                        Each click persists via `onUpdate` so the
+                        UI is optimistic + the Firestore doc is
+                        updated in place. The pills use a clear
+                        color (orange = on, gray = off) so admins
+                        can see the current surface availability
+                        at a glance. */}
+                    <div className="flex items-center gap-1.5 mr-1">
+                      {/* Booking (existing enable toggle) */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggle(pm.method)}
+                        title={pm.isEnabled ? "Visible on regular booking" : "Hidden from regular booking"}
+                        aria-label={pm.isEnabled ? `Hide ${pm.label} from regular booking` : `Show ${pm.label} on regular booking`}
+                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                          pm.isEnabled ? "bg-primary" : "bg-gray-200"
                         }`}
-                      />
-                    </button>
+                      >
+                        <div
+                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                            pm.isEnabled ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                      {/* In-store surface pill */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSurface(pm.method, "showInStore")}
+                        title={pm.showInStore !== false ? "Visible on in-room store" : "Hidden from in-room store"}
+                        aria-label={pm.showInStore !== false ? `Hide ${pm.label} from in-room store` : `Show ${pm.label} on in-room store`}
+                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                          pm.showInStore !== false ? "bg-primary" : "bg-gray-200"
+                        }`}
+                      >
+                        <div
+                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                            pm.showInStore !== false ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                      {/* Corporate surface pill */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSurface(pm.method, "showInCorporate")}
+                        title={pm.showInCorporate !== false ? "Visible on corporate booking" : "Hidden from corporate booking"}
+                        aria-label={pm.showInCorporate !== false ? `Hide ${pm.label} from corporate booking` : `Show ${pm.label} on corporate booking`}
+                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                          pm.showInCorporate !== false ? "bg-primary" : "bg-gray-200"
+                        }`}
+                      >
+                        <div
+                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                            pm.showInCorporate !== false ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
                     {/* Reorder up */}
                     <button
                       type="button"

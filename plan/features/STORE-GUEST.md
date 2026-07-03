@@ -54,7 +54,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Order confirmation message: `addDoc` to `intercoms/{roomId}/messages` with `isStoreOrder: true`, styled summary of items ordered
 - [x] Cancel order: API route sets status to `"cancelled"` — only allowed when `status === "placed"` and room/order ref match
 - [x] Order status refresh: API route returns guest-safe `status` only when room/order ref match; intercom tracker polls while order is active
-- [x] Payment methods for store fetched from `getEffectiveStorePaymentMethods(storeConfig, hotelConfig.paymentMethods)` — see `shared/utils/storePaymentMethods.ts` and `plan/features/SETTINGS.md §11 Store → §Store Payment Methods`
+- [x] Payment methods for store fetched from `getEffectiveStorePaymentMethods(storeConfig, hotelConfig.paymentMethods)` — see `shared/utils/storePaymentMethods.ts` and `plan/features/SETTINGS.md §11 Store → §Store Payment Methods`. The helper also filters by the per-method `showInStore` flag (per #111) — methods where the admin has explicitly set `showInStore: false` are excluded from the store checkout. Pre-#111 methods are treated as `showInStore: true` (permissive read).
 
 ## Edge Cases & States
 
