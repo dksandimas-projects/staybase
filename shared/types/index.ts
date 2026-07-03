@@ -23,6 +23,22 @@ export type PaymentMethod = "pay-at-hotel" | "gcash" | "paypal" | string;
 // for any new code, but keep this interface in sync — the two
 // declarations are mirrored (TypeScript cannot `z.infer` across the
 // shared/admin boundary without a workspace import).
+//
+// Per #111 (per-method surface toggles): each method owns three
+// independent surface toggles so the admin can hide a method from
+// one surface without removing it from the others:
+//   - `isEnabled` — controls visibility on the **regular booking**
+//     flow (`/book` Step 3). The original master toggle.
+//   - `showInStore` — controls visibility on the **in-room store**
+//     checkout (`/intercom/:roomId` Shop tab). Only effective when
+//     `storeConfig.useBookingPaymentMethods === true`; when the
+//     store uses its own 3 hardcoded methods (`cod`, `add-to-bill`,
+//     `gcash`) this flag is ignored for those three but applies to
+//     any other method that might leak in. Defaults to `true`.
+//   - `showInCorporate` — controls visibility on the **corporate
+//     booking** personal-pay selector. The company charge-back path
+//     is unaffected (it doesn't show a method picker). Defaults
+//     to `true`.
 export interface PaymentMethodConfig {
   method: string;
   label: string;
@@ -30,6 +46,8 @@ export interface PaymentMethodConfig {
   accountNumber: string;
   qrUrl: string;
   isEnabled: boolean;
+  showInStore?: boolean;
+  showInCorporate?: boolean;
 }
 
 // Per-method configuration for the in-room store ("Spark Essentials"

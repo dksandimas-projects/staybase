@@ -60,7 +60,12 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 - [ ] **Label** (text) — display name shown to guests (e.g. "GCash", "Bank Transfer", "Pay at Hotel").
 - [ ] **Account name** (text) — recipient name shown beside the QR. Leave empty for "Pay at Hotel" or methods that don't need it.
 - [ ] **Account number** (text) — for PayPal, use the PayPal email address.
-- [ ] **Enable toggle** — `isEnabled: boolean`; hidden methods are not shown to guests.
+- [ ] **Enable toggle** — `isEnabled: boolean`; hidden methods are not shown to guests. Per #111, this is now the **regular-booking** surface switch (the leftmost of the three inline pills in the row).
+- [ ] **Per-method surface pills** (per #111) — three inline pill toggles in each row control which surfaces the method is offered on:
+  - **Booking** (leftmost, the existing `isEnabled` toggle) — visibility on `/book` Step 3.
+  - **Store** — visibility on the in-room store checkout (`/intercom/:roomId` Shop tab). Only effective when `storeConfig.useBookingPaymentMethods === true`; the 3 store-specific methods (`cod`, `add-to-bill`, `gcash`) honor the flag in the legacy 3-method mode too. Persists as `showInStore: boolean`.
+  - **Corp** — visibility on the corporate booking personal-pay selector (`/corporate/book` Step 3). The company charge-back path is unaffected. Persists as `showInCorporate: boolean`.
+  - All three default to `true` when missing (pre-#111 entries are treated as "visible on all surfaces" — no migration required). Tooltip on each pill explains the surface name.
 - [ ] **QR uploader** (only on edit, not add — the new method's storage path requires a saved method key) — file input, preview, "Upload QR" / "Replace QR" / "Remove QR" buttons, status pill ("Custom override" / "No QR"), error inline. Uploads to `assets/payment-methods/{method}/{timestamp}-{filename}` in Firebase Storage. Accepts `image/png`, `image/jpeg`, `image/webp` (max 2 MB). Best-effort deletes the previous QR on replace.
 - [ ] **Pesonet warning** — inline warning when the typed method key matches `UNSUPPORTED_PAYMENT_METHODS` (case-insensitive). The Save button label flips to "I understand, save anyway" for 5 seconds; the second click persists. Schema is not hard-blocked — the friction is policy, not enforcement.
 - [ ] **Save / Cancel** — single "Save" button in the modal footer.
