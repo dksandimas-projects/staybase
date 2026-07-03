@@ -26,11 +26,11 @@ export function Footer() {
   // its own fallback, but the `||` here is belt-and-suspenders
   // for the brief moment when both are missing during a deploy
   // race).
-  const address = contact.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
-  const phone = contact.frontDeskPhone || config.frontDeskPhone;
-  const email = contact.supportEmail || config.supportEmail;
-  const facebook = contact.facebookUrl || config.facebookUrl;
-  const instagram = contact.instagramUrl || config.instagramUrl;
+  const address = contact?.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  const phone = contact?.frontDeskPhone || config.frontDeskPhone;
+  const email = contact?.supportEmail || config.supportEmail;
+  const facebook = contact?.facebookUrl || config.facebookUrl;
+  const instagram = contact?.instagramUrl || config.instagramUrl;
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
   const phoneHref = `tel:${phone.replace(/[^\d+]/g, "")}`;
   const footerLogoSrc = resolveLogo(branding.logoFooter, config.logos.white);

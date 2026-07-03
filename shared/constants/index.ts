@@ -284,7 +284,11 @@ export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 // v2 — `homepage.featuredRoomIds` renamed to
 // `homepage.featuredTypeValues`. Old cached entries are now
 // shape-incompatible and fall through to the empty state.
-export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v2";
+// v3 — added the `contact` section (Phase 11.8 PR 3). v2 entries
+// have no `contact` key at all, which crashed Footer/ContactPage/
+// PrivacyPage on `contact.address` for returning visitors with a
+// pre-existing cache.
+export const PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v3";
 export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Cross-tab cache-invalidation signal for the public site content

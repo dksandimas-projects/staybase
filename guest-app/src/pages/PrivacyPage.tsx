@@ -15,8 +15,8 @@ export function PrivacyPage() {
   // from Settings → Hotel Info. The hook value wins when set; the
   // deploy-time `hotel.config.ts` value is the safe fallback.
   const { contact } = usePublicSiteContent();
-  const dpoEmail = contact.dpoEmail || config.dpoEmail;
-  const addressLine = contact.address
+  const dpoEmail = contact?.dpoEmail || config.dpoEmail;
+  const addressLine = contact?.address
     ? contact.address
     : `${config.address.street}, ${config.address.city}, ${config.address.region}`;
 

@@ -472,11 +472,10 @@ describe("No hero fallback flash — initial state must not show the static imag
   });
 
   it("shared/constants exports the cache key + 5-minute TTL", () => {
-    // v2 — bumped from v1 because `homepage.featuredRoomIds`
-    // was renamed to `homepage.featuredTypeValues`. v1 entries
-    // are now shape-incompatible and fall through to the empty
-    // state.
-    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_KEY\s*=\s*["']publicSiteContent:v2["']/);
+    // v3 — bumped from v2 because the `contact` section was added
+    // (Phase 11.8 PR 3). v2 entries have no `contact` key and are
+    // now shape-incompatible and fall through to the empty state.
+    expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_KEY\s*=\s*["']publicSiteContent:v3["']/);
     expect(sharedConstantsSrc).toMatch(/PUBLIC_SITE_CONTENT_CACHE_TTL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
   });
 

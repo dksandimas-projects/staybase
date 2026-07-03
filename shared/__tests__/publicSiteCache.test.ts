@@ -182,7 +182,7 @@ describe("publicSiteCache module", () => {
       const mod = await import("../../shared/utils/publicSiteCache");
       // Pre-populate the content cache so we can assert the bust
       // handler clears it.
-      storage.setItem("publicSiteContent:v2", JSON.stringify({ fetchedAt: Date.now(), value: { x: 1 } }));
+      storage.setItem("publicSiteContent:v3", JSON.stringify({ fetchedAt: Date.now(), value: { x: 1 } }));
 
       const onBust = vi.fn();
       const unsubscribe = mod.subscribeToPublicSiteContentBust(onBust);
@@ -194,7 +194,7 @@ describe("publicSiteCache module", () => {
       expect(onBust).toHaveBeenCalledTimes(1);
       expect(onBust).toHaveBeenCalledWith(9876543210);
       // …and cleared the cached content.
-      expect(storage.getItem("publicSiteContent:v2")).toBeNull();
+      expect(storage.getItem("publicSiteContent:v3")).toBeNull();
 
       unsubscribe();
     });
