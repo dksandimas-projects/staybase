@@ -312,6 +312,26 @@ function PaymentMethodsTabBody({
     void onUpdate(method, { [surface]: next } as Partial<PaymentMethodConfig>);
   };
 
+  const surfaceOptions = [
+    { key: "booking", label: "Booking", icon: Globe },
+    { key: "store", label: "Store", icon: ShoppingBag },
+    { key: "corporate", label: "Corp", icon: Building2 }
+  ] as const;
+
+  const isSurfaceVisible = (pm: PaymentMethodConfig, surface: (typeof surfaceOptions)[number]["key"]) => {
+    if (surface === "booking") return pm.isEnabled;
+    if (surface === "store") return pm.showInStore !== false;
+    return pm.showInCorporate !== false;
+  };
+
+  const toggleSurface = (pm: PaymentMethodConfig, surface: (typeof surfaceOptions)[number]["key"]) => {
+    if (surface === "booking") {
+      handleToggle(pm.method);
+      return;
+    }
+    handleToggleSurface(pm.method, surface === "store" ? "showInStore" : "showInCorporate");
+  };
+
   const handleReorder = (method: string, direction: "up" | "down") => {
     const idx = paymentMethods.findIndex((p) => p.method === method);
     if (idx === -1) return;
@@ -414,9 +434,9 @@ function PaymentMethodsTabBody({
   return (
     <div className="space-y-6 text-xs">
       <div>
-        <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking Payment Methods</h3>
+        <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Payment Methods</h3>
         <p className="text-[10px] text-gray-500 mt-0.5">
-          Add, edit, and remove the payment methods shown to guests on <code>/book</code> Step 3. QR codes are uploaded once per method and rendered inline in the booking page.
+          Add payment details once, then choose where each method appears: booking, in-room store, or corporate booking. QR codes are uploaded once per method.
         </p>
       </div>
 
@@ -458,11 +478,12 @@ function PaymentMethodsTabBody({
             const armed = pendingDelete === pm.method;
             const unsupported = isUnsupportedMethod(pm.method);
             const isProtected = (PROTECTED_PAYMENT_METHODS as readonly string[]).includes(pm.method);
+            const hasAnySurface = surfaceOptions.some((surface) => isSurfaceVisible(pm, surface.key));
             return (
               <div
                 key={pm.method}
                 className={`rounded-xl border bg-white p-4 shadow-sm transition ${
-                  pm.isEnabled ? "border-gray-200" : "border-gray-200 opacity-60"
+                  hasAnySurface ? "border-gray-200" : "border-gray-200 opacity-70"
                 }`}
               >
                 <div className="grid gap-4 lg:grid-cols-[80px_1fr_auto] lg:items-center">
@@ -498,7 +519,7 @@ function PaymentMethodsTabBody({
                           Required
                         </span>
                       )}
-                      {!pm.isEnabled && (
+                      {!hasAnySurface && (
                         <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-500">
                           Hidden
                         </span>
@@ -519,67 +540,34 @@ function PaymentMethodsTabBody({
                   </div>
                   {/* Actions */}
                   <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                    {/* Per #111 (per-method surface toggles):
-                        three independent switches control which
-                        surfaces the method is shown on. The leftmost
-                        switch is the existing `isEnabled` (the
-                        regular-booking surface). The next two pills
-                        toggle `showInStore` and `showInCorporate`.
-                        Each click persists via `onUpdate` so the
-                        UI is optimistic + the Firestore doc is
-                        updated in place. The pills use a clear
-                        color (orange = on, gray = off) so admins
-                        can see the current surface availability
-                        at a glance. */}
-                    <div className="flex items-center gap-1.5 mr-1">
-                      {/* Booking (existing enable toggle) */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggle(pm.method)}
-                        title={pm.isEnabled ? "Visible on regular booking" : "Hidden from regular booking"}
-                        aria-label={pm.isEnabled ? `Hide ${pm.label} from regular booking` : `Show ${pm.label} on regular booking`}
-                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                          pm.isEnabled ? "bg-primary" : "bg-gray-200"
-                        }`}
-                      >
-                        <div
-                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                            pm.isEnabled ? "translate-x-5" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                      {/* In-store surface pill */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleSurface(pm.method, "showInStore")}
-                        title={pm.showInStore !== false ? "Visible on in-room store" : "Hidden from in-room store"}
-                        aria-label={pm.showInStore !== false ? `Hide ${pm.label} from in-room store` : `Show ${pm.label} on in-room store`}
-                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                          pm.showInStore !== false ? "bg-primary" : "bg-gray-200"
-                        }`}
-                      >
-                        <div
-                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                            pm.showInStore !== false ? "translate-x-5" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                      {/* Corporate surface pill */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleSurface(pm.method, "showInCorporate")}
-                        title={pm.showInCorporate !== false ? "Visible on corporate booking" : "Hidden from corporate booking"}
-                        aria-label={pm.showInCorporate !== false ? `Hide ${pm.label} from corporate booking` : `Show ${pm.label} on corporate booking`}
-                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                          pm.showInCorporate !== false ? "bg-primary" : "bg-gray-200"
-                        }`}
-                      >
-                        <div
-                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                            pm.showInCorporate !== false ? "translate-x-5" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
+                    <div className="mr-1 rounded-xl border border-gray-200 bg-gray-50/70 p-1">
+                      <div className="mb-1 px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                        Visible on
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {surfaceOptions.map((surface) => {
+                          const visible = isSurfaceVisible(pm, surface.key);
+                          const SurfaceIcon = surface.icon;
+                          return (
+                            <button
+                              key={surface.key}
+                              type="button"
+                              onClick={() => toggleSurface(pm, surface.key)}
+                              title={visible ? `Hide ${pm.label} from ${surface.label}` : `Show ${pm.label} on ${surface.label}`}
+                              aria-pressed={visible}
+                              aria-label={visible ? `Hide ${pm.label} from ${surface.label}` : `Show ${pm.label} on ${surface.label}`}
+                              className={`inline-flex min-h-[34px] items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-bold transition ${
+                                visible
+                                  ? "bg-primary text-white shadow-sm"
+                                  : "bg-white text-gray-500 ring-1 ring-gray-200 hover:bg-gray-50"
+                              }`}
+                            >
+                              <SurfaceIcon size={12} aria-hidden="true" />
+                              {surface.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                     {/* Reorder up */}
                     <button
