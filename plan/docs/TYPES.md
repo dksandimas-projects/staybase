@@ -326,7 +326,18 @@ PaymentMethodConfig {
   accountName: string     // recipient name shown to guests beside the QR (e.g. "Spark Inn Hotel Corp")
   accountNumber: string   // account number / PayPal email / digital wallet number
   qrUrl: string           // public Firebase Storage URL; empty string = no QR uploaded
-  isEnabled: boolean      // when false, the method is hidden from the guest booking page
+  isEnabled: boolean      // per #111: visibility on the REGULAR BOOKING surface (`/book` Step 3). When false, the method is hidden from the guest booking page.
+  // Per #111 (per-method surface toggles). Each method owns
+  // three independent visibility switches — `isEnabled` for
+  // the regular booking flow, and these two optional flags
+  // for the in-room store and the corporate booking. All
+  // three default to "visible" when the flag is missing or
+  // explicitly `true`; only an explicit `false` hides the
+  // method from that surface. The optional Zod fields and
+  // permissive TypeScript reads let pre-#111 entries
+  // continue to work without a migration.
+  showInStore?: boolean   // per #111: visibility on the IN-ROOM STORE surface. Only effective when `storeConfig.useBookingPaymentMethods === true`. Filtered by `getEffectiveStorePaymentMethods` in `shared/utils/storePaymentMethods.ts`.
+  showInCorporate?: boolean // per #111: visibility on the CORPORATE BOOKING personal-pay surface. The company charge-back path is unaffected. Filtered by `CorporateBookingPage.tsx`.
 }
 // The list of method keys that are protected from admin-side
 // deletion is `PROTECTED_PAYMENT_METHODS` in `shared/constants`
