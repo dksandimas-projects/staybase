@@ -20,7 +20,15 @@ export const PaymentMethodConfigSchema = z.object({
   accountName: z.string().max(200),
   accountNumber: z.string().max(200),
   qrUrl: z.string().max(2048),
-  isEnabled: z.boolean()
+  isEnabled: z.boolean(),
+  // Per #111 (per-method surface toggles). Both default to
+  // `true` when omitted — the helper functions read them
+  // permissively (`!== false`) so legacy data is treated as
+  // "visible on all surfaces" without an explicit migration.
+  // Optional on the schema for the same reason: pre-#111
+  // entries do not have these fields.
+  showInStore: z.boolean().optional(),
+  showInCorporate: z.boolean().optional()
 });
 
 export const PaymentMethodsArraySchema = z
