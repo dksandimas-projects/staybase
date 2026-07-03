@@ -2410,6 +2410,20 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // `setDoc`. Gated by `hasBackfilledProtectedPaymentMethodsRef`
   // so it runs at most once per session and is idempotent.
   //
+  // IMPORTANT — depends on `hotelConfig`, NOT on the
+  // `paymentMethods` state. The `paymentMethods` state is seeded
+  // with the legacy 4-method default (which already includes
+  // `pay-at-hotel`), so a useEffect that reads from it would
+  // see "nothing missing" on the very first render and close
+  // the ref gate BEFORE the Firestore snapshot arrives. By the
+  // time the snapshot replaces the state with the actual
+  // Firestore data (e.g. `[gcash, paypal]` for a deployment
+  // that was configured before `pay-at-hotel` existed), the ref
+  // is already `true` and the backfill never runs. Reading
+  // `hotelConfig.paymentMethods` directly avoids the seed
+  // pollution — the effect only fires once the real Firestore
+  // data has loaded.
+  //
   // Only `pay-at-hotel` is backfilled — `maya` and `bank` are
   // NOT, so an admin who previously removed them keeps their
   // decision. To add more backfill entries, add to the
@@ -2429,19 +2443,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!currentUser) return;
     if (hasBackfilledProtectedPaymentMethodsRef.current) return;
-    if (paymentMethods.length === 0) return;
+    const raw = (hotelConfig as Record<string, unknown>) || {};
+    const persisted = raw.paymentMethods;
+    if (!Array.isArray(persisted)) return; // wait for the Firestore snapshot
     const missing = PROTECTED_PAYMENT_METHODS.filter(
-      (key) => !paymentMethods.some((p) => p.method === key)
+      (key) => !persisted.some((p: unknown) => typeof (p as { method?: unknown })?.method === "string" && (p as { method: string }).method === key)
     );
     if (missing.length === 0) {
       hasBackfilledProtectedPaymentMethodsRef.current = true;
       return;
     }
-    const next = [...paymentMethods, ...missing.map((key) => BACKFILL_DEFAULTS[key])];
+    const next = [
+      ...persisted,
+      ...missing.map((key) => BACKFILL_DEFAULTS[key])
+    ];
     hasBackfilledProtectedPaymentMethodsRef.current = true;
-    setPaymentMethods(next);
+    setPaymentMethods(next as PaymentMethodConfig[]);
     void updateSettings("hotelConfig", { paymentMethods: next });
-  }, [paymentMethods, currentUser, updateSettings]);
+  }, [hotelConfig, currentUser, updateSettings]);
 
   const persistPaymentMethods = async (next: PaymentMethodConfig[]) => {
     setPaymentMethods(next);
