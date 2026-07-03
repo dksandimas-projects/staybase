@@ -17,11 +17,11 @@ export function ContactPage() {
   // wins when set; the deploy-time `hotel.config.ts` value is
   // the safe fallback. Mirrors the Footer change.
   const { contact } = usePublicSiteContent();
-  const addressString = contact.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
-  const phone = contact.frontDeskPhone || config.frontDeskPhone;
-  const supportEmail = contact.supportEmail || config.supportEmail;
-  const facebook = contact.facebookUrl || config.facebookUrl;
-  const instagram = contact.instagramUrl || config.instagramUrl;
+  const addressString = contact?.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  const phone = contact?.frontDeskPhone || config.frontDeskPhone;
+  const supportEmail = contact?.supportEmail || config.supportEmail;
+  const facebook = contact?.facebookUrl || config.facebookUrl;
+  const instagram = contact?.instagramUrl || config.instagramUrl;
   const mapQuery = encodeURIComponent(addressString);
 
   // Contact Form states
