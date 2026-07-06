@@ -25,9 +25,10 @@
 > a commit references the fix in this doc.
 >
 > **Last status sync: 2026-07-06** — all 6 SEV-1 findings fixed in `f20c0bb`
-> (`fix/audit-bi-sev1`, shared VERSION 0.119.8). Typecheck + full test suite
-> (99 shared / 254 guest-api / 580 admin) pass; API bundle rebuilt and
-> committed. SEV-2..SEV-4 remain open.
+> (`fix/audit-bi-sev1`, shared VERSION 0.119.8); all 5 SEV-2 findings fixed
+> in `bcb1b38` (`fix/audit-bi-sev2`, shared VERSION 0.119.8).
+> Typecheck + full test suite (99 shared / 254 guest-api / 580 admin) pass;
+> API bundle rebuilt and committed. SEV-3..SEV-4 remain open.
 
 ---
 
@@ -36,10 +37,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 6 (`f20c0bb`) | **6** |
-| **SEV-2 (major)** | 5 | 0 | **5** |
+| **SEV-2 (major)** | 0 | 5 (`bcb1b38`) | **5** |
 | **SEV-3 (minor)** | 7 | 0 | **7** |
 | **SEV-4 (nit / doc drift)** | 5 | 0 | **5** |
-| **Total** | **17** | **6** | **23** |
+| **Total** | **12** | **11** | **23** |
 
 The server side of the booking flow (`handleCreateBooking`, `handleCreateWalkin`,
 availability transaction, ref counter, discount stacking, idempotency, email
@@ -242,8 +243,15 @@ geolocation locked.
 ## SEV-2 — Major (5)
 
 ### BI-07 — `corporateCodes.usageCount` never incremented on booking creation
-**Status:** Open
-**File:** `guest-app/server/handlers/bookings.ts:350-383`; spec `CORPORATE-BOOKING.md` ("`usageCount` … incremented server-side on successful booking")
+**Status:** **Fixed in `bcb1b38`** — `handleCreateBooking` now writes
+`usageCount + 1` back to the corporateCodes doc inside the same
+transaction as the booking (using the looked-up ref so the
+`code`-field-fallback path also targets the right doc); the
+`handleConvertInquiryToBooking` path got the same fix per the audit's
+explicit callout. The corporate-code re-validation now runs *before*
+the increment, so a code that failed re-validation does not advance
+its count.
+**File:** `guest-app/server/handlers/bookings.ts:402-490` (create path), `guest-app/server/handlers/corporate-inquiries.ts:214-234` (convert path); spec `CORPORATE-BOOKING.md` ("`usageCount` … incremented server-side on successful booking")
 
 The create transaction validates the code (active / expiry / cap via
 `validateCorporateCode`) and applies the negotiated rate, but never writes
@@ -253,8 +261,14 @@ a capped code is effectively unlimited. `handleConvertInquiryToBooking` should
 be checked for the same omission when fixing.
 
 ### BI-08 — `vouchers` and `corporateCodes` are world-readable via the client SDK
-**Status:** Open
-**File:** `firebase/firestore.rules:81-89`
+**Status:** **Fixed in `bcb1b38`** — `allow read: if true;` is now
+`allow read: if isStaff();` on both collections. The validation
+endpoints (`/api/validate/voucher`, `/api/validate/corporate-code`)
+already return only the minimum data needed (discount type/value or
+rate map) — the raw docs are no longer reachable from anonymous
+clients. The admin app reads both via authenticated staff sessions.
+`SECURITY.md` is updated to reflect the staff-only read scope.
+**File:** `firebase/firestore.rules:81-101`; spec `SECURITY.md` (corporateCodes / vouchers sections)
 
 `allow read: if true` on both collections lets any anonymous visitor run a
 collection query and dump **every voucher code, discount value, usage cap,
@@ -270,8 +284,14 @@ firebase-security-rules-auditor / emulator suite after (admin app reads them
 via authenticated staff sessions).
 
 ### BI-09 — Regular flow: Step 2 "Number of guests" edits don't reach the submitted booking
-**Status:** Open
-**File:** `guest-app/src/pages/BookingPage.tsx:169-178` (`guestDetails.guestCount`), `:706` (submit sends `guests`), `:938-956` (aside displays `guestCount`)
+**Status:** **Fixed in `bcb1b38`** — `updateGuestDetail("guestCount", ...)`
+in `BookingPage.tsx` now also writes to the Step 1 `guests` state
+(matching the corporate wiring at `CorporateBookingPage.tsx:1285-1288`),
+so the Step 2 field is the single source of truth. The submit body
+prefers the parsed Step 2 value and falls back to the Step 1 stepper
+for guests who never reached Step 2. The sticky-bar total, aside, and
+breakfast math now all see the same number.
+**File:** `guest-app/src/pages/BookingPage.tsx:170-179, 522-545, 643-672`
 
 Step 2 renders an editable, validated "Number of guests" field bound to
 `guestDetails.guestCount`, and the summary aside displays that value — but the
@@ -287,8 +307,19 @@ submits `Number(guestDetails.guestCount) || guests`).
 drop the Step 2 field and keep the Step 1 stepper as the single source).
 
 ### BI-10 — Corporate code silently downgraded at creation; doc-ID-only lookup
-**Status:** Open
-**File:** `guest-app/server/handlers/bookings.ts:350-383`; spec `CORPORATE-BOOKING.md §Edge Cases` ("Code expires between validation and booking creation — re-validate server-side at creation, **return clear error**")
+**Status:** **Fixed in `bcb1b38`** — (a) the corporate-code lookup
+in `handleCreateBooking` now applies the same `code`-field fallback
+as `handleValidateCorporateCode` so a code whose doc ID differs from
+its `code` field is still found. (b) A code that fails re-validation
+inside the transaction (expired / cap reached / deactivated between
+gate and confirm) now throws a distinct `Corporate code no longer
+valid: ...` error that the catch block maps to **409** so the client
+can send the guest back to the gate. (c) The voucher create-time
+lookup got the same `code`-field fallback; the voucher re-validation
+itself stays silent (less critical than a deactivated corporate code).
+The S1.5 source-pattern test in `batch-8-isCorporate-server-authoritative.test.ts`
+was rewritten to assert the new throw-on-invalid contract.
+**File:** `guest-app/server/handlers/bookings.ts:402-510` (corporate branch), `:535-595` (voucher branch), `:830-855` (catch); spec `CORPORATE-BOOKING.md §Edge Cases`
 
 Two related issues:
 1. When the code fails re-validation inside the transaction (expired / cap
@@ -311,8 +342,21 @@ back to the gate; add the `code`-field fallback to both create-time lookups
 (read outside/inside the txn consistently).
 
 ### BI-11 — Corporate Step 2 metadata dropped server-side
-**Status:** Open
-**File:** `guest-app/server/handlers/bookings.ts:538-603` (`newBooking` field list); client sends them at `CorporateBookingPage.tsx:541-553`
+**Status:** **Fixed in `bcb1b38`** — the create handler now
+persists a nested `corporate: { designation, companyAddress,
+purposeOfStay, billingArrangement }` block on the booking doc when
+`isCorporate: true` (omitted entirely for non-corporate bookings so
+the schema doesn't drift with empty strings). `billingArrangement` is
+normalized to `"personal"` or `"chargeback"` — the former requires a
+payment proof, the latter triggers the LOU workflow
+(`DECISIONS-FEATURES.md #99`). The `guestDetails` Zod schema
+(BI-16, applied together) validates + trims + length-caps every
+field, including `companyName` on the flat-rate path. The
+`handleConvertInquiryToBooking` path persists the inquiry's
+`specialRequirements` as `corporate.purposeOfStay` and forces
+`billingArrangement: "chargeback"` (inquiries are always direct-bill).
+`BACKEND.md §bookings` documents the new `corporate` block.
+**File:** `guest-app/server/handlers/bookings.ts:66-109, 175-208, 736-770`; `guest-app/server/handlers/corporate-inquiries.ts:329-343`; spec `BACKEND.md` (`bookings/{bookingId}` table — `corporate` row)
 
 The corporate flow collects and requires `designation`, `companyAddress`,
 `purposeOfStay`, `preferredBillingArrangement` (personal vs chargeback), and —
@@ -559,12 +603,13 @@ Write the marker after a successful send, or accept at-most-once and note it.
 | Batch | Findings | Theme | Status |
 |---|---|---|---|
 | 1 (`fix/audit-bi-sev1`) | BI-01, BI-02, BI-03, BI-04, BI-05, BI-06 | All SEV-1: Turnstile real end-to-end, corporate pricing/proof, mic policy | **Fixed in `f20c0bb`** |
-| 2 | BI-07, BI-10, BI-11 | Corporate flow correctness (usage caps, re-validation error, metadata persistence) | Open |
-| 3 | BI-08, BI-09, BI-12, BI-16 | Rules tightening + input wiring/validation | Open |
+| 2 (`fix/audit-bi-sev2`) | BI-07, BI-08, BI-09, BI-10, BI-11 | All SEV-2: corporate flow correctness + rules tightening + input wiring | **Fixed in `bcb1b38`** |
+| 3 | BI-12, BI-16 | Server-side input validation + past-date rejection | Open |
 | 4 | BI-13, BI-14, BI-15, BI-17, BI-18, BI-19 … BI-23 | Copy, UX, nits, doc drift | Open |
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `c593560`.
 - **Fixed in `<hash>`** — a commit referencing this doc closes the finding.
-  (`f20c0bb` = `fix/audit-bi-sev1`, all six SEV-1 findings, VERSION 0.119.8.)
+  (`f20c0bb` = `fix/audit-bi-sev1`, all six SEV-1 findings, VERSION 0.119.8.
+  `bcb1b38` = `fix/audit-bi-sev2`, all five SEV-2 findings, VERSION 0.119.8.)
 - **Verified** — re-checked and found already correct (none yet in this audit).
