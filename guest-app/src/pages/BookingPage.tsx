@@ -21,7 +21,7 @@ import {
   Banknote
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -45,6 +45,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
+import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
@@ -217,7 +218,17 @@ export function BookingPage() {
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
 
   const [termsConsent, setTermsConsent] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState("");
+  // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
+  // rendered through the shared `useTurnstileToken` hook, gated on
+  // the review step (the only step whose JSX contains the
+  // container). The previous inline effect ran once on mount with
+  // `[]` deps and bailed when the container was null — the first
+  // render is always the loading skeleton or Step 1, so the widget
+  // never mounted and every submit fell back to `"mock_token"`
+  // (which the server no longer accepts — see BI-02).
+  const { token: turnstileToken, containerRef: turnstileContainerRef } = useTurnstileToken({
+    enabled: isReviewStep
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const navigate = useNavigate();
@@ -467,78 +478,6 @@ export function BookingPage() {
     };
   }, [checkIn, checkOut]);
 
-  // Mount the Turnstile widget explicitly via `turnstile.render()` rather
-  // than relying on the implicit auto-render triggered by the
-  // `cf-turnstile` class. Mirrors the CorporateStaysPage pattern: explicit
-  // render lets us pass `expired-callback` / `error-callback` and
-  // `turnstile.remove()` the widget on unmount. The previous auto-render
-  // path also registered a global `window.onTurnstileSuccess` that raced
-  // with React state updates and could fire on stale widget instances.
-  const turnstileContainerRef = useRef<HTMLDivElement>(null);
-  const turnstileWidgetIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const container = turnstileContainerRef.current;
-    if (!container) return;
-
-    const isProductionDomain = window.location.hostname === config.domain || window.location.hostname === `www.${config.domain}`;
-    const siteKey = isProductionDomain
-      ? String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "1x00000000000000000000AA")
-      : "1x00000000000000000000AA";
-    let cancelled = false;
-    let widgetId: string | null = null;
-    let pollHandle: ReturnType<typeof setTimeout> | null = null;
-
-    const ensureScript = (): void => {
-      const scriptId = "turnstile-script";
-      if (document.getElementById(scriptId)) return;
-      const script = document.createElement("script");
-      script.id = scriptId;
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
-      script.async = true;
-      script.defer = true;
-      document.body.appendChild(script);
-    };
-
-    const renderWidget = (): void => {
-      if (cancelled || !window.turnstile || !container.isConnected) return;
-      widgetId = window.turnstile.render(container, {
-        sitekey: siteKey,
-        callback: (token) => setTurnstileToken(token),
-        "expired-callback": () => setTurnstileToken(""),
-        "error-callback": () => setTurnstileToken("")
-      });
-      turnstileWidgetIdRef.current = widgetId;
-    };
-
-    const tryRender = (): void => {
-      if (cancelled) return;
-      if (window.turnstile) {
-        renderWidget();
-      } else {
-        pollHandle = setTimeout(tryRender, 100);
-      }
-    };
-
-    ensureScript();
-    tryRender();
-
-    return () => {
-      cancelled = true;
-      if (pollHandle !== null) clearTimeout(pollHandle);
-      const id = turnstileWidgetIdRef.current;
-      if (id && window.turnstile) {
-        try {
-          window.turnstile.remove(id);
-        } catch {
-          // Widget may already be gone. Safe to ignore — the next mount
-          // will allocate a fresh id.
-        }
-      }
-      turnstileWidgetIdRef.current = null;
-    };
-  }, []);
-
   useEffect(() => {
     if (!selectedRoomType && availableRoomTypes[0]) {
       setSelectedRoomType(availableRoomTypes[0].type.value);
@@ -624,7 +563,9 @@ export function BookingPage() {
         body: JSON.stringify({
           code,
           roomType: selectedTypeEntry?.value,
-          turnstileToken: turnstileToken || "mock_token"
+          // Per BI-02/BI-03: real token only — the server no longer
+          // accepts the "mock_token" sentinel outside unit tests.
+          turnstileToken
         })
       });
 
@@ -746,7 +687,7 @@ export function BookingPage() {
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
           // `corporateCode` lookup, so this field is omitted.
-          turnstileToken: turnstileToken || "mock_token",
+          turnstileToken,
           _hp: guestDetails._hp || ""
         })
       });
@@ -1006,7 +947,11 @@ export function BookingPage() {
   if (isReviewStep) {
   const isIdUploadRequired = discountType !== "none" && !discountIdUpload;
   const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUpload;
-    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry);
+    // Per BI-03 + BOOKING-FLOW.md §Step 3: Confirm stays disabled
+    // until the Turnstile token has been received — submitting
+    // without one is a guaranteed 400 now that the server bypass
+    // is gone (BI-02).
+    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry) && Boolean(turnstileToken);
 
     return bookingShell(
       <>
@@ -1413,6 +1358,8 @@ export function BookingPage() {
                   ? "Please upload your Senior/PWD ID"
                   : isPaymentProofRequired
                   ? "Please upload proof of payment"
+                  : !turnstileToken
+                  ? "Running a quick security check..."
                   : "Ready to confirm booking"}
               </p>
             </div>
