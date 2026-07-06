@@ -69,6 +69,7 @@ Zero-cost peer-to-peer audio between guest browser and front desk browser. No th
 7. On hang-up by either side: update `calls/{roomId}.status` to `"ended"` — both sides detect via `onSnapshot` and close the connection
 
 ### Checklist
+- [x] `Permissions-Policy` allows the microphone for the app's own origin — `microphone=(self)` in **all three** `vercel.json` files (root, guest-app, admin-app). `microphone=()` blocks `getUserMedia` outright and kills the call in production only (per BI-06, booking-intercom audit 2026-07-06; see `plan/docs/GOTCHAS.md §Intercom`)
 - [x] `RTCPeerConnection` created with public STUN servers (Google's free STUN: `stun:stun.l.google.com:19302`) — no TURN server needed for same-network/LAN use; add free TURN (Metered.ca free tier) for cross-network reliability
 - [x] Firestore signaling: `calls/{roomId}` document — offer, answer, status; `calls/{roomId}/iceCandidates/{id}` subcollection
 - [x] Guest side: creates offer → writes to Firestore → listens for answer → listens for ICE candidates
