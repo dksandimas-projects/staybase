@@ -79,19 +79,71 @@ describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomT
       expect(codeOnly).not.toMatch(/corporateDetails\.companyName\s*=\s*[^;]*guestDetails/);
     });
 
-    it("falls back to the standard rate when the code is invalid or missing", () => {
-      // The handler must keep the booking on the standard rate when
-      // no valid code is supplied — i.e. an attacker cannot
-      // bypass by sending isCorporate:true + corporateCode:INVALID.
-      const corpBranch = bookingsSrc.match(
-        /if\s*\(\s*corporateCode\s*\)\s*\{[\s\S]*?if\s*\(\s*corpCodeDoc\.exists\s*\)\s*\{[\s\S]*?\}\s*else\s*\{[\s\S]*?\}\s*\}/
+    it("throws a clear error when the code fails re-validation (BI-10)", () => {
+      // Per BI-10 (booking-intercom audit 2026-07-06): an
+      // invalid or missing corporate code used to silently
+      // downgrade the booking to the standard rate with
+      // `isCorporate: false`. The guest confirmed a
+      // negotiated total and got charged the full rate with
+      // no error and no explanation. The new contract:
+      //   * a code that fails re-validation inside the
+      //     transaction (expired / cap reached / deactivated
+      //     between gate and confirm) throws a distinct
+      //     `Corporate code no longer valid: ...` error
+      //     that the catch block maps to 409
+      //   * a code that is not found at all throws the
+      //     same prefix with a different reason
+      // The standard `roomTypes[].pricePerNight` is *not*
+      // substituted silently anymore — the booking is
+      // aborted so the client can send the guest back to
+      // the gate.
+      const fnStart = bookingsSrc.indexOf("if (corporateCode)");
+      const fnEnd = bookingsSrc.indexOf("// No corporateCode and no flat-rate flag", fnStart);
+      const corpBranch = bookingsSrc.slice(fnStart, fnEnd);
+      expect(corpBranch, "expected to find the corporate branch").toBeTruthy();
+      // Strip line comments before checking for the throw pattern
+      const codeOnly = corpBranch
+        .split("\n")
+        .filter(line => !line.trim().startsWith("//"))
+        .join("\n");
+      expect(codeOnly).toMatch(
+        /throw\s+new\s+Error\(\s*`Corporate code no longer valid:/
       );
-      expect(corpBranch, "expected to find the corporate branch with else fallback").toBeTruthy();
-      // The else branch must set the rate to the standard price
-      // (per the room-type booking refactor: the standard rate
-      // now comes from the `roomType` entry in settings/hotelConfig,
-      // not from the physical room doc).
-      expect(corpBranch![0]).toMatch(/activeRoomRate\s*=\s*typeBaseRate/);
+      // The catch block must map this message to a 409.
+      // Check the body of `handleCreateBooking` for the prefix
+      // match.
+      const catchStart = bookingsSrc.indexOf("} catch (error: any) {", fnStart);
+      const catchEnd = bookingsSrc.indexOf("}\n}\n", catchStart);
+      const catchBlock = bookingsSrc.slice(catchStart, catchEnd);
+      expect(catchBlock).toMatch(
+        /error\.message\.startsWith\(\s*["']Corporate code no longer valid["']/
+      );
+    });
+
+    it("no longer silently downgrades on invalid corporate code (regression)", () => {
+      // Source-pattern regression guard for BI-10: a
+      // future agent that re-introduces a silent fallback
+      // (`activeRoomRate = typeBaseRate` inside the
+      // `else` branch of the corporate-code re-validation)
+      // is caught. The previous behavior of "set the rate
+      // to the standard price when the code is invalid" is
+      // what the audit flagged as a critical UX bug.
+      const fnStart = bookingsSrc.indexOf("if (corpValidation.valid)");
+      const block = bookingsSrc.slice(
+        fnStart,
+        fnStart + 5000
+      );
+      // The "valid" branch must NOT contain a
+      // `activeRoomRate = typeBaseRate` reassignment. The
+      // "invalid" branch must contain a `throw` (not a
+      // reassignment).
+      const validBranch = block.match(/if\s*\(\s*corpValidation\.valid\s*\)\s*\{[\s\S]*?\}\s*else\s*\{[\s\S]*?throw/);
+      expect(validBranch, "expected to find valid/else+throw structure").toBeTruthy();
+      // Inside the valid branch, the rate assignment uses
+      // either `ratePerRoomType[roomType]` or
+      // `typeCorporateRate`, never a fallback to
+      // `typeBaseRate`.
+      expect(validBranch![0]).not.toMatch(/activeRoomRate\s*=\s*typeBaseRate/);
     });
 
     it("BookingPage (standard online flow) no longer sends isCorporate: false", () => {

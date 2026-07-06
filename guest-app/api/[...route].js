@@ -188871,6 +188871,24 @@ var guestCancelSchema = external_exports.object({
   (data) => Boolean(data.guestEmail) !== Boolean(data.token),
   "Provide either an email or a lookup token (not both)."
 );
+var guestDetailsSchema = external_exports.object({
+  firstName: external_exports.string().trim().min(1).max(80),
+  lastName: external_exports.string().trim().min(1).max(80),
+  email: external_exports.string().trim().toLowerCase().email().max(160),
+  phone: external_exports.string().trim().min(7).max(32),
+  requests: external_exports.string().trim().max(1e3).optional().default(""),
+  consent: external_exports.boolean(),
+  // Corporate fields — all optional with safe defaults so
+  // non-corporate bookings validate cleanly. The handler
+  // drops them from the doc unless the booking is
+  // corporate.
+  companyName: external_exports.string().trim().max(160).optional().default(""),
+  designation: external_exports.string().trim().max(120).optional().default(""),
+  companyAddress: external_exports.string().trim().max(300).optional().default(""),
+  numRooms: external_exports.coerce.number().int().min(1).max(50).optional(),
+  purposeOfStay: external_exports.string().trim().max(120).optional().default(""),
+  preferredBillingArrangement: external_exports.string().trim().max(40).optional().default("")
+});
 async function handleCreateBooking(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -188886,18 +188904,27 @@ async function handleCreateBooking(req, res) {
     checkOut,
     guests,
     hasBreakfast,
-    guestDetails,
+    guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
     voucherCode,
     paymentMethod,
     paymentProofUrl,
     corporateCode,
+    corporateFlatRate,
     linkedInquiryId
   } = body;
-  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !guestDetails) {
+  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
   }
+  const parsedGuest = guestDetailsSchema.safeParse(rawGuestDetails);
+  if (!parsedGuest.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check your guest details \u2014 a required field is missing or invalid."
+    });
+  }
+  const guestDetails = parsedGuest.data;
   if (!guestDetails.consent) {
     return res.status(400).json({ success: false, error: "Privacy policy consent is required." });
   }
@@ -189015,9 +189042,19 @@ async function handleCreateBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
+      let corporateCodeRef = null;
       if (corporateCode) {
-        const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
-        const corpCodeDoc = await transaction.get(corpCodeRef);
+        const formattedCorpCode = String(corporateCode).trim().toUpperCase();
+        corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
+        let corpCodeDoc = await transaction.get(corporateCodeRef);
+        if (!corpCodeDoc.exists) {
+          const corpCodeQuery = adminDb.collection("corporateCodes").where("code", "==", formattedCorpCode).limit(1);
+          const corpCodeQuerySnap = await transaction.get(corpCodeQuery);
+          if (!corpCodeQuerySnap.empty) {
+            corpCodeDoc = corpCodeQuerySnap.docs[0];
+            corporateCodeRef = corpCodeDoc.ref;
+          }
+        }
         if (corpCodeDoc.exists) {
           const corpData = corpCodeDoc.data();
           const corpValidation = validateCorporateCode({
@@ -189028,18 +189065,26 @@ async function handleCreateBooking(req, res) {
           });
           if (corpValidation.valid) {
             corporateDetails.isCorporate = true;
-            corporateDetails.corporateCode = corporateCode;
+            corporateDetails.corporateCode = formattedCorpCode;
             corporateDetails.companyName = corpData.companyName || "";
             if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomType] !== void 0) {
               activeRoomRate = corpData.ratePerRoomType[roomType];
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
+            transaction.update(corporateCodeRef, {
+              usageCount: (corpData.usageCount || 0) + 1,
+              updatedAt: /* @__PURE__ */ new Date()
+            });
           } else {
-            activeRoomRate = typeBaseRate;
+            throw new Error(
+              `Corporate code no longer valid: ${corpValidation.error} Please re-enter your access code or continue without a code.`
+            );
           }
         } else {
-          activeRoomRate = typeBaseRate;
+          throw new Error(
+            "Corporate code no longer valid: code not recognized. Please re-enter your access code or continue without a code."
+          );
         }
       }
       let roomTotal = 0;
@@ -189062,7 +189107,14 @@ async function handleCreateBooking(req, res) {
       if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
         const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
-        const voucherDoc = await transaction.get(voucherRef);
+        let voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb.collection("vouchers").where("code", "==", formattedCode).limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+          }
+        }
         if (voucherDoc.exists) {
           const vData = voucherDoc.data();
           const now = /* @__PURE__ */ new Date();
@@ -189190,6 +189242,32 @@ async function handleCreateBooking(req, res) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
+        // corporate flow collects `designation`,
+        // `companyAddress`, `purposeOfStay`, and
+        // `preferredBillingArrangement` at Step 2, plus the
+        // flat-rate `companyName`. None of this was persisted
+        // server-side, so staff could not tell a chargeback
+        // booking (LOU workflow per `DECISIONS-FEATURES.md #99`)
+        // from a personal-pay one and flat-rate bookings had
+        // no company at all. Persist the metadata as a nested
+        // `corporate` block **only when** the booking is
+        // corporate — non-corporate bookings never carry the
+        // field so the schema doesn't drift with empty
+        // strings. `preferredBillingArrangement` is normalized
+        // to `"personal"` or `"chargeback"`; an unrecognized
+        // value falls back to `"chargeback"` since
+        // `isCorporate: true` defaults to direct-billing
+        // semantics and the staff LOU workflow assumes
+        // chargeback.
+        ...corporateDetails.isCorporate ? {
+          corporate: {
+            designation: String(guestDetails.designation || "").trim().slice(0, 120),
+            companyAddress: String(guestDetails.companyAddress || "").trim().slice(0, 300),
+            purposeOfStay: String(guestDetails.purposeOfStay || "").trim().slice(0, 120),
+            billingArrangement: guestDetails.preferredBillingArrangement === "personal" ? "personal" : "chargeback"
+          }
+        } : {},
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -189261,6 +189339,16 @@ async function handleCreateBooking(req, res) {
     const isInfraError = typeof code === "string" && (code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED") || code.includes("INTERNAL"));
     let status;
     if (error.message === "Room no longer available") {
+      status = 409;
+    } else if (
+      // Per BI-10 (booking-intercom audit 2026-07-06): a
+      // corporate code that failed re-validation between the
+      // gate and the create transaction is a 409 — the code
+      // was valid when the guest confirmed, but the server
+      // cannot honor the negotiated rate anymore. The client
+      // shows the error and sends the guest back to the gate.
+      typeof error.message === "string" && error.message.startsWith("Corporate code no longer valid")
+    ) {
       status = 409;
     } else if (isInfraError) {
       status = 503;
@@ -190306,6 +190394,10 @@ async function handleConvertInquiryToBooking(req, res) {
           } else if (roomData.corporateRate) {
             ratePerNight = roomData.corporateRate;
           }
+          transaction.update(codeRef, {
+            usageCount: (codeData.usageCount || 0) + 1,
+            updatedAt: /* @__PURE__ */ new Date()
+          });
         } else if (roomData.corporateRate) {
           ratePerNight = roomData.corporateRate;
         }
@@ -190394,6 +190486,24 @@ async function handleConvertInquiryToBooking(req, res) {
         cancellationReason: "",
         // Per W2.14 / decision #102: backlink to the source inquiry
         linkedInquiryId: inquiryId,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
+        // convert-inquiry path is always corporate, so the
+        // corporate metadata block is written. The
+        // `inquiryData` shape doesn't carry the same
+        // designation / purposeOfStay fields the public
+        // corporate form collects, so we persist what's
+        // available: `specialRequirements` flows into
+        // `purposeOfStay` (the closest semantic match) and
+        // `companyName` is the company on the inquiry.
+        // `billingArrangement` is implicit (inquiry is
+        // always a chargeback) so we record "chargeback" so
+        // staff can tell the LOU workflow to fire.
+        corporate: {
+          designation: "",
+          companyAddress: "",
+          purposeOfStay: String(inquiryData.specialRequirements || "").trim().slice(0, 120),
+          billingArrangement: "chargeback"
+        },
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };

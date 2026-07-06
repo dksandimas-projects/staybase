@@ -78,13 +78,28 @@ service cloud.firestore {
       allow create: if isStaff();
     }
 
+    // Per BI-08 (booking-intercom audit 2026-07-06): the
+    // previous `allow read: if true` on both collections let
+    // any anonymous visitor dump every voucher code, discount
+    // value, usage cap, corporate access code, company name,
+    // and negotiated `ratePerRoomType` via a single collection
+    // query. The point of `/api/validate/*` (per
+    // `plan/docs/GOTCHAS.md` "never expose full voucher or
+    // code documents to the client") is to expose only the
+    // minimum data needed for validation — the API endpoint
+    // returns discount type/value (vouchers) or rate map
+    // (corporate codes), never the raw document. Tightening
+    // the rule to staff-only is safe because the guest-app
+    // code never reads these collections client-side (the
+    // API is the only sanctioned path). Admin staff reads
+    // them via authenticated sessions.
     match /corporateCodes/{code} {
-      allow read: if true;
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
 
     match /vouchers/{voucherId} {
-      allow read: if true;
+      allow read: if isStaff();
       allow write: if isStaff();
     }
 
