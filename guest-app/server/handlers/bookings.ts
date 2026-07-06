@@ -78,6 +78,47 @@ interface GuestDetails {
   preferredBillingArrangement?: string;
 }
 
+// Per BI-11 (booking-intercom audit 2026-07-06): the
+// corporate flow collects and requires `designation`,
+// `companyAddress`, `purposeOfStay`, and
+// `preferredBillingArrangement` at Step 2, plus a
+// guest-entered `companyName` on the flat-rate path. The
+// `Consent` + base contact fields below are always present
+// for every booking; the corporate fields are optional on
+// the wire (the Zod schema marks them `.optional()` with
+// safe defaults) and persisted on the booking doc only when
+// the booking is corporate. Standard online bookings send
+// empty strings and the conditional `corporate` block on
+// the booking doc is omitted entirely so a non-corporate
+// booking never carries spurious `""` fields. The Zod
+// treatment also closes BI-16 (input validation) — strings
+// are trimmed + length-capped, email is normalized to
+// lowercase, and a 100KB `requests` blob can no longer land
+// in Firestore.
+const guestDetailsSchema = z.object({
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+  email: z.string().trim().toLowerCase().email().max(160),
+  phone: z.string().trim().min(7).max(32),
+  requests: z.string().trim().max(1000).optional().default(""),
+  consent: z.boolean(),
+  // Corporate fields — all optional with safe defaults so
+  // non-corporate bookings validate cleanly. The handler
+  // drops them from the doc unless the booking is
+  // corporate.
+  companyName: z.string().trim().max(160).optional().default(""),
+  designation: z.string().trim().max(120).optional().default(""),
+  companyAddress: z.string().trim().max(300).optional().default(""),
+  numRooms: z.coerce.number().int().min(1).max(50).optional(),
+  purposeOfStay: z.string().trim().max(120).optional().default(""),
+  preferredBillingArrangement: z
+    .string()
+    .trim()
+    .max(40)
+    .optional()
+    .default("")
+});
+
 interface CreateBookingBody {
   bookingId: string;
   // Per the room-type booking refactor: clients send the chosen
@@ -133,20 +174,38 @@ export async function handleCreateBooking(req: any, res: any) {
     checkOut,
     guests,
     hasBreakfast,
-    guestDetails,
+    guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
     voucherCode,
     paymentMethod,
     paymentProofUrl,
     corporateCode,
+    corporateFlatRate,
     linkedInquiryId
   } = body;
 
   // Basic Input Validation
-  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !guestDetails) {
+  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
   }
+
+  // Per BI-11 (booking-intercom audit 2026-07-06): validate +
+  // normalize guest details before any Firestore work. The
+  // parsed object replaces the raw body copy so every
+  // downstream read gets trimmed, length-capped, lowercase
+  // email, and a typed shape for the corporate metadata
+  // fields the handler will later persist conditionally.
+  // This also closes BI-16 (input validation): a garbage
+  // email or a 100KB `requests` blob never reaches Firestore.
+  const parsedGuest = guestDetailsSchema.safeParse(rawGuestDetails);
+  if (!parsedGuest.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check your guest details — a required field is missing or invalid."
+    });
+  }
+  const guestDetails: GuestDetails = parsedGuest.data;
 
   if (!guestDetails.consent) {
     return res.status(400).json({ success: false, error: "Privacy policy consent is required." });
@@ -344,12 +403,52 @@ export async function handleCreateBooking(req: any, res: any) {
       // gets the corporate rate — the server independently looks
       // up the code, validates it (active + not expired + under
       // cap), and sets these fields from the corporateCodes doc.
+      //
+      // Per BI-10 (booking-intercom audit 2026-07-06): the previous
+      // implementation silently downgraded to the standard rate if
+      // the code failed re-validation inside the transaction. The
+      // guest confirmed a negotiated total and got charged the
+      // full rate with no error and no explanation. The fix:
+      //   (a) Add the `code`-field fallback for codes whose doc ID
+      //       differs from their `code` field (mirrors
+      //       `handleValidateCorporateCode`).
+      //   (b) If the code fails re-validation (expired / cap
+      //       reached / deactivated between gate and confirm),
+      //       abort the transaction with a distinct
+      //       `Corporate code no longer valid` error so the client
+      //       can send the guest back to the gate.
+      //
+      // Per BI-07: on a successful re-validation the handler now
+      // increments `usageCount` in the same transaction (the
+      // voucher branch already does this for `vouchers.usageCount`).
+      // Without this write, capped codes never advance and a
+      // capped code is effectively unlimited.
       let activeRoomRate = typeBaseRate;
       let corporateDetails: any = { isCorporate: false, corporateCode: "", companyName: "" };
+      let corporateCodeRef: any = null;
 
       if (corporateCode) {
-        const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
-        const corpCodeDoc = await transaction.get(corpCodeRef);
+        // (a) `code`-field fallback: try the doc-ID lookup first
+        // (the common case), then fall back to a `where("code")`
+        // query for codes whose Firestore doc ID differs from
+        // their public `code` field. Doing the fallback inside
+        // the same transaction means a code that was valid at
+        // the gate and is now deactivated between gate and
+        // confirm is caught by the re-validation below.
+        const formattedCorpCode = String(corporateCode).trim().toUpperCase();
+        corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
+        let corpCodeDoc = await transaction.get(corporateCodeRef);
+        if (!corpCodeDoc.exists) {
+          const corpCodeQuery = adminDb
+            .collection("corporateCodes")
+            .where("code", "==", formattedCorpCode)
+            .limit(1);
+          const corpCodeQuerySnap = await transaction.get(corpCodeQuery);
+          if (!corpCodeQuerySnap.empty) {
+            corpCodeDoc = corpCodeQuerySnap.docs[0];
+            corporateCodeRef = corpCodeDoc.ref;
+          }
+        }
         if (corpCodeDoc.exists) {
           const corpData = corpCodeDoc.data()!;
           const corpValidation = validateCorporateCode({
@@ -360,7 +459,7 @@ export async function handleCreateBooking(req: any, res: any) {
           });
           if (corpValidation.valid) {
             corporateDetails.isCorporate = true;
-            corporateDetails.corporateCode = corporateCode;
+            corporateDetails.corporateCode = formattedCorpCode;
             // The doc's companyName is the source of truth — the
             // body's guestDetails.companyName is informational only.
             corporateDetails.companyName = corpData.companyName || "";
@@ -369,16 +468,32 @@ export async function handleCreateBooking(req: any, res: any) {
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
+            // BI-07: increment usageCount inside the same
+            // transaction. Use the looked-up ref (not the
+            // original doc-id ref) so the write targets the
+            // actual doc regardless of which fallback path
+            // found it.
+            transaction.update(corporateCodeRef, {
+              usageCount: (corpData.usageCount || 0) + 1,
+              updatedAt: new Date()
+            });
           } else {
-            // Invalid code: fall back to standard rate, do NOT set
-            // isCorporate. The booking still goes through but
-            // without any corporate discount — the server never
-            // trusts the body's claim.
-            activeRoomRate = typeBaseRate;
+            // (b) Failed re-validation inside the transaction
+            // (expired / cap reached / deactivated between gate
+            // and confirm). The spec requires a clear error,
+            // not a silent downgrade. The catch block below
+            // maps this message to a 409 with a user-friendly
+            // copy.
+            throw new Error(
+              `Corporate code no longer valid: ${corpValidation.error} Please re-enter your access code or continue without a code.`
+            );
           }
         } else {
-          // Code not found in DB — fall back to standard rate.
-          activeRoomRate = typeBaseRate;
+          // Code not found in DB at all — the gate should have
+          // caught this, but defend in depth.
+          throw new Error(
+            "Corporate code no longer valid: code not recognized. Please re-enter your access code or continue without a code."
+          );
         }
       }
       // No corporateCode at all → activeRoomRate stays as
@@ -414,8 +529,29 @@ export async function handleCreateBooking(req: any, res: any) {
       let appliedVoucherCode = "";
       if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
+        // Per BI-10 (booking-intercom audit 2026-07-06): the
+        // create-time voucher lookup was `vouchers.doc(code)` only,
+        // while `handleValidateVoucher` also falls back to a
+        // `where("code", "==", code)` query for docs whose ID
+        // differs from their `code` field. A voucher that validated
+        // at the gate could therefore silently lose its discount
+        // at creation. Apply the same `code`-field fallback here
+        // so the create-time lookup matches the validate-time
+        // lookup (read inside the transaction so a recently
+        // deactivated voucher is caught by the re-validation
+        // below).
         const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
-        const voucherDoc = await transaction.get(voucherRef);
+        let voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb
+            .collection("vouchers")
+            .where("code", "==", formattedCode)
+            .limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+          }
+        }
         if (voucherDoc.exists) {
           const vData = voucherDoc.data()!;
           const now = new Date();
@@ -598,6 +734,37 @@ export async function handleCreateBooking(req: any, res: any) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
+        // corporate flow collects `designation`,
+        // `companyAddress`, `purposeOfStay`, and
+        // `preferredBillingArrangement` at Step 2, plus the
+        // flat-rate `companyName`. None of this was persisted
+        // server-side, so staff could not tell a chargeback
+        // booking (LOU workflow per `DECISIONS-FEATURES.md #99`)
+        // from a personal-pay one and flat-rate bookings had
+        // no company at all. Persist the metadata as a nested
+        // `corporate` block **only when** the booking is
+        // corporate — non-corporate bookings never carry the
+        // field so the schema doesn't drift with empty
+        // strings. `preferredBillingArrangement` is normalized
+        // to `"personal"` or `"chargeback"`; an unrecognized
+        // value falls back to `"chargeback"` since
+        // `isCorporate: true` defaults to direct-billing
+        // semantics and the staff LOU workflow assumes
+        // chargeback.
+        ...(corporateDetails.isCorporate
+          ? {
+              corporate: {
+                designation: String(guestDetails.designation || "").trim().slice(0, 120),
+                companyAddress: String(guestDetails.companyAddress || "").trim().slice(0, 300),
+                purposeOfStay: String(guestDetails.purposeOfStay || "").trim().slice(0, 120),
+                billingArrangement:
+                  guestDetails.preferredBillingArrangement === "personal"
+                    ? "personal"
+                    : "chargeback"
+              }
+            }
+          : {}),
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -716,6 +883,17 @@ export async function handleCreateBooking(req: any, res: any) {
     );
     let status: number;
     if (error.message === "Room no longer available") {
+      status = 409;
+    } else if (
+      // Per BI-10 (booking-intercom audit 2026-07-06): a
+      // corporate code that failed re-validation between the
+      // gate and the create transaction is a 409 — the code
+      // was valid when the guest confirmed, but the server
+      // cannot honor the negotiated rate anymore. The client
+      // shows the error and sends the guest back to the gate.
+      typeof error.message === "string"
+      && error.message.startsWith("Corporate code no longer valid")
+    ) {
       status = 409;
     } else if (isInfraError) {
       status = 503;

@@ -222,6 +222,17 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
           } else if (roomData.corporateRate) {
             ratePerNight = roomData.corporateRate;
           }
+          // Per BI-07 (booking-intercom audit 2026-07-06):
+          // the convert-inquiry path shares the same
+          // `usageCount` omission as the create path — a code
+          // attached to an inquiry never advances its cap.
+          // Increment in the same transaction so capped
+          // codes used via the convert path also stop working
+          // once their cap is hit.
+          transaction.update(codeRef, {
+            usageCount: (codeData.usageCount || 0) + 1,
+            updatedAt: new Date()
+          });
         } else if (roomData.corporateRate) {
           ratePerNight = roomData.corporateRate;
         }
@@ -326,6 +337,24 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
         cancellationReason: "",
         // Per W2.14 / decision #102: backlink to the source inquiry
         linkedInquiryId: inquiryId,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
+        // convert-inquiry path is always corporate, so the
+        // corporate metadata block is written. The
+        // `inquiryData` shape doesn't carry the same
+        // designation / purposeOfStay fields the public
+        // corporate form collects, so we persist what's
+        // available: `specialRequirements` flows into
+        // `purposeOfStay` (the closest semantic match) and
+        // `companyName` is the company on the inquiry.
+        // `billingArrangement` is implicit (inquiry is
+        // always a chargeback) so we record "chargeback" so
+        // staff can tell the LOU workflow to fire.
+        corporate: {
+          designation: "",
+          companyAddress: "",
+          purposeOfStay: String(inquiryData.specialRequirements || "").trim().slice(0, 120),
+          billingArrangement: "chargeback"
+        },
         createdAt: new Date(),
         updatedAt: new Date()
       };
