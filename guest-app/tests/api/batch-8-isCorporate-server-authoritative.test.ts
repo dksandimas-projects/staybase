@@ -66,10 +66,17 @@ describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomT
       // The handler must read companyName from `corpData.companyName`
       // (the document) and not from `guestDetails.companyName`.
       const fnStart = bookingsSrc.indexOf("if (corporateCode)");
-      const fnEnd = bookingsSrc.indexOf("// No corporativoCode at all", fnStart);
+      // End of the coded branch: the comment that opens the
+      // flat-rate / no-code section. The string changed in
+      // BI-04/BI-10 from `// No corporativoCode at all` (typo)
+      // to the actual marker now in the code.
+      const fnEnd = bookingsSrc.indexOf(
+        "if (!corporateDetails.isCorporate && corporateFlatRate === true)",
+        fnStart
+      );
       const corpBranch = bookingsSrc.slice(fnStart, fnEnd);
       expect(corpBranch, "expected to find the corporate branch").toBeTruthy();
-      // Source of truth: the corporativoCodes doc
+      // Source of truth: the corporateCodes doc
       expect(corpBranch).toMatch(/corpData\.companyName\s*\|\|\s*["']["']/);
       // Strip line comments before checking for body-trust patterns
       const codeOnly = corpBranch
@@ -144,6 +151,30 @@ describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomT
       // `typeCorporateRate`, never a fallback to
       // `typeBaseRate`.
       expect(validBranch![0]).not.toMatch(/activeRoomRate\s*=\s*typeBaseRate/);
+    });
+
+    it("flat-rate branch (BI-04) prices from the server-side type entry, never from the body", () => {
+      // Per BI-04 (booking-intercom audit 2026-07-06): the
+      // "Continue without code" path may flag the booking
+      // corporate and store the guest-entered companyName, but
+      // the RATE must come from the server-side roomTypes[]
+      // entry (typeCorporateRate, falling back to typeBaseRate
+      // — never a client-supplied number, never ₱0).
+      const flatStart = bookingsSrc.indexOf(
+        "if (!corporateDetails.isCorporate && corporateFlatRate === true)"
+      );
+      expect(flatStart, "expected to find the flat-rate branch").toBeGreaterThan(-1);
+      const flatEnd = bookingsSrc.indexOf("}", flatStart);
+      const flatBranch = bookingsSrc.slice(flatStart, flatEnd + 1);
+      expect(flatBranch).toMatch(
+        /activeRoomRate\s*=\s*typeCorporateRate\s*>\s*0\s*\?\s*typeCorporateRate\s*:\s*typeBaseRate/
+      );
+      // A validated code always wins: the branch only runs
+      // when the coded branch did not already flag the booking
+      // corporate.
+      expect(flatBranch).toMatch(/!corporateDetails\.isCorporate/);
+      // No client-supplied rate can reach the branch.
+      expect(flatBranch).not.toMatch(/body\.|ratePerNight/);
     });
 
     it("BookingPage (standard online flow) no longer sends isCorporate: false", () => {

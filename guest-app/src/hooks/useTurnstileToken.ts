@@ -66,13 +66,18 @@ export function useTurnstileToken(
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const container = containerRef.current;
-    if (!container) return undefined;
 
     let cancelled = false;
     let pollHandle: ReturnType<typeof setTimeout> | null = null;
 
-    const renderWidget = () => {
+    // Per BI-03 (booking-intercom audit 2026-07-06): re-read the
+    // container ref on every poll tick instead of capturing it
+    // once. Pages render the container conditionally (loading
+    // skeletons, step-gated forms), so the ref is often still
+    // null when this effect first fires; the previous early
+    // `return` meant the widget never rendered at all and every
+    // caller fell back to the (now removed) `mock_token`.
+    const renderWidget = (container: HTMLDivElement) => {
       if (cancelled || !window.turnstile || !container.isConnected) return;
       const id = window.turnstile.render(container, {
         sitekey: getSiteKey(),
@@ -85,8 +90,9 @@ export function useTurnstileToken(
 
     const tryRender = () => {
       if (cancelled) return;
-      if (window.turnstile) {
-        renderWidget();
+      const container = containerRef.current;
+      if (window.turnstile && container) {
+        renderWidget(container);
       } else {
         pollHandle = setTimeout(tryRender, 100);
       }
@@ -107,6 +113,10 @@ export function useTurnstileToken(
         }
       }
       widgetIdRef.current = null;
+      // A token is only meaningful while its widget is mounted —
+      // clear it so a page that re-enables the widget later can't
+      // submit a stale (already expired or consumed) token.
+      setToken("");
     };
   }, [enabled, containerRef]);
 

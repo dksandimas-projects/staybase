@@ -30,12 +30,15 @@ import {
 } from "lucide-react";
 import {
   calculateBookingTotal,
+  compressImageFile,
   getNumNights,
   staggerChild,
   staggerContainer,
   VERSION
 } from "@spark-inn/shared";
 import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { storage } from "../firebase/config";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -43,6 +46,7 @@ import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
+import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
@@ -71,6 +75,16 @@ export function CorporateBookingPage() {
   const shouldReduceMotion = useReducedMotion();
   const currentStepKey = searchParams.get("step") ?? "gate";
   const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
+
+  // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
+  // Turnstile challenges. The gate widget covers
+  // /api/validate/corporate-code; the review widget covers
+  // /api/bookings/create. Previously the gate hardcoded
+  // `"mock_token"` and the create body sent no token at all, so
+  // corporate bookings were rejected outside NODE_ENV=test (the
+  // Step 3 "Connection Verified" panel was a hardcoded fake).
+  const gateTurnstile = useTurnstileToken({ enabled: currentStepKey === "gate" });
+  const reviewTurnstile = useTurnstileToken({ enabled: currentStepKey === "review" });
 
   // Corporate validation state (persisted in sessionStorage)
   const [accessCode, setAccessCode] = useState("");
@@ -148,7 +162,14 @@ export function CorporateBookingPage() {
   });
 
   // Step 3 State
-  const [billingFile, setBillingFile] = useState<string | null>(null);
+  // Per BI-05 (booking-intercom audit 2026-07-06): the personal-pay
+  // receipt is a real Storage upload under the preallocated booking
+  // ID (same pattern as BookingPage). The previous `billingFile`
+  // state stored only the picked file's *name* — nothing was ever
+  // uploaded, no `paymentProofUrl` was sent, and the booking was
+  // recorded as `pay-at-hotel` with no trace of the transfer.
+  const [proofUpload, setProofUpload] = useState<{ name: string; url: string } | null>(null);
+  const [uploadingProof, setUploadingProof] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
   const [termsConsent, setTermsConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -189,6 +210,30 @@ export function CorporateBookingPage() {
       })
       .catch(() => undefined);
   }, []);
+
+  // Personal-pay selector source — enabled + corporate-visible
+  // online methods only. Hoisted from the Step 3 JSX so the
+  // stale-selection fallback below can reuse it.
+  const corporatePaymentMethods = useMemo(
+    () =>
+      paymentMethodsConfig.filter(
+        (pm) =>
+          pm.isEnabled &&
+          pm.showInCorporate !== false &&
+          (pm.method === "gcash" || pm.method === "maya" || pm.method === "bank")
+      ),
+    [paymentMethodsConfig]
+  );
+
+  // Per BI-05: the default selection is "gcash", which may be
+  // disabled (or hidden from the corporate surface) in Settings.
+  // Fall back to the first available method so the submitted
+  // `paymentMethod` always matches a method the guest could see.
+  useEffect(() => {
+    if (corporatePaymentMethods.length === 0) return;
+    if (corporatePaymentMethods.some((pm) => pm.method === paymentMethod)) return;
+    setPaymentMethod(corporatePaymentMethods[0].method);
+  }, [corporatePaymentMethods, paymentMethod]);
 
   // Sync companyName from state when it validates
   useEffect(() => {
@@ -308,9 +353,13 @@ export function CorporateBookingPage() {
   // the chosen room type from the corporateCodes/{code} doc. Fall
   // back to the type's flat corporateRate only when the negotiated
   // map has no entry for this room type.
+  // Per BI-04 + CORPORATE-BOOKING.md edge case: a missing/zero
+  // `corporateRate` falls back to the standard nightly rate —
+  // never show (or charge) ₱0. Mirrors the server-side fallback
+  // in handleCreateBooking.
   const negotiatedRate = selectedTypeEntry && ratePerRoomType && ratePerRoomType[selectedTypeEntry.value] !== undefined
     ? ratePerRoomType[selectedTypeEntry.value]
-    : (selectedRoomRates?.corporateRate ?? 0);
+    : (selectedRoomRates?.corporateRate || selectedRoomRates?.pricePerNight || 0);
   const baseRate = negotiatedRate;
   // Apply additional code discount if active
   const ratePerNight = Math.round(baseRate * (1 - discountPercent / 100));
@@ -413,6 +462,16 @@ export function CorporateBookingPage() {
   async function handleValidateCode(e: React.FormEvent) {
     e.preventDefault();
     setCodeError("");
+
+    // Per BI-01: the endpoint is Turnstile-gated for real now.
+    // The widget on this gate auto-resolves for most visitors;
+    // if the token hasn't arrived yet, ask for a retry instead
+    // of burning a request that will 400.
+    if (!gateTurnstile.token) {
+      setCodeError("The security check hasn't finished yet. Please wait a moment and try again.");
+      return;
+    }
+
     setIsValidating(true);
 
     try {
@@ -420,7 +479,7 @@ export function CorporateBookingPage() {
       const response = await fetch("/api/validate/corporate-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, turnstileToken: "mock_token" })
+        body: JSON.stringify({ code, turnstileToken: gateTurnstile.token })
       });
       const result = await response.json();
 
@@ -447,6 +506,10 @@ export function CorporateBookingPage() {
     } catch {
       setCodeError("Unable to validate code. Please check your connection and try again.");
     } finally {
+      // Turnstile tokens are single-use — siteverify consumed this
+      // one whatever the outcome. Reset so a retry (or a second
+      // code attempt) mints a fresh token.
+      gateTurnstile.reset();
       setIsValidating(false);
     }
   }
@@ -479,9 +542,25 @@ export function CorporateBookingPage() {
     sessionStorage.removeItem("corp_isFlatRate");
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  // Per BI-05: compress + upload the receipt to the preallocated
+  // booking path (staff-read / public-write per storage.rules),
+  // exactly like the standard booking flow's payment proof.
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
-      setBillingFile(e.target.files[0].name);
+      const file = e.target.files[0];
+      setUploadingProof(true);
+      try {
+        const compressed = await compressImageFile(file);
+        const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
+        await uploadBytes(storageRef, compressed.file);
+        const url = await getDownloadURL(storageRef);
+        setProofUpload({ name: file.name, url });
+      } catch (err) {
+        console.error("Corporate payment proof upload failed:", err);
+        alert("Receipt upload failed. Please try again.");
+      } finally {
+        setUploadingProof(false);
+      }
     }
   }
 
@@ -531,6 +610,7 @@ export function CorporateBookingPage() {
     setSubmitError("");
 
     try {
+      const isPersonalPay = guestDetails.billingArrangement === "personal";
       const body = {
         bookingId,
         roomType: selectedTypeEntry?.value ?? "",
@@ -553,13 +633,25 @@ export function CorporateBookingPage() {
         },
         discountType: "" as const,
         discountIdPhotoUrl: null,
-        paymentMethod: "pay-at-hotel",
+        // Per BI-05: personal pay submits the method the guest
+        // actually paid with plus the uploaded receipt URL, so the
+        // booking lands as `payment-uploaded` and staff can verify
+        // the transfer. Chargeback stays `pay-at-hotel` (settled
+        // via LOU per decision #99).
+        paymentMethod: isPersonalPay ? paymentMethod : "pay-at-hotel",
+        paymentProofUrl: isPersonalPay ? proofUpload?.url ?? null : null,
         // Per W1.3 / decision #79 / audit S1.5: the server
         // derives `isCorporate` from the validated `corporateCode`
         // lookup. The client no longer sets it. The booking body's
         // companyName is also overridden by the doc's companyName
         // server-side.
         corporateCode: activeCode || undefined,
+        // Per BI-04: the "Continue without code" path — the server
+        // resolves the flat corporate rate from its own
+        // roomTypes[].corporateRate and flags the booking corporate.
+        corporateFlatRate: isFlatRate && !activeCode,
+        // Per BI-01: real Turnstile token from the review-step widget.
+        turnstileToken: reviewTurnstile.token,
         _hp: "",
       };
 
@@ -596,10 +688,13 @@ export function CorporateBookingPage() {
         setSearchParams(params);
       } else {
         setSubmitError(result.error || "Booking submission failed. Please try again.");
+        // Tokens are single-use; mint a fresh one for the retry.
+        reviewTurnstile.reset();
         setIsSubmitting(false);
       }
     } catch {
       setSubmitError("Unable to submit booking. Please check your connection and try again.");
+      reviewTurnstile.reset();
       setIsSubmitting(false);
     }
   };
@@ -735,6 +830,10 @@ export function CorporateBookingPage() {
                     Enter the access code provided by your company.
                   </span>
                 </label>
+
+                {/* Per BI-01: real Turnstile challenge gating
+                    /api/validate/corporate-code. */}
+                <div ref={gateTurnstile.containerRef} className="flex justify-center" />
 
                 <div className="flex flex-col gap-4">
                   <PrimaryButton
@@ -884,9 +983,11 @@ export function CorporateBookingPage() {
                 // Per W3.6 — pricing lives on the type. Apply the
                 // negotiated map override first (S4.1 / decision
                 // #101) then the additional code discount.
+                // Per BI-04: never render ₱0 when the type has no
+                // corporateRate — fall back to the standard rate.
                 const baseCorp = (ratePerRoomType && ratePerRoomType[type.value] !== undefined)
                   ? ratePerRoomType[type.value]
-                  : (type.corporateRate ?? 0);
+                  : (type.corporateRate || type.pricePerNight || 0);
                 const discountedCorp = Math.round(baseCorp * (1 - discountPercent / 100));
 
                 return (
@@ -1269,13 +1370,17 @@ export function CorporateBookingPage() {
   // ==================== STEP 3: REVIEW & PAY ====================
   if (currentStepKey === "review") {
     const isPersonalPay = guestDetails.billingArrangement === "personal";
-    // Per W2.11 / decision #99: LOU is no longer collected in Phase 1.
-    // The previous isFileUploaded requirement blocked chargeback
-    // bookings, but the file was never actually uploaded (only the
-    // filename was stored in state). The file picker has been replaced
-    // with a note; staff tracks receipt via the louReceived boolean on
-    // the booking drawer.
-    const canConfirm = termsConsent && Boolean(selectedTypeEntry);
+    // Per W2.11 / decision #99: LOU is no longer collected in Phase 1
+    // (chargeback shows a note; staff tracks receipt via louReceived).
+    // Per BI-05: personal pay requires the uploaded receipt before
+    // Confirm unlocks. Per BI-01: Confirm also waits for the
+    // Turnstile token — submitting without one is a guaranteed 400.
+    const canConfirm =
+      termsConsent &&
+      Boolean(selectedTypeEntry) &&
+      Boolean(reviewTurnstile.token) &&
+      !uploadingProof &&
+      (!isPersonalPay || Boolean(proofUpload));
 
     return bookingShell(
       <>
@@ -1333,13 +1438,7 @@ export function CorporateBookingPage() {
                   </p>
                   
                   <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                    {paymentMethodsConfig
-                      .filter(
-                        (pm) =>
-                          pm.isEnabled &&
-                          pm.showInCorporate !== false &&
-                          (pm.method === "gcash" || pm.method === "maya" || pm.method === "bank")
-                      )
+                    {corporatePaymentMethods
                       .map((pm) => {
                         const Icon = pm.method === "gcash" || pm.method === "maya" ? Wallet : Landmark;
                         return (
@@ -1388,17 +1487,34 @@ export function CorporateBookingPage() {
                     );
                   })()}
 
-                  {/* Proof upload */}
+                  {/* Proof upload — per BI-05, a real Storage upload
+                      (was: filename-only state, nothing persisted). */}
                   <div className="mt-6">
                     <p className="text-sm font-medium text-gray-700 mb-2">Upload payment receipt screenshot <span className="text-red-500">*</span></p>
-                    <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition hover:bg-gray-50">
-                      <UploadCloud size={32} className="text-primary mb-2" />
-                      <span className="text-sm font-semibold text-gray-900">
-                        {billingFile ? `File Selected: ${billingFile}` : "Click to select or drop file"}
-                      </span>
-                      <span className="mt-1 text-xs text-gray-500">JPG, PNG, or PDF up to 5MB</span>
-                      <input type="file" className="hidden" accept="image/*,.pdf" onChange={handleFileChange} />
-                    </label>
+                    {proofUpload ? (
+                      <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 size={18} className="text-status-green-text" />
+                          <span className="text-sm font-medium text-gray-800">{proofUpload.name}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setProofUpload(null)}
+                          className="text-xs font-semibold text-red-600 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition hover:bg-gray-50">
+                        <UploadCloud size={32} className="text-primary mb-2" />
+                        <span className="text-sm font-semibold text-gray-900">
+                          {uploadingProof ? "Uploading receipt..." : "Click to upload receipt photo"}
+                        </span>
+                        <span className="mt-1 text-xs text-gray-500">JPG, PNG, or WEBP up to 5MB</span>
+                        <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} disabled={uploadingProof} />
+                      </label>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -1437,14 +1553,10 @@ export function CorporateBookingPage() {
                 </span>
               </label>
 
-              {/* Turnstile simulated widget */}
-              <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 size={16} className="text-green-500" />
-                  <span className="text-xs font-semibold text-gray-800">Connection Verified (Turnstile)</span>
-                </div>
-                <span className="text-[10px] text-gray-400 font-bold uppercase">Cloudflare</span>
-              </div>
+              {/* Per BI-01: real Cloudflare Turnstile challenge —
+                  replaces the previous hardcoded "Connection
+                  Verified" panel that had no widget behind it. */}
+              <div ref={reviewTurnstile.containerRef} className="flex justify-center" />
             </div>
 
             {/* Submit error */}
@@ -1476,11 +1588,19 @@ export function CorporateBookingPage() {
           <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs text-gray-600">
-                {isPersonalPay ? "Payment receipt uploaded" : "Authorization via email after booking"}
+                {isPersonalPay ? "Personal payment verification" : "Authorization via email after booking"}
               </p>
               <p className="text-sm font-semibold text-gray-950">
-                {isPersonalPay
-                  ? (billingFile ? "Payment receipt uploaded" : "Payment receipt upload required")
+                {isPersonalPay && uploadingProof
+                  ? "Uploading payment receipt..."
+                  : isPersonalPay && !proofUpload
+                  ? "Payment receipt upload required"
+                  : !termsConsent
+                  ? "Agree to the terms to continue"
+                  : !reviewTurnstile.token
+                  ? "Running a quick security check..."
+                  : isPersonalPay
+                  ? "Payment receipt uploaded"
                   : "No LOU upload needed — accounts team will email you"}
               </p>
             </div>
