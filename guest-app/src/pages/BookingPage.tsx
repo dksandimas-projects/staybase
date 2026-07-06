@@ -585,6 +585,24 @@ export function BookingPage() {
       ...current,
       [field]: value
     }));
+    // Per BI-09 (booking-intercom audit 2026-07-06): the Step 2
+    // "Number of guests" field used to write only to
+    // `guestDetails.guestCount`, while the create body, the
+    // breakfast total, and the member/voucher math all used the
+    // separate `guests` state seeded from the Step 1 URL param.
+    // Editing the field changed what the guest *saw* without
+    // changing what was *booked or charged*. The corporate page
+    // wires it correctly (`CorporateBookingPage.tsx:1285-1288`):
+    // a Step 2 edit also updates `guests`. Mirror that here so
+    // the Step 2 value is the single source of truth that flows
+    // into the submitted body + downstream totals.
+    if (field === "guestCount") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 1) {
+        setGuests(parsed);
+        updateDateParams(checkIn, checkOut, parsed);
+      }
+    }
   }
 
   // Real API calls for Voucher validation
@@ -703,7 +721,13 @@ export function BookingPage() {
           roomType: selectedTypeEntry?.value,
           checkIn,
           checkOut,
-          guests,
+          // Per BI-09 (booking-intercom audit 2026-07-06): the
+          // Step 2 "Number of guests" field is the single source
+          // of truth once the guest has touched it. Mirror the
+          // corporate page (`CorporateBookingPage.tsx:619`) and
+          // prefer the parsed Step 2 value, falling back to the
+          // Step 1 stepper for guests who never reached Step 2.
+          guests: Number(guestDetails.guestCount) || guests,
           hasBreakfast,
           guestDetails: {
             firstName: guestDetails.firstName,
