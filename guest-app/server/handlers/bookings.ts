@@ -103,6 +103,14 @@ interface CreateBookingBody {
   // booking is sourced from the `corporateCodes` document for
   // the validated code, never from `guestDetails.companyName`.
   corporateCode?: string;
+  // Per BI-04 (booking-intercom audit 2026-07-06): the corporate
+  // booking route's "Continue without code" path. The flag only
+  // expresses *intent* — the rate itself is always read from the
+  // server-side `roomTypes[].corporateRate` (public flat corporate
+  // pricing per CORPORATE-BOOKING.md), never from the client. The
+  // guest-entered `companyName` is stored as unverified contact
+  // metadata. A validated `corporateCode` always wins over this flag.
+  corporateFlatRate?: boolean;
   // Per W2.14 / decision #102: set when this booking is created from a
   // converted corporate inquiry. The convert-to-booking UI (per audit
   // 1.4 SEV-1 #2) populates this field; normal bookings send null.
@@ -140,6 +148,7 @@ export async function handleCreateBooking(req: any, res: any) {
     paymentMethod,
     paymentProofUrl,
     corporateCode,
+    corporateFlatRate,
     linkedInquiryId
   } = body;
 
@@ -381,8 +390,27 @@ export async function handleCreateBooking(req: any, res: any) {
           activeRoomRate = typeBaseRate;
         }
       }
-      // No corporateCode at all → activeRoomRate stays as
-      // typeBaseRate, isCorporate stays false.
+      // Per BI-04 (booking-intercom audit 2026-07-06): the
+      // "Continue without code" corporate path. Previously the
+      // server ignored it entirely: the booking was priced at the
+      // standard rate with `isCorporate: false` / `source: "online"`
+      // while the corporate UI quoted `roomTypes[].corporateRate`
+      // on every step. The flag is client intent only — the rate
+      // comes from the server-side type entry (the flat corporate
+      // rate is public pricing per CORPORATE-BOOKING.md), and the
+      // guest-entered companyName is stored as unverified metadata.
+      // A validated corporateCode above always takes precedence.
+      // Per the CORPORATE-BOOKING.md edge case, a missing/zero
+      // `corporateRate` falls back to the standard rate (never ₱0)
+      // — the booking is still flagged corporate.
+      if (!corporateDetails.isCorporate && corporateFlatRate === true) {
+        corporateDetails.isCorporate = true;
+        corporateDetails.corporateCode = "";
+        corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
+        activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
+      }
+      // No corporateCode and no flat-rate flag → activeRoomRate
+      // stays as typeBaseRate, isCorporate stays false.
 
       // 5. Calculate Nightly Rate Total (support weekend rate)
       let roomTotal = 0;

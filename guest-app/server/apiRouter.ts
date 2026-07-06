@@ -248,17 +248,17 @@ const LOOKUP_FAILURE_THRESHOLD = 3;
 const LOOKUP_FAILURE_WINDOW_MS = 3600000;
 
 async function verifyTurnstile(token: string | undefined, req?: VercelRequest): Promise<{ success: boolean; error?: string }> {
-  // Cloudflare test keys: always verify successfully.
-  // Test bypass: NODE_ENV is "test", OR the client supplied an
-  // explicit test token (the Cloudflare "always passes" / "always
-  // fails" sentinel keys, or our internal `mock_token` from
-  // vercel dev / unit tests).
-  if (
-    process.env.NODE_ENV === "test" ||
-    token === "1x00000000000000000000AA" ||
-    token === "1x00000000000000000000000000000000" ||
-    token === "mock_token"
-  ) {
+  // Per BI-02 (booking-intercom audit 2026-07-06): the bypass is
+  // gated on NODE_ENV === "test" ONLY. The previous version also
+  // short-circuited on the literal tokens "mock_token" and the
+  // Cloudflare sentinel keys — in every environment, including
+  // production. Since every guest-app caller shipped a
+  // `|| "mock_token"` fallback in its bundle, any bot could read
+  // it and bypass Turnstile on all gated endpoints. Local dev /
+  // vercel dev does not need a sentinel: non-production origins
+  // fall through to the Cloudflare always-pass test secret below,
+  // which verifies any token the dev-sitekey widget issues.
+  if (process.env.NODE_ENV === "test") {
     return { success: true };
   }
 

@@ -234,6 +234,14 @@ export function CorporateStaysPage() {
       return;
     }
 
+    // Per BI-02 (booking-intercom audit 2026-07-06): the endpoint
+    // is Turnstile-gated for real now — don't burn a request that
+    // will 400 while the widget is still resolving.
+    if (!turnstileToken) {
+      setFormError("The security check hasn't finished yet. Please wait a moment and try again.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -249,7 +257,7 @@ export function CorporateStaysPage() {
           preferredDates,
           specialRequirements,
           _hp: websiteUrl,
-          turnstileToken: turnstileToken || "mock_token"
+          turnstileToken
         })
       });
 
