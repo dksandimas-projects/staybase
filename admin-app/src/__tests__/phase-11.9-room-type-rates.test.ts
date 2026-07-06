@@ -236,7 +236,13 @@ describe("Phase 11.9 — Room type drives pricing + maxCapacity (W3.6)", () => {
     });
 
     it("CorporateBookingPage falls back to the type's corporateRate (not room.corporateRate)", () => {
-      expect(corporateBookingPageSrc).toMatch(/selectedRoomRates\?\.corporateRate\s*\?\?\s*0/);
+      // Per BI-04 (booking-intercom audit 2026-07-06): the fallback
+      // chain is corporateRate → standard pricePerNight — never ₱0
+      // (CORPORATE-BOOKING.md edge case: "corporateRate not set …
+      // fall back to standard rate, do not show ₱0").
+      expect(corporateBookingPageSrc).toMatch(
+        /selectedRoomRates\?\.corporateRate\s*\|\|\s*selectedRoomRates\?\.pricePerNight\s*\|\|\s*0/
+      );
       expect(corporateBookingPageSrc).not.toMatch(/selectedRoom\.corporateRate/);
     });
   });

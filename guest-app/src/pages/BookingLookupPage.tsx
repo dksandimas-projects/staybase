@@ -127,9 +127,11 @@ export function BookingLookupPage() {
     setActiveBooking(null);
 
     try {
+      // Per BI-02 (booking-intercom audit 2026-07-06): real token
+      // only — the "mock_token" sentinel is test-env-only server-side.
       const payload: Record<string, string> = {
         bookingRef,
-        turnstileToken: turnstileToken || "mock_token"
+        turnstileToken
       };
       if (token) {
         payload.token = token;
@@ -154,12 +156,6 @@ export function BookingLookupPage() {
           result?.error ||
             "We couldn't find a booking with those details. Please check your reference number and email."
         );
-        // If Turnstile rejected the token, the widget
-        // will already be expired — reset it so the user
-        // can re-submit without a hard refresh.
-        if (response.status === 400 && /bot|turnstile|captcha/i.test(String(result?.error || ""))) {
-          resetTurnstile();
-        }
         return;
       }
 
@@ -192,6 +188,13 @@ export function BookingLookupPage() {
         "We couldn't reach the booking service. Please check your connection and try again."
       );
     } finally {
+      // Per BI-02: Turnstile tokens are single-use — siteverify
+      // consumed this one whether the lookup succeeded or not.
+      // Reset unconditionally so a follow-up submit (including the
+      // cancel modal, which shares this widget) gets a fresh token.
+      // The previous conditional reset only fired on bot-check
+      // errors, which was masked by the mock_token bypass.
+      resetTurnstile();
       setIsSearching(false);
     }
   };
@@ -207,6 +210,11 @@ export function BookingLookupPage() {
     const email = searchParams.get("email");
     if (!ref) return;
     if (!token && !email) return;
+    // Per BI-02/BI-03: the magic-link auto-lookup must wait for the
+    // Turnstile widget to issue a token — the lookup endpoint is
+    // gated for real now. The effect re-runs when the token arrives
+    // (deps below); the signature guard keeps it single-fire.
+    if (!turnstileToken) return;
     const signature = `${ref}::${token || email || ""}`;
     if (lastAutoLookupSignatureRef.current === signature) return;
     lastAutoLookupSignatureRef.current = signature;
@@ -214,10 +222,16 @@ export function BookingLookupPage() {
     if (email) setEmailInput(email);
     setHasSearched(true);
     void performLookup(ref, email || undefined, token || undefined);
-  }, [searchParams]);
+  }, [searchParams, turnstileToken]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Per BI-02/BI-03: don't burn a request that will 400 — the
+    // widget below the form auto-resolves for most visitors.
+    if (!turnstileToken) {
+      setSearchError("The security check hasn't finished yet. Please wait a moment and try again.");
+      return;
+    }
     setSearchError("");
     setHasSearched(true);
     await performLookup(refInput, emailInput || undefined);
@@ -299,6 +313,12 @@ export function BookingLookupPage() {
   const handleCancelBookingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeBooking) return;
+    // Per BI-02: the lookup consumed the previous token and
+    // `performLookup` reset the widget — wait for the fresh one.
+    if (!turnstileToken) {
+      setCancelError("The security check hasn't finished yet. Please wait a moment and try again.");
+      return;
+    }
     setIsCancelling(true);
     setCancelError("");
 
@@ -314,7 +334,7 @@ export function BookingLookupPage() {
       const cancelPayload: Record<string, string> = {
         bookingRef: activeBooking.bookingRef,
         reason: cancelReason,
-        turnstileToken: turnstileToken || "mock_token"
+        turnstileToken
       };
       if (lookupAuthMode === "token" && activeLookupToken) {
         cancelPayload.token = activeLookupToken;
@@ -341,6 +361,8 @@ export function BookingLookupPage() {
       console.error("Cancel booking failed:", err);
       setCancelError("We couldn't reach the booking service. Please try again.");
     } finally {
+      // Per BI-02: single-use token consumed — mint a fresh one.
+      resetTurnstile();
       setIsCancelling(false);
     }
   };
