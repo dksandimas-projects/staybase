@@ -1,7 +1,7 @@
 # Booking Flow (Regular + Corporate) & Intercom Audit — 2026-07-06
 > Focused wiring audit of the public booking flow, the corporate booking flow,
 > and the guest/admin intercom feature (chat, quick requests, WebRTC voice call,
-> store-order messages). Read-only. No code changes shipped. Successor to
+> store-order messages). Read-only at audit time. Successor to
 > `plan/project/AUDIT-BOOKING-FLOW-2026-06-26.md` (all 50 BF-* findings closed);
 > this pass verifies what the BF batches left behind and extends coverage to the
 > intercom, which the 2026-06-26 audit did not touch.
@@ -23,6 +23,11 @@
 > **Convention:** findings are numbered `BI-<n>` (Booking & Intercom). Severity
 > matches prior audits (`SEV-1` critical → `SEV-4` nit). Status is `Open` until
 > a commit references the fix in this doc.
+>
+> **Last status sync: 2026-07-06** — all 6 SEV-1 findings fixed in `f20c0bb`
+> (`fix/audit-bi-sev1`, shared VERSION 0.119.8). Typecheck + full test suite
+> (99 shared / 254 guest-api / 580 admin) pass; API bundle rebuilt and
+> committed. SEV-2..SEV-4 remain open.
 
 ---
 
@@ -30,11 +35,11 @@
 
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
-| **SEV-1 (critical)** | 6 | 0 | **6** |
+| **SEV-1 (critical)** | 0 | 6 (`f20c0bb`) | **6** |
 | **SEV-2 (major)** | 5 | 0 | **5** |
 | **SEV-3 (minor)** | 7 | 0 | **7** |
 | **SEV-4 (nit / doc drift)** | 5 | 0 | **5** |
-| **Total** | **23** | **0** | **23** |
+| **Total** | **17** | **6** | **23** |
 
 The server side of the booking flow (`handleCreateBooking`, `handleCreateWalkin`,
 availability transaction, ref counter, discount stacking, idempotency, email
@@ -57,26 +62,36 @@ in this pass are concentrated in three places:
 
 ### Top 5 to fix first
 
-| # | ID | Why | File:line |
-|---|---|---|---|
-| 1 | **BI-01** | Corporate booking creation always returns 400 outside `NODE_ENV=test` — the flow cannot complete at all | `guest-app/src/pages/CorporateBookingPage.tsx:534-564` |
-| 2 | **BI-02** | `"mock_token"` bypasses Turnstile server-side in every environment — all bot gates (create, cancel, lookup, voucher, corp-code, inquiry, contact) are void | `guest-app/server/apiRouter.ts:250-262` |
-| 3 | **BI-05** | Corporate personal-pay proof is never uploaded and the booking is recorded as `pay-at-hotel` — guests pay real money and staff have no trace | `guest-app/src/pages/CorporateBookingPage.tsx:482-486,556` |
-| 4 | **BI-04** | "Continue without code" corporate bookings are priced at the standard rate with `isCorporate: false`, `source: "online"`, no company name | `guest-app/server/handlers/bookings.ts:347-385` |
-| 5 | **BI-06** | `Permissions-Policy: microphone=()` on both apps kills the intercom WebRTC call in production (works only in local dev) | `guest-app/vercel.json`, `admin-app/vercel.json`, root `vercel.json` |
+| # | ID | Why | File:line | Status |
+|---|---|---|---|---|
+| 1 | **BI-01** | Corporate booking creation always returns 400 outside `NODE_ENV=test` — the flow cannot complete at all | `guest-app/src/pages/CorporateBookingPage.tsx:534-564` | Fixed in `f20c0bb` |
+| 2 | **BI-02** | `"mock_token"` bypasses Turnstile server-side in every environment — all bot gates (create, cancel, lookup, voucher, corp-code, inquiry, contact) are void | `guest-app/server/apiRouter.ts:250-262` | Fixed in `f20c0bb` |
+| 3 | **BI-05** | Corporate personal-pay proof is never uploaded and the booking is recorded as `pay-at-hotel` — guests pay real money and staff have no trace | `guest-app/src/pages/CorporateBookingPage.tsx:482-486,556` | Fixed in `f20c0bb` |
+| 4 | **BI-04** | "Continue without code" corporate bookings are priced at the standard rate with `isCorporate: false`, `source: "online"`, no company name | `guest-app/server/handlers/bookings.ts:347-385` | Fixed in `f20c0bb` |
+| 5 | **BI-06** | `Permissions-Policy: microphone=()` on both apps kills the intercom WebRTC call in production (works only in local dev) | `guest-app/vercel.json`, `admin-app/vercel.json`, root `vercel.json` | Fixed in `f20c0bb` |
 
-> **Fix-order warning:** BI-02 and BI-03 must be fixed **together with** the
-> client-side fallbacks. Removing the `mock_token` server bypass while the
-> widget still fails to mount (BI-03) would break *all* public bookings,
-> lookups, and voucher validation, because every caller currently sends
+> **Fix-order warning (resolved):** BI-02 and BI-03 had to be fixed **together
+> with** the client-side fallbacks. Removing the `mock_token` server bypass
+> while the widget still failed to mount (BI-03) would have broken *all*
+> public bookings, lookups, and voucher validation, because every caller sent
 > `turnstileToken: turnstileToken || "mock_token"` with an empty real token.
+> `f20c0bb` ships all three sides atomically: the test-only server bypass, the
+> container-polling `useTurnstileToken` hook, and the removal of every
+> client-side `|| "mock_token"` fallback (BookingPage, BookingLookupPage,
+> CorporateStaysPage, CorporateBookingPage). Because Turnstile tokens are
+> single-use, the same commit also resets widgets after each token-consuming
+> request and makes the lookup magic-link auto-lookup wait for the token.
 
 ---
 
 ## SEV-1 — Critical (6)
 
 ### BI-01 — Corporate booking create sends no `turnstileToken` → always rejected
-**Status:** Open
+**Status:** **Fixed in `f20c0bb`** — real Turnstile widgets on the corporate
+gate (covers `/api/validate/corporate-code`) and review step (covers
+`/api/bookings/create`) via the shared `useTurnstileToken` hook; the fake
+"Connection Verified" panel is replaced by the real challenge; Confirm and
+Validate wait for the token and widgets reset after each consuming call.
 **File:** `guest-app/src/pages/CorporateBookingPage.tsx:534-564` (body), `guest-app/server/apiRouter.ts:421-424` + `:265-267` (rejection)
 
 `handleConfirmSubmit` builds the `/api/bookings/create` body with `corporateCode`
@@ -97,7 +112,10 @@ explicit-render pattern from `BookingPage`/`CorporateStaysPage`) and send the
 token; remove the fake "verified" panel.
 
 ### BI-02 — Server accepts `"mock_token"` (and Cloudflare sentinel tokens) in every environment
-**Status:** Open
+**Status:** **Fixed in `f20c0bb`** — the bypass is now `NODE_ENV === "test"`
+only; sentinel-token equality checks removed; every client-side
+`|| "mock_token"` fallback removed. Local dev keeps working through the
+existing non-production-origin → Cloudflare always-pass test-secret path.
 **File:** `guest-app/server/apiRouter.ts:250-262`
 
 `verifyTurnstile` short-circuits to success when the token equals
@@ -116,7 +134,12 @@ a non-production origin check). Must land together with BI-03 and a real token
 on every caller (BI-01), or production traffic breaks.
 
 ### BI-03 — Turnstile widget never mounts on `BookingPage` → token is always empty
-**Status:** Open
+**Status:** **Fixed in `f20c0bb`** — `useTurnstileToken` now polls for the
+container ref (instead of bailing when conditional JSX hasn't rendered it)
+and clears the token on unmount; `BookingPage` replaced its inline 60-line
+effect with the hook gated on the review step; Confirm is disabled until the
+token arrives (per BOOKING-FLOW.md §Step 3); the lookup page's magic-link
+auto-lookup waits for the token and its widget resets after lookup/cancel.
 **File:** `guest-app/src/pages/BookingPage.tsx:480-540` (effect), `:1341-1345` (container)
 
 The mount effect runs **once** (`[]` deps) and bails immediately when
@@ -137,7 +160,14 @@ drop the `|| "mock_token"` fallbacks once the widget reliably issues tokens.
 fallback — verify it issues real tokens as part of the same fix.
 
 ### BI-04 — Flat-rate corporate bookings priced at standard rate, stored as non-corporate
-**Status:** Open
+**Status:** **Fixed in `f20c0bb`** — the create body carries a
+`corporateFlatRate: true` intent flag for the "Continue without code" path;
+the server prices from its own `roomTypes[].corporateRate` (falling back to
+the standard rate — never ₱0), sets `isCorporate: true` / `source:
+"corporate"`, and stores the guest-entered `companyName` as unverified
+metadata. A validated `corporateCode` always wins over the flag. Client-side
+rate fallbacks (`corporateRate || pricePerNight`) mirror the server so ₱0 is
+never rendered. Structural tests updated to pin the new invariants.
 **File:** `guest-app/server/handlers/bookings.ts:347-385`; spec `plan/features/CORPORATE-BOOKING.md §Data & Logic`
 
 The server derives corporate-ness **only** from a validated `corporateCode`.
@@ -160,7 +190,12 @@ client-trusted beyond intent, price from the type's `corporateRate`, set
 corporate pricing and remove the flat-rate promise from the UI + spec.
 
 ### BI-05 — Corporate personal-pay receipt never uploaded; payment method hardcoded to `pay-at-hotel`
-**Status:** Open
+**Status:** **Fixed in `f20c0bb`** — the receipt is compressed and uploaded to
+`bookings/{bookingId}/payment-proof/` (same pattern as BookingPage) and the
+body submits the real `paymentMethod` + `paymentProofUrl`, so personal-pay
+corporate bookings land as `payment-uploaded`; Confirm requires the upload;
+chargeback keeps `pay-at-hotel` semantics (LOU per decision #99); a stale
+payment-method selection now falls back to the first corporate-visible method.
 **File:** `guest-app/src/pages/CorporateBookingPage.tsx:482-486` (`handleFileChange` stores only the file name), `:556` (`paymentMethod: "pay-at-hotel"`), `:1278` (`canConfirm` ignores the file), `:1393` (UI marks upload required)
 
 The Step 3 personal-pay path shows GCash/Maya/bank account details + QR and a
@@ -180,7 +215,10 @@ for personal-pay. For chargeback keep `pay-at-hotel` semantics but persist the
 billing arrangement (see BI-11).
 
 ### BI-06 — `Permissions-Policy: microphone=()` blocks the intercom voice call in production
-**Status:** Open
+**Status:** **Fixed in `f20c0bb`** — header changed to `microphone=(self)` in
+all three `vercel.json` files (root, guest-app, admin-app); camera and
+geolocation remain fully locked. Needs a manual voice-call QA on a Vercel
+preview deploy to confirm end-to-end (see Manual QA in INTERCOM-INBOX.md).
 **File:** `guest-app/vercel.json`, root `vercel.json`, `admin-app/vercel.json` (all send `Permissions-Policy: camera=(), microphone=(), geolocation=()` on `/(.*)`)
 
 An empty allowlist (`microphone=()`) denies the feature for **all** origins
@@ -518,15 +556,15 @@ Write the marker after a successful send, or accept at-most-once and note it.
 
 ## Suggested fix batches
 
-| Batch | Findings | Theme |
-|---|---|---|
-| 1 (`fix/audit-bi-batch-1`) | BI-01, BI-02, BI-03 | Make Turnstile real end-to-end (must ship together) |
-| 2 | BI-04, BI-05, BI-07, BI-10, BI-11 | Corporate flow correctness (pricing, proof upload, metadata, usage caps) |
-| 3 | BI-06 | One-line header fix per app + manual call QA on preview |
-| 4 | BI-08, BI-09, BI-12, BI-16 | Rules tightening + input wiring/validation |
-| 5 | BI-13, BI-14, BI-15, BI-17, BI-18, BI-19 … BI-23 | Copy, UX, nits, doc drift |
+| Batch | Findings | Theme | Status |
+|---|---|---|---|
+| 1 (`fix/audit-bi-sev1`) | BI-01, BI-02, BI-03, BI-04, BI-05, BI-06 | All SEV-1: Turnstile real end-to-end, corporate pricing/proof, mic policy | **Fixed in `f20c0bb`** |
+| 2 | BI-07, BI-10, BI-11 | Corporate flow correctness (usage caps, re-validation error, metadata persistence) | Open |
+| 3 | BI-08, BI-09, BI-12, BI-16 | Rules tightening + input wiring/validation | Open |
+| 4 | BI-13, BI-14, BI-15, BI-17, BI-18, BI-19 … BI-23 | Copy, UX, nits, doc drift | Open |
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `c593560`.
 - **Fixed in `<hash>`** — a commit referencing this doc closes the finding.
+  (`f20c0bb` = `fix/audit-bi-sev1`, all six SEV-1 findings, VERSION 0.119.8.)
 - **Verified** — re-checked and found already correct (none yet in this audit).
