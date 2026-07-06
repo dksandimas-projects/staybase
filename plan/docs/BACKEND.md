@@ -74,6 +74,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `isCorporate` | boolean | `true` if booked via `/corporate/book` |
 | `corporateCode` | string | Access code used (if any) |
 | `companyName` | string | Corporate bookings only |
+| `corporate` | object \| absent | Per BI-11 (booking-intercom audit 2026-07-06): persisted only when the booking is corporate. Shape: `{ designation: string, companyAddress: string, purposeOfStay: string, billingArrangement: "personal" \| "chargeback" }`. `chargeback` triggers the LOU workflow (`DECISIONS-FEATURES.md #99`); `personal` requires a payment proof. Standard online bookings omit the field entirely. |
 | `specialRequests` | string | |
 | `status` | string | `"pending"` \| `"payment-uploaded"` \| `"payment-confirmed"` \| `"confirmed"` \| `"checked-in"` \| `"checked-out"` \| `"cancelled"` |
 | `paymentMethod` | string | `"pay-at-hotel"` \| `"gcash"` \| `"paypal"` \| other |

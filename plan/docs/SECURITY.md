@@ -127,14 +127,21 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 - Public guest submissions go through `/api/corporate/inquiry`; Firestore client-side creates are not allowed
 
 ### `corporateCodes`
-- Read: anyone — needed for validation on `/corporate/book`
-- **However:** validation endpoint only returns rate data, never the full document — enforce in API route
+- Read: staff/admin only — the prior `allow read: if true;` rule
+  was tightened per BI-08 (booking-intercom audit 2026-07-06) so
+  anonymous visitors can no longer dump every access code, company
+  name, and negotiated `ratePerRoomType` via a collection query.
+- Validation endpoint `/api/validate/corporate-code` is the only
+  sanctioned path for the public — it returns only the rate map and
+  the public code label, never the full document.
 - Write: admin only
 
 ### `vouchers`
-- Read: anyone — needed for validation in booking flow
+- Read: staff/admin only — same BI-08 tightening as
+  `corporateCodes`. The public booking flow never reads the
+  collection client-side; validation is via
+  `/api/validate/voucher` (returns only discount type/value).
 - Write: staff/admin
-- Validation API returns only discount info — not full document
 
 ### `intercoms`
 - Read/Write: open (no auth — anonymous QR chat)
