@@ -44,17 +44,17 @@
 
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
-| **SEV-1 (critical)** | 3 | 0 | **3** |
+| **SEV-1 (critical)** | 0 | 3 | **3** |
 | **SEV-2 (major)** | 4 | 0 | **4** |
-| **SEV-3 (minor)** | 7 | 0 | **7** |
+| **SEV-3 (minor)** | 6 | 1 | **7** |
 | **SEV-4 (nit / doc drift)** | 5 | 0 | **5** |
-| **Total** | **19** | **0** | **19** |
+| **Total** | **15** | **4** | **19** |
 
 The public marketing shell (heroes, content fallback chain, branding
 overrides, SEO meta, PWA), the rooms catalog, the corporate inquiry form,
 the booking-lookup and cancel flows (post-BI fixes), and the member
 registration + RA 10173 erasure server endpoints are all in good shape.
-The critical problems cluster in three places:
+At audit time, the critical problems clustered in three places:
 
 1. **The member portal reads `bookings` straight from the guest client**
    — which Firestore rules (correctly, per GOTCHAS) deny. My Stays is
@@ -74,13 +74,19 @@ The critical problems cluster in three places:
    rewards program without the privacy consent the email flow requires
    (GA-07).
 
+**2026-07-07 update:** SEV-1 findings GA-01, GA-02, and GA-03 were fixed
+in `2b5b187` (`fix: repair guest app sev1 audit issues`). The same fix
+also closed GA-14 because `/api/members/stays` now returns pending /
+payment-uploaded stays, matches by `memberId` OR guest email, and drives
+the member portal without client-side `bookings` reads.
+
 ### Top 5 to fix first
 
 | # | ID | Why | File:line | Status |
 |---|---|---|---|---|
-| 1 | **GA-02** | Contact form is 100% dead — every submit 400s on the missing Turnstile token | `guest-app/src/pages/ContactPage.tsx:43-52`, `guest-app/server/apiRouter.ts:626-645` | Open |
-| 2 | **GA-01** | My Stays always "No stays yet"; early check-in can't load bookings — guest client queries a staff-only collection | `guest-app/src/pages/StaysPage.tsx:49-55`, `guest-app/src/pages/RewardsPage.tsx:95-101`, `firebase/firestore.rules:27` | Open |
-| 3 | **GA-03** | Early check-in submit fails even with GA-01 fixed — endpoint demands a guest email the member client never sends | `guest-app/src/pages/RewardsPage.tsx:132-136`, `guest-app/server/handlers/email.ts:277-285` | Open |
+| 1 | **GA-02** | Contact form is 100% dead — every submit 400s on the missing Turnstile token | `guest-app/src/pages/ContactPage.tsx:43-52`, `guest-app/server/apiRouter.ts:626-645` | Fixed in `2b5b187` |
+| 2 | **GA-01** | My Stays always "No stays yet"; early check-in can't load bookings — guest client queries a staff-only collection | `guest-app/src/pages/StaysPage.tsx:49-55`, `guest-app/src/pages/RewardsPage.tsx:95-101`, `firebase/firestore.rules:27` | Fixed in `2b5b187` |
+| 3 | **GA-03** | Early check-in submit fails even with GA-01 fixed — endpoint demands a guest email the member client never sends | `guest-app/src/pages/RewardsPage.tsx:132-136`, `guest-app/server/handlers/email.ts:277-285` | Fixed in `2b5b187` |
 | 4 | **GA-06** | Internal staff `remarks` publicly readable on every room doc — GOTCHAS-forbidden data exposure | `firebase/firestore.rules:17-24`, `guest-app/src/hooks/useRooms.ts:29` | Open |
 | 5 | **GA-04** | Homepage availability checker ships hardcoded June 2026 dates — now in the past, forwarded straight into `/book` | `guest-app/src/pages/HomePage.tsx:58-59` | Open |
 
@@ -89,7 +95,7 @@ The critical problems cluster in three places:
 ## SEV-1 — Critical (3)
 
 ### GA-01 — My Stays and the early check-in picker query `bookings` from the guest client — Firestore rules deny every read
-**Status:** Open
+**Status:** Fixed in `2b5b187`
 **File:** `guest-app/src/pages/StaysPage.tsx:49-55` (email query), `guest-app/src/pages/RewardsPage.tsx:95-101` (memberId query); rules: `firebase/firestore.rules:26-30`
 
 `bookings` reads are `allow read: if isStaff()` — correct per GOTCHAS
@@ -123,8 +129,14 @@ fix is an API route, not a rules relaxation.
 never `paymentProofUrl`/`remarks`); consume it from both `StaysPage`
 and the early check-in picker. Land together with GA-03 and GA-14.
 
+**Fixed in `2b5b187`:** added authenticated `GET /api/members/stays`,
+deduped memberId/email matches, returned only guest-safe display fields,
+and moved both `StaysPage` and the Rewards early check-in picker off
+direct Firestore `bookings` reads. Added regression coverage in
+`members-register.test.ts` and `early-checkin.test.ts`.
+
 ### GA-02 — Contact form can never submit: no Turnstile widget, no honeypot, router demands both
-**Status:** Open
+**Status:** Fixed in `2b5b187`
 **File:** `guest-app/src/pages/ContactPage.tsx:36-68, 220-280` (form), `guest-app/server/apiRouter.ts:626-645` (gate), `:265-267` (`verifyTurnstile` missing-token rejection)
 
 `POST /api/contact/inquiry` is honeypot-checked and Turnstile-gated in
@@ -146,8 +158,12 @@ disabled-submit until token, reset after each submit per GOTCHAS
 (single-use tokens), plus a CSS-hidden honeypot field submitted as
 `_hp` (hidden via opacity/position, not `display:none`).
 
+**Fixed in `2b5b187`:** wired `ContactPage` to `useTurnstileToken`,
+submitted `turnstileToken` plus a CSS-hidden `_hp` honeypot, disabled
+submit until a token exists, and reset the widget after each token use.
+
 ### GA-03 — Early check-in request fails server-side: client sends neither guest email nor a verifiable member token
-**Status:** Open
+**Status:** Fixed in `2b5b187`
 **File:** `guest-app/src/pages/RewardsPage.tsx:128-148` (client POST), `guest-app/server/apiRouter.ts:790-824` (email dispatch — staff-or-nothing auth), `guest-app/server/handlers/email.ts:250-288` (`findBooking`), `:882-894` (early-checkin action)
 
 Independent of GA-01: the rewards page POSTs `/api/email/
@@ -167,6 +183,12 @@ non-staff Authorization header is present, and let `findBooking` accept
 a verified member match (`booking.memberId == uid` or
 `booking.guestEmail == token.email`) as the guest-match proof; send the
 member ID token from `RewardsPage`. Land with GA-01.
+
+**Fixed in `2b5b187`:** `RewardsPage` now sends the guest Firebase ID
+token with early check-in requests, and the email route accepts member
+tokens for `early-checkin-request` while preserving staff auth and the
+anonymous ref/email ownership path. Added
+`early-checkin-member-auth.test.ts`.
 
 ---
 
@@ -342,7 +364,7 @@ the homepage cards (or drive it from `/api/rooms/availability` for a
 default date range) and update `HOMEPAGE.md` to match the decision.
 
 ### GA-14 — My Stays hides pending bookings and deviates from the specced ordering/matching
-**Status:** Open
+**Status:** Fixed in `2b5b187`
 **File:** `guest-app/src/pages/StaysPage.tsx:50-54, 85-87`
 
 Behavior issues to fix inside the GA-01 endpoint work: (a) the section
@@ -354,6 +376,11 @@ is by `guestEmail` only — bookings linked via `memberId` but booked
 under a different email (the spec's explicit manual-link case) never
 appear. The spec'd model is `memberId == uid OR guestEmail == email`,
 upcoming first.
+
+**Fixed in `2b5b187`:** `/api/members/stays` includes pending /
+payment-uploaded / payment-confirmed bookings, matches by `memberId` OR
+token email, dedupes results, and returns upcoming stays before past and
+cancelled stays for the portal.
 
 ---
 
@@ -494,17 +521,17 @@ the GA-13 decision when updating `HOMEPAGE.md`.
 
 | Batch | Findings | Theme | Status |
 |---|---|---|---|
-| 1 (`fix/audit-ga-sev1`) | GA-01, GA-02, GA-03 (+GA-14 rides along) | Member stays endpoint, contact-form Turnstile + honeypot, early check-in auth contract | Open |
+| 1 (`fix/audit-ga-sev1`) | GA-01, GA-02, GA-03 (+GA-14 rides along) | Member stays endpoint, contact-form Turnstile + honeypot, early check-in auth contract | Fixed in `2b5b187` |
 | 2 (`fix/audit-ga-sev2`) | GA-04, GA-05, GA-06, GA-07 | Date defaults, enrollment error surfacing, remarks migration, Google-consent decision | Open |
 | 3 (`fix/audit-ga-sev3`) | GA-08 … GA-13 | Rate-limit keys, rewardsConfig wiring, member-state gating, account linking, modal carousel, homepage badge | Open |
 | 4 | GA-15 … GA-19 | White-label tokens, timezone helper, navbar/portal drift, doc sync | Open |
 
 **Fix-order notes:**
-- GA-01, GA-03, and GA-14 are one unit of work — the new
+- GA-01, GA-03, and GA-14 landed together in `2b5b187` — the new
   `/api/members/stays` endpoint defines the data contract all three
   need. Rebuild + commit the API bundle (`npm run build:api -w
   guest-app`) per GOTCHAS after any `server/` change.
-- GA-02 should copy the `CorporateStaysPage` Turnstile pattern verbatim
+- GA-02 landed in `2b5b187` using the shared `useTurnstileToken` pattern
   (explicit render + expired/error callbacks + reset) — do not
   reintroduce the BI-02 sentinel-token fallback.
 - GA-06 needs a small migration (copy existing `remarks` to the
