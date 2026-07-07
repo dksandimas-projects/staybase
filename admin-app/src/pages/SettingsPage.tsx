@@ -18,9 +18,10 @@ import {
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
-  Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote
+  Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw
 } from "lucide-react";
 import config from "@config";
+import { auth } from "../firebase/auth";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -1100,6 +1101,19 @@ export function SettingsPage() {
   const [editingStoreItemId, setEditingStoreItemId] = useState<string | null>(null);
   const [pendingDeleteStoreItemId, setPendingDeleteStoreItemId] = useState<string | null>(null);
   const [pendingDeleteRoomType, setPendingDeleteRoomType] = useState<string | null>(null);
+
+  // Email preview states
+  const [previewingTemplate, setPreviewingTemplate] = useState<string | null>(null);
+  const [previewingLabel, setPreviewingLabel] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Breakfast item CRUD states
+  const [isBreakfastItemModalOpen, setIsBreakfastItemModalOpen] = useState(false);
+  const [editingSilogItem, setEditingSilogItem] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
+  const [breakfastItemNameInput, setBreakfastItemNameInput] = useState("");
+
   useEffect(() => {
     if (!pendingDeleteStoreItemId) return;
     const timer = setTimeout(() => setPendingDeleteStoreItemId(null), 3000);
@@ -1351,6 +1365,48 @@ export function SettingsPage() {
     });
   };
 
+  const getApiBaseUrl = () => {
+    if (typeof window === "undefined") return "";
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:3000";
+    }
+    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
+  };
+
+  const handleOpenPreview = async (action: string, label: string) => {
+    setPreviewingTemplate(action);
+    setPreviewingLabel(label);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewHtml(null);
+
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ template: action })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Failed to load preview." }));
+        throw new Error(errorData.error || "Failed to load preview.");
+      }
+
+      const html = await res.text();
+      setPreviewHtml(html);
+    } catch (err: any) {
+      console.error("Email preview fetch failed:", err);
+      setPreviewError(err?.message || "Failed to load email template preview.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
     await updateSettings("breakfastConfig", {
@@ -1512,6 +1568,84 @@ export function SettingsPage() {
   // Toggle item status in local states
   const toggleSilogItem = (id: string) => {
     setSilogItems(prev => prev.map(item => item.id === id ? { ...item, isActive: !item.isActive } : item));
+  };
+
+  const handleAddSilogItemClick = () => {
+    setEditingSilogItem(null);
+    setBreakfastItemNameInput("");
+    setIsBreakfastItemModalOpen(true);
+  };
+
+  const handleEditSilogItem = (item: { id: string; name: string; isActive: boolean }) => {
+    setEditingSilogItem(item);
+    setBreakfastItemNameInput(item.name);
+    setIsBreakfastItemModalOpen(true);
+  };
+
+  const handleDeleteSilogItem = (id: string) => {
+    setSilogItems(prev => prev.filter(item => item.id !== id));
+    toast.success("Breakfast Item Deleted", "The menu item was removed. Save Dining Settings to commit.");
+  };
+
+  const handleSaveSilogItemSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = breakfastItemNameInput.trim();
+    if (!trimmedName) {
+      toast.error("Name is required", "Please enter a name for the breakfast menu item.");
+      return;
+    }
+
+    // Generate a URL/ID safe key
+    const generatedId = trimmedName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    if (!generatedId) {
+      toast.error("Invalid name", "Name must contain letters or numbers.");
+      return;
+    }
+
+    if (editingSilogItem) {
+      // Editing
+      // Check for duplicates (excluding the item we're editing)
+      const duplicateExists = silogItems.some(
+        item => item.id !== editingSilogItem.id && item.name.toLowerCase() === trimmedName.toLowerCase()
+      );
+      if (duplicateExists) {
+        toast.error("Duplicate Item", "A breakfast item with this name already exists.");
+        return;
+      }
+
+      setSilogItems(prev =>
+        prev.map(item =>
+          item.id === editingSilogItem.id
+            ? { ...item, name: trimmedName }
+            : item
+        )
+      );
+      toast.success("Breakfast Item Renamed", "Click Save Dining Settings to commit changes.");
+    } else {
+      // Adding new
+      // Check for duplicates
+      const duplicateExists = silogItems.some(
+        item => item.name.toLowerCase() === trimmedName.toLowerCase() || item.id === generatedId
+      );
+      if (duplicateExists) {
+        toast.error("Duplicate Item", "A breakfast item with this name or ID already exists.");
+        return;
+      }
+
+      setSilogItems(prev => [
+        ...prev,
+        { id: generatedId, name: trimmedName, isActive: true }
+      ]);
+      toast.success("Breakfast Item Added", "Click Save Dining Settings to commit changes.");
+    }
+
+    setIsBreakfastItemModalOpen(false);
+    setEditingSilogItem(null);
+    setBreakfastItemNameInput("");
   };
 
   const editingStoreItem = storeItems.find(item => item.id === editingStoreItemId) ?? null;
@@ -2732,24 +2866,62 @@ export function SettingsPage() {
                 
                 <div className="grid gap-3 sm:grid-cols-2">
                   {silogItems.map(item => (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
-                      onClick={() => toggleSilogItem(item.id)}
                       className={`min-h-[44px] flex items-center justify-between px-3.5 rounded-lg border text-xs font-semibold transition ${
-                        item.isActive 
+                        item.isActive && breakfastEnabled
                           ? "bg-primary/5 border-primary/30 text-primary-dark" 
                           : "bg-white border-gray-200 text-gray-550 hover:bg-gray-50"
-                      }`}
+                      } ${!breakfastEnabled ? "opacity-50" : ""}`}
                     >
-                      <span>{item.name} Service</span>
-                      {item.isActive ? (
-                        <CheckSquare size={16} className="text-primary" />
-                      ) : (
-                        <Square size={16} className="text-gray-300" />
-                      )}
-                    </button>
+                      <button
+                        type="button"
+                        disabled={!breakfastEnabled}
+                        onClick={() => toggleSilogItem(item.id)}
+                        className="flex-1 flex items-center justify-between py-2 text-left disabled:cursor-not-allowed"
+                      >
+                        <span className="truncate">{item.name} Service</span>
+                        <span className="shrink-0 mr-3">
+                          {item.isActive ? (
+                            <CheckSquare size={16} className="text-primary" />
+                          ) : (
+                            <Square size={16} className="text-gray-300" />
+                          )}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1.5 border-l border-gray-150 pl-3">
+                        <button
+                          type="button"
+                          disabled={!breakfastEnabled}
+                          onClick={() => handleEditSilogItem(item)}
+                          className="p-1.5 text-gray-400 hover:text-primary transition rounded hover:bg-gray-100 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                          title="Edit Item Name"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!breakfastEnabled}
+                          onClick={() => handleDeleteSilogItem(item.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 transition rounded hover:bg-red-50 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                          title="Delete Item"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
                   ))}
+
+                  <button
+                    type="button"
+                    disabled={!breakfastEnabled}
+                    onClick={handleAddSilogItemClick}
+                    className="min-h-[44px] flex items-center justify-center gap-2 px-3.5 rounded-lg border border-dashed border-gray-300 bg-white hover:bg-gray-50 text-xs font-bold text-gray-500 hover:text-primary transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-gray-500 disabled:hover:bg-white"
+                  >
+                    <Plus size={14} />
+                    Add Menu Item
+                  </button>
                 </div>
               </div>
 
@@ -3875,24 +4047,37 @@ export function SettingsPage() {
                 <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-3">Active Email Triggers</h4>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {[
-                    { label: "Booking Submitted", description: "Guest receives acknowledgment when a booking request is submitted", status: "active" },
-                    { label: "Payment Confirmed", description: "Guest notified when their payment is verified and fully paid", status: "active" },
-                    { label: "Booking Confirmed", description: "Guest notified when booking is confirmed by front desk", status: "active" },
-                    { label: "Check-in Reminder", description: "Scheduled daily cron — guests with tomorrow's check-in get a reminder", status: "active" },
-                    { label: "Booking Cancelled", description: "Guest receives cancellation confirmation", status: "active" },
-                    { label: "Discount Rejected", description: "Guest notified when their Senior/PWD ID cannot be verified", status: "active" },
-                    { label: "Corporate Inquiry", description: "Staff notification when a new corporate inquiry is submitted", status: "active" },
-                    { label: "Early Check-in Request", description: "Staff notification when a member requests early check-in via Intercom", status: "planned" }
+                    { label: "Booking Submitted", description: "Guest receives acknowledgment when a booking request is submitted", status: "active", action: "booking-submitted" },
+                    { label: "Payment Confirmed", description: "Guest notified when their payment is verified and fully paid", status: "active", action: "payment-confirmed" },
+                    { label: "Booking Confirmed", description: "Guest notified when booking is confirmed by front desk", status: "active", action: "booking-confirmed" },
+                    { label: "Check-in Reminder", description: "Scheduled daily cron — guests with tomorrow's check-in get a reminder", status: "active", action: "checkin-reminder" },
+                    { label: "Booking Cancelled", description: "Guest receives cancellation confirmation", status: "active", action: "booking-cancelled" },
+                    { label: "Discount Rejected", description: "Guest notified when their Senior/PWD ID cannot be verified", status: "active", action: "discount-rejected" },
+                    { label: "Corporate Inquiry", description: "Staff notification when a new corporate inquiry is submitted", status: "active", action: "corporate-inquiry" },
+                    { label: "Early Check-in Request", description: "Staff notification when a member requests early check-in via Intercom", status: "planned", action: "early-checkin-request" }
                   ].map(trigger => (
-                    <div key={trigger.label} className="rounded-lg border border-gray-150 bg-white p-3 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${trigger.status === "active" ? "bg-green-500" : "bg-gray-300"}`} />
-                        <span className="text-xs font-bold text-gray-800">{trigger.label}</span>
-                        {trigger.status === "planned" && (
-                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-500">Planned</span>
-                        )}
+                    <div key={trigger.label} className="rounded-lg border border-gray-150 bg-white p-3 space-y-1 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${trigger.status === "active" ? "bg-green-500" : "bg-gray-300"}`} />
+                            <span className="text-xs font-bold text-gray-800">{trigger.label}</span>
+                            {trigger.status === "planned" && (
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-500">Planned</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleOpenPreview(trigger.action, trigger.label)}
+                            className="text-gray-400 hover:text-primary transition p-1"
+                            title="Preview template"
+                            aria-label={`Preview ${trigger.label} email template`}
+                          >
+                            <Eye size={14} />
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-gray-500 leading-relaxed mt-1">{trigger.description}</p>
                       </div>
-                      <p className="text-[10px] text-gray-500 leading-relaxed">{trigger.description}</p>
                     </div>
                   ))}
                 </div>
@@ -4556,6 +4741,114 @@ export function SettingsPage() {
             ) : null}
           </form>
         ) : null}
+      </Modal>
+
+      <Modal
+        title={`Email Preview: ${previewingLabel || ""}`}
+        open={Boolean(previewingTemplate)}
+        onClose={() => {
+          setPreviewingTemplate(null);
+          setPreviewingLabel(null);
+          setPreviewHtml(null);
+          setPreviewError(null);
+        }}
+      >
+        <div className="space-y-4">
+          <p className="text-[10px] text-gray-500">
+            Note: This is a preview using mock database values. Real emails will feature dynamic guest names, dates, pricing, and hotel details.
+          </p>
+
+          {previewLoading && (
+            <div className="flex flex-col items-center justify-center py-20 space-y-3">
+              <RefreshCw className="animate-spin text-primary" size={24} />
+              <p className="text-xs text-gray-500 font-semibold">Generating email preview...</p>
+            </div>
+          )}
+
+          {previewError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-xs text-red-800 space-y-2">
+              <p className="font-bold">Error generating preview</p>
+              <p>{previewError}</p>
+              <button
+                type="button"
+                onClick={() => void handleOpenPreview(previewingTemplate!, previewingLabel!)}
+                className="rounded bg-red-100 hover:bg-red-200 px-3 py-1 font-semibold text-red-950 transition active:scale-95"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {previewHtml && (
+            <div className="rounded-lg border border-gray-200 overflow-hidden bg-gray-50 max-h-[600px] overflow-y-auto">
+              <iframe
+                title="Email Template Preview"
+                srcDoc={previewHtml}
+                className="w-full min-h-[500px] border-0"
+              />
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2 border-t border-gray-150">
+            <button
+              type="button"
+              onClick={() => {
+                setPreviewingTemplate(null);
+                setPreviewingLabel(null);
+                setPreviewHtml(null);
+                setPreviewError(null);
+              }}
+              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        title={editingSilogItem ? "Edit Breakfast Menu Item" : "Add Breakfast Menu Item"}
+        open={isBreakfastItemModalOpen}
+        onClose={() => {
+          setIsBreakfastItemModalOpen(false);
+          setEditingSilogItem(null);
+          setBreakfastItemNameInput("");
+        }}
+      >
+        <form onSubmit={handleSaveSilogItemSubmit} className="space-y-4 text-xs">
+          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+            Item Name (e.g. Tocilog, Longsilog)
+            <input
+              type="text"
+              required
+              placeholder="e.g. Tocilog"
+              value={breakfastItemNameInput}
+              onChange={(e) => setBreakfastItemNameInput(e.target.value)}
+              className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+            />
+          </label>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => {
+                setIsBreakfastItemModalOpen(false);
+                setEditingSilogItem(null);
+                setBreakfastItemNameInput("");
+              }}
+              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+            >
+              <Save size={14} />
+              {editingSilogItem ? "Save Changes" : "Add Item"}
+            </button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

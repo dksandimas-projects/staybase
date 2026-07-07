@@ -188858,6 +188858,143 @@ async function handleEmailTrigger(req, res, action) {
     return res.status(status).json({ success: false, error: message });
   }
 }
+async function handleEmailPreview(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  if (!req.staff?.success) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  const { template } = req.body || {};
+  if (!template) {
+    return res.status(400).json({ success: false, error: "Template parameter is required." });
+  }
+  const mockBooking = {
+    bookingRef: "BK-2026-MOCK",
+    guestName: "Juan Dela Cruz",
+    guestEmail: "juan.delacruz@example.com",
+    guestPhone: "+63 917 123 4567",
+    roomNumber: "201",
+    roomName: "Deluxe Ocean View",
+    roomType: "deluxe",
+    checkIn: new Date(Date.now() + 864e5 * 2),
+    // 2 days from now
+    checkOut: new Date(Date.now() + 864e5 * 4),
+    // 4 days from now
+    numNights: 2,
+    totalPrice: 8500,
+    paymentMethod: "gcash",
+    status: "confirmed",
+    specialRequests: "High floor requested. Anniversary trip.",
+    discountType: "senior",
+    discountRejectionReason: "ID photo was blurred and expired.",
+    cancellationReason: "Flight cancelled due to weather.",
+    lookupToken: "mock-lookup-token-xyz"
+  };
+  const mockInquiry = {
+    companyName: "Acme Tech Solutions Inc.",
+    contactPerson: "Jane Smith",
+    email: "corporate@acme.com",
+    phone: "+63 2 8123 4567",
+    numRooms: "5 rooms",
+    preferredDates: "Oct 12 - Oct 15, 2026",
+    specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
+  };
+  const mockEarlyCheckinRequest = {
+    requestedCheckInTime: "10:30 AM",
+    notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+  };
+  const mockVoucher = {
+    code: "SPARKWELCOME10",
+    guestEmail: "juan.delacruz@example.com",
+    discountType: "percent",
+    discountValue: 10,
+    applicableRoomTypes: ["deluxe", "executive"],
+    expiresAt: new Date(Date.now() + 864e5 * 30),
+    // 30 days from now
+    usageCap: 1
+  };
+  const mockStoreOrder = {
+    orderRef: "ORD-2026-MOCK",
+    roomNumber: "201",
+    guestEmail: "juan.delacruz@example.com",
+    paymentMethod: "add-to-bill",
+    totalAmount: 450,
+    status: "confirmed",
+    items: [
+      { name: "Pork Silog Extra", quantity: 2, price: 150 },
+      { name: "Mineral Water 1L", quantity: 2, price: 75 }
+    ],
+    cancellationReason: "Decided to dine out instead."
+  };
+  const mockPaymentProof = {
+    amount: 8500,
+    method: "gcash",
+    note: "GCash reference ID: 123456789",
+    paymentProofUrl: "https://example.com/mock-receipt.png"
+  };
+  try {
+    let html = "";
+    switch (template) {
+      case "booking-submitted":
+        html = bookingSubmittedEmail(mockBooking);
+        break;
+      case "payment-confirmed":
+        html = paymentConfirmedEmail(mockBooking);
+        break;
+      case "booking-confirmed":
+        html = bookingConfirmedEmail(mockBooking);
+        break;
+      case "checkin-reminder":
+        html = checkinReminderEmail(mockBooking);
+        break;
+      case "booking-cancelled":
+        html = bookingCancelledEmail(mockBooking);
+        break;
+      case "discount-rejected":
+        html = discountRejectedEmail(mockBooking);
+        break;
+      case "corporate-inquiry":
+        html = corporateInquiryEmail(mockInquiry);
+        break;
+      case "early-checkin-request":
+        html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
+        break;
+      case "voucher-issued":
+        html = voucherIssuedEmail(mockVoucher);
+        break;
+      case "store-order-placed":
+        html = storeOrderPlacedEmail(mockStoreOrder);
+        break;
+      case "store-order-confirmed":
+        html = storeOrderConfirmedEmail(mockStoreOrder);
+        break;
+      case "store-order-out-for-delivery":
+        html = storeOrderOutForDeliveryEmail(mockStoreOrder);
+        break;
+      case "store-order-delivered":
+        html = storeOrderDeliveredEmail(mockStoreOrder);
+        break;
+      case "store-order-cancelled":
+        html = storeOrderCancelledEmail(mockStoreOrder);
+        break;
+      case "staff-new-booking":
+        html = staffNewBookingEmail(mockBooking);
+        break;
+      case "staff-new-payment":
+        html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        break;
+      default:
+        return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+    }
+    res.setHeader("Content-Type", "text/html");
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error("Email preview generation failed:", error);
+    const message = error instanceof Error ? error.message : "Unable to generate preview. Please try again.";
+    return res.status(500).json({ success: false, error: message });
+  }
+}
 
 // server/handlers/bookings.ts
 function getConfiguredBookingRefPrefix() {
@@ -191474,6 +191611,15 @@ var createStaffSchema = external_exports.object({
 var disableStaffSchema = external_exports.object({
   uid: external_exports.string().trim().min(1).max(160)
 }).strict();
+var updateStaffSchema = external_exports.object({
+  uid: external_exports.string().trim().min(1).max(160),
+  fullName: external_exports.string().trim().min(1).max(120),
+  email: external_exports.string().trim().email().max(160),
+  phone: external_exports.string().trim().max(40).optional().default(""),
+  nationality: external_exports.string().trim().max(80).optional().default(""),
+  role: staffRoleSchema,
+  password: external_exports.string().min(8).max(128).optional().or(external_exports.literal(""))
+}).strict();
 function getStaff2(req) {
   return req.staff || {};
 }
@@ -191632,6 +191778,113 @@ async function handleDisableStaff(req, res) {
     return res.status(500).json({
       success: false,
       error: "Unable to disable staff account. Please try again."
+    });
+  }
+}
+async function handleUpdateStaff(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff2(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
+  }
+  const parsed = updateStaffSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the staff account details and try again."
+    });
+  }
+  const { uid, fullName, email, phone, nationality, role, password } = parsed.data;
+  try {
+    const docRef = adminDb.collection("guests").doc(uid);
+    const docSnap = await docRef.get();
+    if (!docSnap.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Staff account was not found."
+      });
+    }
+    const targetStaff = docSnap.data();
+    if (targetStaff?.role !== "admin" && targetStaff?.role !== "front-desk") {
+      return res.status(400).json({
+        success: false,
+        error: "Target account is not a staff member."
+      });
+    }
+    if (targetStaff?.role === "admin" && role !== "admin") {
+      if (uid === staff.uid) {
+        return res.status(400).json({
+          success: false,
+          error: "You cannot change your own admin role."
+        });
+      }
+      const anotherActiveAdmin = await hasAnotherActiveAdmin(uid);
+      if (!anotherActiveAdmin) {
+        return res.status(400).json({
+          success: false,
+          error: "You must keep at least one active admin account."
+        });
+      }
+    }
+    const originalAuthUser = await adminAuth.getUser(uid);
+    const authUpdates = {
+      email: email.toLowerCase(),
+      displayName: fullName
+    };
+    if (password && password.trim().length >= 8) {
+      authUpdates.password = password;
+    }
+    try {
+      await adminAuth.updateUser(uid, authUpdates);
+      if (targetStaff?.role !== role) {
+        await adminAuth.setCustomUserClaims(uid, { role });
+      }
+      const now = /* @__PURE__ */ new Date();
+      await docRef.set({
+        fullName,
+        email: email.toLowerCase(),
+        phone,
+        nationality,
+        role,
+        updatedAt: now
+      }, { merge: true });
+    } catch (syncErr) {
+      console.error("Staff update sync failed, rolling back Auth details:", syncErr);
+      try {
+        const rollbackParams = {
+          email: originalAuthUser.email,
+          displayName: originalAuthUser.displayName
+        };
+        await adminAuth.updateUser(uid, rollbackParams);
+        if (targetStaff?.role !== role) {
+          await adminAuth.setCustomUserClaims(uid, { role: targetStaff?.role });
+        }
+      } catch (rollbackErr) {
+        console.error("Failed to roll back Auth user details during update failure:", rollbackErr);
+      }
+      throw syncErr;
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        uid,
+        email: email.toLowerCase(),
+        role
+      }
+    });
+  } catch (error) {
+    if (error?.code === "auth/email-already-exists") {
+      return res.status(409).json({
+        success: false,
+        error: "A staff account with this email already exists."
+      });
+    }
+    console.error("Staff account update failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update staff account. Please try again."
     });
   }
 }
@@ -192734,6 +192987,20 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleDisableStaff(req, res);
   }
+  if (domain === "admin" && action === "update-staff" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-update-staff:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many update-staff requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
+    }
+    req.staff = authResult;
+    return await handleUpdateStaff(req, res);
+  }
   if (domain === "store" && action === "create-order" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`store:${ip}`, 10, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
@@ -192751,6 +193018,17 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many store status requests. Please try again in a minute." });
     }
     return await handleGetStoreOrderStatus(req, res);
+  }
+  if (domain === "email" && action === "preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email-preview:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleEmailPreview(req, res);
   }
   const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
   const isKnownEmailAction = publicEmailActions.has(action) || staffOnlyEmailActions.has(action);
