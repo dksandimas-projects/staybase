@@ -16,6 +16,16 @@ const disableStaffSchema = z.object({
   uid: z.string().trim().min(1).max(160)
 }).strict();
 
+const updateStaffSchema = z.object({
+  uid: z.string().trim().min(1).max(160),
+  fullName: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(160),
+  phone: z.string().trim().max(40).optional().default(""),
+  nationality: z.string().trim().max(80).optional().default(""),
+  role: staffRoleSchema,
+  password: z.string().min(8).max(128).optional().or(z.literal(""))
+}).strict();
+
 function getStaff(req: any) {
   return (req as any).staff || {};
 }
@@ -219,6 +229,125 @@ export async function handleDisableStaff(req: any, res: any) {
     return res.status(500).json({
       success: false,
       error: "Unable to disable staff account. Please try again."
+    });
+  }
+}
+
+export async function handleUpdateStaff(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
+  }
+
+  const parsed = updateStaffSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the staff account details and try again."
+    });
+  }
+
+  const { uid, fullName, email, phone, nationality, role, password } = parsed.data;
+
+  try {
+    const docRef = adminDb.collection("guests").doc(uid);
+    const docSnap = await docRef.get();
+    if (!docSnap.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Staff account was not found."
+      });
+    }
+
+    const targetStaff = docSnap.data();
+    if (targetStaff?.role !== "admin" && targetStaff?.role !== "front-desk") {
+      return res.status(400).json({
+        success: false,
+        error: "Target account is not a staff member."
+      });
+    }
+
+    if (targetStaff?.role === "admin" && role !== "admin") {
+      if (uid === staff.uid) {
+        return res.status(400).json({
+          success: false,
+          error: "You cannot change your own admin role."
+        });
+      }
+      const anotherActiveAdmin = await hasAnotherActiveAdmin(uid);
+      if (!anotherActiveAdmin) {
+        return res.status(400).json({
+          success: false,
+          error: "You must keep at least one active admin account."
+        });
+      }
+    }
+
+    const originalAuthUser = await adminAuth.getUser(uid);
+    const authUpdates: any = {
+      email: email.toLowerCase(),
+      displayName: fullName
+    };
+    if (password && password.trim().length >= 8) {
+      authUpdates.password = password;
+    }
+
+    try {
+      await adminAuth.updateUser(uid, authUpdates);
+      if (targetStaff?.role !== role) {
+        await adminAuth.setCustomUserClaims(uid, { role });
+      }
+
+      const now = new Date();
+      await docRef.set({
+        fullName,
+        email: email.toLowerCase(),
+        phone,
+        nationality,
+        role,
+        updatedAt: now
+      }, { merge: true });
+    } catch (syncErr) {
+      console.error("Staff update sync failed, rolling back Auth details:", syncErr);
+      try {
+        const rollbackParams: any = {
+          email: originalAuthUser.email,
+          displayName: originalAuthUser.displayName
+        };
+        await adminAuth.updateUser(uid, rollbackParams);
+        if (targetStaff?.role !== role) {
+          await adminAuth.setCustomUserClaims(uid, { role: targetStaff?.role });
+        }
+      } catch (rollbackErr) {
+        console.error("Failed to roll back Auth user details during update failure:", rollbackErr);
+      }
+      throw syncErr;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        uid,
+        email: email.toLowerCase(),
+        role
+      }
+    });
+  } catch (error: any) {
+    if (error?.code === "auth/email-already-exists") {
+      return res.status(409).json({
+        success: false,
+        error: "A staff account with this email already exists."
+      });
+    }
+
+    console.error("Staff account update failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update staff account. Please try again."
     });
   }
 }

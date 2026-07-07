@@ -406,6 +406,7 @@ export interface AdminContextType {
   staff: StaffMember[];
   createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string }>;
   disableStaff: (uid: string) => Promise<{ success: boolean; error?: string }>;
+  updateStaff: (input: { uid: string; fullName: string; email: string; phone?: string; nationality?: string; role: StaffRole; password?: string }) => Promise<{ success: boolean; error?: string }>;
 
   // Room Types Config
   roomTypes: RoomTypeEntry[];
@@ -3448,6 +3449,44 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateStaff = async (input: {
+    uid: string;
+    fullName: string;
+    email: string;
+    phone?: string;
+    nationality?: string;
+    role: StaffRole;
+    password?: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/update-staff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          uid: input.uid,
+          fullName: input.fullName,
+          email: input.email,
+          phone: input.phone || "",
+          nationality: input.nationality || "",
+          role: input.role,
+          password: input.password || ""
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update staff account." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error updating staff account:", err);
+      return { success: false, error: err?.message || "Failed to update staff account." };
+    }
+  };
+
   return (
     <AdminContext.Provider
       value={{
@@ -3526,7 +3565,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         resetPaymentMethodQr,
         staff,
         createStaff,
-        disableStaff
+        disableStaff,
+        updateStaff
       }}
     >
       {children}
