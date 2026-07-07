@@ -39,7 +39,12 @@ export function RoomsPage() {
 
   // Edit drawer form fields — capacity + rate are on the type now
   // (per W3.6 / `plan/features/RATE-MANAGEMENT.md §W3.6`).
+  const [roomName, setRoomName] = useState("");
+  const [editRoomType, setEditRoomType] = useState("");
   const [status, setStatus] = useState<Room["status"]>("available");
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [editRemarks, setEditRemarks] = useState("");
+  const [statusBlockReason, setStatusBlockReason] = useState("");
 
   // Block schedule form fields
   const [blockFromDate, setBlockFromDate] = useState("");
@@ -68,7 +73,12 @@ export function RoomsPage() {
 
   const handleEditClick = (room: Room) => {
     setSelectedRoom(room);
+    setRoomName(room.name);
+    setEditRoomType(room.type);
     setStatus(room.status);
+    setEditIsActive(room.isActive);
+    setEditRemarks(room.remarks || "");
+    setStatusBlockReason(room.status === "blocked" ? room.blockReason || "" : "");
     setBlockFromDate("");
     setBlockToDate("");
     setBlockReason("");
@@ -78,8 +88,17 @@ export function RoomsPage() {
   const handleConfigSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedRoom) {
+      if (status === "blocked" && !statusBlockReason.trim()) {
+        toast.error("Block reason required", "Choose a reason before saving a room as blocked.");
+        return;
+      }
       updateRoomConfig(selectedRoom.id, {
-        status
+        name: roomName.trim(),
+        type: editRoomType,
+        status,
+        isActive: editIsActive,
+        remarks: editRemarks.trim(),
+        blockReason: status === "blocked" ? statusBlockReason.trim() : ""
       });
       toast.success("Room updated", `Room ${selectedRoom.roomNumber} configuration saved`);
       setIsEditDrawerOpen(false);
@@ -157,7 +176,8 @@ export function RoomsPage() {
     }
     setDeleteAttempted(true);
     setIsDeleting(true);
-    const result = await deleteRoom(deleteTarget.id);
+    const deleteRoomWithReason = deleteRoom as (roomId: string, reason?: string) => Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }>;
+    const result = await deleteRoomWithReason(deleteTarget.id, reason);
     setIsDeleting(false);
     if (result.success) {
       toast.success(
@@ -300,13 +320,40 @@ export function RoomsPage() {
             <form onSubmit={handleConfigSubmit} className="space-y-4">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Room Specifications</h3>
 
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Display name
+                <input
+                  type="text"
+                  required
+                  value={roomName}
+                  onChange={(e) => setRoomName(e.target.value)}
+                  className="min-h-[44px] w-full rounded border border-gray-200 px-3 text-xs"
+                />
+              </label>
+
               <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Bed Setup (inherited)</p>
                   <p className="mt-1 text-sm font-semibold text-gray-900">
-                    {roomTypes.find((t) => t.value === selectedRoom?.type)?.bedDefinition || "—"}
+                    {roomTypes.find((t) => t.value === editRoomType)?.bedDefinition || "—"}
                   </p>
                 </div>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Room type
+                  <select
+                    value={editRoomType}
+                    onChange={(e) => setEditRoomType(e.target.value)}
+                    className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs bg-white"
+                  >
+                    {roomTypes.map((type) => (
+                      <option key={type.value} value={type.value}>{type.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
 
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Inventory Status
@@ -320,7 +367,45 @@ export function RoomsPage() {
                     <option value="blocked">Blocked</option>
                   </select>
                 </label>
+
+                <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-3 text-xs font-semibold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={editIsActive}
+                    onChange={(e) => setEditIsActive(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  Visible on public rooms page
+                </label>
               </div>
+
+              {status === "blocked" && (
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Block reason
+                  <select
+                    required
+                    value={statusBlockReason}
+                    onChange={(e) => setStatusBlockReason(e.target.value)}
+                    className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs bg-white"
+                  >
+                    <option value="">Select reason...</option>
+                    <option value="Maintenance">Maintenance</option>
+                    <option value="Hold">Hold</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+              )}
+
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Internal remarks
+                <textarea
+                  rows={3}
+                  value={editRemarks}
+                  onChange={(e) => setEditRemarks(e.target.value)}
+                  placeholder="Staff notes only, never shown to guests."
+                  className="min-h-[88px] w-full rounded border border-gray-200 px-3 py-2 text-xs"
+                />
+              </label>
 
               <button
                 type="submit"

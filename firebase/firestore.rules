@@ -23,6 +23,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /roomDeletionAudit/{auditId} {
+      allow read: if isStaff();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
     match /bookings/{bookingId} {
       allow read: if isStaff();
       allow create: if false;

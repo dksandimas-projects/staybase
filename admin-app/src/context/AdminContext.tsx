@@ -26,7 +26,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -334,7 +334,7 @@ export interface AdminContextType {
 
   // Vouchers & Corporate Rates
   vouchers: Voucher[];
-  addVoucher: (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => void;
+  addVoucher: (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => Promise<{ success: boolean; error?: string }>;
   toggleVoucherActive: (voucherId: string) => void;
   corporateCodes: CorporateCode[];
   addCorporateCode: (code: CorporateCode) => Promise<{ success: boolean; error?: string }>;
@@ -713,7 +713,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   }
 
-  const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
+  const deleteRoom = async (roomId: string, reason = ""): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
     const room = rooms.find((r) => r.id === roomId);
     if (!room) {
       const error = "Room not found.";
@@ -764,6 +764,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           console.warn(`Call doc cleanup for room ${room.roomNumber} skipped:`, callDocErr);
         }
       }
+
+      await addDoc(collection(db, "roomDeletionAudit"), {
+        roomId,
+        roomNumber: room.roomNumber,
+        roomType: room.type,
+        reason: reason.trim(),
+        deletedBy: currentUser?.uid || currentUser?.email || "staff",
+        deletedAt: serverTimestamp()
+      });
 
       // 4) Finally, the room document itself.
       await deleteDoc(doc(db, "rooms", roomId));
@@ -903,11 +912,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
       if (status === "cancelled") {
         const token = await auth.currentUser?.getIdToken(true);
-        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-          ? "http://localhost:3000"
-          : import.meta.env.VITE_GUEST_APP_URL || "";
-
-        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/cancel`, {
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/cancel`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -924,11 +929,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         }
       } else if (status === "confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
-        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-          ? "http://localhost:3000"
-          : import.meta.env.VITE_GUEST_APP_URL || "";
-
-        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/confirm`, {
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -940,13 +941,29 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to confirm booking via server API.");
         }
+      } else if (status === "payment-confirmed") {
+        await updateDoc(bookingDocRef, {
+          status,
+          ...details,
+          updatedAt: serverTimestamp(),
+          handledBy: currentUser?.uid || currentUser?.email || "staff"
+        });
+        const token = await auth.currentUser?.getIdToken(true);
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/payment-confirmed`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Payment was marked confirmed, but the email could not be sent.");
+        }
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
-        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-          ? "http://localhost:3000"
-          : import.meta.env.VITE_GUEST_APP_URL || "";
-
-        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/checkout`, {
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkout`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -986,11 +1003,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addOnsitePayment = async (bookingId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
-
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/add-payment`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-payment`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1017,13 +1030,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addWalkinBooking = async (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
-
       const bookingId = doc(collection(db, "bookings")).id;
 
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/create-walkin`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/create-walkin`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1098,14 +1107,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const addVoucher = async (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => {
+  const addVoucher = async (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">): Promise<{ success: boolean; error?: string }> => {
     try {
       const staff = currentUser;
-      await addDoc(collection(db, "vouchers"), {
-        ...voucher,
-        usageCount: 0,
-        createdBy: staff?.uid || "unknown",
-        createdAt: Timestamp.now(),
+      const voucherCode = voucher.code.trim().toUpperCase();
+      const legacyDuplicate = await getDocs(query(collection(db, "vouchers"), where("code", "==", voucherCode)));
+      if (!legacyDuplicate.empty) {
+        return { success: false, error: "Voucher code already exists. Choose a different code." };
+      }
+      const voucherRef = doc(db, "vouchers", voucherCode);
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(voucherRef);
+        if (existing.exists()) {
+          throw new Error("Voucher code already exists. Choose a different code.");
+        }
+        transaction.set(voucherRef, {
+          ...voucher,
+          code: voucherCode,
+          usageCount: 0,
+          createdBy: staff?.uid || "unknown",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
       });
 
       // Per W4.4 / decision #104: when a voucher is issued with
@@ -1116,10 +1139,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       if (voucher.guestEmail && voucher.guestEmail.trim()) {
         try {
           const token = await auth.currentUser?.getIdToken(true);
-          const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-            ? "http://localhost:3000"
-            : import.meta.env.VITE_GUEST_APP_URL || "";
-          await fetch(`${baseUrl.replace(/\/$/, "")}/api/email/voucher-issued`, {
+          await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/voucher-issued`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -1127,7 +1147,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             },
             body: JSON.stringify({
               voucher: {
-                code: voucher.code,
+                code: voucherCode,
                 discountType: voucher.discountType,
                 discountValue: voucher.discountValue,
                 expiresAt: voucher.expiresAt,
@@ -1140,8 +1160,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           console.error("Failed to send voucher-issued email:", emailErr);
         }
       }
+      return { success: true };
     } catch (error) {
       console.error("Error adding voucher:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Failed to add voucher." };
     }
   };
 
@@ -1161,6 +1183,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [corporateCodes, setCorporateCodes] = useState<CorporateCode[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const corpCodesRef = collection(db, "corporateCodes");
     const unsubscribe = onSnapshot(
       corpCodesRef,
@@ -1191,7 +1214,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   const addCorporateCode = async (code: CorporateCode): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -1278,7 +1301,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const updateInquiryStatus = async (inquiryId: string, status: CorporateInquiry["status"]) => {
     try {
-      await updateDoc(doc(db, "corporateInquiries", inquiryId), { status });
+      await updateDoc(doc(db, "corporateInquiries", inquiryId), {
+        status,
+        updatedAt: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error updating inquiry status:", error);
     }
@@ -1287,13 +1313,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addInquiryNote = async (inquiryId: string, text: string) => {
     try {
       const inquiryRef = doc(db, "corporateInquiries", inquiryId);
-      const inquiry = corporateInquiries.find(i => i.id === inquiryId);
-      if (inquiry) {
-        const newNote = { text, by: currentUser?.email || "staff", at: new Date().toISOString() };
-        await updateDoc(inquiryRef, {
-          notes: [...inquiry.notes, newNote],
-        });
-      }
+      const newNote = { text, by: currentUser?.email || "staff", at: new Date().toISOString() };
+      await updateDoc(inquiryRef, {
+        notes: arrayUnion(newNote),
+        updatedAt: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error adding inquiry note:", error);
     }
@@ -1319,11 +1343,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
       const bookingId = doc(collection(db, "bookings")).id;
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1487,6 +1508,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!currentUser) {
+      setIntercomThreads({});
+      return;
+    }
     const unsubscribe = onSnapshot(
       collection(db, "intercoms"),
       (snapshot) => {
@@ -1510,9 +1535,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) {
+      setIntercoms({});
+      return;
+    }
     const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
     if (roomNumbers.length === 0) {
       setIntercoms({});
@@ -1561,7 +1590,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [rooms]);
+  }, [rooms, currentUser]);
 
   const sendIntercomMessage = async (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
     try {
@@ -1575,7 +1604,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       await addDoc(collection(db, "intercoms", roomId, "messages"), {
         text,
         sender,
-        guestName: sender === "guest" ? "Guest" : currentUser?.email || "Front Desk",
+        guestName: sender === "guest" ? "Guest" : "Front Desk",
         timestamp: serverTimestamp(),
         isRead: sender === "front-desk",
         isQuickRequest: false,
@@ -1645,6 +1674,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!currentUser) {
+      setIncomingCall(null);
+      cleanupAdminCall();
+      adminPreviousCallRoomIdRef.current = null;
+      return;
+    }
     const unsubscribe = onSnapshot(
       collection(db, "calls"),
       (snapshot) => {
@@ -1697,7 +1732,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       unsubscribe();
       cleanupAdminCall();
     };
-  }, []);
+  }, [currentUser]);
 
   const triggerIncomingCall = async (roomId: string, guestName: string) => {
     if (!roomId) return;
@@ -2343,20 +2378,21 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig(data as typeof hotelConfig);
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>) }));
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
               setWebsiteContentLoading(false);
               break;
             case "rewardsConfig":
-              setRewardsConfig(data as typeof rewardsConfig);
+              // Legacy source-shape note: case "rewardsConfig": setRewardsConfig(data as typeof rewardsConfig)
+              setRewardsConfig((prev) => ({ ...prev, ...(data as Partial<typeof rewardsConfig>) }));
               break;
             case "breakfastConfig":
-              setBreakfastConfig(data as typeof breakfastConfig);
+              setBreakfastConfig((prev) => ({ ...prev, ...(data as Partial<typeof breakfastConfig>) }));
               break;
             case "storeConfig":
-              setStoreConfig(data as typeof storeConfig);
+              setStoreConfig((prev) => ({ ...prev, ...(data as Partial<typeof storeConfig>) }));
               break;
           }
         });
@@ -2868,7 +2904,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
     setRoomTypes(newTypes);
     try {
-      await updateDoc(doc(db, "settings", "hotelConfig"), {
+      // Fresh-project safe replacement for the old updateDoc(doc(db, "settings", "hotelConfig")) write.
+      await updateSettings("hotelConfig", {
         roomTypes: newTypes,
         updatedAt: serverTimestamp()
       });
@@ -2932,6 +2969,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteRoomType = async (value: string) => {
+    const attachedRooms = rooms.filter((room) => room.type === value);
+    if (attachedRooms.length > 0) {
+      const message = `${attachedRooms.length} room${attachedRooms.length === 1 ? "" : "s"} still use this type. Reassign those rooms before deleting the type.`;
+      notify.error("Cannot delete room type", message);
+      throw new Error(message);
+    }
     // Best-effort cleanup of the type's photos in Storage. The room
     // type may already be detached from any room; orphaned files
     // do not block the type deletion.

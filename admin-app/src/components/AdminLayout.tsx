@@ -50,7 +50,8 @@ export function AdminLayout() {
 
   // Define restricted paths
   const restrictedPaths = ["/rates", "/members", "/settings"];
-  const isPathRestricted = restrictedPaths.includes(location.pathname);
+  const normalizedPath = location.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  const isPathRestricted = restrictedPaths.includes(normalizedPath);
   const isUserRestricted = currentUser.role !== "admin";
 
   return (
@@ -111,9 +112,10 @@ export function AdminLayout() {
             {isMobile ? (
               <button
                 type="button"
+                onClick={() => void signOut()}
                 aria-label="Account and sign out"
                 className="flex min-h-11 min-w-11 items-center justify-center rounded-full bg-primary/10 text-primary active:bg-primary/20"
-                title="Account"
+                title="Sign out"
               >
                 <User size={18} aria-hidden="true" />
               </button>
