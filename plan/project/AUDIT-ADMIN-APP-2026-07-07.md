@@ -34,8 +34,8 @@
 | **SEV-1 (critical)** | 0 | 3 | **3** |
 | **SEV-2 (major)** | 0 | 6 | **6** |
 | **SEV-3 (minor)** | 0 | 12 | **12** |
-| **SEV-4 (nit / doc drift)** | 11 | 0 | **11** |
-| **Total** | **11** | **21** | **32** |
+| **SEV-4 (nit / doc drift)** | 0 | 11 | **11** |
+| **Total** | **0** | **32** | **32** |
 
 > **Fix update — 2026-07-07:** The three SEV-1 findings were fixed in
 > `9627f8a` (`fix: address critical admin audit bugs`), merged to `dev`
@@ -67,6 +67,16 @@
 > dashboard metric cleanup, weekend labels, identity literals, and auth-
 > gated listeners. Regression coverage was added in
 > `admin-app/src/__tests__/audit-admin-sev3-2026-07-07.test.ts`.
+>
+> **Fix update — 2026-07-07:** The eleven SEV-4 findings were fixed on
+> `fix/audit-aa-sev4`: breakfast-selection docs/rules now match the
+> booking-map implementation, corporate inquiry notes/status/code issuance
+> were corrected, already-closed dashboard/rate/identity/listener drift was
+> verified, PDF generation now registers bundled brand fonts and uses stored
+> discount totals, Dashboard/Rooms/Rates/Settings render first-load
+> skeletons, and admin docs were synced to the actual components and
+> admin-only voucher/settings surfaces. Regression coverage was added in
+> `admin-app/src/__tests__/audit-admin-sev4-2026-07-07.test.ts`.
 
 The admin shell (auth, routing, responsive layout, focus traps, toasts,
 DataTable), the QR management page, the intercom inbox, store order
@@ -515,7 +525,7 @@ Use `getApiBaseUrl()` everywhere.
 ## SEV-4 — Nits & doc drift (11)
 
 ### AA-23 — Breakfast selections stored on the booking doc, not the `breakfastSelections` collection
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/pages/BookingsPage.tsx:1205-1212`; docs `plan/docs/BACKEND.md §breakfastSelections`, `plan/admin-app/CLAUDE.md` (Firebase usage table)
 
 The drawer writes a `breakfastSelections` map onto `bookings/{id}` and the
@@ -527,7 +537,7 @@ Reports "Breakfast Selections" backup sheet spec also assumes the
 collection).
 
 ### AA-24 — Inquiry notes: read-modify-write race, oldest-first ordering, author drift
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/context/AdminContext.tsx:1254-1267`, `admin-app/src/pages/CorporateInquiriesPage.tsx:63-83, 460`
 
 `addInquiryNote` rebuilds `notes` from context state and overwrites the
@@ -537,7 +547,7 @@ entry uses `by: "admin-staff"` while the real write uses the email —
 brief author flicker; spec asks for staff name.
 
 ### AA-25 — Inquiry status updates skip `updatedAt`; code generation allowed at any stage and force-converts
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/context/AdminContext.tsx:1246-1252`, `admin-app/src/pages/CorporateInquiriesPage.tsx:372, 105-111`
 
 Spec: stage move writes `status` + `updatedAt` (only `status` is written);
@@ -546,7 +556,7 @@ for every non-converted stage, including Declined) and generation itself
 should not flip the pipeline to converted.
 
 ### AA-26 — Dashboard metrics fudge: pending bookings count as occupancy; "Checked In Today" is all in-house; in-progress shows as "Clean"
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/pages/DashboardPage.tsx:21-69, 156-177`
 
 The weekly occupancy chart counts any non-cancelled booking (including
@@ -558,7 +568,7 @@ cycle itself is correct per decision #88; the button just hides the third
 state).
 
 ### AA-27 — Weekend rate mislabeled "Fri/Sat" — server charges Sat/Sun nights
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/pages/RatesPage.tsx:408, 457` vs `guest-app/server/handlers/bookings.ts:578, 1090` (`day === 0 || day === 6`)
 
 The rate matrix headers say "Weekend Rate (Fri/Sat)" but the pricing
@@ -568,7 +578,7 @@ peak" is configuring the wrong nights. Relabel (and consider whether the
 hotel actually wants Fri/Sat — if so the engine and spec change together).
 
 ### AA-28 — Identity literals: staff email as intercom `guestName`, `walkin@guest.com`, `handledBy: "frontdesk-staff"`
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/context/AdminContext.tsx:1496`, `admin-app/src/pages/BookingsPage.tsx:1250, 1295`
 
 Front-desk intercom replies store the staff member's email in the
@@ -581,7 +591,7 @@ overwrites it from the verified token, so this is dead-but-misleading
 client code).
 
 ### AA-29 — `corporateCodes` / intercom / calls listeners run before sign-in
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/context/AdminContext.tsx:1141-1172, 1407-1431, 1565-1618`
 
 Most listeners gate on `currentUser`, but these three have `[]` /
@@ -592,7 +602,7 @@ console error, and the subscriptions don't detach on sign-out. Gate all
 three on `currentUser` for consistency.
 
 ### AA-30 — Receipt/registration PDFs: default fonts, client-recomputed discount math
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/pages/BookingsPage.tsx:503-836 (registration), 838-1135 (receipt)`
 
 GOTCHAS/`EMAIL-PDF-STORAGE.md` require Apollo + Inter embedded as base64
@@ -606,7 +616,7 @@ breakdown from stored fields (`originalTotalPrice`, `voucherDiscount`,
 `pointsRedeemedValue`) instead.
 
 ### AA-31 — Loading skeletons missing on Dashboard, Rooms, Rates, and Settings tabs
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/pages/{DashboardPage,RoomsPage,RatesPage,SettingsPage}.tsx`
 
 The UX checklist in every feature MD requires skeletons; `DataTable`
@@ -615,7 +625,7 @@ rates form, and settings tabs render empty/default content until the first
 snapshot arrives (which is also what makes AA-06 dangerous).
 
 ### AA-32 — Doc drift: `plan/admin-app/CLAUDE.md` component/collection table vs reality
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `plan/admin-app/CLAUDE.md`
 
 Accumulated drift worth one sync pass: Sidebar is described as "role-aware
@@ -629,7 +639,7 @@ voucher management "within Settings" with front-desk access while it lives
 on the admin-only Rates page (see AA-33).
 
 ### AA-33 — Role-surface drift: front desk locked out of vouchers, breakfast menu, and store catalog
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev4`
 **File:** `admin-app/src/components/AdminLayout.tsx:52` (restricted paths), `admin-app/src/pages/RatesPage.tsx` (vouchers location)
 
 Specs grant Front Desk: voucher management (`VOUCHERS.md` "Both Admin and
@@ -717,7 +727,7 @@ admin-only.
 | 1 (`fix/admin-critical-audit-2026-07-07`) | AA-01, AA-02, AA-03 | Real member writes, confirm-email endpoint, payment proof visibility | Fixed in `9627f8a`; merged to `dev` in `e79cc9d` |
 | 2 (`fix/audit-aa-sev2`) | AA-04, AA-05, AA-06, AA-07, AA-08, AA-09 | Storage migration for embedded images, rates form hydration, corporate code integrity, dashboard operational sections | Fixed on `fix/audit-aa-sev2` |
 | 3 (`fix/audit-aa-sev3`) | AA-10 … AA-22 | Route guard normalization, mobile sign-out, timezone, exports, room/type editing, status model, redemption panel, white-label, API base URL | Fixed on `fix/audit-aa-sev3` |
-| 4 | AA-23 … AA-33 | Nits, doc sync, role-surface decisions | Open |
+| 4 (`fix/audit-aa-sev4`) | AA-23 … AA-33 | Nits, doc sync, role-surface decisions | Fixed on `fix/audit-aa-sev4` |
 
 **Fix-order notes:**
 - AA-10 through AA-22 are fixed on `fix/audit-aa-sev3`; AA-18 now exposes
@@ -727,7 +737,7 @@ admin-only.
 - AA-04/AA-05 are fixed; store item data-URL migration is handled by
   `AdminContext`, while guest ID uploads are Storage-only going forward.
 - AA-07(4) is fixed by allowing staff/admin corporate-code writes; AA-33
-  still needs a product decision for voucher ownership/surface policy.
+  is resolved by documenting voucher/settings management as admin-only.
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `4c43cfa`.

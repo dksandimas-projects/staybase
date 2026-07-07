@@ -909,6 +909,7 @@ export function SettingsPage() {
     hotelConfig,
     websiteContent,
     websiteContentLoading,
+    settingsLoading,
     rewardsConfig,
     breakfastConfig,
     storeConfig,
@@ -1555,6 +1556,32 @@ export function SettingsPage() {
     { id: "legal" as const, label: "Legal Content", icon: Scale },
     { id: "staff" as const, label: "Staff Accounts", icon: UserCog }
   ];
+
+  if (settingsLoading) {
+    return (
+      <div className="space-y-8 font-body">
+        <header className="space-y-2">
+          <div className="h-8 w-64 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
+          <aside className="hidden space-y-2 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 lg:block">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div key={index} className="h-11 animate-pulse rounded-lg bg-gray-100" />
+            ))}
+          </aside>
+          <div className="min-h-[400px] rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-7">
+            <div className="h-5 w-48 animate-pulse rounded bg-gray-200" />
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="h-16 animate-pulse rounded bg-gray-100" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 font-body">

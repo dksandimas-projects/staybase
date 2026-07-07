@@ -478,19 +478,8 @@ BreakfastConfig {
   silogItems: SilogItem[]
 }
 
-BreakfastSelection {
-  id: string
-  bookingId: string
-  roomNumber: string
-  date: string          // ISO date "YYYY-MM-DD" — the breakfast morning
-  guestIndex: number    // 0-based
-  guestName: string
-  silogId: string
-  silogName: string     // snapshot
-  enteredBy: string     // staff UID
-  createdAt: Date
-  updatedAt: Date
-}
+// Breakfast selections are stored on Booking.breakfastSelections.
+// Key format: yyyy-mm-dd-guest-n. Value: selected silog item name.
 ```
 
 ---

@@ -9,7 +9,7 @@ import { formatPrice } from "../utils/format";
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading } = useAdmin();
 
   const toLocalDateKey = (date: Date) => {
     const tz = config.timezone || "Asia/Manila";
@@ -46,6 +46,36 @@ export function DashboardPage() {
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
   const recentBookings = bookings.slice(0, 10);
+
+  if (dashboardLoading) {
+    return (
+      <div className="space-y-8 font-body">
+        <header className="space-y-2">
+          <div className="h-8 w-52 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-80 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+              <div className="h-4 w-24 animate-pulse rounded bg-gray-100" />
+              <div className="mt-4 h-8 w-20 animate-pulse rounded bg-gray-200" />
+              <div className="mt-3 h-3 w-32 animate-pulse rounded bg-gray-100" />
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="h-80 rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <div className="h-full animate-pulse rounded bg-gray-100" />
+          </div>
+          <div className="space-y-3 rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="h-14 animate-pulse rounded-lg bg-gray-100" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Per audit S5.3: replace the hardcoded weekly chart with a live
   // computation of occupancy rate per day for the last 7 days. A

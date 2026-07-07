@@ -29,7 +29,8 @@ export function RoomsPage() {
     createRoom,
     deleteRoom,
     hasActiveBookings,
-    roomTypes
+    roomTypes,
+    roomsLoading
   } = useAdmin();
   const toast = useToast();
 
@@ -199,6 +200,30 @@ export function RoomsPage() {
       return acc;
     }, {} as Record<string, string>);
   }, [roomTypes]);
+
+  if (roomsLoading) {
+    return (
+      <div className="space-y-6 font-body sm:space-y-8">
+        <header className="space-y-2">
+          <div className="h-8 w-48 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <div key={index} className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+              <div className="flex items-center justify-between gap-3">
+                <div className="h-6 w-24 animate-pulse rounded bg-gray-200" />
+                <div className="h-6 w-20 animate-pulse rounded-full bg-gray-100" />
+              </div>
+              <div className="mt-5 h-4 w-40 animate-pulse rounded bg-gray-100" />
+              <div className="mt-3 h-4 w-28 animate-pulse rounded bg-gray-100" />
+              <div className="mt-6 h-10 w-full animate-pulse rounded-lg bg-gray-100" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

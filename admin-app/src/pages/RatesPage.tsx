@@ -27,7 +27,8 @@ export function RatesPage() {
     updateSettings,
     updateRoomType,
     roomTypes,
-    currentUser
+    currentUser,
+    ratesLoading
   } = useAdmin();
   const { isMobile } = useBreakpoint();
   const toast = useToast();
@@ -405,6 +406,38 @@ export function RatesPage() {
       </p>
     </div>
   );
+
+  if (ratesLoading) {
+    return (
+      <div className="space-y-8 font-body">
+        <header className="space-y-2">
+          <div className="h-8 w-64 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-8 lg:grid-cols-3">
+          <div className="space-y-4 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 lg:col-span-2">
+            <div className="h-5 w-44 animate-pulse rounded bg-gray-200" />
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="grid gap-3 sm:grid-cols-4">
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-4 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+            <div className="h-5 w-40 animate-pulse rounded bg-gray-200" />
+            <div className="h-12 animate-pulse rounded bg-gray-100" />
+            <div className="h-10 animate-pulse rounded bg-gray-100" />
+          </div>
+        </div>
+        <div className="h-72 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <div className="h-full animate-pulse rounded bg-gray-100" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 font-body">
