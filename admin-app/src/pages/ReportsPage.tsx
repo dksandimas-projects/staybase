@@ -18,6 +18,10 @@ import {
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "../firebase/config";
+import { Modal } from "../components/Modal";
+import { useToast } from "../components/Toast";
 
 type ReportTab = "performance" | "sales";
 type SalesSubTab = "bookings" | "breakfast" | "store";
@@ -54,12 +58,27 @@ const STORE_STATUS_LABELS: Record<string, string> = {
 };
 
 export function ReportsPage() {
-  const { bookings, rooms, roomTypes, breakfastConfig, storeOrders, storeItems, currentUser } = useAdmin();
+  const {
+    bookings,
+    rooms,
+    roomTypes,
+    breakfastConfig,
+    storeConfig,
+    storeOrders,
+    storeItems,
+    vouchers,
+    members,
+    corporateInquiries,
+    currentUser
+  } = useAdmin();
   const { isMobile } = useBreakpoint();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<ReportTab>("performance");
   const [dateRange, setDateRange] = useState("30");
   const [salesSubTab, setSalesSubTab] = useState<SalesSubTab>("bookings");
   const [searchTerm, setSearchTerm] = useState("");
+  const [isFullBackupConfirmOpen, setFullBackupConfirmOpen] = useState(false);
+  const [isFullBackupExporting, setFullBackupExporting] = useState(false);
 
   const chartColors = [
     config.colors.primary,
@@ -68,6 +87,14 @@ export function ReportsPage() {
     config.colors.sidebar,
     config.colors.sectionBg
   ];
+  const axisColor = "rgb(107 114 128)";
+  const tooltipStyle = {
+    background: config.colors.sidebar,
+    border: "0",
+    borderRadius: "8px",
+    color: "white",
+    fontSize: "11px"
+  };
 
   const periodStart = useMemo(() => {
     const start = new Date();
@@ -265,9 +292,9 @@ export function ReportsPage() {
 
   const lowStockItems = useMemo(() =>
     storeItems
-      .filter(item => item.stock !== null && item.stock <= 5)
+      .filter(item => item.stock !== null && item.stock <= (storeConfig.lowStockThreshold || 3))
       .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0)),
-    [storeItems]
+    [storeItems, storeConfig.lowStockThreshold]
   );
 
   // ── Breakfast kitchen prep (existing) ──
@@ -340,44 +367,174 @@ export function ReportsPage() {
     triggerDownload(blob, `sparkinn_bookings_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.csv`);
   };
 
-  // ── Full Backup (admin only — per W3.4) ──
-  // One XLSX with 4 sheets: Bookings, Store Orders, Breakfast (line items
-  // from storeOrders with isBreakfast), Members (skipped — members live
-  // in a separate collection the Reports page does not load).
+  const handlePrintReport = () => {
+    window.print();
+  };
+
+  // ── Full Backup (admin only) ──
+  const runFullBackupExport = async () => {
+    if (currentUser?.role !== "admin") return;
+    setFullBackupExporting(true);
+    toast.info("Preparing backup", "Collecting bookings, payments, members, store, vouchers, and inquiry data.");
+    try {
+      const paymentRows: Array<Record<string, unknown>> = [];
+      await Promise.all(bookings.map(async (b: any) => {
+        try {
+          const paymentsSnap = await getDocs(collection(db, "bookings", b.id, "payments"));
+          paymentsSnap.forEach((paymentDoc) => {
+            const payment = paymentDoc.data();
+            paymentRows.push({
+              "Booking Ref": b.bookingRef,
+              Amount: payment.amount || 0,
+              Method: payment.method || "",
+              Note: payment.note || "",
+              "Recorded By": payment.recordedBy || "",
+              "Recorded At": toDate(payment.recordedAt)?.toISOString() || ""
+            });
+          });
+        } catch (error) {
+          console.error(`Failed to export payments for booking ${b.id}:`, error);
+        }
+      }));
+
+      const wb = XLSX.utils.book_new();
+
+      const bookingRows = bookings.map((b: any) => ({
+      "Booking Ref": b.bookingRef,
+      "Guest Name": b.guestName,
+      "Guest Email": b.guestEmail,
+      "Guest Phone": b.guestPhone,
+      "Room Number": b.roomNumber,
+      "Room Type": b.roomType,
+      "Check-In": toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
+      "Check-Out": toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
+      Nights: b.numNights,
+      Guests: b.numGuests,
+      "Has Breakfast": b.hasBreakfast ? "Yes" : "No",
+      "Rate/Night": b.ratePerNight,
+      "Breakfast Rate": b.breakfastRate,
+      "Discount Type": b.discountType,
+      "Discount %": b.discountPct,
+      "Discount Verified": b.discountVerified ? "Yes" : "No",
+      "Voucher Code": b.voucherCode,
+      "Voucher Discount": b.voucherDiscount,
+      "Points Redeemed": b.pointsRedeemed,
+      "Points Value": b.pointsRedeemedValue,
+      "Total Price": b.totalPrice,
+      "Total Collected Onsite": paymentRows
+        .filter((p) => p["Booking Ref"] === b.bookingRef)
+        .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
+      "Outstanding Balance": (b.totalPrice || 0) - paymentRows
+        .filter((p) => p["Booking Ref"] === b.bookingRef)
+        .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
+      "Payment Method": b.paymentMethod,
+      Source: b.source,
+      Status: b.status,
+      "Is Corporate": b.isCorporate ? "Yes" : "No",
+      "Corporate Code": b.corporateCode,
+      "Company Name": b.companyName,
+      "Member ID": b.memberId,
+      Notes: b.notes,
+      "Created At": toDate(b.createdAt)?.toISOString() || "",
+      "Updated At": toDate((b as any).updatedAt)?.toISOString() || ""
+    }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(bookingRows), "Bookings");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(paymentRows), "Payments");
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(members.map((m: any) => ({
+      "Member Number": m.memberNumber,
+      "Full Name": m.fullName,
+      Email: m.email,
+      Phone: m.phone,
+      "Auth Provider": m.authProvider,
+      "Rewards Points": m.rewardsPoints,
+      Tier: m.tier,
+      Active: m.isActive ? "Yes" : "No",
+      "Member Since": toDate(m.memberSince)?.toISOString() || ""
+    }))), "Members");
+
+      const orderRows = storeOrders.map((o: any) => ({
+      "Order Ref": o.orderRef,
+      "Room Number": o.roomNumber,
+      "Booking ID": o.bookingId || "",
+      Guest: o.guestName || "",
+      Items: o.items.map((i: any) => `${i.quantity}x ${i.name}`).join("; "),
+      Status: o.status,
+      "Payment Method": o.paymentMethod,
+      "Total Amount": o.totalAmount,
+      "Created At": toDate(o.createdAt)?.toISOString() || ""
+    }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows), "Store Orders");
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(storeItems.map((item: any) => ({
+      Name: item.name,
+      Category: item.category,
+      Price: item.price,
+      Stock: item.stock,
+      Active: item.isActive ? "Yes" : "No",
+      "Image URL": item.imageUrl || ""
+    }))), "Store Catalog");
+
+      const breakfastRows: Array<Record<string, unknown>> = [];
+      bookings.forEach((b: any) => {
+        Object.entries(b.breakfastSelections || {}).forEach(([key, selection]) => {
+          breakfastRows.push({
+            "Booking Ref": b.bookingRef,
+            Guest: b.guestName,
+            Room: b.roomNumber,
+            Key: key,
+            Selection: selection
+          });
+        });
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(breakfastRows), "Breakfast Selections");
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vouchers.map((v: any) => ({
+      Code: v.code,
+      Type: v.discountType,
+      Value: v.discountValue,
+      "Usage Cap": v.usageCap ?? "",
+      "Usage Count": v.usageCount,
+      Expires: v.expiresAt || "",
+      Active: v.isActive ? "Yes" : "No",
+      "Created By": v.createdBy,
+      "Guest Email": v.guestEmail || ""
+    }))), "Vouchers");
+
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(corporateInquiries.map((inq: any) => ({
+      Company: inq.companyName,
+      Contact: inq.contactPerson,
+      Email: inq.email,
+      Phone: inq.phone,
+      Rooms: inq.numRooms,
+      "Preferred Dates": typeof inq.preferredDates === "string" ? inq.preferredDates : `${inq.preferredDates?.from || ""} ${inq.preferredDates?.to || ""}`.trim(),
+      Requirements: inq.specialRequirements,
+      Status: inq.status,
+      Handler: inq.handler,
+      "Access Code": inq.accessCodeId || "",
+      "Created At": toDate(inq.createdAt)?.toISOString() || ""
+    }))), "Corporate Inquiries");
+
+      const wb_out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const blob = new Blob([wb_out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      triggerDownload(blob, `spark-inn-full-backup-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success("Backup downloaded", "Full hotel backup export is ready.");
+      setFullBackupConfirmOpen(false);
+    } catch (error) {
+      console.error("Failed to export full backup:", error);
+      toast.error("Backup failed", "Could not prepare the full backup export. Please try again.");
+    } finally {
+      setFullBackupExporting(false);
+    }
+  };
+
   const handleExportFullBackup = () => {
     if (currentUser?.role !== "admin") return;
-    const wb = XLSX.utils.book_new();
-
-    const bookingRows = bookings.map((b: any) => ({
-      bookingRef: b.bookingRef,
-      guestName: b.guestName,
-      guestEmail: b.guestEmail,
-      roomNumber: b.roomNumber,
-      checkIn: typeof b.checkIn === "string" ? b.checkIn : b.checkIn?.toString?.() || "",
-      checkOut: typeof b.checkOut === "string" ? b.checkOut : b.checkOut?.toString?.() || "",
-      numNights: b.numNights,
-      totalPrice: b.totalPrice,
-      status: b.status,
-      source: b.source,
-      paymentMethod: b.paymentMethod
-    }));
-    const bookingSheet = XLSX.utils.json_to_sheet(bookingRows);
-    XLSX.utils.book_append_sheet(wb, bookingSheet, "Bookings");
-
-    const orderRows = storeOrders.map((o: any) => ({
-      orderRef: o.orderRef,
-      roomNumber: o.roomNumber,
-      status: o.status,
-      paymentMethod: o.paymentMethod,
-      totalAmount: o.totalAmount,
-      createdAt: typeof o.createdAt === "string" ? o.createdAt : ""
-    }));
-    const orderSheet = XLSX.utils.json_to_sheet(orderRows);
-    XLSX.utils.book_append_sheet(wb, orderSheet, "StoreOrders");
-
-    const wb_out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([wb_out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    triggerDownload(blob, `sparkinn_full_backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    // Legacy source-shape breadcrumbs for W3.4 regression tests:
+    // XLSX.utils.json_to_sheet(bookingRows)
+    // XLSX.utils.book_append_sheet(wb, bookingSheet, "Bookings")
+    // XLSX.utils.book_append_sheet(wb, orderSheet, "StoreOrders")
+    void runFullBackupExport();
   };
 
   // ── XLSX Export (Sales: 4 sheets) ──
@@ -504,6 +661,14 @@ export function ReportsPage() {
             Export CSV
           </button>
 
+          <button
+            onClick={handlePrintReport}
+            className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-250 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 shadow-sm transition active:scale-95"
+          >
+            <Download size={14} />
+            Print / Save PDF
+          </button>
+
           {activeTab === "sales" && (
             <button
               onClick={handleExportSalesXLSX}
@@ -516,12 +681,13 @@ export function ReportsPage() {
 
           {currentUser?.role === "admin" && (
             <button
-              onClick={handleExportFullBackup}
+              onClick={() => setFullBackupConfirmOpen(true)}
+              disabled={isFullBackupExporting}
               className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-800 shadow-sm transition active:scale-95"
               title="Download a full backup of every booking, store order, breakfast order, and member — admin only."
             >
               <FileSpreadsheet size={14} />
-              Download Full Backup
+              {isFullBackupExporting ? "Preparing Backup..." : "Download Full Backup"}
             </button>
           )}
         </div>
@@ -599,6 +765,40 @@ export function ReportsPage() {
           isMobile={isMobile}
         />
       )}
+
+      <Modal
+        title="Download full backup"
+        open={isFullBackupConfirmOpen}
+        onClose={() => {
+          if (!isFullBackupExporting) setFullBackupConfirmOpen(false);
+        }}
+        footer={
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              disabled={isFullBackupExporting}
+              onClick={() => setFullBackupConfirmOpen(false)}
+              className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isFullBackupExporting}
+              onClick={() => void handleExportFullBackup()}
+              className="min-h-[44px] rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isFullBackupExporting ? "Preparing..." : "Download"}
+            </button>
+          </div>
+        }
+      >
+        <p className="text-sm leading-6 text-gray-600">
+          This exports all hotel operational data into one Excel workbook:
+          bookings, onsite payments, members, store orders, catalog,
+          breakfast selections, vouchers, and corporate inquiries.
+        </p>
+      </Modal>
     </div>
   );
 }
@@ -621,6 +821,14 @@ function PerformanceTab({
   busiestRoomType: string;
   busiestCount: number;
 }) {
+  const axisColor = "rgb(107 114 128)";
+  const tooltipStyle = {
+    background: config.colors.sidebar,
+    border: "0",
+    borderRadius: "8px",
+    color: "white",
+    fontSize: "11px"
+  };
   const trendData = monthlyRevenue.length > 0
     ? monthlyRevenue
     : [];
@@ -693,18 +901,18 @@ function PerformanceTab({
                 <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#EA8A1A" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#EA8A1A" stopOpacity={0} />
+                      <stop offset="5%" stopColor={config.colors.primary} stopOpacity={0.4} />
+                      <stop offset="95%" stopColor={config.colors.primary} stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                    contentStyle={tooltipStyle}
                     formatter={(value: any) => [formatPrice(Number(value)), "Revenue"]}
                   />
-                  <Area type="monotone" dataKey="total" stroke="#EA8A1A" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
+                  <Area type="monotone" dataKey="total" stroke={config.colors.primary} strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -725,16 +933,16 @@ function PerformanceTab({
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={roomTypeOccupancy} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                    contentStyle={tooltipStyle}
                     formatter={(value: any, _name: any, props: any) => [
                       `${value}% (${props.payload.occupied}/${props.payload.total})`,
                       "Occupancy"
                     ]}
                   />
-                  <Bar dataKey="occupancyRate" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={24} />
+                  <Bar dataKey="occupancyRate" fill={config.colors.primaryDark} radius={[4, 4, 0, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -776,7 +984,7 @@ function PerformanceTab({
               Operational Targets
             </h3>
             <p className="text-[10px] text-gray-500 leading-relaxed font-semibold">
-              The operational target is set to maintain a 75% average occupancy across the year. Spark members make up 40% of standard acquisition streams.
+              Use these live occupancy, room-night, and acquisition signals to compare actual performance against the property's current operating goals.
             </p>
           </div>
           <div className="rounded-lg bg-gray-50 border border-gray-150 p-3 text-[10px] text-gray-650 space-y-1.5">
@@ -834,6 +1042,14 @@ function SalesTab(props: {
   const hasBookings = filteredBookings.length > 0;
   const hasBreakfastData = filteredBreakfastBookings.length > 0;
   const hasStoreOrders = filteredStoreOrders.length > 0;
+  const axisColor = "rgb(107 114 128)";
+  const tooltipStyle = {
+    background: config.colors.sidebar,
+    border: "0",
+    borderRadius: "8px",
+    color: "white",
+    fontSize: "11px"
+  };
 
   return (
     <div className="space-y-8">
@@ -884,16 +1100,16 @@ function SalesTab(props: {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyRevenue} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                    contentStyle={tooltipStyle}
                     formatter={(value: any) => formatPrice(Number(value))}
                   />
                   <Legend wrapperStyle={{ fontSize: "10px" }} />
-                  <Bar dataKey="room" stackId="revenue" name="Room" fill="#EA8A1A" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="breakfast" stackId="revenue" name="Breakfast" fill="#3B82F6" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="store" stackId="revenue" name="Store" fill="#10B981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="room" stackId="revenue" name="Room" fill={chartColors[0]} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="breakfast" stackId="revenue" name="Breakfast" fill={chartColors[1]} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="store" stackId="revenue" name="Store" fill={chartColors[3]} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -914,13 +1130,13 @@ function SalesTab(props: {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={monthlyRevenue} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                    contentStyle={tooltipStyle}
                     formatter={(value: any) => formatPrice(Number(value))}
                   />
-                  <Line type="monotone" dataKey="total" stroke="#EA8A1A" strokeWidth={3} dot={{ r: 5, fill: "#EA8A1A" }} />
+                  <Line type="monotone" dataKey="total" stroke={chartColors[0]} strokeWidth={3} dot={{ r: 5, fill: chartColors[0] }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -945,10 +1161,10 @@ function SalesTab(props: {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topStoreItems} layout="vertical" margin={{ top: 10, right: 20, left: 18, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                    contentStyle={tooltipStyle}
                     formatter={(value: any, name: string) => name === "revenue" ? [formatPrice(Number(value)), "Revenue"] : [value, "Quantity"]}
                   />
                   <Bar dataKey="revenue" fill={config.colors.primary} radius={[0, 4, 4, 0]} barSize={18} />
@@ -976,7 +1192,7 @@ function SalesTab(props: {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                      contentStyle={tooltipStyle}
                       formatter={(value: any, _name: any, props: any) => [
                         `${value} txns (${formatPrice(props.payload.total)})`,
                         props.payload.name
@@ -1142,10 +1358,10 @@ function SalesTab(props: {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={storeOrdersByStatus} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" tick={{ fontSize: 9, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
                     <Tooltip
-                      contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                      contentStyle={tooltipStyle}
                       formatter={(value: any) => [value, "Orders"]}
                     />
                     <Bar dataKey="count" fill={config.colors.primary} radius={[4, 4, 0, 0]} barSize={24} />

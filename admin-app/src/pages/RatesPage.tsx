@@ -60,6 +60,8 @@ export function RatesPage() {
   // Corporate Code Form States
   const [corpCode, setCorpCode] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [corpExpiresAt, setCorpExpiresAt] = useState("");
+  const [corpUsageCap, setCorpUsageCap] = useState("");
 
   // Local pricing state per room type — the source of truth now lives on
   // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
@@ -148,11 +150,11 @@ export function RatesPage() {
     }
   };
 
-  const handleVoucherSubmit = (e: React.FormEvent) => {
+  const handleVoucherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vchCode || !discountValue) return;
 
-    addVoucher({
+    const result = await addVoucher({
       code: vchCode.trim().toUpperCase(),
       discountType,
       discountValue: parseFloat(discountValue) || 0,
@@ -160,9 +162,13 @@ export function RatesPage() {
       expiresAt: expiresAt || null,
       applicableRoomTypes: applicableRooms,
       isActive: true,
-      createdBy: "admin",
+      createdBy: currentUser?.uid || "staff",
       guestEmail: vchGuestEmail.trim() || null
     });
+    if (!result.success) {
+      toast.error("Voucher not created", result.error || "Please choose a different code.");
+      return;
+    }
 
     setVchCode("");
     setDiscountValue("");
@@ -170,6 +176,7 @@ export function RatesPage() {
     setExpiresAt("");
     setApplicableRooms([]);
     setIsVchModalOpen(false);
+    toast.success("Voucher created", `${vchCode.trim().toUpperCase()} is ready.`);
   };
 
   const handleCorpSubmit = async (e: React.FormEvent) => {
@@ -185,8 +192,8 @@ export function RatesPage() {
       code: corpCode.trim().toUpperCase(),
       companyName,
       ratePerRoomType: rateMap,
-      expiresAt: "2027-12-31",
-      usageCap: null,
+      expiresAt: corpExpiresAt || null,
+      usageCap: corpUsageCap ? parseInt(corpUsageCap) : null,
       usageCount: 0,
       linkedInquiryId: "",
       createdBy: currentUser?.uid || "staff",
@@ -200,6 +207,8 @@ export function RatesPage() {
 
     setCorpCode("");
     setCompanyName("");
+    setCorpExpiresAt("");
+    setCorpUsageCap("");
     setDirtyCorporateRateTypes(new Set());
     setIsCorpModalOpen(false);
     toast.success("Corporate code created", `${corpCode.trim().toUpperCase()} is ready.`);
@@ -437,7 +446,7 @@ export function RatesPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Weekend Rate (Fri/Sat)</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Weekend Rate (Sat/Sun)</label>
                       <div className="relative mt-1 flex items-center">
                         <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
                         <input
@@ -474,7 +483,7 @@ export function RatesPage() {
                     <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
                       <th className="py-2.5">Room Type</th>
                       <th className="py-2.5">Standard Rate (Base)</th>
-                      <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
+                      <th className="py-2.5">Weekend Rate (Sat/Sun)</th>
                       <th className="py-2.5">Corporate Rate (Flat)</th>
                     </tr>
                   </thead>
@@ -822,6 +831,30 @@ export function RatesPage() {
                 placeholder="Globe Telecom"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Expiration Date
+              <input
+                type="date"
+                value={corpExpiresAt}
+                onChange={(e) => setCorpExpiresAt(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Usage Cap
+              <input
+                type="number"
+                min={0}
+                placeholder="Unlimited if empty"
+                value={corpUsageCap}
+                onChange={(e) => setCorpUsageCap(e.target.value)}
                 className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
               />
             </label>
