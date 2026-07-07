@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth } from "./lib/firebase-admin";
-import { handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
@@ -412,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         success: true,
         data: {
           bookingId: "hp_" + Math.random().toString(36).substring(2, 9),
-          bookingRef: `SI-${new Date().getFullYear()}0608-099`
+          bookingRef: `${getConfiguredBookingRefPrefix()}-${new Date().getFullYear()}0608-00099`
         }
       });
     }

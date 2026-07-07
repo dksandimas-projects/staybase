@@ -283,25 +283,29 @@ describe("BF-04 — staff-new-booking email is deduped against the persisted ema
     expect(sendStaffNewBookingTrigger).toHaveBeenCalledTimes(2);
   });
 
-  test("re-submitting the same bookingId is rejected by the existence check (BF-03)", async () => {
+  test("re-submitting the same bookingId returns the existing booking without re-firing staff email (BI-17)", async () => {
     // Per BF-03 (booking-flow audit 2026-06-26): a client retry
     // with the same preallocated bookingId would clobber the
-    // prior booking. The transaction now reads the doc first
-    // and throws "Booking already exists" on collision.
+    // prior booking. Per BI-17, the retry now reads the doc first
+    // and returns the existing bookingRef instead of stranding the
+    // guest behind a raw 500.
     const req1 = mockRequest(baseBody);
     const res1 = mockResponse();
     await handler(req1, res1);
     expect(res1.status).toHaveBeenCalledWith(200);
+    const firstJsonArg = (res1.json as any).mock.calls[0][0];
 
     // The second call uses the same preallocated bookingId; the
-    // transaction's existence check must reject it without
-    // re-firing the staff email.
+    // transaction's existence check must return the existing
+    // booking without re-firing the staff email.
     const req2 = mockRequest(baseBody);
     const res2 = mockResponse();
     await handler(req2, res2);
-    expect(res2.status).toHaveBeenCalledWith(500);
+    expect(res2.status).toHaveBeenCalledWith(200);
     const jsonArg = (res2.json as any).mock.calls[0][0];
-    expect(jsonArg.error).toBe("Booking already exists");
+    expect(jsonArg.success).toBe(true);
+    expect(jsonArg.data.alreadyExists).toBe(true);
+    expect(jsonArg.data.bookingRef).toBe(firstJsonArg.data.bookingRef);
     // Only the first call fired the staff-new-booking email.
     expect(sendStaffNewBookingTrigger).toHaveBeenCalledTimes(1);
   });

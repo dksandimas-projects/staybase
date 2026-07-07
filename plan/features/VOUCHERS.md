@@ -50,6 +50,7 @@ Promo vouchers allow staff to create discount codes redeemable during the guest 
 - [ ] Voucher validation (guest): calls `/api/validate/voucher` — server-side checks: exists, `isActive`, not expired, under usage cap, room type match
 - [ ] Validation response: returns `{ valid: true, discountType, discountValue }` or `{ valid: false, reason }`
 - [ ] `usageCount` increment: happens server-side at booking creation (`/api/bookings/create`) — not at validation time
+- [ ] `usageCount` restore: if a booking with an applied voucher is cancelled before check-in, `/api/bookings/cancel` decrements the voucher usage count inside the cancellation transaction (never below 0), releasing capped voucher capacity for another guest
 - [ ] `voucherCode` and `voucherDiscount` stored on booking document
 - [ ] Discount calculation: percent voucher applies to total after senior/PWD discount; flat voucher subtracts fixed amount; total never goes below ₱0
 - [ ] Voucher and senior/PWD discount can stack — apply senior/PWD first, then voucher
@@ -62,6 +63,7 @@ Promo vouchers allow staff to create discount codes redeemable during the guest 
 - [ ] Duplicate voucher code on creation — show error "Code already exists"
 - [ ] Flat discount exceeds total — total set to ₱0, not negative
 - [ ] Voucher deactivated by admin while guest is in booking flow — server-side catch at creation
+- [ ] Voucher applied then booking cancelled — voucher usage count is restored so usage-capped campaigns count active redemptions, not abandoned bookings
 
 ## Manual QA
 

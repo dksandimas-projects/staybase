@@ -24,7 +24,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 
 ## UI Checklist
 
-- [ ] Conversation list (left panel) — one row per room with active messages: room number, last message preview, timestamp, unread count badge
+- [ ] Conversation list (left panel) — one row per room with active messages, plus occupied rooms with no messages so staff can initiate a greeting: room number, last message preview, timestamp, unread count badge
 - [x] Active / Resolved tabs — filter conversations by resolution status
 - [ ] Thread view (right panel) — full message thread for selected room
 - [ ] Messages: guest messages (left-aligned), front desk messages (right-aligned)
@@ -63,7 +63,7 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 ## Edge Cases & States
 
 - [ ] No active conversations — "No active conversations" empty state
-- [ ] Room has no messages yet — do not show in conversation list
+- [ ] Occupied room has no messages yet — show in the active conversation list with an empty-state prompt so staff can initiate a greeting
 - [ ] Notification sound file not configured — fail silently, no sound (not an error)
 - [ ] Audio locked (no user interaction yet) — notification sound skipped silently until unlocked
 - [ ] Guest sends message while staff is viewing thread — appears in real-time, marked read immediately

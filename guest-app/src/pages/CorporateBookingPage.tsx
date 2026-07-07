@@ -79,6 +79,8 @@ import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type RateChoice = "room-only" | "room-breakfast";
 type GuestField = "firstName" | "lastName" | "email" | "phone" | "guestCount" | "designation" | "companyAddress";
@@ -122,7 +124,7 @@ export function CorporateBookingPage() {
 
   const [companyName, setCompanyName] = useState(() => sessionStorage.getItem("corp_companyName") ?? "");
   const [activeCode, setActiveCode] = useState(() => sessionStorage.getItem("corp_code") ?? "");
-  const [discountPercent, setDiscountPercent] = useState(() => Number(sessionStorage.getItem("corp_discount") ?? "0"));
+  const [, setDiscountPercent] = useState(() => Number(sessionStorage.getItem("corp_discount") ?? "0"));
   const [isFlatRate, setIsFlatRate] = useState(() => sessionStorage.getItem("corp_isFlatRate") === "true");
   // Per audit S4.1 / decision #101: store the negotiated
   // ratePerRoomType map returned by /api/validate/corporate-code so
@@ -367,6 +369,10 @@ export function CorporateBookingPage() {
       ),
     [typeAvailability, guests]
   );
+  const maxGuestCapacity = useMemo(
+    () => Math.max(1, ...roomTypes.map((type) => Number(type.maxCapacity) || 0)),
+    [roomTypes]
+  );
 
   const selectedTypeEntry = roomTypes.find((type) => type.value === selectedRoomType)
     ?? availableRoomTypes[0]?.type
@@ -390,8 +396,7 @@ export function CorporateBookingPage() {
     ? ratePerRoomType[selectedTypeEntry.value]
     : (selectedRoomRates?.corporateRate || selectedRoomRates?.pricePerNight || 0);
   const baseRate = negotiatedRate;
-  // Apply additional code discount if active
-  const ratePerNight = Math.round(baseRate * (1 - discountPercent / 100));
+  const ratePerNight = baseRate;
 
   const roomTotal = ratePerNight * nights;
   const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
@@ -457,7 +462,7 @@ export function CorporateBookingPage() {
   }
 
   function updateGuests(nextGuests: number) {
-    const safeGuests = Math.min(Math.max(nextGuests, 1), 6);
+    const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
     setGuests(safeGuests);
     updateDateParams(checkIn, checkOut, safeGuests);
   }
@@ -577,7 +582,18 @@ export function CorporateBookingPage() {
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (!ACCEPTED_UPLOAD_TYPES.has(file.type)) {
+        setSubmitError("Please upload a JPG, PNG, or WEBP image.");
+        e.target.value = "";
+        return;
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        setSubmitError("Please upload an image that is 5MB or smaller.");
+        e.target.value = "";
+        return;
+      }
       setUploadingProof(true);
+      setSubmitError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
@@ -813,7 +829,7 @@ export function CorporateBookingPage() {
                     <div>
                       <p className="font-semibold text-green-200">Verified: {companyName}</p>
                       <p className="mt-1 text-xs text-green-400">
-                        Code {activeCode} unlocked an extra {discountPercent}% discount.
+                        Code {activeCode} verified. Negotiated rate applied.
                       </p>
                     </div>
                   </div>
@@ -1010,14 +1026,12 @@ export function CorporateBookingPage() {
                 const typeMaxCapacity = type.maxCapacity ?? 0;
 
                 // Per W3.6 — pricing lives on the type. Apply the
-                // negotiated map override first (S4.1 / decision
-                // #101) then the additional code discount.
+                // negotiated map override first (S4.1 / decision #101).
                 // Per BI-04: never render ₱0 when the type has no
                 // corporateRate — fall back to the standard rate.
                 const baseCorp = (ratePerRoomType && ratePerRoomType[type.value] !== undefined)
                   ? ratePerRoomType[type.value]
                   : (type.corporateRate || type.pricePerNight || 0);
-                const discountedCorp = Math.round(baseCorp * (1 - discountPercent / 100));
 
                 return (
                   <motion.article
@@ -1062,18 +1076,13 @@ export function CorporateBookingPage() {
                           <p className="text-[10px] uppercase font-bold text-gray-500">Corporate Price</p>
                           <div className="flex items-baseline gap-2">
                             <span className="text-lg font-bold text-gray-950">
-                              {formatPrice(discountedCorp)}
+                              {formatPrice(baseCorp)}
                             </span>
-                            {activeCode && baseCorp !== discountedCorp && (
-                              <span className="text-xs text-gray-400 line-through">
-                                {formatPrice(baseCorp)}
-                              </span>
-                            )}
                           </div>
                         </div>
                         {activeCode && (
                           <span className="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded font-semibold border border-green-200">
-                            -{discountPercent}% Code
+                            Negotiated rate
                           </span>
                         )}
                       </div>
@@ -1541,7 +1550,7 @@ export function CorporateBookingPage() {
                           {uploadingProof ? "Uploading receipt..." : "Click to upload receipt photo"}
                         </span>
                         <span className="mt-1 text-xs text-gray-500">JPG, PNG, or WEBP up to 5MB</span>
-                        <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} disabled={uploadingProof} />
+                        <input type="file" className="hidden" accept="image/jpeg,image/png,image/webp" onChange={handleFileChange} disabled={uploadingProof} />
                       </label>
                     )}
                   </div>

@@ -29,6 +29,9 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { getEffectiveStorePaymentMethods, type EffectiveStorePaymentMethod } from "@spark-inn/shared";
 
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 const rtcConfiguration: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
@@ -757,6 +760,17 @@ export function IntercomPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (!ACCEPTED_UPLOAD_TYPES.has(file.type)) {
+        setStoreError("Please upload a JPG, PNG, or WEBP receipt image.");
+        e.target.value = "";
+        return;
+      }
+      if (file.size > MAX_UPLOAD_BYTES) {
+        setStoreError("Please upload a receipt image that is 5MB or smaller.");
+        e.target.value = "";
+        return;
+      }
+      setStoreError("");
       setGcashFile(file);
       setGcashPreview(URL.createObjectURL(file));
     }
@@ -1693,7 +1707,7 @@ export function IntercomPage() {
                             </div>
                             <input
                               type="file"
-                              accept="image/*"
+                              accept="image/jpeg,image/png,image/webp"
                               className="hidden"
                               onChange={handleFileChange}
                               required

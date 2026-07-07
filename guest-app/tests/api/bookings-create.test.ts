@@ -951,8 +951,13 @@ describe("/api/bookings/create", () => {
         guestName: "Guest To Cancel",
         guestEmail: "cancel@guest.com",
         status: "pending",
+        voucherCode: "SAVE500",
         checkIn: { toDate: () => new Date("2026-06-12") },
         checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockVouchers.SAVE500 = {
+        code: "SAVE500",
+        usageCount: 2
       };
       mockBookings.push(activeBooking);
 
@@ -968,8 +973,19 @@ describe("/api/bookings/create", () => {
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith({ success: true });
 
-      expect(activeBooking.status).toBe("cancelled");
-      expect(activeBooking.cancellationReason).toBe("Change of plans");
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_to_cancel",
+        data: expect.objectContaining({
+          status: "cancelled",
+          cancellationReason: "Change of plans"
+        })
+      });
+      expect(updateCalls).toContainEqual({
+        path: "vouchers/SAVE500",
+        data: expect.objectContaining({
+          usageCount: 1
+        })
+      });
     });
 
     test("POST /api/bookings/cancel: allows self-cancel after confirmed (BF-16)", async () => {
@@ -1001,8 +1017,12 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      // Status is flipped to cancelled.
-      expect(confirmedBooking.status).toBe("cancelled");
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_confirmed",
+        data: expect.objectContaining({
+          status: "cancelled"
+        })
+      });
     });
 
     test("POST /api/bookings/cancel: allows self-cancel after payment-confirmed (BF-16)", async () => {
@@ -1028,7 +1048,12 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      expect(paymentConfirmedBooking.status).toBe("cancelled");
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_payment_confirmed",
+        data: expect.objectContaining({
+          status: "cancelled"
+        })
+      });
     });
 
     test("POST /api/bookings/cancel: still rejects self-cancel after checked-in (BF-16)", async () => {
