@@ -226,6 +226,23 @@ export async function handleCreateBooking(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
 
+  // Per BI-12 (booking-intercom audit 2026-07-06): reject
+  // stays that start in the past (Manila calendar). The
+  // client blocks past dates in its date picker, but the
+  // corporate page's URL-seeded defaults proved that
+  // server-side enforcement is the only reliable guard.
+  // Same-day check-in is allowed (a guest checking in today
+  // is valid). Walk-ins (`handleCreateWalkin`) are exempt —
+  // staff may legitimately backfill past stays for guests
+  // who forgot to register.
+  const { todayStr: manilaToday } = getManilaDateInfo();
+  if (checkIn < manilaToday) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-in date cannot be in the past. Please choose a new date."
+    });
+  }
+
   // Calculate nights
   const startMs = checkInDate.getTime();
   const endMs = checkOutDate.getTime();

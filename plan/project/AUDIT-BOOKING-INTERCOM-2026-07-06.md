@@ -24,11 +24,13 @@
 > matches prior audits (`SEV-1` critical → `SEV-4` nit). Status is `Open` until
 > a commit references the fix in this doc.
 >
-> **Last status sync: 2026-07-06** — all 6 SEV-1 findings fixed in `f20c0bb`
+> **Last status sync: 2026-07-07** — all 6 SEV-1 findings fixed in `f20c0bb`
 > (`fix/audit-bi-sev1`, shared VERSION 0.119.8); all 5 SEV-2 findings fixed
-> in `bcb1b38` (`fix/audit-bi-sev2`, shared VERSION 0.119.8).
-> Typecheck + full test suite (99 shared / 254 guest-api / 580 admin) pass;
-> API bundle rebuilt and committed. SEV-3..SEV-4 remain open.
+> in `bcb1b38` (`fix/audit-bi-sev2`, shared VERSION 0.119.8); BI-12 + BI-16
+> from SEV-3 fixed in `f080ed1` (`fix/audit-bi-sev3`, shared VERSION
+> 0.119.9). Typecheck + full test suite (99 shared / 262 guest-api /
+> 580 admin) pass; API bundle rebuilt and committed. SEV-3 BI-13..BI-18
+> and SEV-4 BI-19..BI-23 remain open.
 
 ---
 
@@ -38,9 +40,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 6 (`f20c0bb`) | **6** |
 | **SEV-2 (major)** | 0 | 5 (`bcb1b38`) | **5** |
-| **SEV-3 (minor)** | 7 | 0 | **7** |
+| **SEV-3 (minor)** | 5 | 2 (`f080ed1`) | **7** |
 | **SEV-4 (nit / doc drift)** | 5 | 0 | **5** |
-| **Total** | **12** | **11** | **23** |
+| **Total** | **10** | **13** | **23** |
 
 The server side of the booking flow (`handleCreateBooking`, `handleCreateWalkin`,
 availability transaction, ref counter, discount stacking, idempotency, email
@@ -377,8 +379,17 @@ booking is corporate; store guest-entered `companyName` for the flat-rate path
 ## SEV-3 — Minor (7)
 
 ### BI-12 — Corporate flow defaults to hardcoded past dates; server accepts past check-ins
-**Status:** Open
-**File:** `guest-app/src/pages/CorporateBookingPage.tsx:98-99` (`"2026-06-12"` / `"2026-06-14"`); `guest-app/server/handlers/bookings.ts:155-168` (no past-date check)
+**Status:** **Fixed in `f080ed1`** — `handleCreateBooking` now reads
+`getManilaDateInfo()` and rejects `checkIn < manilaToday` with a 400
++ "Check-in date cannot be in the past" (same-day check-in is
+allowed). `handleCreateWalkin` is deliberately exempt so staff
+can backfill. The corporate page's `useState` defaults switched
+from the literal Phase 0.5 wireframe dates to `getTodayIso()` /
+`getTomorrowIso()` helpers (mirroring `BookingPage`). The existing
+`bookings-create.test.ts` fixtures migrated to dynamic future-dated
+ISO strings via a new `isoDate(offsetDays)` helper so the suite
+stays green as the calendar advances.
+**File:** `guest-app/server/handlers/bookings.ts:222-237` (past-date check); `guest-app/src/pages/CorporateBookingPage.tsx:3-25, 128-129` (helpers + new defaults); `guest-app/tests/api/bookings-create.test.ts:264-289` (date helper + fixture migration)
 
 The corporate page seeds `checkIn`/`checkOut` with literal June 2026 dates
 (already in the past). The regular page computes today/tomorrow. And because
@@ -416,8 +427,18 @@ The Step 1 guest stepper clamps at literal `6`. Room types are dynamic
 `maxCapacity` across active room types instead.
 
 ### BI-16 — `guestDetails` not schema-validated server-side
-**Status:** Open
-**File:** `guest-app/server/handlers/bookings.ts:146-153`; unused schema `shared/schemas/booking.ts` (`GuestDetailsSchema`)
+**Status:** **Fixed in `f080ed1`** — the `guestDetailsSchema`
+Zod schema in `bookings.ts:guestDetailsSchema` validates +
+normalizes every field on the create endpoint (trim + length-cap
++ lowercase email + email format + phone shape). Lands as a
+side effect of the BI-11 corporate-metadata work (the same
+schema covers the standard + corporate fields), so all
+non-corporate bookings now benefit from the same input
+validation the lookup/cancel endpoints got in BF-21. A new
+`audit-batch-3-bi12-bi16.test.ts` regression test pins the
+schema's structure + the `consent: z.boolean()` requirement
++ the 400-on-validation-failure branch.
+**File:** `guest-app/server/handlers/bookings.ts:81-110` (schema), `:182-208` (parse + 400); `guest-app/tests/api/audit-batch-3-bi12-bi16.test.ts` (regression)
 
 `handleCreateBooking` checks only field presence + `consent`. Email format,
 phone shape, and string lengths are unvalidated — a 100KB `requests` string or
@@ -604,12 +625,13 @@ Write the marker after a successful send, or accept at-most-once and note it.
 |---|---|---|---|
 | 1 (`fix/audit-bi-sev1`) | BI-01, BI-02, BI-03, BI-04, BI-05, BI-06 | All SEV-1: Turnstile real end-to-end, corporate pricing/proof, mic policy | **Fixed in `f20c0bb`** |
 | 2 (`fix/audit-bi-sev2`) | BI-07, BI-08, BI-09, BI-10, BI-11 | All SEV-2: corporate flow correctness + rules tightening + input wiring | **Fixed in `bcb1b38`** |
-| 3 | BI-12, BI-16 | Server-side input validation + past-date rejection | Open |
+| 3 (`fix/audit-bi-sev3`) | BI-12, BI-16 | Server-side input validation + past-date rejection | **Fixed in `f080ed1`** |
 | 4 | BI-13, BI-14, BI-15, BI-17, BI-18, BI-19 … BI-23 | Copy, UX, nits, doc drift | Open |
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `c593560`.
 - **Fixed in `<hash>`** — a commit referencing this doc closes the finding.
   (`f20c0bb` = `fix/audit-bi-sev1`, all six SEV-1 findings, VERSION 0.119.8.
-  `bcb1b38` = `fix/audit-bi-sev2`, all five SEV-2 findings, VERSION 0.119.8.)
+  `bcb1b38` = `fix/audit-bi-sev2`, all five SEV-2 findings, VERSION 0.119.8.
+  `f080ed1` = `fix/audit-bi-sev3`, BI-12 + BI-16 from SEV-3, VERSION 0.119.9.)
 - **Verified** — re-checked and found already correct (none yet in this audit).
