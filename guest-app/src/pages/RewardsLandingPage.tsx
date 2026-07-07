@@ -22,14 +22,13 @@ import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
-import { auth } from "../firebase/auth";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { REWARDS_HERO_LQIP } from "../data/homepage";
 
 export function RewardsLandingPage() {
   const shouldReduceMotion = useReducedMotion();
   const navigate = useNavigate();
-  const { user, memberProfile, loading, refreshMemberProfile } = useGuestAuth();
+  const { user, memberProfile, loading, refreshMemberProfile, registerCurrentMember } = useGuestAuth();
   const { rewards } = usePublicSiteContent();
   const heroPhoto = rewards.heroPhotoUrl;
   const heroEyebrow = rewards.heroEyebrow;
@@ -45,10 +44,9 @@ export function RewardsLandingPage() {
 
   useEffect(() => {
     if (!loading && user && memberProfile?.isMember) {
-      // Already a member — nothing to do, the UI shows the "Go to
-      // My Rewards" CTA instead.
+      navigate("/account/rewards", { replace: true });
     }
-  }, [loading, memberProfile?.isMember, user]);
+  }, [loading, memberProfile?.isMember, navigate, user]);
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -63,25 +61,7 @@ export function RewardsLandingPage() {
     setEnrolling(true);
     setEnrollError("");
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
-        setEnrollError("Please sign in again before joining Spark Rewards.");
-        setEnrolling(false);
-        return;
-      }
-      const res = await fetch("/api/members/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`
-        }
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        setEnrollError(data?.error || "We could not join Spark Rewards right now. Please try again.");
-        setEnrolling(false);
-        return;
-      }
+      await registerCurrentMember();
       // Refresh the local member profile from Firestore so the UI
       // flips to the "member" state without a hard reload.
       await refreshMemberProfile();

@@ -10,6 +10,11 @@ import { GhostButton } from "../components/GhostButton";
 import { scaleIn } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
 
+function getAuthConflictMessage(error: any): string | null {
+  if (error?.code !== "auth/account-exists-with-different-credential") return null;
+  return "An account with this email already exists using a different sign-in method. Sign in with that method first, then ask the front desk to link providers if needed.";
+}
+
 export function SignInPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -66,7 +71,7 @@ export function SignInPage() {
       navigate("/account/profile");
     } catch (err: any) {
       if (err?.code !== "auth/popup-closed-by-user") {
-        setErrorMsg("Google sign-in failed. Please try again.");
+        setErrorMsg(getAuthConflictMessage(err) || "Google sign-in failed. Please try again.");
       }
     } finally {
       setIsGoogleLoading(false);

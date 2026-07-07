@@ -396,7 +396,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Route Dispatch and Middlewares
   if (domain === "bookings" && action === "create" && req.method === "POST") {
     // 5 requests / IP / minute
-    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 5, 60000)) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-create:${ip}`, 5, 60000)) {
       return res.status(429).json({ success: false, error: "Too many booking requests. Please try again in a minute." });
     }
 
@@ -572,7 +572,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
     // 20 requests / IP / minute
-    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 20, 60000)) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 60000)) {
       return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
     }
 
@@ -588,7 +588,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (domain === "validate" && action === "corporate-code" && req.method === "POST") {
     // 10 requests / IP / minute
-    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 10, 60000)) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-corporate-code:${ip}`, 10, 60000)) {
       return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
     }
 

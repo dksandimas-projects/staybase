@@ -10,6 +10,17 @@ import { GhostButton } from "../components/GhostButton";
 import { scaleIn } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
 
+function getAuthConflictMessage(error: any): string | null {
+  const code = error?.code || "";
+  if (code === "auth/email-already-in-use") {
+    return "An account with this email already exists. Sign in with your existing method first.";
+  }
+  if (code === "auth/account-exists-with-different-credential") {
+    return "This email is already linked to another sign-in method. Sign in with that method first, then ask the front desk to link providers if needed.";
+  }
+  return null;
+}
+
 export function SignUpPage() {
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion();
@@ -60,8 +71,9 @@ export function SignUpPage() {
       navigate("/account/profile");
     } catch (err: any) {
       const code = err?.code || "";
-      if (code === "auth/email-already-in-use") {
-        setErrorMsg("An account with this email already exists. Try signing in instead.");
+      const conflictMessage = getAuthConflictMessage(err);
+      if (conflictMessage) {
+        setErrorMsg(conflictMessage);
       } else if (code === "auth/invalid-email") {
         setErrorMsg("Please enter a valid email address.");
       } else if (code === "auth/weak-password") {
@@ -87,7 +99,7 @@ export function SignUpPage() {
       navigate("/account/profile");
     } catch (err: any) {
       if (err?.code !== "auth/popup-closed-by-user") {
-        setErrorMsg(err?.message || "Google sign-in failed. Please try again.");
+        setErrorMsg(getAuthConflictMessage(err) || err?.message || "Google sign-in failed. Please try again.");
       }
     } finally {
       setIsGoogleLoading(false);

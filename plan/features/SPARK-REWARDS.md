@@ -177,11 +177,11 @@ These are documented here for awareness. Define before starting Phase 2:
 
 **Account linking — email conflict between Google and email/password:**
 - [ ] Guest signs up with email/password first, then later tries Google Sign-In with the same email → Firebase throws `auth/account-exists-with-different-credential`
-- [ ] On this error: show message "An account with this email already exists. Sign in with your password first, then you can link Google to your account."
-- [ ] After successful email/password sign-in: show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider
-- [ ] Once linked: guest can sign in with either Google or email/password going forward
+- [ ] Phase 1 behavior: show a provider-conflict message that tells the guest to use the existing sign-in method first; full self-service `linkWithPopup(googleProvider)` is deferred.
+- [ ] Phase 2 behavior: after successful email/password sign-in, show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider
+- [ ] Once linked in Phase 2: guest can sign in with either Google or email/password going forward
 - [ ] Guest signs up with Google first, then tries email/password sign-in with the same email → Firebase throws `auth/account-exists-with-different-credential`
-- [ ] On this error: show message "This email is linked to a Google account. Sign in with Google instead." with a Google Sign-In button
+- [ ] Phase 1 behavior: show a provider-conflict message that tells the guest to sign in with the existing method first
 - [ ] All booking linkage by email applies regardless of auth provider — the email is the identity anchor, not the provider
 
 ## Manual QA
@@ -191,8 +191,8 @@ These are documented here for awareness. Define before starting Phase 2:
 - [ ] Post-booking registration prompt appears on Step 4 for non-members
 - [ ] Past bookings linked to member account on registration (by email) — My Stays shows previous anonymous bookings immediately after sign-up
 - [ ] My Stays shows correct booking history
-- [ ] Email/password account + Google Sign-In same email → account linking prompt shown, both providers work after linking
-- [ ] Google account + email/password same email → directed to Google Sign-In with friendly message
+- [ ] Email/password account + Google Sign-In same email → provider-conflict message shown; self-service linking is deferred to Phase 2
+- [ ] Google account + email/password same email → provider-conflict message shown; self-service linking is deferred to Phase 2
 - [ ] My Rewards shows points balance (0 for new members)
 - [ ] Early check-in request reaches front desk
 - [ ] Admin member list shows all members with correct data

@@ -15,6 +15,7 @@ import { RoomCard } from "../components/RoomCard";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { useGuestAuth } from "../context/GuestAuthContext";
 import { MAX_FEATURED_TYPES } from "@spark-inn/shared";
 import { HOMEPAGE_HERO_LQIP } from "../data/homepage";
 
@@ -55,6 +56,7 @@ export function HomePage() {
   const { rooms, loading } = useRooms();
   const { roomTypes } = useRoomTypes();
   const { homepage } = usePublicSiteContent();
+  const { user, memberProfile } = useGuestAuth();
   const [checkIn, setCheckIn] = useState(() => getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(() => getDateKeyInTimezone(config.timezone, 2));
   const [guests, setGuests] = useState(2);
@@ -113,6 +115,8 @@ export function HomePage() {
   const visibleRewards = sparkRewardsVisible
     ? homepage.sparkRewards.perks.filter((p) => p.isEnabled !== false)
     : [];
+  const isRewardsMember = !!user && !!memberProfile?.isMember;
+  const memberName = memberProfile?.fullName?.split(" ")[0] || user?.displayName?.split(" ")[0] || "there";
 
   function searchAvailability() {
     const params = new URLSearchParams({
@@ -267,6 +271,7 @@ export function HomePage() {
                 typeBedDefinition={roomTypes.find((t) => t.value === room.type)?.bedDefinition}
                 typeDescription={roomTypes.find((t) => t.value === room.type)?.description}
                 typeAmenities={roomTypes.find((t) => t.value === room.type)?.amenities}
+                showStatusBadge={false}
               />
             ))}
           </motion.div>
@@ -348,14 +353,21 @@ export function HomePage() {
             {...entranceProps}
           >
             <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-primary">Spark Rewards</p>
-              <h2 className="mt-3 font-heading text-3xl sm:text-4xl">{homepage.sparkRewards.heading}</h2>
-              <p className="mt-4 max-w-xl leading-7 text-gray-300">{homepage.sparkRewards.description}</p>
-              <PrimaryButton to="/rewards" className="mt-8">
+              <p className="text-sm font-semibold uppercase tracking-wide text-primary">{config.rewardsName}</p>
+              <h2 className="mt-3 font-heading text-3xl sm:text-4xl">
+                {isRewardsMember ? `Welcome back, ${memberName}` : homepage.sparkRewards.heading}
+              </h2>
+              <p className="mt-4 max-w-xl leading-7 text-gray-300">
+                {isRewardsMember
+                  ? "Your member perks and points are ready whenever you are."
+                  : homepage.sparkRewards.description}
+              </p>
+              <PrimaryButton to={isRewardsMember ? "/account/rewards" : "/rewards"} className="mt-8">
                 <Gift size={18} />
-                Join Spark Rewards
+                {isRewardsMember ? "View My Rewards" : "Join Spark Rewards"}
               </PrimaryButton>
             </div>
+            {!isRewardsMember && (
             <motion.div className="grid gap-3" variants={staggerContainer}>
               {visibleRewards.map((perk) => {
                 const Icon = resolveIcon(perk.icon, 0);
@@ -376,6 +388,7 @@ export function HomePage() {
                 );
               })}
             </motion.div>
+            )}
           </motion.div>
         </section>
       )}
