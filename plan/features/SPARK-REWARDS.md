@@ -118,7 +118,7 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 - [ ] **Points balance** — pulled from `members/{uid}.rewardsPoints`; shows "0 pts" for new members
 - [ ] **Points earning info** — if `settings/rewardsConfig.pointsEnabled` is true, show how points are earned (e.g. "Earn {X} points per booking" or "Earn {X} points per ₱100 spent") — pulled from `settings/rewardsConfig`; if disabled, hide points balance section entirely
 - [ ] **Member discount badge** — if `settings/rewardsConfig.memberDiscountEnabled` is true, show "You get {X}% off every booking as a member" — if disabled, hide
-- [ ] **Early check-in perk** — always shown (not configurable off); "Request Early Check-In" button → sends a tagged message to front desk via `intercoms` (or email if no active room intercom); subject to availability
+- [x] **Early check-in perk** — always shown (not configurable off); "Request Early Check-In" button opens a modal that loads the member's upcoming stays (auto-picks a single booking, picker for multiple) and submits the request; subject to availability. **Delivery is email-only** — staff receive an email with booking details and a "Review booking" link into the admin app. The originally planned tagged-`intercoms`-message path was not built: the `isEarlyCheckInRequest` message flag exists in shared types and is preserved by the guest intercom, but nothing sets it and the admin inbox does not render it — deferred alongside `plan/features/INTERCOM-INBOX.md §Preserve early check-in request metadata`
 - [ ] Points redemption — staff-only from booking detail drawer via `/api/members/redeem-points`; My Rewards page shows current balance only — no guest-facing redeem button in Phase 1
 
 ### Data & Logic Checklist
@@ -126,7 +126,7 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 - [ ] Stays: call `GET /api/members/stays` with the guest Firebase ID token; the API matches `memberId == uid` OR `guestEmail == token.email`, dedupes, and returns a guest-safe booking subset only
 - [ ] Points history: `onSnapshot` on `members/{uid}/pointsHistory` subcollection
 - [ ] Points balance + rewards config: fetch `members/{uid}.rewardsPoints` + `settings/rewardsConfig` on load
-- [ ] Early check-in request: POST to `/api/email/early-checkin-request` with the guest Firebase ID token and selected `bookingId`; the API verifies `booking.memberId == uid` OR `booking.guestEmail == token.email` before emailing staff — always shown to members regardless of rewards config
+- [x] Early check-in request: POST to `/api/email/early-checkin-request` with the guest Firebase ID token and selected `bookingId`; when an `Authorization` header is present the API verifies `booking.memberId == uid` OR `booking.guestEmail == token.email` before emailing staff — always shown to members regardless of rewards config. Note: the route sits in the public email actions set, so a tokenless request falls back to the public booking-lookup pattern (`bookingId` + matching `guestEmail` in the body) — the token is verified when supplied, not strictly required; same auth level as the other public booking emails
 - [ ] Member discount: if `settings/rewardsConfig.memberDiscountEnabled`, show discount badge in booking Step 1 for logged-in members (auto-applied) — if disabled, no discount shown
 - [ ] Points awarded on booking checkout: if `settings/rewardsConfig.pointsEnabled`, compute points earned from booking `totalPrice` or flat per-booking value per `rewardsConfig` — `updateDoc` on `members/{uid}.rewardsPoints` + `addDoc` to pointsHistory when booking status changes to `checked-out`; triggered server-side via API route
 - [ ] Points redemption: POST `/api/members/redeem-points`; API transaction validates member balance and redemption rate, updates booking totals, deducts points, and writes points history
@@ -194,7 +194,7 @@ These are documented here for awareness. Define before starting Phase 2:
 - [ ] Email/password account + Google Sign-In same email → provider-conflict message shown; self-service linking is deferred to Phase 2
 - [ ] Google account + email/password same email → provider-conflict message shown; self-service linking is deferred to Phase 2
 - [ ] My Rewards shows points balance (0 for new members)
-- [ ] Early check-in request reaches front desk
+- [x] Early check-in request reaches front desk — via staff email (email-only delivery; submission flow covered by automated tests in `guest-app/tests/api/early-checkin.test.ts` and `early-checkin-member-auth.test.ts`)
 - [ ] Admin member list shows all members with correct data
 - [ ] Manual points adjustment updates balance and logs to history
 - [ ] Disable member — member cannot sign in
