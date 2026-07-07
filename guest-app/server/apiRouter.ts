@@ -10,7 +10,7 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
-import { handleEmailTrigger } from "./handlers/email";
+import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import config from "../../hotel.config";
 
@@ -819,6 +819,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     
     return await handleGetStoreOrderStatus(req, res);
+  }
+
+  if (domain === "email" && action === "preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email-preview:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleEmailPreview(req, res);
   }
 
   const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
