@@ -982,6 +982,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⏸ Early check-in approval workflow — persist member early check-in requests on the booking (`earlyCheckIn` map), approve/decline from the booking drawer, guest confirmation email + status in My Stays/My Rewards, arrivals-list badge. Today the request ends at a staff notification email with no record on the booking. Full spec: `plan/features/SPARK-REWARDS.md §Phase 2 — Early Check-In Approval Workflow`
 - 🔄 Email preview interface — add a preview to the sample email templates in Admin Settings (Active Email Triggers). Add an authenticated server-side route `/api/email/preview` that renders templates with realistic mock data, and display it in an iframe inside a preview modal/drawer in SettingsPage.
 - 🔄 Breakfast Silog Management CRUD — add, edit, and delete options for the breakfast menu items in SettingsPage under the Breakfast & Dining tab.
+- 🔄 Dashboard Intercom Widget — add a live chat preview/widget to the Dashboard Overview page showing recent active room threads, unread message indicators, and quick links to `/intercom`.
 
 ---
 
