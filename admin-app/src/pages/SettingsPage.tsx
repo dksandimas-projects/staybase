@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAdmin, type StoreItem } from "../context/AdminContext";
+import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminContext";
 import {
   compressImageFile,
   DEFAULT_CORPORATE_PAGE_CONTENT,
@@ -932,6 +932,8 @@ export function SettingsPage() {
     staff,
     createStaff,
     disableStaff,
+    updateStaff,
+    sendPasswordReset,
     paymentMethods,
     addPaymentMethod,
     updatePaymentMethod,
@@ -1158,6 +1160,16 @@ export function SettingsPage() {
   const [disablingStaff, setDisablingStaff] = useState<{ uid: string; name: string } | null>(null);
   const [isDisablingStaff, setIsDisablingStaff] = useState(false);
   const [disableStaffError, setDisableStaffError] = useState("");
+
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [editStaffName, setEditStaffName] = useState("");
+  const [editStaffEmail, setEditStaffEmail] = useState("");
+  const [editStaffPhone, setEditStaffPhone] = useState("");
+  const [editStaffRole, setEditStaffRole] = useState<"front-desk" | "admin">("front-desk");
+  const [editStaffPassword, setEditStaffPassword] = useState("");
+  const [isUpdatingStaff, setIsUpdatingStaff] = useState(false);
+  const [editStaffFormMessage, setEditStaffFormMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isSendingResetEmail, setIsSendingResetEmail] = useState(false);
 
   useEffect(() => {
     setStoreEnabled(storeConfig.isEnabled !== false);
@@ -1426,6 +1438,73 @@ export function SettingsPage() {
       return;
     }
     setDisablingStaff(null);
+  };
+
+  const openEditStaffModal = (member: StaffMember) => {
+    setEditingStaff(member);
+    setEditStaffName(member.fullName);
+    setEditStaffEmail(member.email);
+    setEditStaffPhone(member.phone || "");
+    setEditStaffRole(member.role);
+    setEditStaffPassword("");
+    setEditStaffFormMessage(null);
+  };
+
+  const handleUpdateStaffSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingStaff) return;
+
+    if (!editStaffName.trim() || !editStaffEmail.trim()) {
+      setEditStaffFormMessage({ type: "error", text: "Name and email are required." });
+      return;
+    }
+
+    if (editStaffPassword && editStaffPassword.length < 8) {
+      setEditStaffFormMessage({ type: "error", text: "Password must be at least 8 characters." });
+      return;
+    }
+
+    setIsUpdatingStaff(true);
+    setEditStaffFormMessage(null);
+
+    const result = await updateStaff({
+      uid: editingStaff.uid,
+      fullName: editStaffName.trim(),
+      email: editStaffEmail.trim(),
+      phone: editStaffPhone.trim(),
+      role: editStaffRole,
+      password: editStaffPassword || undefined
+    });
+
+    setIsUpdatingStaff(false);
+
+    if (!result.success) {
+      setEditStaffFormMessage({ type: "error", text: result.error || "Failed to update staff account." });
+      return;
+    }
+
+    toast.success("Staff updated", `Staff account for ${editStaffEmail} was successfully updated.`);
+    setEditingStaff(null);
+  };
+
+  const handleSendResetPasswordEmail = async () => {
+    if (!editingStaff) return;
+    setIsSendingResetEmail(true);
+    setEditStaffFormMessage(null);
+    try {
+      await sendPasswordReset(editStaffEmail.trim());
+      setEditStaffFormMessage({
+        type: "success",
+        text: `Password reset email sent to ${editStaffEmail.trim()}.`
+      });
+    } catch (err: any) {
+      setEditStaffFormMessage({
+        type: "error",
+        text: err?.message || "Failed to send password reset email."
+      });
+    } finally {
+      setIsSendingResetEmail(false);
+    }
   };
 
   const isAdmin = currentUser?.role === "admin";
@@ -4067,21 +4146,28 @@ export function SettingsPage() {
                                       </span>
                                     </div>
                                   </div>
-                                  <div className="shrink-0">
+                                  <div className="shrink-0 flex flex-col gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditStaffModal(member)}
+                                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                                      title="Edit this staff account"
+                                    >
+                                      <Pencil size={13} />
+                                      Edit
+                                    </button>
                                     {member.isActive ? (
                                       <button
                                         type="button"
                                         disabled={isCurrentUser}
                                         onClick={() => openDisableStaffConfirm(member)}
-                                        className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                         title={isCurrentUser ? "You cannot disable your own account" : "Disable this staff account"}
                                       >
                                         <Lock size={13} />
                                         Disable
                                       </button>
-                                    ) : (
-                                      <span className="text-[10px] text-gray-400 italic">No actions</span>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </li>
                               );
@@ -4127,20 +4213,29 @@ export function SettingsPage() {
                                       </span>
                                     </td>
                                     <td className="px-4 py-3 text-right">
-                                      {member.isActive ? (
+                                      <div className="flex justify-end gap-2">
                                         <button
                                           type="button"
-                                          disabled={isCurrentUser}
-                                          onClick={() => openDisableStaffConfirm(member)}
-                                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                          title={isCurrentUser ? "You cannot disable your own account" : "Disable this staff account"}
+                                          onClick={() => openEditStaffModal(member)}
+                                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                                          title="Edit this staff account"
                                         >
-                                          <Lock size={13} />
-                                          Disable
+                                          <Pencil size={13} />
+                                          Edit
                                         </button>
-                                      ) : (
-                                        <span className="text-[10px] text-gray-400 italic">No actions</span>
-                                      )}
+                                        {member.isActive ? (
+                                          <button
+                                            type="button"
+                                            disabled={isCurrentUser}
+                                            onClick={() => openDisableStaffConfirm(member)}
+                                            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-100 px-3 text-[10px] font-bold text-red-650 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            title={isCurrentUser ? "You cannot disable your own account" : "Disable this staff account"}
+                                          >
+                                            <Lock size={13} />
+                                            Disable
+                                          </button>
+                                        ) : null}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -4321,6 +4416,148 @@ export function SettingsPage() {
           </div>
         ) : null}
       </Modal>
+
+      <Modal
+        title="Edit Staff Account"
+        open={Boolean(editingStaff)}
+        onClose={() => !isUpdatingStaff && setEditingStaff(null)}
+      >
+        {editingStaff ? (
+          <form onSubmit={handleUpdateStaffSubmit} className="space-y-4 text-xs">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Full Name
+                <input
+                  type="text"
+                  required
+                  value={editStaffName}
+                  onChange={(e) => setEditStaffName(e.target.value)}
+                  placeholder="Jane Doe"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Email
+                <input
+                  type="email"
+                  required
+                  value={editStaffEmail}
+                  onChange={(e) => setEditStaffEmail(e.target.value)}
+                  placeholder="janedoe@sparkinn.com"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                />
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Phone (optional)
+                <input
+                  type="tel"
+                  value={editStaffPhone}
+                  onChange={(e) => setEditStaffPhone(e.target.value)}
+                  placeholder="+63 917 000 0000"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                New Password (leave blank to keep current)
+                <input
+                  type="text"
+                  minLength={8}
+                  value={editStaffPassword}
+                  onChange={(e) => setEditStaffPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                  className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white font-mono"
+                />
+              </label>
+            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-semibold text-gray-700">Role</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className={`flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border px-3 text-xs font-bold transition ${
+                  editStaffRole === "front-desk"
+                    ? "border-primary/30 bg-primary/5 text-primary-dark"
+                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                }`}>
+                  <input
+                    type="radio"
+                    name="editStaffRole"
+                    value="front-desk"
+                    checked={editStaffRole === "front-desk"}
+                    onChange={() => setEditStaffRole("front-desk")}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  <div>
+                    <div>Front Desk</div>
+                    <div className="text-[10px] font-medium text-gray-500">Bookings, check-in, intercom, dashboard.</div>
+                  </div>
+                </label>
+                <label className={`flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg border px-3 text-xs font-bold transition ${
+                  editStaffRole === "admin"
+                    ? "border-primary/30 bg-primary/5 text-primary-dark"
+                    : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                }`}>
+                  <input
+                    type="radio"
+                    name="editStaffRole"
+                    value="admin"
+                    checked={editStaffRole === "admin"}
+                    onChange={() => setEditStaffRole("admin")}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  <div>
+                    <div>Admin</div>
+                    <div className="text-[10px] font-medium text-gray-500">All front-desk access + Settings, Rates, Members.</div>
+                  </div>
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+              <button
+                type="button"
+                disabled={isSendingResetEmail || isUpdatingStaff}
+                onClick={handleSendResetPasswordEmail}
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg border border-primary/30 px-4 text-xs font-semibold text-primary-dark hover:bg-primary-light transition disabled:opacity-60"
+              >
+                <Mail size={14} />
+                {isSendingResetEmail ? "Sending..." : "Send Reset Email Link"}
+              </button>
+              
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingStaff(null)}
+                  disabled={isUpdatingStaff || isSendingResetEmail}
+                  className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingStaff || isSendingResetEmail}
+                  className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Save size={14} />
+                  {isUpdatingStaff ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
+
+            {editStaffFormMessage ? (
+              <div className={`rounded-lg border px-3 py-2 text-[10px] font-semibold ${
+                editStaffFormMessage.type === "success"
+                  ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                  : "border-red-100 bg-red-50 text-red-700"
+              }`}>
+                {editStaffFormMessage.text}
+              </div>
+            ) : null}
+          </form>
+        ) : null}
+      </Modal>
+    </Modal>
     </div>
   );
 }
