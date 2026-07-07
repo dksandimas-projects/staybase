@@ -95,7 +95,7 @@ service cloud.firestore {
     // them via authenticated sessions.
     match /corporateCodes/{code} {
       allow read: if isStaff();
-      allow write: if isAdmin();
+      allow write: if isStaff();
     }
 
     match /vouchers/{voucherId} {

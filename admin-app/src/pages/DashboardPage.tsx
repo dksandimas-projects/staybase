@@ -1,12 +1,32 @@
+import { useNavigate } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { BedDouble, Check, RefreshCw, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
+import { formatPrice } from "../utils/format";
 
 export function DashboardPage() {
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes } = useAdmin();
+  const navigate = useNavigate();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus } = useAdmin();
+
+  const toLocalDateKey = (date: Date) => {
+    const tz = config.timezone || "Asia/Manila";
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(date);
+    const year = parts.find(p => p.type === "year")?.value || "0000";
+    const month = parts.find(p => p.type === "month")?.value || "01";
+    const day = parts.find(p => p.type === "day")?.value || "01";
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayKey = toLocalDateKey(new Date());
+  const monthKey = todayKey.slice(0, 7);
 
   // Metrics Calculations
   // Per audit S5.1: guard against `rooms.length === 0` (first paint
@@ -18,9 +38,14 @@ export function DashboardPage() {
     ? 0
     : Math.round((occupiedRoomsCount / totalRoomsCount) * 100);
 
-  const activeBookingsCount = bookings.filter(b => b.status === "confirmed" || b.status === "checked-in").length;
-  const checkedInToday = bookings.filter(b => b.status === "checked-in").length;
-  const dirtyRoomsCount = rooms.filter(r => r.housekeepingStatus === "dirty").length;
+  const monthlyBookingsCount = bookings.filter((b) => b.createdAt?.startsWith(monthKey)).length;
+  const monthlyRevenue = bookings
+    .filter((b) => b.checkIn?.startsWith(monthKey) && ["confirmed", "checked-in", "checked-out"].includes(b.status))
+    .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
+  const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
+  const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
+  const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
+  const recentBookings = bookings.slice(0, 10);
 
   // Per audit S5.3: replace the hardcoded weekly chart with a live
   // computation of occupancy rate per day for the last 7 days. A
@@ -31,20 +56,6 @@ export function DashboardPage() {
   // (config.timezone) to match the rest of the dashboard.
   const chartData = (() => {
     const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const toLocalDateKey = (date: Date) => {
-      const tz = config.timezone || "Asia/Manila";
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: tz,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }).formatToParts(date);
-      const year = parts.find(p => p.type === "year")?.value || "0000";
-      const month = parts.find(p => p.type === "month")?.value || "01";
-      const day = parts.find(p => p.type === "day")?.value || "01";
-      return `${year}-${month}-${day}`;
-    };
-
     const today = new Date();
     const days: { day: string; rate: number }[] = [];
     for (let i = 6; i >= 0; i -= 1) {
@@ -74,6 +85,14 @@ export function DashboardPage() {
     return acc;
   }, {} as Record<string, string>);
 
+  const openBooking = (bookingId: string) => {
+    navigate(`/bookings?bookingId=${encodeURIComponent(bookingId)}`);
+  };
+
+  const confirmPayment = async (bookingId: string) => {
+    await updateBookingStatus(bookingId, "confirmed");
+  };
+
   return (
     <div className="space-y-8 font-body">
       <header>
@@ -83,10 +102,128 @@ export function DashboardPage() {
 
       {/* Stats Cards Row */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} trend="+8% from last week" />
-        <StatsCard label="Active Bookings" value={String(activeBookingsCount)} />
-        <StatsCard label="Checked In Today" value={String(checkedInToday)} />
-        <StatsCard label="Dirty Rooms" value={String(dirtyRoomsCount)} trend={`${dirtyRoomsCount} urgent`} />
+        <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} />
+        <StatsCard label="Total Bookings" value={String(monthlyBookingsCount)} />
+        <StatsCard label="Revenue" value={formatPrice(monthlyRevenue)} />
+        <StatsCard label="Pending Payments" value={String(pendingPayments.length)} />
+      </div>
+
+      {/* Operational workflow sections */}
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <CreditCard size={18} className="text-primary" />
+              pending payment alerts
+            </h2>
+            <span className="rounded-full bg-primary-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-dark">
+              {pendingPayments.length} queued
+            </span>
+          </div>
+          <div className="space-y-3">
+            {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
+              <div key={booking.id} className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[72px_1fr_auto] sm:items-center">
+                <a
+                  href={booking.paymentProofUrl || undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white sm:w-16"
+                  aria-label={`Open payment proof for ${booking.bookingRef}`}
+                >
+                  {booking.paymentProofUrl ? (
+                    <img src={booking.paymentProofUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <CreditCard size={18} className="text-gray-400" />
+                  )}
+                </a>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-bold text-gray-900">{booking.bookingRef}</p>
+                    <StatusBadge label="payment uploaded" status="payment-uploaded" />
+                  </div>
+                  <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
+                  <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
+                </div>
+                <div className="flex flex-col gap-2 sm:w-36">
+                  {booking.paymentProofUrl && (
+                    <a
+                      href={booking.paymentProofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                    >
+                      <Eye size={12} />
+                      View Proof
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void confirmPayment(booking.id)}
+                    className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                  >
+                    Confirm Payment
+                  </button>
+                </div>
+              </div>
+            )) : (
+              <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-4 text-center text-xs font-semibold text-gray-500">
+                No payment proofs are waiting for review.
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
+          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <LogIn size={18} className="text-primary" />
+              today's arrivals
+            </h2>
+            <div className="space-y-2">
+              {todaysArrivals.length > 0 ? todaysArrivals.map((booking) => (
+                <button
+                  key={booking.id}
+                  type="button"
+                  onClick={() => openBooking(booking.id)}
+                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-left hover:bg-gray-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
+                    <span className="block text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.bookingRef}</span>
+                  </span>
+                  <ArrowRight size={14} className="shrink-0 text-gray-400" />
+                </button>
+              )) : (
+                <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No arrivals today.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <LogOut size={18} className="text-primary" />
+              today's departures
+            </h2>
+            <div className="space-y-2">
+              {todaysDepartures.length > 0 ? todaysDepartures.map((booking) => (
+                <button
+                  key={booking.id}
+                  type="button"
+                  onClick={() => openBooking(booking.id)}
+                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-left hover:bg-gray-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
+                    <span className="block text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.bookingRef}</span>
+                  </span>
+                  <ArrowRight size={14} className="shrink-0 text-gray-400" />
+                </button>
+              )) : (
+                <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No departures today.</p>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
 
       {/* Room Grid and Chart grid */}
@@ -211,6 +348,42 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+            <Clock size={18} className="text-primary" />
+            recent bookings
+          </h2>
+          <button
+            type="button"
+            onClick={() => navigate("/bookings")}
+            className="min-h-[34px] rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+          >
+            View All
+          </button>
+        </div>
+        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+          {recentBookings.length > 0 ? recentBookings.map((booking) => (
+            <button
+              key={booking.id}
+              type="button"
+              onClick={() => openBooking(booking.id)}
+              className="grid min-h-[54px] w-full gap-2 px-3 py-2 text-left hover:bg-gray-50 sm:grid-cols-[1fr_1fr_140px_120px] sm:items-center"
+            >
+              <span>
+                <span className="block text-xs font-bold text-gray-900">{booking.bookingRef}</span>
+                <span className="block truncate text-[10px] font-semibold text-gray-500">{booking.guestName}</span>
+              </span>
+              <span className="text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.checkIn}</span>
+              <span className="text-xs font-bold text-gray-900">{formatPrice(booking.totalPrice)}</span>
+              <StatusBadge label={booking.status.replace("-", " ")} status={booking.status} />
+            </button>
+          )) : (
+            <p className="p-4 text-center text-xs font-semibold text-gray-500">No bookings yet.</p>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

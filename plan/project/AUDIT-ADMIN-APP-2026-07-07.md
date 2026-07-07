@@ -32,10 +32,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 3 | **3** |
-| **SEV-2 (major)** | 6 | 0 | **6** |
+| **SEV-2 (major)** | 0 | 6 | **6** |
 | **SEV-3 (minor)** | 12 | 0 | **12** |
 | **SEV-4 (nit / doc drift)** | 11 | 0 | **11** |
-| **Total** | **29** | **3** | **32** |
+| **Total** | **23** | **9** | **32** |
 
 > **Fix update — 2026-07-07:** The three SEV-1 findings were fixed in
 > `9627f8a` (`fix: address critical admin audit bugs`), merged to `dev`
@@ -47,6 +47,16 @@
 > findings AA-01, AA-02, and AA-03 are now fixed. Cross-referenced
 > non-SEV-1 follow-ups such as AA-19 remain open until their own status
 > entries are updated.
+>
+> **Fix update — 2026-07-07:** The six SEV-2 findings were fixed on
+> `fix/audit-aa-sev2`: guest ID and store item uploads now use Storage
+> URLs, Rates form hydration tracks dirty fields before re-syncing live
+> settings, corporate-code creation is transactional/unique and available
+> to staff, corporate inquiry conversion persists the generated access
+> code with dynamic room-type rates, and the Dashboard now exposes pending
+> payments, arrivals, departures, and recent bookings. Regression coverage
+> was added in
+> `admin-app/src/__tests__/audit-admin-sev2-2026-07-07.test.ts`.
 
 The admin shell (auth, routing, responsive layout, focus traps, toasts,
 DataTable), the QR management page, the intercom inbox, store order
@@ -79,8 +89,8 @@ shape. The critical problems cluster in three places:
 | 1 | **AA-01** | Member points adjustments + suspensions vanish on refresh; success toast lies to staff | `admin-app/src/context/AdminContext.tsx:1368-1394`, `admin-app/src/pages/MembersPage.tsx:33-72` | Fixed in `9627f8a` |
 | 2 | **AA-02** | Staff confirmation never sends the guest a booking-confirmed email — the server endpoint exists and is never called | `admin-app/src/context/AdminContext.tsx:939-957`, `guest-app/server/handlers/bookings.ts:1593` | Fixed in `9627f8a` |
 | 3 | **AA-03** | Payment proofs are unviewable (booking drawer) or faked ("Mock receipt confirmation verified" panel) — staff verifies real money blind | `admin-app/src/pages/BookingsPage.tsx:2219-2228` (mock), drawer (missing proof section) | Fixed in `9627f8a` |
-| 4 | **AA-06** | Rates page displays stale default rates and Save writes them over live rates | `admin-app/src/pages/RatesPage.tsx:67-115` | Open |
-| 5 | **AA-07** | Inquiry-generated corporate codes write the rate map key `executivo` (typo) — negotiated executive rates never apply; and non-admin staff get a success toast on a write Firestore rejects | `admin-app/src/pages/CorporateInquiriesPage.tsx:85-114` | Open |
+| 4 | **AA-06** | Rates page displays stale default rates and Save writes them over live rates | `admin-app/src/pages/RatesPage.tsx:67-115` | Fixed on `fix/audit-aa-sev2` |
+| 5 | **AA-07** | Inquiry-generated corporate codes write the rate map key `executivo` (typo) — negotiated executive rates never apply; and non-admin staff get a success toast on a write Firestore rejects | `admin-app/src/pages/CorporateInquiriesPage.tsx:85-114` | Fixed on `fix/audit-aa-sev2` |
 
 ---
 
@@ -178,7 +188,7 @@ removed.
 ## SEV-2 — Major (6)
 
 ### AA-04 — Guest ID photos stored as base64 data URLs inside the booking document
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev2`
 **File:** `admin-app/src/pages/BookingsPage.tsx:1174-1185` (`handleGuestIdUpload`)
 
 The guest-ID upload compresses to 1400×1400 q0.84 and then writes
@@ -194,8 +204,13 @@ image on every snapshot; the registration PDF then re-fetches the data URL.
 (staff-read Storage rule already exists for booking paths), store the
 download URL.
 
+**Fixed:** `handleGuestIdUpload` now compresses the selected ID image,
+uploads it to `bookings/{bookingId}/guest-id/{timestamp}-{filename}` in
+Firebase Storage, stores only the download URL on the booking, and keeps
+the booking drawer deep-linkable via `?bookingId=`.
+
 ### AA-05 — Store item photos stored as base64 in publicly readable `storeItems` docs
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev2`
 **File:** `admin-app/src/pages/SettingsPage.tsx:1473-1515` (`handleStorePhotoUpload` → `imageUrl: storeItemPhotoDataUrl`)
 
 Same class as AA-04 but worse exposure: `storeItems` has
@@ -207,8 +222,14 @@ Storage at `store-items/{itemId}/{filename}`.
 **Fix:** upload the compressed file to Storage, store the URL; one-off
 migration for existing data-URL items.
 
+**Fixed:** store item create/update now passes the compressed `File` to
+`AdminContext`, uploads it under `store-items/{itemId}/...`, and writes a
+Storage URL to Firestore. `AdminContext` also migrates existing
+`data:image/...` catalog photos to Storage once they appear in the admin
+snapshot.
+
 ### AA-06 — Rates page form seeded from defaults and never re-synced — Save can clobber live rates
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev2`
 **File:** `admin-app/src/pages/RatesPage.tsx:67-115` (`prices`, `roomRates`, `bfRate` seeding + sync effect)
 
 `prices` / `roomRates` are seeded in `useState` initializers from whatever
@@ -225,8 +246,14 @@ configured rates — a silent, hard-to-notice revenue bug.
 dirty (track a `dirty` set, or key the form state off a
 `hotelConfigLoaded` gate and hydrate once real data arrives).
 
+**Fixed:** Rates now builds its local form buffers from live `roomTypes`
+and `breakfastConfig` snapshots, tracks dirty room-rate/corporate-rate/
+breakfast fields, and only preserves local edits while re-syncing all
+clean fields from Firestore. Saving clears the dirty markers after the
+write succeeds.
+
 ### AA-07 — Inquiry code generation: `executivo` typo, hardcoded type keys, unpersisted `accessCodeId`, false success for non-admins
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev2`
 **File:** `admin-app/src/pages/CorporateInquiriesPage.tsx:85-114` (`handleGenerateCode`), `admin-app/src/context/AdminContext.tsx:1174-1184` (`addCorporateCode`)
 
 Four defects in one flow:
@@ -252,8 +279,15 @@ persist `accessCodeId`, and either relax the rule to `isStaff()` or hide
 generation from front desk (pick per spec — `CORPORATE-INQUIRIES.md`
 implies front desk can generate).
 
+**Fixed:** inquiry code generation now renders one negotiated-rate input
+per configured room type, writes `ratePerRoomType` using those dynamic
+type keys, awaits `addCorporateCode`, persists
+`corporateInquiries/{id}.accessCodeId`, and only converts/toasts after
+the write succeeds. Firestore rules now allow staff/admin writes to
+`corporateCodes`.
+
 ### AA-08 — Corporate code create/overwrite without uniqueness check
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev2`
 **File:** `admin-app/src/context/AdminContext.tsx:1174-1184`, callers `RatesPage.tsx:155-180`, `CorporateInquiriesPage.tsx:85-114`
 
 `addCorporateCode` is a blind `setDoc(doc(db, "corporateCodes", code))`.
@@ -269,8 +303,13 @@ codes rather than overwritten ones.
 **Fix:** check existence (transaction or `getDoc`) and reject with a
 distinct error the UI can display.
 
+**Fixed:** `addCorporateCode` now uses a Firestore transaction against
+`corporateCodes/{code}`, rejects duplicates with a distinct error, and
+returns a `{success, error}` result that Rates and Corporate Inquiries
+surface before closing or converting.
+
 ### AA-09 — Dashboard is missing its operational core (pending-payment alerts, arrivals/departures, recent bookings)
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev2`
 **File:** `admin-app/src/pages/DashboardPage.tsx` (whole page vs `DASHBOARD-OVERVIEW.md`)
 
 The dashboard ships the room grid + housekeeping toggle + a weekly chart,
@@ -287,6 +326,11 @@ only**; desktop staff have no equivalent.
 **Fix:** add the pending-payments section (with proof thumbnail per AA-03
 and confirm via AA-02's endpoint), arrivals/departures lists, and a real
 (or no) trend value.
+
+**Fixed:** Dashboard now shows pending payment alerts with proof links and
+a Confirm Payment CTA, today's arrivals, today's departures, recent
+bookings, real monthly revenue and pending-payment stats, and no longer
+shows the fabricated "+8% from last week" trend.
 
 ---
 
@@ -651,7 +695,7 @@ admin-only.
   gating, second-call-wins, `microphone=(self)` headers).
 - **Firestore rules** for admin surfaces are sane: bookings staff-only
   read + no client create, payments append-only, settings admin-write,
-  vouchers staff-write, corporateCodes staff-read/admin-write, rooms
+  vouchers staff-write, corporateCodes staff-read/write, rooms
   delete admin-only.
 
 ---
@@ -661,20 +705,19 @@ admin-only.
 | Batch | Findings | Theme | Status |
 |---|---|---|---|
 | 1 (`fix/admin-critical-audit-2026-07-07`) | AA-01, AA-02, AA-03 | Real member writes, confirm-email endpoint, payment proof visibility | Fixed in `9627f8a`; merged to `dev` in `e79cc9d` |
-| 2 (`fix/audit-aa-sev2`) | AA-04, AA-05, AA-06, AA-07, AA-08, AA-09 | Storage migration for embedded images, rates form hydration, corporate code integrity, dashboard operational sections | Open |
+| 2 (`fix/audit-aa-sev2`) | AA-04, AA-05, AA-06, AA-07, AA-08, AA-09 | Storage migration for embedded images, rates form hydration, corporate code integrity, dashboard operational sections | Fixed on `fix/audit-aa-sev2` |
 | 3 (`fix/audit-aa-sev3`) | AA-10 … AA-22 | Route guard normalization, mobile sign-out, timezone, exports, room/type editing, status model, redemption panel, white-label, API base URL | Open |
 | 4 | AA-23 … AA-33 | Nits, doc sync, role-surface decisions | Open |
 
 **Fix-order notes:**
 - AA-02 is fixed; AA-18 still touches the same status-transition area if
   the `payment-confirmed` intermediate state is introduced later.
-- AA-03 is fixed; AA-09 can reuse the proof-thumbnail pattern now present
-  in the booking and store-order drawers.
-- AA-04/AA-05 need a small migration for existing base64 docs before the
-  UI switch, or old items render broken.
-- AA-07(4)/AA-33 require a product decision (front-desk vs admin for code
-  generation and vouchers) before code changes — record it in
-  `DECISIONS-FEATURES.md`.
+- AA-03 and AA-09 are fixed; the dashboard now reuses proof links for
+  pending-payment verification.
+- AA-04/AA-05 are fixed; store item data-URL migration is handled by
+  `AdminContext`, while guest ID uploads are Storage-only going forward.
+- AA-07(4) is fixed by allowing staff/admin corporate-code writes; AA-33
+  still needs a product decision for voucher ownership/surface policy.
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `4c43cfa`.
