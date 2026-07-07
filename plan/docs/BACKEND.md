@@ -474,7 +474,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `guests` | Owner or Staff/Admin | Create/disable via Admin SDK routes; profile update = Owner or Admin |
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
-| `corporateCodes` | Anyone (validation) | Admin only |
+| `corporateCodes` | Staff/Admin only; public validation uses `/api/corporate/validate-code` | Staff/Admin only |
 | `vouchers` | Anyone (validation) | Staff or Admin |
 | `intercoms` | Open (no auth) | Open (no auth) |
 | `members` | Owner (self) or Staff/Admin | Create = API/Admin SDK only via `/api/members/register`; Update = owner or Staff/Admin |

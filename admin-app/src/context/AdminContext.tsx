@@ -283,6 +283,10 @@ export interface StoreItem {
   createdAt: string;
 }
 
+type StoreItemInput = Omit<StoreItem, "id" | "createdAt"> & {
+  imageFile?: File | null;
+};
+
 export interface StoreOrder {
   id: string;
   orderRef: string;
@@ -333,7 +337,7 @@ export interface AdminContextType {
   addVoucher: (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => void;
   toggleVoucherActive: (voucherId: string) => void;
   corporateCodes: CorporateCode[];
-  addCorporateCode: (code: CorporateCode) => void;
+  addCorporateCode: (code: CorporateCode) => Promise<{ success: boolean; error?: string }>;
   toggleCorporateCodeActive: (code: string) => void;
   deleteCorporateCode: (code: string) => void;
 
@@ -373,8 +377,8 @@ export interface AdminContextType {
   updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"], cancellationReason?: string) => void | Promise<void>;
   billStoreOrder: (orderId: string) => void | Promise<void>;
   storeItems: StoreItem[];
-  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => Promise<void>;
-  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => Promise<void>;
+  addStoreItem: (item: StoreItemInput) => Promise<void>;
+  updateStoreItem: (itemId: string, updates: Partial<StoreItemInput>) => Promise<void>;
   deleteStoreItem: (itemId: string) => Promise<void>;
 
   // Configurations
@@ -1189,15 +1193,26 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const addCorporateCode = async (code: CorporateCode) => {
+  const addCorporateCode = async (code: CorporateCode): Promise<{ success: boolean; error?: string }> => {
     try {
       const { code: codeValue, ...rest } = code;
-      await setDoc(doc(db, "corporateCodes", code.code), {
-        ...rest,
-        isActive: true,
+      const codeRef = doc(db, "corporateCodes", codeValue);
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(codeRef);
+        if (existing.exists()) {
+          throw new Error("Corporate code already exists. Choose a different code.");
+        }
+        transaction.set(codeRef, {
+          ...rest,
+          isActive: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
       });
+      return { success: true };
     } catch (error) {
       console.error("Error adding corporate code:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Failed to add corporate code." };
     }
   };
 
@@ -1935,6 +1950,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       : "other";
   };
 
+  const uploadStoreItemImage = async (itemId: string, file: File) => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const fileRef = storageRef(storage, `store-items/${itemId}/${Date.now()}-${safeName}`);
+    await uploadBytes(fileRef, file);
+    return getDownloadURL(fileRef);
+  };
+
   useEffect(() => {
     if (!currentUser) return;
     const storeItemsQuery = query(collection(db, "storeItems"), orderBy("createdAt", "desc"));
@@ -1964,10 +1986,41 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const addStoreItem = async (item: Omit<StoreItem, "id" | "createdAt">) => {
+  const migratedStoreItemPhotoIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || storeItems.length === 0) return;
+    storeItems.forEach((item) => {
+      if (!item.imageUrl.startsWith("data:image/")) return;
+      if (migratedStoreItemPhotoIdsRef.current.has(item.id)) return;
+      migratedStoreItemPhotoIdsRef.current.add(item.id);
+      void (async () => {
+        try {
+          const response = await fetch(item.imageUrl);
+          const blob = await response.blob();
+          const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+          const file = new File([blob], `migrated-store-item.${ext}`, { type: blob.type || "image/jpeg" });
+          const url = await uploadStoreItemImage(item.id, file);
+          await updateDoc(doc(db, "storeItems", item.id), {
+            imageUrl: url,
+            migratedImageUrlFromDataUrlAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser.uid || currentUser.email || ""
+          });
+        } catch (error) {
+          console.error("Error migrating store item image to Storage:", error);
+        }
+      })();
+    });
+  }, [currentUser, storeItems]);
+
+  const addStoreItem = async (item: StoreItemInput) => {
     try {
-      await addDoc(collection(db, "storeItems"), {
-        ...item,
+      const { imageFile, ...itemFields } = item;
+      const itemRef = doc(collection(db, "storeItems"));
+      const imageUrl = imageFile ? await uploadStoreItemImage(itemRef.id, imageFile) : itemFields.imageUrl;
+      await setDoc(itemRef, {
+        ...itemFields,
+        imageUrl,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: currentUser?.uid || currentUser?.email || ""
@@ -1978,10 +2031,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateStoreItem = async (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
+  const updateStoreItem = async (itemId: string, updates: Partial<StoreItemInput>) => {
     try {
+      const { imageFile, ...updateFields } = updates;
+      const imageUrl = imageFile ? await uploadStoreItemImage(itemId, imageFile) : updateFields.imageUrl;
       await updateDoc(doc(db, "storeItems", itemId), {
-        ...updates,
+        ...updateFields,
+        ...(imageUrl !== undefined ? { imageUrl } : {}),
         updatedAt: serverTimestamp(),
         updatedBy: currentUser?.uid || currentUser?.email || ""
       });

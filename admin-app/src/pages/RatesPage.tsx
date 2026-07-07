@@ -26,7 +26,8 @@ export function RatesPage() {
     breakfastConfig,
     updateSettings,
     updateRoomType,
-    roomTypes
+    roomTypes,
+    currentUser
   } = useAdmin();
   const { isMobile } = useBreakpoint();
   const toast = useToast();
@@ -64,7 +65,15 @@ export function RatesPage() {
   // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
   // §W3.6`), so the local state is just the in-flight form buffer that
   // is flushed via `updateRoomType` on save.
-  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>(() => {
+  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>({});
+  const [dirtyRateFields, setDirtyRateFields] = useState<Set<string>>(() => new Set());
+  const [roomRates, setRoomRates] = useState<Record<string, string>>({});
+  const [dirtyCorporateRateTypes, setDirtyCorporateRateTypes] = useState<Set<string>>(() => new Set());
+
+  // Keep form buffers synced with Firestore-backed room types until the
+  // admin edits a field. This prevents deploy-time defaults from clobbering
+  // live rates when the settings snapshot arrives after first paint.
+  useEffect(() => {
     const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
     roomTypes.forEach(t => {
       initialPrices[t.value] = {
@@ -73,29 +82,16 @@ export function RatesPage() {
         corporate: t.corporateRate
       };
     });
-    return initialPrices;
-  });
 
-  const [roomRates, setRoomRates] = useState<Record<string, string>>(() => {
-    const initialRates: Record<string, string> = {};
-    roomTypes.forEach(t => {
-      initialRates[t.value] = String(t.pricePerNight);
-    });
-    return initialRates;
-  });
-
-  // Keep prices and room rates in sync if room types change
-  useEffect(() => {
     setPrices(prev => {
       const updated = { ...prev };
       roomTypes.forEach(t => {
-        if (!updated[t.value]) {
-          updated[t.value] = {
-            base: t.pricePerNight,
-            weekend: t.weekendRate,
-            corporate: t.corporateRate
-          };
-        }
+        const current = updated[t.value] || { base: 0, weekend: 0, corporate: 0 };
+        updated[t.value] = {
+          base: dirtyRateFields.has(`${t.value}.base`) ? current.base : initialPrices[t.value].base,
+          weekend: dirtyRateFields.has(`${t.value}.weekend`) ? current.weekend : initialPrices[t.value].weekend,
+          corporate: dirtyRateFields.has(`${t.value}.corporate`) ? current.corporate : initialPrices[t.value].corporate
+        };
       });
       return updated;
     });
@@ -103,16 +99,40 @@ export function RatesPage() {
     setRoomRates(prev => {
       const updated = { ...prev };
       roomTypes.forEach(t => {
-        if (!updated[t.value]) {
-          updated[t.value] = String(t.pricePerNight);
+        if (!dirtyCorporateRateTypes.has(t.value)) {
+          updated[t.value] = String(t.corporateRate || t.pricePerNight || 0);
         }
       });
       return updated;
     });
-  }, [roomTypes]);
+  }, [roomTypes, dirtyRateFields, dirtyCorporateRateTypes]);
 
   // Local breakfast rate state
   const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
+  const [bfRateDirty, setBfRateDirty] = useState(false);
+  useEffect(() => {
+    if (!bfRateDirty) {
+      setBfRate(String(breakfastConfig.ratePerPersonPerNight));
+    }
+  }, [breakfastConfig.ratePerPersonPerNight, bfRateDirty]);
+
+  const updateRateField = (typeValue: string, field: "base" | "weekend" | "corporate", value: number) => {
+    setDirtyRateFields(prev => new Set(prev).add(`${typeValue}.${field}`));
+    setPrices(prev => ({
+      ...prev,
+      [typeValue]: {
+        base: prev[typeValue]?.base ?? 0,
+        weekend: prev[typeValue]?.weekend ?? 0,
+        corporate: prev[typeValue]?.corporate ?? 0,
+        [field]: value
+      }
+    }));
+  };
+
+  const updateCorporateRoomRate = (typeValue: string, value: string) => {
+    setDirtyCorporateRateTypes(prev => new Set(prev).add(typeValue));
+    setRoomRates(prev => ({ ...prev, [typeValue]: value }));
+  };
 
   // Booking payment methods are managed in Settings → Payment
   // Methods (per `plan/features/SETTINGS.md §Payment Methods`).
@@ -152,16 +172,16 @@ export function RatesPage() {
     setIsVchModalOpen(false);
   };
 
-  const handleCorpSubmit = (e: React.FormEvent) => {
+  const handleCorpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!corpCode || !companyName) return;
 
     const rateMap: Record<string, number> = {};
-    Object.keys(roomRates).forEach(k => {
-      rateMap[k] = parseFloat(roomRates[k]) || 0;
+    roomTypes.forEach(type => {
+      rateMap[type.value] = parseFloat(roomRates[type.value]) || type.corporateRate || type.pricePerNight || 0;
     });
 
-    addCorporateCode({
+    const result = await addCorporateCode({
       code: corpCode.trim().toUpperCase(),
       companyName,
       ratePerRoomType: rateMap,
@@ -169,14 +189,20 @@ export function RatesPage() {
       usageCap: null,
       usageCount: 0,
       linkedInquiryId: "",
-      createdBy: "admin",
+      createdBy: currentUser?.uid || "staff",
       createdAt: new Date().toISOString(),
       isActive: true
     });
+    if (!result.success) {
+      toast.error("Corporate code not created", result.error || "Please choose a different code.");
+      return;
+    }
 
     setCorpCode("");
     setCompanyName("");
+    setDirtyCorporateRateTypes(new Set());
     setIsCorpModalOpen(false);
+    toast.success("Corporate code created", `${corpCode.trim().toUpperCase()} is ready.`);
   };
 
   // Save room prices changes — per W3.6 the rate matrix lives on the
@@ -197,6 +223,7 @@ export function RatesPage() {
         });
       });
       await Promise.all(updates);
+      setDirtyRateFields(new Set());
       toast.success("Rates saved", "Rate matrix updated for all room types.");
     } catch (err) {
       console.error("Error saving rates:", err);
@@ -213,6 +240,17 @@ export function RatesPage() {
       ...breakfastConfig,
       ratePerPersonPerNight: parseFloat(bfRate) || 300
     });
+    setBfRateDirty(false);
+  };
+
+  const formatCorporateRateSummary = (rateMap: Record<string, number>) => {
+    const configuredTypes = roomTypes.filter((type) => rateMap[type.value] !== undefined);
+    const entries = configuredTypes.length > 0
+      ? configuredTypes
+      : Object.keys(rateMap).map((value) => ({ value, shortLabel: value, label: value }));
+    return entries
+      .map((type) => `${type.shortLabel || type.label}: ${formatPrice(rateMap[type.value] || 0)}`)
+      .join(" • ");
   };
 
   // Voucher Columns
@@ -276,7 +314,7 @@ export function RatesPage() {
       header: "Custom Rates",
       render: (row) => (
         <span className="text-[11px] text-gray-500">
-          Double: <strong>{formatPrice(row.ratePerRoomType["standard-double"] || 0)}</strong> • Exec: <strong>{formatPrice(row.ratePerRoomType["executive"] || 0)}</strong>
+          {formatCorporateRateSummary(row.ratePerRoomType)}
         </span>
       )
     },
@@ -354,7 +392,7 @@ export function RatesPage() {
       </div>
       <p className="text-base font-bold text-gray-900">{row.companyName}</p>
       <p className="text-xs text-gray-500">
-        Double {formatPrice(row.ratePerRoomType["standard-double"] || 0)} · Exec {formatPrice(row.ratePerRoomType["executive"] || 0)} · {row.usageCount} bookings
+        {formatCorporateRateSummary(row.ratePerRoomType)} · {row.usageCount} bookings
       </p>
     </div>
   );
@@ -393,13 +431,7 @@ export function RatesPage() {
                           required
                           min={0}
                           value={prices[type.value]?.base || 0}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setPrices(prev => ({
-                              ...prev,
-                              [type.value]: { ...prev[type.value], base: val }
-                            }));
-                          }}
+                          onChange={(e) => updateRateField(type.value, "base", parseFloat(e.target.value) || 0)}
                           className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
                         />
                       </div>
@@ -413,13 +445,7 @@ export function RatesPage() {
                           required
                           min={0}
                           value={prices[type.value]?.weekend || 0}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setPrices(prev => ({
-                              ...prev,
-                              [type.value]: { ...prev[type.value], weekend: val }
-                            }));
-                          }}
+                          onChange={(e) => updateRateField(type.value, "weekend", parseFloat(e.target.value) || 0)}
                           className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
                         />
                       </div>
@@ -433,13 +459,7 @@ export function RatesPage() {
                           required
                           min={0}
                           value={prices[type.value]?.corporate || 0}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setPrices(prev => ({
-                              ...prev,
-                              [type.value]: { ...prev[type.value], corporate: val }
-                            }));
-                          }}
+                          onChange={(e) => updateRateField(type.value, "corporate", parseFloat(e.target.value) || 0)}
                           className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
                         />
                       </div>
@@ -470,13 +490,7 @@ export function RatesPage() {
                               required
                               min={0}
                               value={prices[type.value]?.base || 0}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrices(prev => ({
-                                  ...prev,
-                                  [type.value]: { ...prev[type.value], base: val }
-                                }));
-                              }}
+                              onChange={(e) => updateRateField(type.value, "base", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>
@@ -489,13 +503,7 @@ export function RatesPage() {
                               required
                               min={0}
                               value={prices[type.value]?.weekend || 0}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrices(prev => ({
-                                  ...prev,
-                                  [type.value]: { ...prev[type.value], weekend: val }
-                                }));
-                              }}
+                              onChange={(e) => updateRateField(type.value, "weekend", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>
@@ -508,13 +516,7 @@ export function RatesPage() {
                               required
                               min={0}
                               value={prices[type.value]?.corporate || 0}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrices(prev => ({
-                                  ...prev,
-                                  [type.value]: { ...prev[type.value], corporate: val }
-                                }));
-                              }}
+                              onChange={(e) => updateRateField(type.value, "corporate", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>
@@ -561,7 +563,10 @@ export function RatesPage() {
                     required
                     min={0}
                     value={bfRate}
-                    onChange={(e) => setBfRate(e.target.value)}
+                    onChange={(e) => {
+                      setBfRateDirty(true);
+                      setBfRate(e.target.value);
+                    }}
                     className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                   />
                 </div>
@@ -831,10 +836,7 @@ export function RatesPage() {
                   <input
                     type="number"
                     value={roomRates[t.value] || ""}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setRoomRates(prev => ({ ...prev, [t.value]: val }));
-                    }}
+                    onChange={(e) => updateCorporateRoomRate(t.value, e.target.value)}
                     className="min-h-[38px] w-full rounded border border-gray-255 px-2 text-xs text-gray-900 font-medium"
                   />
                 </label>
