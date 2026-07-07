@@ -5,6 +5,7 @@ const {
   mockSetCustomUserClaims,
   mockUpdateUser,
   mockDeleteUser,
+  mockGetUser,
   mockGuestDocs,
   mockGuestSet
 } = vi.hoisted(() => ({
@@ -12,6 +13,7 @@ const {
   mockSetCustomUserClaims: vi.fn(),
   mockUpdateUser: vi.fn(),
   mockDeleteUser: vi.fn(),
+  mockGetUser: vi.fn(),
   mockGuestDocs: new Map<string, any>(),
   mockGuestSet: vi.fn()
 }));
@@ -21,7 +23,8 @@ vi.mock("../../server/lib/firebase-admin", () => ({
     createUser: mockCreateUser,
     setCustomUserClaims: mockSetCustomUserClaims,
     updateUser: mockUpdateUser,
-    deleteUser: mockDeleteUser
+    deleteUser: mockDeleteUser,
+    getUser: mockGetUser
   },
   adminDb: {
     collection: vi.fn().mockImplementation((collectionName: string) => {
@@ -49,7 +52,7 @@ vi.mock("../../server/lib/firebase-admin", () => ({
   }
 }));
 
-import { handleCreateStaff, handleDisableStaff } from "../../server/handlers/admin";
+import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "../../server/handlers/admin";
 
 const mockResponse = () => {
   const res: any = {};
@@ -69,6 +72,7 @@ describe("/api/admin staff handlers", () => {
     mockCreateUser.mockReset();
     mockSetCustomUserClaims.mockReset();
     mockUpdateUser.mockReset();
+    mockGetUser.mockReset();
     mockGuestSet.mockReset();
     mockGuestDocs.clear();
     mockGuestDocs.set("admin_1", {
@@ -295,6 +299,151 @@ describe("/api/admin staff handlers", () => {
       // First write: disable; second write: rollback.
       expect(writes[0]).toMatchObject({ isActive: false });
       expect(writes[1]).toMatchObject({ isActive: true, disabledAt: null });
+    });
+  });
+
+  describe("handleUpdateStaff", () => {
+    beforeEach(() => {
+      mockGuestDocs.set("staff_1", {
+        fullName: "Front Desk One",
+        email: "frontdesk@example.test",
+        role: "front-desk",
+        isActive: true
+      });
+      mockGetUser.mockResolvedValue({
+        uid: "staff_1",
+        email: "frontdesk@example.test",
+        displayName: "Front Desk One"
+      });
+    });
+
+    test("successfully updates staff details including custom claims when role changes", async () => {
+      const req = {
+        method: "POST",
+        staff: adminStaff,
+        body: {
+          uid: "staff_1",
+          fullName: "Front Desk Updated",
+          email: "updated@example.test",
+          phone: "+6PhilippinePhone",
+          nationality: "Filipino",
+          role: "admin"
+        }
+      };
+      const res = mockResponse();
+
+      await handleUpdateStaff(req, res);
+
+      expect(mockUpdateUser).toHaveBeenCalledWith("staff_1", {
+        email: "updated@example.test",
+        displayName: "Front Desk Updated"
+      });
+      expect(mockSetCustomUserClaims).toHaveBeenCalledWith("staff_1", { role: "admin" });
+      expect(mockGuestSet).toHaveBeenCalledWith(expect.objectContaining({
+        fullName: "Front Desk Updated",
+        email: "updated@example.test",
+        phone: "+6PhilippinePhone",
+        nationality: "Filipino",
+        role: "admin"
+      }), { merge: true });
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("updates password if provided and valid", async () => {
+      const req = {
+        method: "POST",
+        staff: adminStaff,
+        body: {
+          uid: "staff_1",
+          fullName: "Front Desk One",
+          email: "frontdesk@example.test",
+          role: "front-desk",
+          password: "newsecurepass"
+        }
+      };
+      const res = mockResponse();
+
+      await handleUpdateStaff(req, res);
+
+      expect(mockUpdateUser).toHaveBeenCalledWith("staff_1", {
+        email: "frontdesk@example.test",
+        displayName: "Front Desk One",
+        password: "newsecurepass"
+      });
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("prevents self-demotion from admin to front-desk", async () => {
+      const req = {
+        method: "POST",
+        staff: adminStaff,
+        body: {
+          uid: "admin_1",
+          fullName: "Admin One",
+          email: "admin@sparkinn.com",
+          role: "front-desk"
+        }
+      };
+      const res = mockResponse();
+
+      await handleUpdateStaff(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: "You cannot change your own admin role."
+      }));
+    });
+
+    test("prevents demoting the last active admin", async () => {
+      mockGuestDocs.set("admin_2", {
+        role: "admin",
+        isActive: false
+      });
+      const req = {
+        method: "POST",
+        staff: { ...adminStaff, uid: "super_admin" },
+        body: {
+          uid: "admin_1",
+          fullName: "Admin One",
+          email: "admin@sparkinn.com",
+          role: "front-desk"
+        }
+      };
+      const res = mockResponse();
+
+      await handleUpdateStaff(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: "You must keep at least one active admin account."
+      }));
+    });
+
+    test("rolls back Auth details if Firestore set fails during update", async () => {
+      mockGuestSet.mockRejectedValue(new Error("firestore failure"));
+      const req = {
+        method: "POST",
+        staff: adminStaff,
+        body: {
+          uid: "staff_1",
+          fullName: "Front Desk Updated",
+          email: "updated@example.test",
+          role: "admin"
+        }
+      };
+      const res = mockResponse();
+
+      await handleUpdateStaff(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+
+      expect(mockUpdateUser).toHaveBeenCalledWith("staff_1", {
+        email: "frontdesk@example.test",
+        displayName: "Front Desk One"
+      });
+      expect(mockSetCustomUserClaims).toHaveBeenCalledWith("staff_1", { role: "front-desk" });
     });
   });
 });

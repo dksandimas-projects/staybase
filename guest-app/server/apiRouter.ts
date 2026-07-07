@@ -8,7 +8,7 @@ import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./h
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
-import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
+import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
@@ -776,6 +776,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
     
     return await handleDisableStaff(req, res);
+  }
+
+  if (domain === "admin" && action === "update-staff" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-update-staff:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many update-staff requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
+    }
+    (req as any).staff = authResult;
+    
+    return await handleUpdateStaff(req, res);
   }
 
   if (domain === "store" && action === "create-order" && req.method === "POST") {
