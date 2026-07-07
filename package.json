@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "dotenv": "^17.4.2",
     "husky": "^9.1.7"
   }
 }
