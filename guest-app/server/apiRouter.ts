@@ -12,6 +12,7 @@ import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleEmailTrigger } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
+import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",
@@ -43,14 +44,16 @@ const publicEmailActions = new Set([
   "early-checkin-request"
 ]);
 
+const configuredGuestHost = config.domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+const configuredAdminHost = config.adminDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
 const PRODUCTION_GUEST_HOSTS = new Set([
-  "sparkinnbohol.com",
-  "www.sparkinnbohol.com"
+  configuredGuestHost,
+  `www.${configuredGuestHost}`.replace(/^www\.www\./, "www.")
 ]);
 const ALLOWED_ORIGINS = new Set<string>([
-  "https://sparkinnbohol.com",
-  "https://www.sparkinnbohol.com",
-  "https://admin.sparkinnbohol.com",
+  `https://${configuredGuestHost}`,
+  `https://www.${configuredGuestHost}`.replace(/^https:\/\/www\.www\./, "https://www."),
+  `https://${configuredAdminHost}`,
   "http://localhost:5173", // guest-app dev (Vite)
   "http://localhost:5174", // admin-app dev (Vite)
   "http://localhost:3000", // generic CRA / Next.js dev

@@ -68,7 +68,7 @@ export function RewardsLandingPage() {
       navigate("/account/rewards");
     } catch (err) {
       console.error("Member enrollment failed:", err);
-      setEnrollError("We could not join Spark Rewards right now. Please try again.");
+      setEnrollError(`We could not join ${config.rewardsName} right now. Please try again.`);
       setEnrolling(false);
     }
   };
@@ -118,7 +118,7 @@ export function RewardsLandingPage() {
             {!loading && !user && (
               <>
                 <PrimaryButton to="/signup" className="min-w-[220px] shadow-lg drop-shadow-md">
-                  Join Spark Rewards
+                  Join {config.rewardsName}
                 </PrimaryButton>
                 <GhostButton
                   to="/signin"
@@ -147,7 +147,7 @@ export function RewardsLandingPage() {
                     Enrolling...
                   </span>
                 ) : (
-                  "Enroll in Spark Rewards (One-Click)"
+                  `Enroll in ${config.rewardsName} (One-Click)`
                 )}
               </PrimaryButton>
             )}
@@ -241,7 +241,7 @@ export function RewardsLandingPage() {
               <p className="text-xs font-semibold uppercase tracking-widest text-primary">Member Privileges</p>
               <h2 className="mt-3 font-heading text-3xl text-gray-950 sm:text-4xl">Your World of Perks</h2>
               <p className="mt-4 text-sm text-gray-600">
-                Beyond points redemption, Spark Rewards offers a suite of exclusive privileges designed to elevate your stay.
+                Beyond points redemption, {config.rewardsName} offers a suite of exclusive privileges designed to elevate your stay.
               </p>
             </div>
             {!loading && !user && (
@@ -370,7 +370,7 @@ export function RewardsLandingPage() {
         <div className="container mx-auto px-6 text-center relative z-10">
           <h2 className="font-heading text-3xl md:text-4xl text-white mb-4">Start earning today.</h2>
           <p className="text-white/90 text-sm md:text-base mb-8 max-w-xl mx-auto leading-relaxed">
-            Join our community of travelers and experience a more rewarding way to stay in Tagbilaran City, Bohol.
+            Join our community of travelers and experience a more rewarding way to stay in {config.address.city}, {config.address.region}.
           </p>
 
           {!loading && !user && (
@@ -389,7 +389,7 @@ export function RewardsLandingPage() {
               className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
               disabled={enrolling}
             >
-              {enrolling ? "Enrolling..." : "Join Spark Rewards"}
+              {enrolling ? "Enrolling..." : `Join ${config.rewardsName}`}
             </button>
           )}
 

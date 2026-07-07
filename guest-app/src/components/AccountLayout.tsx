@@ -15,7 +15,7 @@ interface AccountLayoutProps {
 }
 
 export function AccountLayout({ children, activeTab, title, subtitle }: AccountLayoutProps) {
-  const { user, loading, signOut } = useGuestAuth();
+  const { user, memberProfile, loading, signOut } = useGuestAuth();
 
   if (loading) {
     return (
@@ -30,6 +30,10 @@ export function AccountLayout({ children, activeTab, title, subtitle }: AccountL
 
   if (!user) {
     return <Navigate to="/signin" replace />;
+  }
+
+  if (memberProfile?.isActive === false) {
+    return <Navigate to="/contact?member=disabled" replace />;
   }
 
   const navItems = [

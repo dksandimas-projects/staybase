@@ -364,7 +364,7 @@ export function HomePage() {
               </p>
               <PrimaryButton to={isRewardsMember ? "/account/rewards" : "/rewards"} className="mt-8">
                 <Gift size={18} />
-                {isRewardsMember ? "View My Rewards" : "Join Spark Rewards"}
+                {isRewardsMember ? "View My Rewards" : `Join ${config.rewardsName}`}
               </PrimaryButton>
             </div>
             {!isRewardsMember && (

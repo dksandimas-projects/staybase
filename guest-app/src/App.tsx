@@ -71,7 +71,7 @@ export function App() {
         <Route
           path="/corporate"
           element={
-            <WithMeta title="Corporate Stays" description="Corporate room blocks and business stays in Tagbilaran City, Bohol.">
+            <WithMeta title="Corporate Stays" description={`Corporate room blocks and business stays in ${config.address.city}, ${config.address.region}.`}>
               <CorporateStaysPage />
             </WithMeta>
           }
@@ -87,7 +87,7 @@ export function App() {
         <Route
           path="/rewards"
           element={
-            <WithMeta title="Spark Rewards" description="Join Spark Rewards and earn member perks on future spark inn stays.">
+            <WithMeta title={config.rewardsName} description={`Join ${config.rewardsName} and earn member perks on future ${config.brandName} stays.`}>
               <RewardsLandingPage />
             </WithMeta>
           }
@@ -127,7 +127,7 @@ export function App() {
         <Route
           path="/account/rewards"
           element={
-            <WithMeta title="My Rewards" description="Track your Spark Rewards points and member perks." noIndex>
+            <WithMeta title="My Rewards" description={`Track your ${config.rewardsName} points and member perks.`} noIndex>
               <RewardsPage />
             </WithMeta>
           }
@@ -151,7 +151,7 @@ export function App() {
         <Route
           path="/contact"
           element={
-            <WithMeta title="Contact Us" description={`Find ${config.brandName} contact details, address, and map location in Tagbilaran City.`}>
+            <WithMeta title="Contact Us" description={`Find ${config.brandName} contact details, address, and map location in ${config.address.city}.`}>
               <ContactPage />
             </WithMeta>
           }

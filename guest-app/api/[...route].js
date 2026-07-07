@@ -190873,7 +190873,7 @@ async function handleRegisterMember(req, res) {
   }
   const authUser = getAuthUser(req);
   if (!authUser.uid || !authUser.email) {
-    return res.status(401).json({ success: false, error: "Sign in before joining Spark Rewards." });
+    return res.status(401).json({ success: false, error: `Sign in before joining ${hotel_config_default.rewardsName}.` });
   }
   const parsed = registerMemberSchema.safeParse(req.body || {});
   if (!parsed.success) {
@@ -190940,7 +190940,7 @@ async function handleRegisterMember(req, res) {
     console.error("Member registration failed:", error);
     return res.status(500).json({
       success: false,
-      error: "We could not join Spark Rewards right now. Please try again."
+      error: `We could not join ${hotel_config_default.rewardsName} right now. Please try again.`
     });
   }
 }
@@ -192066,14 +192066,16 @@ var publicEmailActions = /* @__PURE__ */ new Set([
   "discount-rejected",
   "early-checkin-request"
 ]);
+var configuredGuestHost = hotel_config_default.domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+var configuredAdminHost = hotel_config_default.adminDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
 var PRODUCTION_GUEST_HOSTS = /* @__PURE__ */ new Set([
-  "sparkinnbohol.com",
-  "www.sparkinnbohol.com"
+  configuredGuestHost,
+  `www.${configuredGuestHost}`.replace(/^www\.www\./, "www.")
 ]);
 var ALLOWED_ORIGINS = /* @__PURE__ */ new Set([
-  "https://sparkinnbohol.com",
-  "https://www.sparkinnbohol.com",
-  "https://admin.sparkinnbohol.com",
+  `https://${configuredGuestHost}`,
+  `https://www.${configuredGuestHost}`.replace(/^https:\/\/www\.www\./, "https://www."),
+  `https://${configuredAdminHost}`,
   "http://localhost:5173",
   // guest-app dev (Vite)
   "http://localhost:5174",

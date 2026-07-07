@@ -5,7 +5,7 @@
 
 ## Overview
 
-The public-facing booking website at `www.sparkinnbohol.com`. Built with React 19 + TypeScript + Vite 6 + Tailwind CSS. No authentication required for guests — all booking and intercom features are anonymous.
+The public-facing booking website at `www.sparkinnbohol.com`. Built with React 19 + TypeScript + Vite 6 + Tailwind CSS. Public booking, lookup, corporate inquiry, and intercom flows work without auth; Spark Rewards account pages use Firebase Auth for member profile, stays, rewards, and erasure flows.
 
 The `api/` folder lives inside `guest-app/` and is deployed as Vercel serverless functions in the same deployment. It is not a separate project.
 
@@ -20,7 +20,7 @@ Shared types and utils are imported from `@spark-inn/shared` (npm workspace pack
 | `/` | `HomePage.tsx` | `plan/features/HOMEPAGE.md` |
 | `/rooms` | `RoomsPage.tsx` | `plan/features/ROOMS-PAGE.md` |
 | `/about` | `AboutPage.tsx` | `plan/features/STATIC-PAGES.md` |
-| `/corporate` | `CorporatePage.tsx` | `plan/features/STATIC-PAGES.md` |
+| `/corporate` | `CorporateStaysPage.tsx` | `plan/features/STATIC-PAGES.md` |
 | `/corporate/book` | `CorporateBookingPage.tsx` | `plan/features/CORPORATE-BOOKING.md` |
 | `/contact` | `ContactPage.tsx` | `plan/features/STATIC-PAGES.md` |
 | `/book` | `BookingPage.tsx` | `plan/features/BOOKING-FLOW.md` |
@@ -29,12 +29,12 @@ Shared types and utils are imported from `@spark-inn/shared` (npm workspace pack
 | `/intercom/:roomId` | `IntercomPage.tsx` | `plan/features/INTERCOM-GUEST.md` |
 | `/privacy` | `PrivacyPage.tsx` | `plan/features/STATIC-PAGES.md` |
 | `/terms` | `TermsPage.tsx` | `plan/features/STATIC-PAGES.md` |
-| `/rewards` | `RewardsPage.tsx` | `plan/features/SPARK-REWARDS.md` |
+| `/rewards` | `RewardsLandingPage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `/signin` | `SignInPage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `/signup` | `SignUpPage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `/account/profile` | `ProfilePage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `/account/stays` | `StaysPage.tsx` | `plan/features/SPARK-REWARDS.md` |
-| `/account/rewards` | `RewardsPortalPage.tsx` | `plan/features/SPARK-REWARDS.md` |
+| `/account/rewards` | `RewardsPage.tsx` | `plan/features/SPARK-REWARDS.md` |
 | `*` | `NotFoundPage.tsx` | `plan/features/STATIC-PAGES.md` |
 
 ---
@@ -43,13 +43,16 @@ Shared types and utils are imported from `@spark-inn/shared` (npm workspace pack
 
 | Collection | Operation | Notes |
 |---|---|---|
-| `rooms` | `onSnapshot` (real-time) | Room grid, availability badges |
-| `bookings` | `getDoc` (one-time) | Booking lookup by ref + email |
+| `rooms` | `onSnapshot` (real-time) | Public room/type surfaces; guest client never receives staff-only `remarks` |
+| `bookings` | none from guest client | Guest lookup, member stays, booking create/cancel all go through `/api/*` |
 | `intercoms` | `onSnapshot` + `addDoc` | Real-time chat |
 | `settings/hotelConfig` | `getDoc` | Payment methods, quick request items |
 | `settings/websiteContent` | `getDoc` | Homepage/about/corporate content |
+| `settings/rewardsConfig` | `getDoc` | Authenticated rewards display + booking discount mirror |
+| `members/{uid}` | `onSnapshot` | Authenticated member profile |
+| `members/{uid}/pointsHistory` | `onSnapshot` | Authenticated member rewards history |
 
-No writes to `guests`, `corporateInquiries`, or admin collections from guest-app.
+No direct guest-client writes to `bookings`, `guests`, `corporateInquiries`, or admin collections. Public submissions use Vercel API routes with validation, Turnstile where required, rate limits, and Admin SDK writes.
 
 ---
 
@@ -110,7 +113,7 @@ guest-app is a Progressive Web App. This must be wired up during Phase 0 scaffol
 
 ## Key Conventions
 
-- No auth in guest-app — all pages are public
+- Guest auth is limited to Spark Rewards/member account pages; public booking and intercom flows remain anonymous-capable
 - Never display prices before room photos/name on room cards
 - All CTAs use `config.colors.primary` (Tailwind token: `primary`) — no exceptions
 - Navbar always uses `config.logos.navbar`
