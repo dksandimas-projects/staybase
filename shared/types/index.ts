@@ -103,6 +103,16 @@ export interface Room {
 // Consumers join the type by `Room.type` at read time via `useRoomTypes`
 // + the `getRoomTypeImages` / `getRoomTypeRates` helpers.
 
+export interface EarlyCheckInDetails {
+  status: "requested" | "approved" | "declined";
+  requestedTime: string;
+  notes: string;
+  requestedAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  staffNote: string | null;
+}
+
 export interface Booking {
   id: string;
   bookingRef: string;
@@ -165,6 +175,7 @@ export interface Booking {
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
+  earlyCheckIn?: EarlyCheckInDetails | null;
   createdAt: Date;
   updatedAt: Date;
 }
