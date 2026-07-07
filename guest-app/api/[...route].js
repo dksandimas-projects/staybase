@@ -188255,13 +188255,14 @@ async function sendEmail(to3, subject, html) {
 async function findBooking(req, options) {
   const { bookingId, bookingRef, guestEmail } = req.body || {};
   let snapshot = null;
+  const user = req.user || {};
   if (bookingId) {
     const doc = await adminDb.collection("bookings").doc(String(bookingId)).get();
     if (!doc.exists) return null;
     snapshot = doc;
   } else if (bookingRef) {
     let query = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).limit(1);
-    if (options.requireGuestMatch) {
+    if (options.requireGuestMatch && !user.uid) {
       if (!guestEmail) {
         throw new Error("Booking reference and guest email are required.");
       }
@@ -188274,7 +188275,13 @@ async function findBooking(req, options) {
     throw new Error("Booking ID or booking reference is required.");
   }
   const booking = { id: snapshot.id, ...snapshot.data() };
-  if (options.requireGuestMatch && bookingId) {
+  if (options.requireGuestMatch && user.uid) {
+    const emailMatches = user.email && String(booking.guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
+    const memberMatches = String(booking.memberId || "") === String(user.uid);
+    if (!emailMatches && !memberMatches) {
+      return null;
+    }
+  } else if (options.requireGuestMatch && bookingId) {
     if (!guestEmail) {
       throw new Error("Guest email is required.");
     }
@@ -190748,6 +190755,15 @@ var setMemberActiveSchema = external_exports.object({
 var eraseAccountSchema = external_exports.object({
   confirmation: external_exports.literal("erase-my-account")
 }).strict();
+var STAY_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed",
+  "checked-in",
+  "checked-out",
+  "cancelled"
+];
 function getAuthUser(req) {
   return req.user || {};
 }
@@ -190775,6 +190791,81 @@ async function linkBookingsByEmail(email, uid, explicitBookingId) {
     await batch.commit();
   }
   return linkedCount;
+}
+function toMillis(value) {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value?.toDate === "function") return value.toDate().getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function toIsoDate2(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+function projectStay(bookingDoc) {
+  const data = bookingDoc.data() || {};
+  return {
+    id: bookingDoc.id,
+    bookingRef: data.bookingRef || "",
+    lookupToken: data.lookupToken || "",
+    roomNumber: data.roomNumber || "",
+    roomType: data.roomType || "",
+    roomName: data.roomName || data.roomType || "",
+    checkIn: toIsoDate2(data.checkIn),
+    checkOut: toIsoDate2(data.checkOut),
+    numNights: Number(data.numNights || 0),
+    totalPrice: Number(data.totalPrice || 0),
+    status: data.status || "",
+    hasBreakfast: Boolean(data.hasBreakfast)
+  };
+}
+function staySortRank(status) {
+  if (["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"].includes(status)) return 0;
+  if (status === "checked-out") return 1;
+  if (status === "cancelled") return 2;
+  return 3;
+}
+async function handleListMemberStays(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const authUser = getAuthUser(req);
+  if (!authUser.uid || !authUser.email) {
+    return res.status(401).json({ success: false, error: "Sign in to view your stays." });
+  }
+  try {
+    const uid = String(authUser.uid);
+    const email = String(authUser.email).trim().toLowerCase();
+    const byIdSnap = await adminDb.collection("bookings").where("memberId", "==", uid).get();
+    const byEmailSnap = await adminDb.collection("bookings").where("guestEmail", "==", email).get();
+    const deduped = /* @__PURE__ */ new Map();
+    [...byIdSnap.docs, ...byEmailSnap.docs].forEach((bookingDoc) => {
+      const data = bookingDoc.data() || {};
+      const belongsToMember = data.memberId === uid || String(data.guestEmail || "").trim().toLowerCase() === email;
+      if (belongsToMember && STAY_STATUSES.includes(data.status || "")) {
+        deduped.set(bookingDoc.id, bookingDoc);
+      }
+    });
+    const stays = Array.from(deduped.values()).sort((a, b3) => {
+      const aData = a.data() || {};
+      const bData = b3.data() || {};
+      const rankDelta = staySortRank(aData.status || "") - staySortRank(bData.status || "");
+      if (rankDelta !== 0) return rankDelta;
+      const aTime = toMillis(aData.checkIn);
+      const bTime = toMillis(bData.checkIn);
+      return staySortRank(aData.status || "") === 0 ? aTime - bTime : bTime - aTime;
+    }).map(projectStay);
+    return res.status(200).json({ success: true, data: { stays } });
+  } catch (error) {
+    console.error("Member stays lookup failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "We could not load your stays right now. Please try again."
+    });
+  }
 }
 async function handleRegisterMember(req, res) {
   if (req.method !== "POST") {
@@ -192404,6 +192495,17 @@ async function handler(req, res) {
     req.user = authResult;
     return await handleRegisterMember(req, res);
   }
+  if (domain === "members" && action === "stays" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-stays:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many stay lookup requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    req.user = authResult;
+    return await handleListMemberStays(req, res);
+  }
   if (domain === "members" && action === "redeem-points" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
@@ -192513,9 +192615,18 @@ async function handler(req, res) {
     } else if (req.headers.authorization) {
       const authResult = await authenticateStaff(req);
       if (!authResult.success) {
-        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+        if (action === "early-checkin-request") {
+          const userAuth = await authenticateUser(req);
+          if (!userAuth.success) {
+            return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+          }
+          req.user = userAuth;
+        } else {
+          return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+        }
+      } else {
+        req.staff = authResult;
       }
-      req.staff = authResult;
     }
     return await handleEmailTrigger(req, res, action);
   }

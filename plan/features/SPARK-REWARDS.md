@@ -123,10 +123,10 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 
 ### Data & Logic Checklist
 - [ ] Profile: `getDoc` / `updateDoc` on `members/{uid}`
-- [ ] Stays: query `bookings` where `memberId == uid` OR `guestEmail == member.email` — ordered by `checkIn` desc
+- [ ] Stays: call `GET /api/members/stays` with the guest Firebase ID token; the API matches `memberId == uid` OR `guestEmail == token.email`, dedupes, and returns a guest-safe booking subset only
 - [ ] Points history: `onSnapshot` on `members/{uid}/pointsHistory` subcollection
 - [ ] Points balance + rewards config: fetch `members/{uid}.rewardsPoints` + `settings/rewardsConfig` on load
-- [ ] Early check-in request: `addDoc` to `intercoms/{roomId}/messages` tagged `isEarlyCheckInRequest: true` OR POST to `/api/email/early-checkin-request` if no active room — always shown to members regardless of rewards config
+- [ ] Early check-in request: POST to `/api/email/early-checkin-request` with the guest Firebase ID token and selected `bookingId`; the API verifies `booking.memberId == uid` OR `booking.guestEmail == token.email` before emailing staff — always shown to members regardless of rewards config
 - [ ] Member discount: if `settings/rewardsConfig.memberDiscountEnabled`, show discount badge in booking Step 1 for logged-in members (auto-applied) — if disabled, no discount shown
 - [ ] Points awarded on booking checkout: if `settings/rewardsConfig.pointsEnabled`, compute points earned from booking `totalPrice` or flat per-booking value per `rewardsConfig` — `updateDoc` on `members/{uid}.rewardsPoints` + `addDoc` to pointsHistory when booking status changes to `checked-out`; triggered server-side via API route
 - [ ] Points redemption: POST `/api/members/redeem-points`; API transaction validates member balance and redemption rate, updates booking totals, deducts points, and writes points history
