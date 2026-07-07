@@ -1,6 +1,6 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
-import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger } from "./email";
+import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
 import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REGEX, generateLookupToken } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
@@ -2070,4 +2070,66 @@ async function enrichAndRespond(res: any, bookingData: any) {
       specialRequests: bookingData.specialRequests || ""
     }
   });
+}
+
+export async function handleResolveEarlyCheckin(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const { bookingId, status, staffNote } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!["approved", "declined"].includes(status)) {
+    return res.status(400).json({ success: false, error: "Status must be 'approved' or 'declined'." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
+    let bookingData: any = null;
+
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const data = bookingDoc.data()!;
+      if (!data.earlyCheckIn) {
+        throw new Error("NO_REQUEST_FOUND");
+      }
+      
+      bookingData = { id: bookingDoc.id, ...data };
+
+      transaction.update(bookingRef, {
+        earlyCheckIn: {
+          ...data.earlyCheckIn,
+          status,
+          resolvedAt: new Date().toISOString(),
+          resolvedBy,
+          staffNote: staffNote || ""
+        },
+        updatedAt: new Date()
+      });
+    });
+
+    // Send resolve email trigger to the guest
+    try {
+      await sendEarlyCheckinResolveTrigger(bookingData, status, staffNote);
+    } catch (emailErr) {
+      console.error("Failed to send early check-in resolve email:", emailErr);
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error: any) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message === "NO_REQUEST_FOUND") {
+      return res.status(400).json({ success: false, error: "No early check-in request exists for this booking." });
+    }
+    console.error("Resolve early check-in handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
 }

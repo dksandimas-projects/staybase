@@ -497,6 +497,46 @@ export async function sendEarlyCheckinRequestTrigger(booking: any, request: any)
   );
 }
 
+function earlyCheckinResolveEmail(booking: any, status: "approved" | "declined", staffNote?: string) {
+  const isApproved = status === "approved";
+  const eyebrow = isApproved ? "Early check-in approved" : "Early check-in unavailable";
+  const title = isApproved ? "Your early check-in request is approved" : "Early check-in request status";
+  const intro = isApproved
+    ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.`
+    : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
+
+  const timeVal = booking.earlyCheckIn?.requestedTime || "Requested time";
+
+  return emailLayout({
+    preheader: isApproved 
+      ? `Your early check-in request for booking ${booking.bookingRef} is approved.` 
+      : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`,
+    eyebrow,
+    title,
+    intro,
+    body: `
+      ${card("Request Details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest name", booking.guestName)}
+        ${row("Check-in date", formatDate(booking.checkIn))}
+        ${row("Early check-in time", isApproved ? timeVal : "Standard time (14:00)")}
+        ${row("Status", isApproved ? "Approved" : "Declined (Unavailable)")}
+      </table>`)}
+      ${staffNote ? callout("warm", "Message from front desk", escapeHtml(staffNote)) : ""}
+    `,
+    ctaLabel: "View your stays",
+    ctaUrl: siteUrl("/account/stays")
+  });
+}
+
+export async function sendEarlyCheckinResolveTrigger(booking: any, status: "approved" | "declined", staffNote?: string) {
+  await sendEmail(
+    booking.guestEmail,
+    `[${config.brandName}] Early check-in status: ${booking.bookingRef}`,
+    earlyCheckinResolveEmail(booking, status, staffNote)
+  );
+}
+
 // ─── W4.4 / decision #104 email extensions ──────────────────────────
 // All 8 templates below are server-triggered (no public form posts
 // to these endpoints). The recipients are looked up server-side
@@ -894,10 +934,51 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
       if (!booking) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
+
+      // Enforce status is confirmed
+      if (booking.status !== "confirmed") {
+        return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking.status}'.` });
+      }
+
+      // Enforce check-in date has not passed
+      const checkInDateObj = toDate(booking.checkIn);
+      if (!checkInDateObj) {
+        return res.status(400).json({ success: false, error: "Invalid check-in date." });
+      }
+      const year = checkInDateObj.getFullYear();
+      const month = String(checkInDateObj.getMonth() + 1).padStart(2, "0");
+      const day = String(checkInDateObj.getDate()).padStart(2, "0");
+      const checkInStr = `${year}-${month}-${day}`;
+
+      const { todayStr } = getManilaDateInfo(config.timezone);
+      if (checkInStr < todayStr) {
+        return res.status(400).json({ success: false, error: "Early check-in request is not allowed as the check-in date has already passed." });
+      }
+
+      // Block if already approved
+      if (booking.earlyCheckIn?.status === "approved") {
+        return res.status(400).json({ success: false, error: "Early check-in has already been approved for this booking." });
+      }
+
       const request = req.body?.request || {
-        requestedCheckInTime: req.body?.requestedCheckInTime,
-        notes: req.body?.notes
+        requestedCheckInTime: req.body?.requestedCheckInTime || "12:00 PM",
+        notes: req.body?.notes || ""
       };
+
+      const earlyCheckIn = {
+        status: "requested",
+        requestedTime: request.requestedCheckInTime,
+        notes: request.notes || "",
+        requestedAt: new Date().toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        staffNote: null
+      };
+
+      await adminDb.collection("bookings").doc(booking.id).update({
+        earlyCheckIn
+      });
+
       await sendEarlyCheckinRequestTrigger(booking, request);
       return res.status(200).json({ success: true });
     }

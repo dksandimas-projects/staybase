@@ -122,7 +122,8 @@ function projectStay(bookingDoc: any) {
     numNights: Number(data.numNights || 0),
     totalPrice: Number(data.totalPrice || 0),
     status: data.status || "",
-    hasBreakfast: Boolean(data.hasBreakfast)
+    hasBreakfast: Boolean(data.hasBreakfast),
+    earlyCheckIn: data.earlyCheckIn || null
   };
 }
 

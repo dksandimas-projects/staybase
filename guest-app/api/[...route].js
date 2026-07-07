@@ -188475,6 +188475,38 @@ async function sendEarlyCheckinRequestTrigger(booking, request) {
     earlyCheckinRequestEmail(booking, request)
   );
 }
+function earlyCheckinResolveEmail(booking, status, staffNote) {
+  const isApproved = status === "approved";
+  const eyebrow = isApproved ? "Early check-in approved" : "Early check-in unavailable";
+  const title = isApproved ? "Your early check-in request is approved" : "Early check-in request status";
+  const intro = isApproved ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.` : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
+  const timeVal = booking.earlyCheckIn?.requestedTime || "Requested time";
+  return emailLayout({
+    preheader: isApproved ? `Your early check-in request for booking ${booking.bookingRef} is approved.` : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`,
+    eyebrow,
+    title,
+    intro,
+    body: `
+      ${card("Request Details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", booking.bookingRef)}
+        ${row("Guest name", booking.guestName)}
+        ${row("Check-in date", formatDate(booking.checkIn))}
+        ${row("Early check-in time", isApproved ? timeVal : "Standard time (14:00)")}
+        ${row("Status", isApproved ? "Approved" : "Declined (Unavailable)")}
+      </table>`)}
+      ${staffNote ? callout("warm", "Message from front desk", escapeHtml(staffNote)) : ""}
+    `,
+    ctaLabel: "View your stays",
+    ctaUrl: siteUrl("/account/stays")
+  });
+}
+async function sendEarlyCheckinResolveTrigger(booking, status, staffNote) {
+  await sendEmail(
+    booking.guestEmail,
+    `[${hotel_config_default.brandName}] Early check-in status: ${booking.bookingRef}`,
+    earlyCheckinResolveEmail(booking, status, staffNote)
+  );
+}
 function voucherCodeBlock(code) {
   return `
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; margin: 22px 0;">
@@ -188813,10 +188845,40 @@ async function handleEmailTrigger(req, res, action) {
       if (!booking2) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
+      if (booking2.status !== "confirmed") {
+        return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking2.status}'.` });
+      }
+      const checkInDateObj = toDate(booking2.checkIn);
+      if (!checkInDateObj) {
+        return res.status(400).json({ success: false, error: "Invalid check-in date." });
+      }
+      const year = checkInDateObj.getFullYear();
+      const month = String(checkInDateObj.getMonth() + 1).padStart(2, "0");
+      const day = String(checkInDateObj.getDate()).padStart(2, "0");
+      const checkInStr = `${year}-${month}-${day}`;
+      const { todayStr } = getManilaDateInfo(hotel_config_default.timezone);
+      if (checkInStr < todayStr) {
+        return res.status(400).json({ success: false, error: "Early check-in request is not allowed as the check-in date has already passed." });
+      }
+      if (booking2.earlyCheckIn?.status === "approved") {
+        return res.status(400).json({ success: false, error: "Early check-in has already been approved for this booking." });
+      }
       const request = req.body?.request || {
-        requestedCheckInTime: req.body?.requestedCheckInTime,
-        notes: req.body?.notes
+        requestedCheckInTime: req.body?.requestedCheckInTime || "12:00 PM",
+        notes: req.body?.notes || ""
       };
+      const earlyCheckIn = {
+        status: "requested",
+        requestedTime: request.requestedCheckInTime,
+        notes: request.notes || "",
+        requestedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        resolvedAt: null,
+        resolvedBy: null,
+        staffNote: null
+      };
+      await adminDb.collection("bookings").doc(booking2.id).update({
+        earlyCheckIn
+      });
       await sendEarlyCheckinRequestTrigger(booking2, request);
       return res.status(200).json({ success: true });
     }
@@ -190354,6 +190416,59 @@ async function enrichAndRespond(res, bookingData) {
     }
   });
 }
+async function handleResolveEarlyCheckin(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const { bookingId, status, staffNote } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!["approved", "declined"].includes(status)) {
+    return res.status(400).json({ success: false, error: "Status must be 'approved' or 'declined'." });
+  }
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
+    let bookingData = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const data = bookingDoc.data();
+      if (!data.earlyCheckIn) {
+        throw new Error("NO_REQUEST_FOUND");
+      }
+      bookingData = { id: bookingDoc.id, ...data };
+      transaction.update(bookingRef, {
+        earlyCheckIn: {
+          ...data.earlyCheckIn,
+          status,
+          resolvedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          resolvedBy,
+          staffNote: staffNote || ""
+        },
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+    });
+    try {
+      await sendEarlyCheckinResolveTrigger(bookingData, status, staffNote);
+    } catch (emailErr) {
+      console.error("Failed to send early check-in resolve email:", emailErr);
+    }
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message === "NO_REQUEST_FOUND") {
+      return res.status(400).json({ success: false, error: "No early check-in request exists for this booking." });
+    }
+    console.error("Resolve early check-in handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
 
 // server/handlers/rooms.ts
 var ACTIVE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
@@ -191104,7 +191219,8 @@ function projectStay(bookingDoc) {
     numNights: Number(data.numNights || 0),
     totalPrice: Number(data.totalPrice || 0),
     status: data.status || "",
-    hasBreakfast: Boolean(data.hasBreakfast)
+    hasBreakfast: Boolean(data.hasBreakfast),
+    earlyCheckIn: data.earlyCheckIn || null
   };
 }
 function staySortRank(status) {
@@ -192755,6 +192871,17 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleConfirmBooking(req, res);
   }
+  if (domain === "bookings" && action === "early-checkin-resolve" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-early-checkin-resolve:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleResolveEarlyCheckin(req, res);
+  }
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many checkout requests. Please try again in a minute." });
@@ -193047,18 +193174,21 @@ async function handler(req, res) {
         return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
       }
       req.staff = authResult;
+    } else if (action === "early-checkin-request") {
+      const authResult = await authenticateStaff(req);
+      if (!authResult.success) {
+        const userAuth = await authenticateUser(req);
+        if (!userAuth.success) {
+          return res.status(401).json({ success: false, error: "Authentication required." });
+        }
+        req.user = userAuth;
+      } else {
+        req.staff = authResult;
+      }
     } else if (req.headers.authorization) {
       const authResult = await authenticateStaff(req);
       if (!authResult.success) {
-        if (action === "early-checkin-request") {
-          const userAuth = await authenticateUser(req);
-          if (!userAuth.success) {
-            return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
-          }
-          req.user = userAuth;
-        } else {
-          return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
-        }
+        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
       } else {
         req.staff = authResult;
       }

@@ -15,6 +15,7 @@ interface UpcomingBooking {
   roomName?: string;
   checkIn: string;
   checkOut: string;
+  earlyCheckIn?: any;
 }
 
 interface PointsTransaction {
@@ -66,6 +67,9 @@ export function RewardsPage() {
   const [earlyCheckInError, setEarlyCheckInError] = useState<string | null>(null);
   const [earlyCheckInSent, setEarlyCheckInSent] = useState<string | null>(null);
   const [submittingEarlyCheckIn, setSubmittingEarlyCheckIn] = useState(false);
+  const [selectedBookingId, setSelectedBookingId] = useState<string>("");
+  const [requestedTime, setRequestedTime] = useState<string>("11:00 AM");
+  const [guestNotes, setGuestNotes] = useState<string>("");
 
   useEffect(() => {
     if (!user?.uid) { setIsLoading(false); return; }
@@ -158,10 +162,14 @@ export function RewardsPage() {
             bookingRef: stay.bookingRef,
             roomName: stay.roomName || stay.roomType,
             checkIn: stay.checkIn,
-            checkOut: stay.checkOut
+            checkOut: stay.checkOut,
+            earlyCheckIn: stay.earlyCheckIn || null
           }))
           .sort((a: UpcomingBooking, b: UpcomingBooking) => a.checkIn.localeCompare(b.checkIn));
         setUpcomingBookings(upcoming);
+        if (upcoming.length > 0) {
+          setSelectedBookingId(upcoming[0].id);
+        }
         if (upcoming.length === 0) {
           setEarlyCheckInError("No upcoming booking found. Book a stay first to request early check-in.");
         }
@@ -187,13 +195,37 @@ export function RewardsPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${await user!.getIdToken()}`
         },
-        body: JSON.stringify({ bookingId })
+        body: JSON.stringify({
+          bookingId,
+          request: {
+            requestedCheckInTime: requestedTime,
+            notes: guestNotes
+          }
+        })
       });
       const result = await response.json();
       if (!response.ok || !result.success) {
         throw new Error(result.error || "Unable to submit the request.");
       }
       setEarlyCheckInSent(bookingId);
+      setUpcomingBookings((prev) =>
+        prev.map((b) =>
+          b.id === bookingId
+            ? {
+                ...b,
+                earlyCheckIn: {
+                  status: "requested",
+                  requestedTime,
+                  notes: guestNotes,
+                  requestedAt: new Date().toISOString(),
+                  resolvedAt: null,
+                  resolvedBy: null,
+                  staffNote: null
+                }
+              }
+            : b
+        )
+      );
     } catch (err: any) {
       console.error("Early check-in request failed:", err);
       setEarlyCheckInError(err.message || "Unable to submit the request.");
@@ -201,6 +233,14 @@ export function RewardsPage() {
       setSubmittingEarlyCheckIn(false);
     }
   };
+
+  useEffect(() => {
+    const booking = upcomingBookings.find((b) => b.id === selectedBookingId);
+    if (booking) {
+      setRequestedTime(booking.earlyCheckIn?.requestedTime || "11:00 AM");
+      setGuestNotes(booking.earlyCheckIn?.notes || "");
+    }
+  }, [selectedBookingId, upcomingBookings]);
 
   const pointsBalance = memberProfile?.rewardsPoints || 0;
   const pointsEnabled = rewardsConfig.pointsEnabled !== false;
@@ -285,55 +325,133 @@ export function RewardsPage() {
                   Close
                 </button>
               </>
-            ) : upcomingBookings.length === 1 ? (
+            ) : upcomingBookings.length > 0 ? (
               <>
-                <p className="leading-relaxed">
-                  Send an early check-in request for your upcoming stay (Booking {upcomingBookings[0].bookingRef}, check-in {toDateStr(upcomingBookings[0].checkIn)})?
-                </p>
-                <button
-                  type="button"
-                  onClick={() => handleSubmitEarlyCheckIn(upcomingBookings[0].id)}
-                  disabled={submittingEarlyCheckIn}
-                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
-                >
-                  {submittingEarlyCheckIn ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                  Send Request
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowEarlyCheckIn(false)}
-                  className="ml-2 text-xs font-semibold text-primary hover:underline"
-                >
-                  Cancel
-                </button>
+                {upcomingBookings.length > 1 && (
+                  <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    Select Booking
+                    <select
+                      value={selectedBookingId}
+                      onChange={(e) => setSelectedBookingId(e.target.value)}
+                      className="min-h-[38px] w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-900 outline-none"
+                    >
+                      {upcomingBookings.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          Booking {b.bookingRef} (Check-in: {toDateStr(b.checkIn)})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {(() => {
+                  const activeBooking = upcomingBookings.find((b) => b.id === selectedBookingId) || upcomingBookings[0];
+                  if (!activeBooking) return null;
+                  
+                  const earlyCheckIn = activeBooking.earlyCheckIn;
+                  const isApproved = earlyCheckIn?.status === "approved";
+                  const isRequested = earlyCheckIn?.status === "requested";
+                  const isDeclined = earlyCheckIn?.status === "declined";
+
+                  return (
+                    <div className="space-y-4 pt-2">
+                      {earlyCheckIn && (
+                        <div className={`p-3 rounded-lg border text-xs ${
+                          isApproved 
+                            ? "bg-green-50 border-green-200 text-green-800" 
+                            : isDeclined 
+                              ? "bg-red-50 border-red-200 text-red-800" 
+                              : "bg-blue-50 border-blue-200 text-blue-800"
+                        }`}>
+                          <p className="font-bold mb-1">
+                            Request Status: {earlyCheckIn.status.toUpperCase()}
+                          </p>
+                          {isApproved && (
+                            <p className="leading-relaxed">
+                              Your request is approved! Room will be ready at <strong>{earlyCheckIn.requestedTime}</strong>.
+                              {earlyCheckIn.staffNote && <span className="block mt-1 italic">Note: "{earlyCheckIn.staffNote}"</span>}
+                            </p>
+                          )}
+                          {isRequested && (
+                            <p className="leading-relaxed">
+                              You requested check-in at <strong>{earlyCheckIn.requestedTime}</strong>. Our front desk is reviewing this request.
+                              {earlyCheckIn.notes && <span className="block mt-1 italic">Your Note: "{earlyCheckIn.notes}"</span>}
+                            </p>
+                          )}
+                          {isDeclined && (
+                            <p className="leading-relaxed">
+                              Unfortunately, early check-in is unavailable for this date. 
+                              {earlyCheckIn.staffNote && <span className="block mt-1 italic">Reason: "{earlyCheckIn.staffNote}"</span>}
+                              You may submit a new request below if you'd like to adjust details.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {!isApproved && (
+                        <div className="space-y-3">
+                          <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                            Requested Check-In Time
+                            <select
+                              value={requestedTime}
+                              onChange={(e) => setRequestedTime(e.target.value)}
+                              className="min-h-[38px] w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-900 outline-none"
+                            >
+                              <option value="08:00 AM">08:00 AM</option>
+                              <option value="09:00 AM">09:00 AM</option>
+                              <option value="10:00 AM">10:00 AM</option>
+                              <option value="11:00 AM">11:00 AM</option>
+                              <option value="12:00 PM">12:00 PM</option>
+                              <option value="01:00 PM">01:00 PM</option>
+                            </select>
+                          </label>
+
+                          <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                            Special Requests / Notes
+                            <textarea
+                              value={guestNotes}
+                              onChange={(e) => setGuestNotes(e.target.value)}
+                              placeholder="e.g. Traveling with kids, requesting quiet side of building..."
+                              rows={2}
+                              className="w-full rounded-md border border-gray-200 bg-white p-2 text-xs text-gray-900 outline-none resize-none"
+                            />
+                          </label>
+
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSubmitEarlyCheckIn(activeBooking.id)}
+                              disabled={submittingEarlyCheckIn}
+                              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-50 min-h-[38px]"
+                            >
+                              {submittingEarlyCheckIn ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                              {isRequested ? "Update Request" : isDeclined ? "Re-submit Request" : "Submit Request"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowEarlyCheckIn(false)}
+                              className="rounded-lg border border-gray-250 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 min-h-[38px]"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {isApproved && (
+                        <button
+                          type="button"
+                          onClick={() => setShowEarlyCheckIn(false)}
+                          className="inline-flex items-center justify-center rounded-lg border border-gray-250 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 min-h-[38px]"
+                        >
+                          Close
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
-            ) : (
-              <>
-                <p className="leading-relaxed">You have {upcomingBookings.length} upcoming bookings. Pick the one you want to request early check-in for:</p>
-                <ul className="space-y-1">
-                  {upcomingBookings.map((b) => (
-                    <li key={b.id} className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5">
-                      <span>Booking {b.bookingRef} — check-in {toDateStr(b.checkIn)}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleSubmitEarlyCheckIn(b.id)}
-                        disabled={submittingEarlyCheckIn}
-                        className="rounded-md bg-primary px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
-                      >
-                        Request
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={() => setShowEarlyCheckIn(false)}
-                  className="mt-2 text-xs font-semibold text-primary hover:underline"
-                >
-                  Cancel
-                </button>
-              </>
-            )}
+            ) : null}
           </div>
         )}
 
