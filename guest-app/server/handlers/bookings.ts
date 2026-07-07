@@ -482,6 +482,7 @@ export async function handleCreateBooking(req: any, res: any) {
       let activeRoomRate = typeBaseRate;
       let corporateDetails: any = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef: any = null;
+      let corporateCodeUsageUpdate: { ref: any; data: any } | null = null;
 
       if (corporateCode) {
         // (a) `code`-field fallback: try the doc-ID lookup first
@@ -524,15 +525,17 @@ export async function handleCreateBooking(req: any, res: any) {
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
-            // BI-07: increment usageCount inside the same
-            // transaction. Use the looked-up ref (not the
-            // original doc-id ref) so the write targets the
-            // actual doc regardless of which fallback path
-            // found it.
-            transaction.update(corporateCodeRef, {
-              usageCount: (corpData.usageCount || 0) + 1,
-              updatedAt: new Date()
-            });
+            // BI-07 / BR-01: increment usageCount inside the same
+            // transaction, but defer the write until after every
+            // transaction read has completed. The Firestore Admin
+            // SDK rejects reads after queued writes.
+            corporateCodeUsageUpdate = {
+              ref: corporateCodeRef,
+              data: {
+                usageCount: (corpData.usageCount || 0) + 1,
+                updatedAt: new Date()
+              }
+            };
           } else {
             // (b) Failed re-validation inside the transaction
             // (expired / cap reached / deactivated between gate
@@ -602,6 +605,7 @@ export async function handleCreateBooking(req: any, res: any) {
       // if a guest types a code into the corporate booking form.
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
+      let voucherUsageUpdate: { ref: any; data: any } | null = null;
       if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
         // Per BI-10 (booking-intercom audit 2026-07-06): the
@@ -659,11 +663,16 @@ export async function handleCreateBooking(req: any, res: any) {
             }
             voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
 
-            // Increment voucher usage
-            transaction.update(voucherRef, {
-              usageCount: (vData.usageCount || 0) + 1,
-              updatedAt: new Date()
-            });
+            // BR-01: defer the usage write until after the read
+            // phase so valid voucher bookings do not trip
+            // Firestore's read-after-write transaction guard.
+            voucherUsageUpdate = {
+              ref: voucherRef,
+              data: {
+                usageCount: (vData.usageCount || 0) + 1,
+                updatedAt: new Date()
+              }
+            };
           } else {
             throw new Error("Voucher no longer valid");
           }
@@ -732,9 +741,6 @@ export async function handleCreateBooking(req: any, res: any) {
       let sequence = 1;
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
-        transaction.update(counterRef, { count: sequence });
-      } else {
-        transaction.set(counterRef, { count: 1 });
       }
 
       // Per H3 (hardening batch 2026-06-26): sequence
@@ -747,6 +753,18 @@ export async function handleCreateBooking(req: any, res: any) {
       // Save output for outer scope
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
+
+      if (corporateCodeUsageUpdate) {
+        transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
+      }
+      if (voucherUsageUpdate) {
+        transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      }
+      if (counterDoc.exists) {
+        transaction.update(counterRef, { count: sequence });
+      } else {
+        transaction.set(counterRef, { count: 1 });
+      }
 
       // 10. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
@@ -859,7 +877,8 @@ export async function handleCreateBooking(req: any, res: any) {
         checkIn,
         checkOut,
         numNights,
-        totalPrice
+        totalPrice,
+        source: corporateDetails.isCorporate ? "corporate" : "online"
       };
     });
 
@@ -889,8 +908,7 @@ export async function handleCreateBooking(req: any, res: any) {
     }
 
     // Per W4.4 / decision #104: also notify the staff team of the
-    // new online booking. Source is "online" (corporate / walkin
-    // bookings take a different path with their own notifications).
+    // new booking. Corporate bookings also use this public create path.
     // Persist a timestamp on the booking so a re-fire via the
     // /api/email/staff-new-booking endpoint won't double-send.
     //
@@ -1570,20 +1588,16 @@ export async function handleAddPayment(req: any, res: any) {
       const bookingData = bookingDoc.data()!;
       bookingDataSnapshot = bookingData;
 
-      // Append the payment record inside the transaction so the
-      // post-commit read sees the new total.
       const paymentsRef = bookingRef.collection("payments");
-      const newPaymentRef = paymentsRef.doc();
-      transaction.set(newPaymentRef, paymentRecord);
-
-      // Re-read the subcollection inside the same transaction.
-      // The Firestore Admin SDK's transaction.get() works for
-      // subcollection queries.
+      // Read existing payments before queuing writes. Firestore
+      // transactions reject reads after writes, and the final
+      // total is the current sum plus this new payment.
       const paymentsSnapshot = await transaction.get(paymentsRef);
-      totalPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
+      const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         const data = docSnap.data() as { amount?: number };
         return sum + Number(data.amount || 0);
       }, 0);
+      totalPaid = existingPaid + numericAmount;
 
       totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
@@ -1599,6 +1613,11 @@ export async function handleAddPayment(req: any, res: any) {
           "emailNotificationsSent.staffNewPayment": new Date()
         });
       }
+
+      // Append the payment record inside the transaction after
+      // all reads have completed.
+      const newPaymentRef = paymentsRef.doc();
+      transaction.set(newPaymentRef, paymentRecord);
     });
   } catch (error: any) {
     if (error.message === "Booking not found") {

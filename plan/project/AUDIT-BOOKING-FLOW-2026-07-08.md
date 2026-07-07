@@ -20,7 +20,7 @@
 >
 > **Convention:** findings are numbered `BR-<n>` (Booking Readiness). Severity
 > matches prior audits (`SEV-1` critical → `SEV-4` nit). Status is `Open` until
-> a commit references the fix in this doc.
+> the remediation branch updates this doc with the fix and verification.
 
 ---
 
@@ -28,15 +28,23 @@
 
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
-| **SEV-1 (critical)** | 1 | 0 | **1** |
-| **SEV-2 (major)** | 1 | 0 | **1** |
-| **SEV-3 (minor)** | 1 | 0 | **1** |
-| **SEV-4 (nit / spec drift)** | 2 | 0 | **2** |
-| **Total** | **5** | **0** | **5** |
+| **SEV-1 (critical)** | 0 | 1 | **1** |
+| **SEV-2 (major)** | 0 | 1 | **1** |
+| **SEV-3 (minor)** | 0 | 1 | **1** |
+| **SEV-4 (nit / spec drift)** | 0 | 2 | **2** |
+| **Total** | **0** | **5** | **5** |
 
-**Verdict: not launch-ready.** The flows are in strong shape overall — the
+**Remediation status: fixed on `codex/fix-booking-flow-readiness`.** The flows are in strong shape overall — the
 BI-* fixes landed and the server is authoritative on every field the spec
-requires — but two blockers remain:
+requires — and the BR-* blockers from this audit have been addressed.
+
+Verification after fixes:
+
+- `npm run test:api -w guest-app` — 38 files, 284 tests passing
+- `npm run build:api -w guest-app` — committed API bundle regenerated
+- `npm run typecheck -w guest-app` — passing
+
+Original blocker summary:
 
 1. **Corporate-code and voucher bookings crash the create transaction**
    (BR-01). The `usageCount` increments queue transaction writes *before* the
@@ -72,7 +80,7 @@ already listed in the feature MDs would have caught both.
 ## SEV-1 — Critical (1)
 
 ### BR-01 — Read-after-write in the create transaction: corporate-code and voucher bookings always 500
-**Status:** Open
+**Status:** Fixed
 **File:** `guest-app/server/handlers/bookings.ts:532-535` (corporate
 `usageCount` write), `:663-666` (voucher `usageCount` write), `:694-704`
 (`settings/rewardsConfig` read), `:729-738` (booking-ref counter read)
@@ -120,7 +128,7 @@ end. Must land together with BR-03 so the ordering is enforced by tests.
 ## SEV-2 — Major (1)
 
 ### BR-02 — `BookingPage` never resets the single-use Turnstile token; voucher Apply consumes the Confirm token
-**Status:** Open
+**Status:** Fixed
 **File:** `guest-app/src/pages/BookingPage.tsx:215-217` (hook destructure —
 no `reset`), `:568-577` (voucher Apply sends the token), `:673-762`
 (Confirm — no reset on any outcome)
@@ -163,7 +171,7 @@ before re-enabling Confirm).
 ## SEV-3 — Minor (1)
 
 ### BR-03 — Transaction test mocks don't enforce read-before-write, so BR-01's class ships green
-**Status:** Open
+**Status:** Fixed
 **File:** `guest-app/tests/api/bookings-create.test.ts:228` (and the sibling
 booking suites that stub `runTransaction` the same way)
 
@@ -186,7 +194,7 @@ booking increments `usageCount` and succeeds; voucher booking increments
 ## SEV-4 — Nits & spec drift (2)
 
 ### BR-04 — Staff new-booking email always reports source "online", including for corporate bookings
-**Status:** Open
+**Status:** Fixed
 **File:** `guest-app/server/handlers/bookings.ts:910-916`
 
 The staff notification passes `source: computedData.source || "online"`, but
@@ -202,7 +210,7 @@ transaction (or read it from the fresh booking snapshot the dedup check
 already fetches) and drop the stale comment.
 
 ### BR-05 — Corporate 409 recovery shows an error but never routes the guest anywhere
-**Status:** Open
+**Status:** Fixed
 **File:** `guest-app/src/pages/CorporateBookingPage.tsx:716-721`
 
 Per `CORPORATE-BOOKING.md` (BI-10), a `"Corporate code no longer valid"` 409
