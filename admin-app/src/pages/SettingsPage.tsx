@@ -1438,6 +1438,27 @@ export function SettingsPage() {
   const filteredStoreItems = storeCategoryFilter === "all"
     ? storeItems
     : storeItems.filter(item => item.category === storeCategoryFilter);
+
+  const countRoomsUsingType = (typeValue: string) => rooms.filter((room) => room.type === typeValue).length;
+
+  const handleDeleteRoomType = async (typeValue: string) => {
+    const attachedRooms = countRoomsUsingType(typeValue);
+    if (attachedRooms > 0) {
+      toast.error(
+        "Cannot delete room type",
+        `${attachedRooms} room${attachedRooms === 1 ? "" : "s"} still use this type. Reassign those rooms before deleting it.`
+      );
+      setPendingDeleteRoomType(null);
+      return;
+    }
+    try {
+      await deleteRoomType(typeValue);
+    } catch (error) {
+      toast.error("Cannot delete room type", error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setPendingDeleteRoomType(null);
+    }
+  };
   const selectedStoreCategoryLabel = storeCategoryFilter === "all"
     ? "All items"
     : storeCategories.find(category => category.value === storeCategoryFilter)?.label ?? "All items";
@@ -3058,6 +3079,9 @@ export function SettingsPage() {
                           <p className="text-[11px] text-gray-500 pt-1">
                             {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos
                           </p>
+                          <p className="text-[11px] text-gray-500">
+                            {countRoomsUsingType(type.value)} room{countRoomsUsingType(type.value) === 1 ? "" : "s"} using this type
+                          </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <button
@@ -3080,8 +3104,7 @@ export function SettingsPage() {
                             type="button"
                             onClick={() => {
                               if (pendingDeleteRoomType === type.value) {
-                                deleteRoomType(type.value);
-                                setPendingDeleteRoomType(null);
+                                void handleDeleteRoomType(type.value);
                               } else {
                                 setPendingDeleteRoomType(type.value);
                               }
@@ -3106,6 +3129,7 @@ export function SettingsPage() {
                         <th className="px-4 py-2.5">Display Label</th>
                         <th className="px-4 py-2.5">Short Abbreviation</th>
                         <th className="px-4 py-2.5">Photos</th>
+                        <th className="px-4 py-2.5">In Use</th>
                         <th className="px-4 py-2.5 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -3129,6 +3153,9 @@ export function SettingsPage() {
                               {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS}
                             </button>
                           </td>
+                          <td className="px-4 py-3 text-[11px] text-gray-500">
+                            {countRoomsUsingType(type.value)} room{countRoomsUsingType(type.value) === 1 ? "" : "s"}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <div className="inline-flex items-center gap-2">
                               <button
@@ -3143,8 +3170,7 @@ export function SettingsPage() {
                                 type="button"
                                 onClick={() => {
                                   if (pendingDeleteRoomType === type.value) {
-                                    deleteRoomType(type.value);
-                                    setPendingDeleteRoomType(null);
+                                    void handleDeleteRoomType(type.value);
                                   } else {
                                     setPendingDeleteRoomType(type.value);
                                   }
