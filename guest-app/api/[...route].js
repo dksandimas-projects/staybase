@@ -188933,6 +188933,13 @@ async function handleCreateBooking(req, res) {
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
+  const { todayStr: manilaToday } = getManilaDateInfo();
+  if (checkIn < manilaToday) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-in date cannot be in the past. Please choose a new date."
+    });
+  }
   const startMs = checkInDate.getTime();
   const endMs = checkOutDate.getTime();
   const numNights = Math.max(Math.round((endMs - startMs) / 864e5), 0);
