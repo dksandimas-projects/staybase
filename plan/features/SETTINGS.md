@@ -129,8 +129,8 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 
 ### 6. Vouchers
 
-- [ ] Full voucher management UI — see `plan/features/VOUCHERS.md §Admin UI Checklist`
-- [ ] Both Admin and Front Desk can access this tab
+- [ ] Voucher campaign management lives on the admin-only Rates page — see `plan/features/VOUCHERS.md §Admin UI Checklist`
+- [ ] Front Desk cannot access voucher campaign management from Settings
 
 ---
 
@@ -256,7 +256,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 - [ ] Add silog item — name input + Add button (e.g. "Tapsilog", "Longsilog", "Tocilog", "Bangsilog")
 - [ ] Enable/disable individual silog items — hidden from booking flow and registration form when inactive
 - [ ] Note: "Breakfast rate is set in Rate Management"
-- [ ] Both Admin and Front Desk can manage the silog menu
+- [ ] Admin-only — Front Desk records guest selections in the booking drawer but cannot manage the silog menu
 - [ ] Source: `settings/breakfastConfig`
 
 ---
@@ -267,7 +267,7 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 - [ ] Product catalog management — see `plan/features/STORE-MANAGEMENT.md §Catalog Management` for full checklist
 - [x] **Store payment methods — managed only from Payment Methods**. See `§Store Payment Methods` below.
 - [ ] Low stock threshold — number input (default 5)
-- [ ] Both Admin and Front Desk can access this tab
+- [ ] Admin-only — Front Desk processes store orders but cannot manage catalog/settings
 - [ ] Source: `settings/storeConfig`
 
 #### §Store Payment Methods
