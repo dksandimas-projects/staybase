@@ -949,3 +949,149 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
     return res.status(status).json({ success: false, error: message });
   }
 }
+
+export async function handleEmailPreview(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  // Double check staff auth
+  if (!(req as any).staff?.success) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+
+  const { template } = req.body || {};
+  if (!template) {
+    return res.status(400).json({ success: false, error: "Template parameter is required." });
+  }
+
+  const mockBooking = {
+    bookingRef: "BK-2026-MOCK",
+    guestName: "Juan Dela Cruz",
+    guestEmail: "juan.delacruz@example.com",
+    guestPhone: "+63 917 123 4567",
+    roomNumber: "201",
+    roomName: "Deluxe Ocean View",
+    roomType: "deluxe",
+    checkIn: new Date(Date.now() + 86400000 * 2), // 2 days from now
+    checkOut: new Date(Date.now() + 86400000 * 4), // 4 days from now
+    numNights: 2,
+    totalPrice: 8500,
+    paymentMethod: "gcash",
+    status: "confirmed",
+    specialRequests: "High floor requested. Anniversary trip.",
+    discountType: "senior",
+    discountRejectionReason: "ID photo was blurred and expired.",
+    cancellationReason: "Flight cancelled due to weather.",
+    lookupToken: "mock-lookup-token-xyz"
+  };
+
+  const mockInquiry = {
+    companyName: "Acme Tech Solutions Inc.",
+    contactPerson: "Jane Smith",
+    email: "corporate@acme.com",
+    phone: "+63 2 8123 4567",
+    numRooms: "5 rooms",
+    preferredDates: "Oct 12 - Oct 15, 2026",
+    specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
+  };
+
+  const mockEarlyCheckinRequest = {
+    requestedCheckInTime: "10:30 AM",
+    notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+  };
+
+  const mockVoucher = {
+    code: "SPARKWELCOME10",
+    guestEmail: "juan.delacruz@example.com",
+    discountType: "percent",
+    discountValue: 10,
+    applicableRoomTypes: ["deluxe", "executive"],
+    expiresAt: new Date(Date.now() + 86400000 * 30), // 30 days from now
+    usageCap: 1
+  };
+
+  const mockStoreOrder = {
+    orderRef: "ORD-2026-MOCK",
+    roomNumber: "201",
+    guestEmail: "juan.delacruz@example.com",
+    paymentMethod: "add-to-bill",
+    totalAmount: 450,
+    status: "confirmed",
+    items: [
+      { name: "Pork Silog Extra", quantity: 2, price: 150 },
+      { name: "Mineral Water 1L", quantity: 2, price: 75 }
+    ],
+    cancellationReason: "Decided to dine out instead."
+  };
+
+  const mockPaymentProof = {
+    amount: 8500,
+    method: "gcash",
+    note: "GCash reference ID: 123456789",
+    paymentProofUrl: "https://example.com/mock-receipt.png"
+  };
+
+  try {
+    let html = "";
+    switch (template) {
+      case "booking-submitted":
+        html = bookingSubmittedEmail(mockBooking);
+        break;
+      case "payment-confirmed":
+        html = paymentConfirmedEmail(mockBooking);
+        break;
+      case "booking-confirmed":
+        html = bookingConfirmedEmail(mockBooking);
+        break;
+      case "checkin-reminder":
+        html = checkinReminderEmail(mockBooking);
+        break;
+      case "booking-cancelled":
+        html = bookingCancelledEmail(mockBooking);
+        break;
+      case "discount-rejected":
+        html = discountRejectedEmail(mockBooking);
+        break;
+      case "corporate-inquiry":
+        html = corporateInquiryEmail(mockInquiry);
+        break;
+      case "early-checkin-request":
+        html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
+        break;
+      case "voucher-issued":
+        html = voucherIssuedEmail(mockVoucher);
+        break;
+      case "store-order-placed":
+        html = storeOrderPlacedEmail(mockStoreOrder);
+        break;
+      case "store-order-confirmed":
+        html = storeOrderConfirmedEmail(mockStoreOrder);
+        break;
+      case "store-order-out-for-delivery":
+        html = storeOrderOutForDeliveryEmail(mockStoreOrder);
+        break;
+      case "store-order-delivered":
+        html = storeOrderDeliveredEmail(mockStoreOrder);
+        break;
+      case "store-order-cancelled":
+        html = storeOrderCancelledEmail(mockStoreOrder);
+        break;
+      case "staff-new-booking":
+        html = staffNewBookingEmail(mockBooking);
+        break;
+      case "staff-new-payment":
+        html = staffNewPaymentEmail(mockBooking, mockPaymentProof);
+        break;
+      default:
+        return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+    }
+    
+    res.setHeader("Content-Type", "text/html");
+    return res.status(200).send(html);
+  } catch (error) {
+    console.error("Email preview generation failed:", error);
+    const message = error instanceof Error ? error.message : "Unable to generate preview. Please try again.";
+    return res.status(500).json({ success: false, error: message });
+  }
+}
