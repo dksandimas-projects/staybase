@@ -33,7 +33,8 @@ import {
 import config from "@config";
 import { jsPDF } from "jspdf";
 import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { db, storage } from "../firebase/config";
 import { auth } from "../firebase/auth";
 
 export function BookingsPage() {
@@ -86,6 +87,16 @@ export function BookingsPage() {
       setOrderSearchText(orderRef);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const bookingId = searchParams.get("bookingId");
+    if (!bookingId) return;
+    const match = bookings.find((booking) => booking.id === bookingId);
+    if (!match) return;
+    setActiveMainTab("bookings");
+    setSelectedBooking(match);
+    setIsDrawerOpen(true);
+  }, [searchParams, bookings]);
 
   // Store Order Drawer States
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
@@ -1177,8 +1188,13 @@ export function BookingsPage() {
     try {
       setGuestIdUploadStatus("Compressing guest ID image...");
       const image = await compressImageFile(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
-      syncSelectedBooking({ guestIdPhotoUrl: image.dataUrl });
-      setGuestIdUploadStatus(`ID image ready: ${Math.max(1, Math.round(image.compressedSize / 1024))} KB.`);
+      setGuestIdUploadStatus("Uploading guest ID to secure storage...");
+      const safeName = image.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileRef = storageRef(storage, `bookings/${selectedBooking.id}/guest-id/${Date.now()}-${safeName}`);
+      await uploadBytes(fileRef, image.file);
+      const url = await getDownloadURL(fileRef);
+      syncSelectedBooking({ guestIdPhotoUrl: url });
+      setGuestIdUploadStatus(`ID image uploaded: ${Math.max(1, Math.round(image.compressedSize / 1024))} KB.`);
     } catch (error) {
       setGuestIdUploadStatus(error instanceof Error ? error.message : "Unable to process guest ID image.");
     }

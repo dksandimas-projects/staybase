@@ -8,6 +8,8 @@ import { DataTable, DataTableColumn } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { Users, Plus, Mail, Phone, Calendar, ClipboardList, Send, Sparkles, ArrowRightCircle, AlertCircle } from "lucide-react";
 import config from "@config";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { db } from "../firebase/config";
 
 export function CorporateInquiriesPage() {
   const navigate = useNavigate();
@@ -19,7 +21,8 @@ export function CorporateInquiriesPage() {
     addCorporateCode,
     convertInquiryToBooking,
     rooms,
-    roomTypes
+    roomTypes,
+    currentUser
   } = useAdmin();
   const toast = useToast();
 
@@ -31,8 +34,8 @@ export function CorporateInquiriesPage() {
 
   // Corporate Code Auto-gen states inside drawer
   const [promoCodeToGenerate, setPromoCodeToGenerate] = useState("");
-  const [corporateDoubleRate, setCorporateDoubleRate] = useState("2880");
-  const [corporateExecRate, setCorporateExecRate] = useState("4050");
+  const [corporateInquiryRates, setCorporateInquiryRates] = useState<Record<string, string>>({});
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
   // Convert-to-booking modal state
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
@@ -50,6 +53,9 @@ export function CorporateInquiriesPage() {
     setSelectedInquiry(inquiry);
     // Pre-fill a potential corporate code recommendation
     setPromoCodeToGenerate(`${inquiry.companyName.replace(/\s+/g, "").slice(0, 4).toUpperCase()}100`);
+    setCorporateInquiryRates(Object.fromEntries(
+      roomTypes.map((type) => [type.value, String(type.corporateRate || type.pricePerNight || 0)])
+    ));
     setIsDrawerOpen(true);
   };
 
@@ -82,35 +88,57 @@ export function CorporateInquiriesPage() {
     setNewNoteText("");
   };
 
-  const handleGenerateCode = (e: React.FormEvent) => {
+  const handleGenerateCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInquiry || !promoCodeToGenerate.trim()) return;
 
-    addCorporateCode({
-      code: promoCodeToGenerate.trim().toUpperCase(),
+    const code = promoCodeToGenerate.trim().toUpperCase();
+    const ratePerRoomType = Object.fromEntries(
+      roomTypes.map((type) => [
+        type.value,
+        Number(corporateInquiryRates[type.value] || type.corporateRate || type.pricePerNight || 0)
+      ])
+    );
+
+    setIsGeneratingCode(true);
+    const result = await addCorporateCode({
+      code,
       companyName: selectedInquiry.companyName,
-      ratePerRoomType: {
-        "standard-double": parseFloat(corporateDoubleRate) || 2880,
-        executivo: parseFloat(corporateExecRate) || 4050
-      },
+      ratePerRoomType,
       expiresAt: "2027-12-31",
       usageCap: null,
       usageCount: 0,
       linkedInquiryId: selectedInquiry.id,
-      createdBy: "admin",
+      createdBy: currentUser?.uid || "staff",
       createdAt: new Date().toISOString(),
       isActive: true
     });
+    if (!result.success) {
+      setIsGeneratingCode(false);
+      toast.error("Corporate code not issued", result.error || "Please choose a different code.");
+      return;
+    }
 
-    // Update status to converted
-    updateInquiryStatus(selectedInquiry.id, "converted");
+    try {
+      await updateDoc(doc(db, "corporateInquiries", selectedInquiry.id), {
+        status: "converted",
+        accessCodeId: code,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      setIsGeneratingCode(false);
+      toast.error("Code issued, inquiry update failed", error instanceof Error ? error.message : "Please update the inquiry manually.");
+      return;
+    }
+
+    setIsGeneratingCode(false);
     setSelectedInquiry({
       ...selectedInquiry,
       status: "converted",
-      accessCodeId: promoCodeToGenerate.trim().toUpperCase()
+      accessCodeId: code
     });
 
-    toast.success("Corporate code issued", `Code ${promoCodeToGenerate.trim().toUpperCase()} is now active`);
+    toast.success("Corporate code issued", `Code ${code} is now active`);
   };
 
   // Per W2.14 / decision #102 / audit S4.2: open the
@@ -379,7 +407,7 @@ export function CorporateInquiriesPage() {
                   Generate a client access key with pre-negotiated fixed prices. Completing this converts the inquiry.
                 </p>
                 
-                <div className="grid gap-3 grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                     Negotiated Promo Code
                     <input
@@ -390,39 +418,35 @@ export function CorporateInquiriesPage() {
                       className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs font-mono"
                     />
                   </label>
-                  
-                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
-                    Std Double Rate (PHP)
-                    <input
-                      type="number"
-                      required
-                      value={corporateDoubleRate}
-                      onChange={(e) => setCorporateDoubleRate(e.target.value)}
-                      className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs"
-                    />
-                  </label>
                 </div>
 
-                <div className="grid gap-3 grid-cols-2">
-                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
-                    Exec Suite Rate (PHP)
-                    <input
-                      type="number"
-                      required
-                      value={corporateExecRate}
-                      onChange={(e) => setCorporateExecRate(e.target.value)}
-                      className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs"
-                    />
-                  </label>
-                  
-                  <div className="flex items-end">
-                    <button
-                      type="submit"
-                      className="min-h-[38px] w-full rounded-lg bg-primary hover:bg-primary-dark text-[11px] font-bold text-white shadow-sm"
-                    >
-                      Issue Access Key
-                    </button>
-                  </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {roomTypes.map((type) => (
+                    <label key={type.value} className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
+                      {type.label} Rate ({config.currency})
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        value={corporateInquiryRates[type.value] ?? ""}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setCorporateInquiryRates((prev) => ({ ...prev, [type.value]: value }));
+                        }}
+                        className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={isGeneratingCode}
+                    className="min-h-[38px] w-full rounded-lg bg-primary hover:bg-primary-dark text-[11px] font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isGeneratingCode ? "Issuing..." : "Issue Access Key"}
+                  </button>
                 </div>
               </form>
             )}
