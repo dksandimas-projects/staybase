@@ -97,7 +97,7 @@ The mobile responsive layout is built on the following hooks + components. **Do 
 | Collection | Operation | Notes |
 |---|---|---|
 | `rooms` | `onSnapshot` + `addDoc` + `updateDoc` + `deleteDoc` | Room management, status grid, create + delete (admin-gated, Phase 11.8) |
-| `bookings` | `onSnapshot` + `updateDoc` | Bookings table, status transitions |
+| `bookings` | `onSnapshot` + `updateDoc` | Bookings table, status transitions, breakfast selections map |
 | `bookings/{id}/payments` | `onSnapshot` + `addDoc` | Onsite payment log in booking drawer |
 | `guests` | `getDoc` | Staff profile lookup |
 | `members` | `onSnapshot` + `updateDoc` | Member management page, points adjustment |
@@ -109,7 +109,6 @@ The mobile responsive layout is built on the following hooks + components. **Do 
 | `calls` | `onSnapshot` + `updateDoc` | Incoming WebRTC voice call signaling |
 | `storeItems` | `onSnapshot` + `addDoc` + `updateDoc` | Store catalog management |
 | `storeOrders` | `onSnapshot` + `updateDoc` | Store order management |
-| `breakfastSelections` | `onSnapshot` + `addDoc` + `updateDoc` | Silog selections in booking drawer |
 | `settings/hotelConfig` | `getDoc` + `setDoc` | Settings management |
 | `settings/websiteContent` | `getDoc` + `setDoc` | Website content editing |
 | `settings/rewardsConfig` | `getDoc` + `setDoc` | Spark Rewards settings tab |
@@ -132,8 +131,8 @@ The mobile responsive layout is built on the following hooks + components. **Do 
 
 ## Component Notes
 
-- `Sidebar.tsx` — role-aware nav links, active state, version in footer
-- `BookingTable.tsx` — filterable, sortable, opens detail drawer on row click
-- `RoomForm.tsx` — edit room details, upload photos, set status/block reason
+- `Sidebar.tsx` — renders the full navigation for both roles; restricted routes show an access-denied state in `AdminLayout`
+- `DataTable.tsx` — shared desktop table / mobile card list shell used by bookings, reports, members, vouchers, and related admin tables
+- `RoomsPage.tsx` — inline create modal plus edit drawer for room details, active toggle, status, block reason, and remarks
 - `StatsCard.tsx` — reusable stat card with label, value, optional trend indicator
-- `OccupancyChart.tsx` — Recharts bar chart, used on Dashboard and Reports pages
+- Dashboard and Reports pages own their Recharts views inline so chart colors can read the active hotel config

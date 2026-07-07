@@ -54,6 +54,54 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
+const pdfFontCache = new Map<string, string | null>();
+
+async function fetchFontAsBase64(path: string) {
+  if (pdfFontCache.has(path)) return pdfFontCache.get(path);
+  try {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`Unable to load font ${path}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    const base64 = btoa(binary);
+    pdfFontCache.set(path, base64);
+    return base64;
+  } catch (error) {
+    console.warn("PDF font unavailable:", error);
+    pdfFontCache.set(path, null);
+    return null;
+  }
+}
+
+async function registerBrandPdfFonts(pdf: jsPDF) {
+  const apolloBase64 = await fetchFontAsBase64("/brand/fonts/APOLLO.otf");
+  const interBase64 = await fetchFontAsBase64("/brand/fonts/Inter-Regular.ttf");
+
+  try {
+    if (apolloBase64) {
+      pdf.addFileToVFS("APOLLO.otf", apolloBase64);
+      pdf.addFont("APOLLO.otf", "Apollo", "normal");
+    }
+    if (interBase64) {
+      pdf.addFileToVFS("Inter-Regular.ttf", interBase64);
+      pdf.addFont("Inter-Regular.ttf", "Inter", "normal");
+    }
+  } catch (error) {
+    console.warn("PDF font registration failed; using jsPDF fallback fonts.", error);
+  }
+}
+
+function setPdfFont(pdf: jsPDF, family: "Apollo" | "Inter" | "helvetica") {
+  try {
+    pdf.setFont(family, "normal");
+  } catch {
+    pdf.setFont("helvetica", "normal");
+  }
+}
+
 export function BookingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { 
@@ -602,6 +650,8 @@ export function BookingsPage() {
     const reg = b.guestRegistration;
 
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    await registerBrandPdfFonts(pdf);
+    setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -615,10 +665,12 @@ export function BookingsPage() {
     };
 
     // ── Header ──
+    setPdfFont(pdf, "Apollo");
     pdf.setFontSize(18);
     pdf.setTextColor(30, 30, 30);
     pdf.text("Guest Registration Form", pageW / 2, y, { align: "center" });
     y += 8;
+    setPdfFont(pdf, "Inter");
 
     pdf.setDrawColor(...brandRgb);
     pdf.setLineWidth(0.5);
@@ -931,11 +983,13 @@ export function BookingsPage() {
     window.open(url, "_blank");
   };
 
-  const printBookingReceiptPDF = () => {
+  const printBookingReceiptPDF = async () => {
     if (!selectedBooking) return;
     const b = selectedBooking;
 
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    await registerBrandPdfFonts(pdf);
+    setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -954,11 +1008,13 @@ export function BookingsPage() {
       formatPrice(value).replace(/\u00A0/g, " ");
 
     // ── Header ──
+    setPdfFont(pdf, "Apollo");
     pdf.setFontSize(20);
     pdf.setTextColor(...brandRgb);
     pdf.text(config.brandName, pageW / 2, y, { align: "center" });
     y += 7;
 
+    setPdfFont(pdf, "Inter");
     pdf.setFontSize(16);
     pdf.setTextColor(30, 30, 30);
     pdf.text("Booking Confirmation Receipt", pageW / 2, y, { align: "center" });

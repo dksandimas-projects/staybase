@@ -91,7 +91,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
 | `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
 | `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, ID type/number, emergency contact, vehicle plate, signature status |
-| `breakfastSelections` | map | Wire format `yyyy-mm-dd-guest-n` → selected silog item name; may later move to `breakfastSelections` collection |
+| `breakfastSelections` | map | Canonical silog selection store. Wire format `yyyy-mm-dd-guest-n` → selected silog item name; updated by staff in the admin booking drawer and exported by Reports. |
 | `cancellationReason` | string | |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
@@ -438,22 +438,10 @@ Single document. Managed from Settings → Breakfast tab.
 
 ---
 
-### `breakfastSelections/{selectionId}`
-
-One document per guest per day. Created by front desk at check-in.
-
-| Field | Type | Notes |
-|---|---|---|
-| `bookingId` | string | Ref to `bookings/{bookingId}` |
-| `roomNumber` | string | Denormalized |
-| `date` | string | ISO date of the breakfast morning e.g. `"2026-06-15"` |
-| `guestIndex` | number | 0-based — Guest 1 = 0, Guest 2 = 1, etc. |
-| `guestName` | string | Entered by front desk |
-| `silogId` | string | Ref to item in `settings/breakfastConfig.silogItems` |
-| `silogName` | string | Snapshot at entry time |
-| `enteredBy` | string | Staff UID |
-| `createdAt` | timestamp | |
-| `updatedAt` | timestamp | |
+Breakfast selections are intentionally stored on `bookings/{bookingId}.breakfastSelections`
+instead of a separate collection. This keeps the drawer, kitchen-prep
+report, and full backup export on one canonical source. The map key is
+`yyyy-mm-dd-guest-n`; the value is the selected silog item name.
 
 ---
 
@@ -480,7 +468,6 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `intercoms` | Open (no auth) | Open (no auth) |
 | `members` | Owner (self) or Staff/Admin | Create = API/Admin SDK only via `/api/members/register`; Update = owner or Staff/Admin |
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
-| `breakfastSelections` | Staff/Admin only | Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
 | `storeOrders` | Open for create and guest cancellation by room/order ref | Create = anyone; Update = Staff/Admin; guest cancellation via API only |
