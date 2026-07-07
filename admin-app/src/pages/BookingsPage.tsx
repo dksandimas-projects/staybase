@@ -2844,8 +2844,28 @@ export function BookingsPage() {
         title="Create Walk-in Booking"
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              type="button"
+              form="walkin-form"
+              onClick={() => setIsModalOpen(false)}
+              className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <PrimaryButton
+              type="submit"
+              form="walkin-form"
+              disabled={!roomNumber || isWalkinSubmitting}
+              className="min-w-[150px]"
+            >
+              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
+            </PrimaryButton>
+          </div>
+        }
       >
-        <form onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
+        <form id="walkin-form" onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Full Name
             <input
@@ -3021,24 +3041,6 @@ export function BookingsPage() {
               <span>Final Total Price:</span>
               <span>{formatPrice(priceOverride !== "" ? Number(priceOverride) : totalPrice)}</span>
             </div>
-          </div>
-
-          {/* Action Row */}
-          <div className="flex gap-3 pt-2 justify-end">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <PrimaryButton
-              type="submit"
-              disabled={!roomNumber || isWalkinSubmitting}
-              className="min-w-[150px]"
-            >
-              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
-            </PrimaryButton>
           </div>
         </form>
       </Modal>

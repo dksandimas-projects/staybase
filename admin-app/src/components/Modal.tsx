@@ -149,10 +149,9 @@ function DesktopModalPanel({
     // conflict entirely.
     <div
       className={cn(
-        "pointer-events-auto fixed left-1/2 top-1/2 z-50 flex w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card-lg bg-white shadow-xl",
+        "pointer-events-auto fixed left-1/2 top-1/2 z-50 flex w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-card-lg bg-white shadow-xl max-h-[90vh]",
         className
       )}
-      style={{ maxHeight: "90vh" }}
     >
       <motion.section
         ref={trapRef}
@@ -163,7 +162,7 @@ function DesktopModalPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex h-full max-h-full w-full flex-col"
+        className="flex min-h-0 w-full flex-1 flex-col"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
           <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
@@ -176,7 +175,7 @@ function DesktopModalPanel({
             <X size={20} aria-hidden="true" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">{children}</div>
         {footer ? <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3">{footer}</div> : null}
       </motion.section>
     </div>
