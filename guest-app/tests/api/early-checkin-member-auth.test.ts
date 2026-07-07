@@ -13,7 +13,8 @@ vi.mock("../../server/lib/firebase-admin", () => ({
           collectionName === "bookings" && mockBookings[id]
             ? { exists: true, id, data: () => mockBookings[id] }
             : { exists: false }
-        )
+        ),
+        update: vi.fn().mockResolvedValue(undefined)
       })),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
@@ -40,14 +41,15 @@ const mockResponse = () => {
 };
 
 const booking = {
-  bookingRef: "SI-20260710-001",
+  bookingRef: "SI-20990101-001",
   guestName: "Maria Santos",
   guestEmail: "maria@example.test",
   memberId: "member_123",
   roomNumber: "101",
   roomName: "Standard Room",
-  checkIn: new Date("2026-07-10T00:00:00.000Z"),
-  checkOut: new Date("2026-07-12T00:00:00.000Z"),
+  status: "confirmed",
+  checkIn: new Date("2099-01-10T00:00:00.000Z"),
+  checkOut: new Date("2099-01-12T00:00:00.000Z"),
   numNights: 2,
   totalPrice: 5000
 };

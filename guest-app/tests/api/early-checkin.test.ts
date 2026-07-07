@@ -48,12 +48,17 @@ describe("RewardsPage.tsx — early check-in real submission (decision #92)", ()
   });
 
   it("auto-picks when there is exactly 1 upcoming booking", () => {
-    expect(src).toMatch(/upcomingBookings\.length\s*===\s*1/);
+    // The new unified UI handles both 1 and N bookings with a dropdown;
+    // when there's only one, the select is hidden and the active booking
+    // is used directly. The selectedBookingId state is used to pick it.
+    expect(src).toMatch(/selectedBookingId/);
+    expect(src).toMatch(/upcomingBookings\.find/);
   });
 
   it("shows a picker when there are multiple upcoming bookings", () => {
+    // A <select> dropdown renders when upcomingBookings.length > 1
     expect(src).toMatch(/upcomingBookings\.length/);
-    expect(src).toMatch(/Pick the one/);
+    expect(src).toMatch(/Select Booking/);
   });
 
   it("POSTs to /api/email/early-checkin-request with the bookingId and member token", () => {
