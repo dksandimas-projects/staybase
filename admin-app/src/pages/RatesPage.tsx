@@ -26,7 +26,9 @@ export function RatesPage() {
     breakfastConfig,
     updateSettings,
     updateRoomType,
-    roomTypes
+    roomTypes,
+    currentUser,
+    ratesLoading
   } = useAdmin();
   const { isMobile } = useBreakpoint();
   const toast = useToast();
@@ -59,12 +61,22 @@ export function RatesPage() {
   // Corporate Code Form States
   const [corpCode, setCorpCode] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [corpExpiresAt, setCorpExpiresAt] = useState("");
+  const [corpUsageCap, setCorpUsageCap] = useState("");
 
   // Local pricing state per room type — the source of truth now lives on
   // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
   // §W3.6`), so the local state is just the in-flight form buffer that
   // is flushed via `updateRoomType` on save.
-  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>(() => {
+  const [prices, setPrices] = useState<Record<string, { base: number; weekend: number; corporate: number }>>({});
+  const [dirtyRateFields, setDirtyRateFields] = useState<Set<string>>(() => new Set());
+  const [roomRates, setRoomRates] = useState<Record<string, string>>({});
+  const [dirtyCorporateRateTypes, setDirtyCorporateRateTypes] = useState<Set<string>>(() => new Set());
+
+  // Keep form buffers synced with Firestore-backed room types until the
+  // admin edits a field. This prevents deploy-time defaults from clobbering
+  // live rates when the settings snapshot arrives after first paint.
+  useEffect(() => {
     const initialPrices: Record<string, { base: number; weekend: number; corporate: number }> = {};
     roomTypes.forEach(t => {
       initialPrices[t.value] = {
@@ -73,29 +85,16 @@ export function RatesPage() {
         corporate: t.corporateRate
       };
     });
-    return initialPrices;
-  });
 
-  const [roomRates, setRoomRates] = useState<Record<string, string>>(() => {
-    const initialRates: Record<string, string> = {};
-    roomTypes.forEach(t => {
-      initialRates[t.value] = String(t.pricePerNight);
-    });
-    return initialRates;
-  });
-
-  // Keep prices and room rates in sync if room types change
-  useEffect(() => {
     setPrices(prev => {
       const updated = { ...prev };
       roomTypes.forEach(t => {
-        if (!updated[t.value]) {
-          updated[t.value] = {
-            base: t.pricePerNight,
-            weekend: t.weekendRate,
-            corporate: t.corporateRate
-          };
-        }
+        const current = updated[t.value] || { base: 0, weekend: 0, corporate: 0 };
+        updated[t.value] = {
+          base: dirtyRateFields.has(`${t.value}.base`) ? current.base : initialPrices[t.value].base,
+          weekend: dirtyRateFields.has(`${t.value}.weekend`) ? current.weekend : initialPrices[t.value].weekend,
+          corporate: dirtyRateFields.has(`${t.value}.corporate`) ? current.corporate : initialPrices[t.value].corporate
+        };
       });
       return updated;
     });
@@ -103,16 +102,40 @@ export function RatesPage() {
     setRoomRates(prev => {
       const updated = { ...prev };
       roomTypes.forEach(t => {
-        if (!updated[t.value]) {
-          updated[t.value] = String(t.pricePerNight);
+        if (!dirtyCorporateRateTypes.has(t.value)) {
+          updated[t.value] = String(t.corporateRate || t.pricePerNight || 0);
         }
       });
       return updated;
     });
-  }, [roomTypes]);
+  }, [roomTypes, dirtyRateFields, dirtyCorporateRateTypes]);
 
   // Local breakfast rate state
   const [bfRate, setBfRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
+  const [bfRateDirty, setBfRateDirty] = useState(false);
+  useEffect(() => {
+    if (!bfRateDirty) {
+      setBfRate(String(breakfastConfig.ratePerPersonPerNight));
+    }
+  }, [breakfastConfig.ratePerPersonPerNight, bfRateDirty]);
+
+  const updateRateField = (typeValue: string, field: "base" | "weekend" | "corporate", value: number) => {
+    setDirtyRateFields(prev => new Set(prev).add(`${typeValue}.${field}`));
+    setPrices(prev => ({
+      ...prev,
+      [typeValue]: {
+        base: prev[typeValue]?.base ?? 0,
+        weekend: prev[typeValue]?.weekend ?? 0,
+        corporate: prev[typeValue]?.corporate ?? 0,
+        [field]: value
+      }
+    }));
+  };
+
+  const updateCorporateRoomRate = (typeValue: string, value: string) => {
+    setDirtyCorporateRateTypes(prev => new Set(prev).add(typeValue));
+    setRoomRates(prev => ({ ...prev, [typeValue]: value }));
+  };
 
   // Booking payment methods are managed in Settings → Payment
   // Methods (per `plan/features/SETTINGS.md §Payment Methods`).
@@ -128,11 +151,11 @@ export function RatesPage() {
     }
   };
 
-  const handleVoucherSubmit = (e: React.FormEvent) => {
+  const handleVoucherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vchCode || !discountValue) return;
 
-    addVoucher({
+    const result = await addVoucher({
       code: vchCode.trim().toUpperCase(),
       discountType,
       discountValue: parseFloat(discountValue) || 0,
@@ -140,9 +163,13 @@ export function RatesPage() {
       expiresAt: expiresAt || null,
       applicableRoomTypes: applicableRooms,
       isActive: true,
-      createdBy: "admin",
+      createdBy: currentUser?.uid || "staff",
       guestEmail: vchGuestEmail.trim() || null
     });
+    if (!result.success) {
+      toast.error("Voucher not created", result.error || "Please choose a different code.");
+      return;
+    }
 
     setVchCode("");
     setDiscountValue("");
@@ -150,33 +177,42 @@ export function RatesPage() {
     setExpiresAt("");
     setApplicableRooms([]);
     setIsVchModalOpen(false);
+    toast.success("Voucher created", `${vchCode.trim().toUpperCase()} is ready.`);
   };
 
-  const handleCorpSubmit = (e: React.FormEvent) => {
+  const handleCorpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!corpCode || !companyName) return;
 
     const rateMap: Record<string, number> = {};
-    Object.keys(roomRates).forEach(k => {
-      rateMap[k] = parseFloat(roomRates[k]) || 0;
+    roomTypes.forEach(type => {
+      rateMap[type.value] = parseFloat(roomRates[type.value]) || type.corporateRate || type.pricePerNight || 0;
     });
 
-    addCorporateCode({
+    const result = await addCorporateCode({
       code: corpCode.trim().toUpperCase(),
       companyName,
       ratePerRoomType: rateMap,
-      expiresAt: "2027-12-31",
-      usageCap: null,
+      expiresAt: corpExpiresAt || null,
+      usageCap: corpUsageCap ? parseInt(corpUsageCap) : null,
       usageCount: 0,
       linkedInquiryId: "",
-      createdBy: "admin",
+      createdBy: currentUser?.uid || "staff",
       createdAt: new Date().toISOString(),
       isActive: true
     });
+    if (!result.success) {
+      toast.error("Corporate code not created", result.error || "Please choose a different code.");
+      return;
+    }
 
     setCorpCode("");
     setCompanyName("");
+    setCorpExpiresAt("");
+    setCorpUsageCap("");
+    setDirtyCorporateRateTypes(new Set());
     setIsCorpModalOpen(false);
+    toast.success("Corporate code created", `${corpCode.trim().toUpperCase()} is ready.`);
   };
 
   // Save room prices changes — per W3.6 the rate matrix lives on the
@@ -197,6 +233,7 @@ export function RatesPage() {
         });
       });
       await Promise.all(updates);
+      setDirtyRateFields(new Set());
       toast.success("Rates saved", "Rate matrix updated for all room types.");
     } catch (err) {
       console.error("Error saving rates:", err);
@@ -213,6 +250,17 @@ export function RatesPage() {
       ...breakfastConfig,
       ratePerPersonPerNight: parseFloat(bfRate) || 300
     });
+    setBfRateDirty(false);
+  };
+
+  const formatCorporateRateSummary = (rateMap: Record<string, number>) => {
+    const configuredTypes = roomTypes.filter((type) => rateMap[type.value] !== undefined);
+    const entries = configuredTypes.length > 0
+      ? configuredTypes
+      : Object.keys(rateMap).map((value) => ({ value, shortLabel: value, label: value }));
+    return entries
+      .map((type) => `${type.shortLabel || type.label}: ${formatPrice(rateMap[type.value] || 0)}`)
+      .join(" • ");
   };
 
   // Voucher Columns
@@ -276,7 +324,7 @@ export function RatesPage() {
       header: "Custom Rates",
       render: (row) => (
         <span className="text-[11px] text-gray-500">
-          Double: <strong>{formatPrice(row.ratePerRoomType["standard-double"] || 0)}</strong> • Exec: <strong>{formatPrice(row.ratePerRoomType["executive"] || 0)}</strong>
+          {formatCorporateRateSummary(row.ratePerRoomType)}
         </span>
       )
     },
@@ -354,10 +402,42 @@ export function RatesPage() {
       </div>
       <p className="text-base font-bold text-gray-900">{row.companyName}</p>
       <p className="text-xs text-gray-500">
-        Double {formatPrice(row.ratePerRoomType["standard-double"] || 0)} · Exec {formatPrice(row.ratePerRoomType["executive"] || 0)} · {row.usageCount} bookings
+        {formatCorporateRateSummary(row.ratePerRoomType)} · {row.usageCount} bookings
       </p>
     </div>
   );
+
+  if (ratesLoading) {
+    return (
+      <div className="space-y-8 font-body">
+        <header className="space-y-2">
+          <div className="h-8 w-64 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-8 lg:grid-cols-3">
+          <div className="space-y-4 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 lg:col-span-2">
+            <div className="h-5 w-44 animate-pulse rounded bg-gray-200" />
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="grid gap-3 sm:grid-cols-4">
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+                <div className="h-10 animate-pulse rounded bg-gray-100" />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-4 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+            <div className="h-5 w-40 animate-pulse rounded bg-gray-200" />
+            <div className="h-12 animate-pulse rounded bg-gray-100" />
+            <div className="h-10 animate-pulse rounded bg-gray-100" />
+          </div>
+        </div>
+        <div className="h-72 rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <div className="h-full animate-pulse rounded bg-gray-100" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 font-body">
@@ -393,19 +473,13 @@ export function RatesPage() {
                           required
                           min={0}
                           value={prices[type.value]?.base || 0}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setPrices(prev => ({
-                              ...prev,
-                              [type.value]: { ...prev[type.value], base: val }
-                            }));
-                          }}
+                          onChange={(e) => updateRateField(type.value, "base", parseFloat(e.target.value) || 0)}
                           className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
                         />
                       </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Weekend Rate (Fri/Sat)</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Weekend Rate (Sat/Sun)</label>
                       <div className="relative mt-1 flex items-center">
                         <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
                         <input
@@ -413,13 +487,7 @@ export function RatesPage() {
                           required
                           min={0}
                           value={prices[type.value]?.weekend || 0}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setPrices(prev => ({
-                              ...prev,
-                              [type.value]: { ...prev[type.value], weekend: val }
-                            }));
-                          }}
+                          onChange={(e) => updateRateField(type.value, "weekend", parseFloat(e.target.value) || 0)}
                           className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
                         />
                       </div>
@@ -433,13 +501,7 @@ export function RatesPage() {
                           required
                           min={0}
                           value={prices[type.value]?.corporate || 0}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setPrices(prev => ({
-                              ...prev,
-                              [type.value]: { ...prev[type.value], corporate: val }
-                            }));
-                          }}
+                          onChange={(e) => updateRateField(type.value, "corporate", parseFloat(e.target.value) || 0)}
                           className="min-h-[44px] w-full rounded border border-gray-200 pl-7 pr-3 text-sm text-gray-800 font-medium"
                         />
                       </div>
@@ -454,7 +516,7 @@ export function RatesPage() {
                     <tr className="text-gray-400 font-bold uppercase text-[9px] tracking-wider text-left">
                       <th className="py-2.5">Room Type</th>
                       <th className="py-2.5">Standard Rate (Base)</th>
-                      <th className="py-2.5">Weekend Rate (Fri/Sat)</th>
+                      <th className="py-2.5">Weekend Rate (Sat/Sun)</th>
                       <th className="py-2.5">Corporate Rate (Flat)</th>
                     </tr>
                   </thead>
@@ -470,13 +532,7 @@ export function RatesPage() {
                               required
                               min={0}
                               value={prices[type.value]?.base || 0}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrices(prev => ({
-                                  ...prev,
-                                  [type.value]: { ...prev[type.value], base: val }
-                                }));
-                              }}
+                              onChange={(e) => updateRateField(type.value, "base", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>
@@ -489,13 +545,7 @@ export function RatesPage() {
                               required
                               min={0}
                               value={prices[type.value]?.weekend || 0}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrices(prev => ({
-                                  ...prev,
-                                  [type.value]: { ...prev[type.value], weekend: val }
-                                }));
-                              }}
+                              onChange={(e) => updateRateField(type.value, "weekend", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>
@@ -508,13 +558,7 @@ export function RatesPage() {
                               required
                               min={0}
                               value={prices[type.value]?.corporate || 0}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                setPrices(prev => ({
-                                  ...prev,
-                                  [type.value]: { ...prev[type.value], corporate: val }
-                                }));
-                              }}
+                              onChange={(e) => updateRateField(type.value, "corporate", parseFloat(e.target.value) || 0)}
                               className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                             />
                           </div>
@@ -561,7 +605,10 @@ export function RatesPage() {
                     required
                     min={0}
                     value={bfRate}
-                    onChange={(e) => setBfRate(e.target.value)}
+                    onChange={(e) => {
+                      setBfRateDirty(true);
+                      setBfRate(e.target.value);
+                    }}
                     className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs text-gray-800 font-medium"
                   />
                 </div>
@@ -822,6 +869,30 @@ export function RatesPage() {
             </label>
           </div>
 
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Expiration Date
+              <input
+                type="date"
+                value={corpExpiresAt}
+                onChange={(e) => setCorpExpiresAt(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Usage Cap
+              <input
+                type="number"
+                min={0}
+                placeholder="Unlimited if empty"
+                value={corpUsageCap}
+                onChange={(e) => setCorpUsageCap(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+          </div>
+
           <div className="space-y-2.5 pt-2">
             <p className="font-semibold text-gray-700">Set Custom Flat Rate per Room Type (PHP)</p>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -831,10 +902,7 @@ export function RatesPage() {
                   <input
                     type="number"
                     value={roomRates[t.value] || ""}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setRoomRates(prev => ({ ...prev, [t.value]: val }));
-                    }}
+                    onChange={(e) => updateCorporateRoomRate(t.value, e.target.value)}
                     className="min-h-[38px] w-full rounded border border-gray-255 px-2 text-xs text-gray-900 font-medium"
                   />
                 </label>

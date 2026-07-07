@@ -65,7 +65,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [x] Grid of dates (one column per night) × guests (one row per guest)
   - [x] Each cell: dropdown of active silog items from `settings/breakfastConfig.silogItems`
   - [x] Front desk fills this in at check-in after guest completes physical registration form
-  - [ ] Save button — `addDoc` / `updateDoc` to `breakfastSelections` per guest per date
+  - [x] Save button — updates `bookings/{bookingId}.breakfastSelections` map per guest per date
   - [x] Already-entered selections shown and editable in the wireframe drawer
 - [x] Guest ID upload — shown in drawer when status is `confirmed` or `checked-in`
   - [x] Upload button: "Attach Guest ID Photo" — accepts jpg/png/webp

@@ -909,6 +909,7 @@ export function SettingsPage() {
     hotelConfig,
     websiteContent,
     websiteContentLoading,
+    settingsLoading,
     rewardsConfig,
     breakfastConfig,
     storeConfig,
@@ -1129,6 +1130,7 @@ export function SettingsPage() {
   const [isStoreItemModalOpen, setIsStoreItemModalOpen] = useState(false);
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
   const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
+  const [storeItemPhotoFile, setStoreItemPhotoFile] = useState<File | null>(null);
   const [storeItemPhotoStatus, setStoreItemPhotoStatus] = useState("");
 
   // 6. Intercom Config states
@@ -1437,6 +1439,27 @@ export function SettingsPage() {
   const filteredStoreItems = storeCategoryFilter === "all"
     ? storeItems
     : storeItems.filter(item => item.category === storeCategoryFilter);
+
+  const countRoomsUsingType = (typeValue: string) => rooms.filter((room) => room.type === typeValue).length;
+
+  const handleDeleteRoomType = async (typeValue: string) => {
+    const attachedRooms = countRoomsUsingType(typeValue);
+    if (attachedRooms > 0) {
+      toast.error(
+        "Cannot delete room type",
+        `${attachedRooms} room${attachedRooms === 1 ? "" : "s"} still use this type. Reassign those rooms before deleting it.`
+      );
+      setPendingDeleteRoomType(null);
+      return;
+    }
+    try {
+      await deleteRoomType(typeValue);
+    } catch (error) {
+      toast.error("Cannot delete room type", error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setPendingDeleteRoomType(null);
+    }
+  };
   const selectedStoreCategoryLabel = storeCategoryFilter === "all"
     ? "All items"
     : storeCategories.find(category => category.value === storeCategoryFilter)?.label ?? "All items";
@@ -1445,6 +1468,7 @@ export function SettingsPage() {
     const item = storeItems.find(storeItem => storeItem.id === itemId);
     setEditingStoreItemId(itemId);
     setStoreItemPhotoDataUrl(item?.imageUrl ?? "");
+    setStoreItemPhotoFile(null);
     setStoreItemPhotoStatus("");
     setIsStoreItemModalOpen(true);
   };
@@ -1453,6 +1477,7 @@ export function SettingsPage() {
     setIsStoreItemModalOpen(false);
     setEditingStoreItemId(null);
     setStoreItemPhotoDataUrl("");
+    setStoreItemPhotoFile(null);
     setStoreItemPhotoStatus("");
   };
 
@@ -1477,8 +1502,9 @@ export function SettingsPage() {
       setStoreItemPhotoStatus("Compressing image...");
       const image = await compressImageFile(file, { maxWidth: 1200, maxHeight: 1200, quality: 0.84 });
       setStoreItemPhotoDataUrl(image.dataUrl);
+      setStoreItemPhotoFile(image.file);
       setStoreItemPhotoStatus(
-        `Compressed to ${Math.max(1, Math.round(image.compressedSize / 1024))} KB at ${image.width}x${image.height}.`
+        `Compressed to ${Math.max(1, Math.round(image.compressedSize / 1024))} KB at ${image.width}x${image.height}. It will upload to Storage on save.`
       );
     } catch (error) {
       setStoreItemPhotoStatus(error instanceof Error ? error.message : "Unable to process image.");
@@ -1498,6 +1524,7 @@ export function SettingsPage() {
       price: Number(formData.get("price") || 0),
       stock: hasUnlimitedStock ? null : Math.max(0, stockValue),
       imageUrl: storeItemPhotoDataUrl,
+      imageFile: storeItemPhotoFile,
       isActive: formData.get("isActive") === "on"
     };
 
@@ -1529,6 +1556,32 @@ export function SettingsPage() {
     { id: "legal" as const, label: "Legal Content", icon: Scale },
     { id: "staff" as const, label: "Staff Accounts", icon: UserCog }
   ];
+
+  if (settingsLoading) {
+    return (
+      <div className="space-y-8 font-body">
+        <header className="space-y-2">
+          <div className="h-8 w-64 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-96 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-8 lg:grid-cols-[260px_1fr]">
+          <aside className="hidden space-y-2 rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200 lg:block">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div key={index} className="h-11 animate-pulse rounded-lg bg-gray-100" />
+            ))}
+          </aside>
+          <div className="min-h-[400px] rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 sm:p-7">
+            <div className="h-5 w-48 animate-pulse rounded bg-gray-200" />
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="h-16 animate-pulse rounded bg-gray-100" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 font-body">
@@ -3053,6 +3106,9 @@ export function SettingsPage() {
                           <p className="text-[11px] text-gray-500 pt-1">
                             {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS} photos
                           </p>
+                          <p className="text-[11px] text-gray-500">
+                            {countRoomsUsingType(type.value)} room{countRoomsUsingType(type.value) === 1 ? "" : "s"} using this type
+                          </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           <button
@@ -3075,8 +3131,7 @@ export function SettingsPage() {
                             type="button"
                             onClick={() => {
                               if (pendingDeleteRoomType === type.value) {
-                                deleteRoomType(type.value);
-                                setPendingDeleteRoomType(null);
+                                void handleDeleteRoomType(type.value);
                               } else {
                                 setPendingDeleteRoomType(type.value);
                               }
@@ -3101,6 +3156,7 @@ export function SettingsPage() {
                         <th className="px-4 py-2.5">Display Label</th>
                         <th className="px-4 py-2.5">Short Abbreviation</th>
                         <th className="px-4 py-2.5">Photos</th>
+                        <th className="px-4 py-2.5">In Use</th>
                         <th className="px-4 py-2.5 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -3124,6 +3180,9 @@ export function SettingsPage() {
                               {type.imageUrls.length} / {MAX_ROOM_TYPE_PHOTOS}
                             </button>
                           </td>
+                          <td className="px-4 py-3 text-[11px] text-gray-500">
+                            {countRoomsUsingType(type.value)} room{countRoomsUsingType(type.value) === 1 ? "" : "s"}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <div className="inline-flex items-center gap-2">
                               <button
@@ -3138,8 +3197,7 @@ export function SettingsPage() {
                                 type="button"
                                 onClick={() => {
                                   if (pendingDeleteRoomType === type.value) {
-                                    deleteRoomType(type.value);
-                                    setPendingDeleteRoomType(null);
+                                    void handleDeleteRoomType(type.value);
                                   } else {
                                     setPendingDeleteRoomType(type.value);
                                   }

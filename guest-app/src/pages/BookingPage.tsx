@@ -21,7 +21,7 @@ import {
   Banknote
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -45,11 +45,14 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
+import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 // Per BF-26 (booking-flow audit 2026-06-26): the previous module-level
 // constants ignored the live `breakfastConfig` (rate + on/off toggle).
 // The Step 1 card price + the Room + Breakfast option therefore
@@ -217,7 +220,17 @@ export function BookingPage() {
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
 
   const [termsConsent, setTermsConsent] = useState(false);
-  const [turnstileToken, setTurnstileToken] = useState("");
+  // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
+  // rendered through the shared `useTurnstileToken` hook, gated on
+  // the review step (the only step whose JSX contains the
+  // container). The previous inline effect ran once on mount with
+  // `[]` deps and bailed when the container was null — the first
+  // render is always the loading skeleton or Step 1, so the widget
+  // never mounted and every submit fell back to `"mock_token"`
+  // (which the server no longer accepts — see BI-02).
+  const { token: turnstileToken, containerRef: turnstileContainerRef } = useTurnstileToken({
+    enabled: isReviewStep
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const navigate = useNavigate();
@@ -263,6 +276,10 @@ export function BookingPage() {
         (entry) => entry.type.maxCapacity >= guests && entry.availableCount > 0
       ),
     [typeAvailability, guests]
+  );
+  const maxGuestCapacity = useMemo(
+    () => Math.max(1, ...roomTypes.map((type) => Number(type.maxCapacity) || 0)),
+    [roomTypes]
   );
 
   // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
@@ -467,78 +484,6 @@ export function BookingPage() {
     };
   }, [checkIn, checkOut]);
 
-  // Mount the Turnstile widget explicitly via `turnstile.render()` rather
-  // than relying on the implicit auto-render triggered by the
-  // `cf-turnstile` class. Mirrors the CorporateStaysPage pattern: explicit
-  // render lets us pass `expired-callback` / `error-callback` and
-  // `turnstile.remove()` the widget on unmount. The previous auto-render
-  // path also registered a global `window.onTurnstileSuccess` that raced
-  // with React state updates and could fire on stale widget instances.
-  const turnstileContainerRef = useRef<HTMLDivElement>(null);
-  const turnstileWidgetIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    const container = turnstileContainerRef.current;
-    if (!container) return;
-
-    const isProductionDomain = window.location.hostname === config.domain || window.location.hostname === `www.${config.domain}`;
-    const siteKey = isProductionDomain
-      ? String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? "1x00000000000000000000AA")
-      : "1x00000000000000000000AA";
-    let cancelled = false;
-    let widgetId: string | null = null;
-    let pollHandle: ReturnType<typeof setTimeout> | null = null;
-
-    const ensureScript = (): void => {
-      const scriptId = "turnstile-script";
-      if (document.getElementById(scriptId)) return;
-      const script = document.createElement("script");
-      script.id = scriptId;
-      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
-      script.async = true;
-      script.defer = true;
-      document.body.appendChild(script);
-    };
-
-    const renderWidget = (): void => {
-      if (cancelled || !window.turnstile || !container.isConnected) return;
-      widgetId = window.turnstile.render(container, {
-        sitekey: siteKey,
-        callback: (token) => setTurnstileToken(token),
-        "expired-callback": () => setTurnstileToken(""),
-        "error-callback": () => setTurnstileToken("")
-      });
-      turnstileWidgetIdRef.current = widgetId;
-    };
-
-    const tryRender = (): void => {
-      if (cancelled) return;
-      if (window.turnstile) {
-        renderWidget();
-      } else {
-        pollHandle = setTimeout(tryRender, 100);
-      }
-    };
-
-    ensureScript();
-    tryRender();
-
-    return () => {
-      cancelled = true;
-      if (pollHandle !== null) clearTimeout(pollHandle);
-      const id = turnstileWidgetIdRef.current;
-      if (id && window.turnstile) {
-        try {
-          window.turnstile.remove(id);
-        } catch {
-          // Widget may already be gone. Safe to ignore — the next mount
-          // will allocate a fresh id.
-        }
-      }
-      turnstileWidgetIdRef.current = null;
-    };
-  }, []);
-
   useEffect(() => {
     if (!selectedRoomType && availableRoomTypes[0]) {
       setSelectedRoomType(availableRoomTypes[0].type.value);
@@ -564,9 +509,19 @@ export function BookingPage() {
   }
 
   function updateGuests(nextGuests: number) {
-    const safeGuests = Math.min(Math.max(nextGuests, 1), 6);
+    const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
     setGuests(safeGuests);
     updateDateParams(checkIn, checkOut, safeGuests);
+  }
+
+  function validateUploadFile(file: File) {
+    if (!ACCEPTED_UPLOAD_TYPES.has(file.type)) {
+      return "Please upload a JPG, PNG, or WEBP image.";
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return "Please upload an image that is 5MB or smaller.";
+    }
+    return "";
   }
 
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
@@ -585,6 +540,24 @@ export function BookingPage() {
       ...current,
       [field]: value
     }));
+    // Per BI-09 (booking-intercom audit 2026-07-06): the Step 2
+    // "Number of guests" field used to write only to
+    // `guestDetails.guestCount`, while the create body, the
+    // breakfast total, and the member/voucher math all used the
+    // separate `guests` state seeded from the Step 1 URL param.
+    // Editing the field changed what the guest *saw* without
+    // changing what was *booked or charged*. The corporate page
+    // wires it correctly (`CorporateBookingPage.tsx:1285-1288`):
+    // a Step 2 edit also updates `guests`. Mirror that here so
+    // the Step 2 value is the single source of truth that flows
+    // into the submitted body + downstream totals.
+    if (field === "guestCount") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 1) {
+        setGuests(parsed);
+        updateDateParams(checkIn, checkOut, parsed);
+      }
+    }
   }
 
   // Real API calls for Voucher validation
@@ -606,7 +579,9 @@ export function BookingPage() {
         body: JSON.stringify({
           code,
           roomType: selectedTypeEntry?.value,
-          turnstileToken: turnstileToken || "mock_token"
+          // Per BI-02/BI-03: real token only — the server no longer
+          // accepts the "mock_token" sentinel outside unit tests.
+          turnstileToken
         })
       });
 
@@ -650,7 +625,14 @@ export function BookingPage() {
   async function handleDiscountIdChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const validationError = validateUploadFile(file);
+      if (validationError) {
+        setSubmitError(validationError);
+        e.target.value = "";
+        return;
+      }
       setUploadingDiscountId(true);
+      setSubmitError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${compressed.file.name}`);
@@ -671,7 +653,14 @@ export function BookingPage() {
   async function handlePaymentProofChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const validationError = validateUploadFile(file);
+      if (validationError) {
+        setSubmitError(validationError);
+        e.target.value = "";
+        return;
+      }
       setUploadingPaymentProof(true);
+      setSubmitError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
@@ -703,7 +692,13 @@ export function BookingPage() {
           roomType: selectedTypeEntry?.value,
           checkIn,
           checkOut,
-          guests,
+          // Per BI-09 (booking-intercom audit 2026-07-06): the
+          // Step 2 "Number of guests" field is the single source
+          // of truth once the guest has touched it. Mirror the
+          // corporate page (`CorporateBookingPage.tsx:619`) and
+          // prefer the parsed Step 2 value, falling back to the
+          // Step 1 stepper for guests who never reached Step 2.
+          guests: Number(guestDetails.guestCount) || guests,
           hasBreakfast,
           guestDetails: {
             firstName: guestDetails.firstName,
@@ -722,7 +717,7 @@ export function BookingPage() {
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
           // `corporateCode` lookup, so this field is omitted.
-          turnstileToken: turnstileToken || "mock_token",
+          turnstileToken,
           _hp: guestDetails._hp || ""
         })
       });
@@ -741,6 +736,7 @@ export function BookingPage() {
       const serverTotal = typeof result.data?.totalPrice === "number"
         ? result.data.totalPrice
         : null;
+      const confirmedGuests = Number(guestDetails.guestCount) || guests;
       const confirmParams = new URLSearchParams({
         bookingRef: result.data.bookingRef,
         roomType: result.data.roomType || selectedTypeEntry?.value || "",
@@ -748,7 +744,7 @@ export function BookingPage() {
         roomNumber: result.data.roomNumber || "",
         checkIn,
         checkOut,
-        guests: String(guests),
+        guests: String(confirmedGuests),
         paymentMethod,
         total: String(serverTotal ?? total)
       });
@@ -982,7 +978,11 @@ export function BookingPage() {
   if (isReviewStep) {
   const isIdUploadRequired = discountType !== "none" && !discountIdUpload;
   const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUpload;
-    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry);
+    // Per BI-03 + BOOKING-FLOW.md §Step 3: Confirm stays disabled
+    // until the Turnstile token has been received — submitting
+    // without one is a guaranteed 400 now that the server bypass
+    // is gone (BI-02).
+    const canConfirm = termsConsent && !isIdUploadRequired && !isPaymentProofRequired && Boolean(selectedTypeEntry) && Boolean(turnstileToken);
 
     return bookingShell(
       <>
@@ -1109,7 +1109,7 @@ export function BookingPage() {
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPG, PNG, WEBP up to 5MB</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
                           onChange={handleDiscountIdChange}
                           className="sr-only"
                           disabled={uploadingDiscountId}
@@ -1276,7 +1276,7 @@ export function BookingPage() {
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
                           onChange={handlePaymentProofChange}
                           className="sr-only"
                           disabled={uploadingPaymentProof}
@@ -1389,6 +1389,8 @@ export function BookingPage() {
                   ? "Please upload your Senior/PWD ID"
                   : isPaymentProofRequired
                   ? "Please upload proof of payment"
+                  : !turnstileToken
+                  ? "Running a quick security check..."
                   : "Ready to confirm booking"}
               </p>
             </div>
@@ -1417,7 +1419,7 @@ export function BookingPage() {
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select your stay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
-              Choose dates, guests, and a room option. This is static wireframe data shaped for the future booking context.
+              Choose dates, guests, and a room option. We will show room types available for your stay.
             </p>
           </div>
           <div className="rounded-card bg-white p-4 text-sm shadow-sm ring-1 ring-gray-200">
@@ -1510,11 +1512,13 @@ export function BookingPage() {
                   : 0;
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
-                  numNights: nights
+                  numNights: nights,
+                  roomTotal: calculateWeekendAwareRoomTotal(type, checkIn, nights)
                 });
                 const breakfastTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
+                  roomTotal: calculateWeekendAwareRoomTotal(type, checkIn, nights),
                   numGuests: guests,
                   breakfastRate: liveBreakfastRate,
                   hasBreakfast: true
@@ -1628,6 +1632,25 @@ export function BookingPage() {
       </div>
     </>
   );
+}
+
+function calculateWeekendAwareRoomTotal(
+  type: { pricePerNight?: number; weekendRate?: number },
+  checkIn: string,
+  nights: number
+) {
+  const baseRate = Number(type.pricePerNight) || 0;
+  const weekendRate = Number(type.weekendRate) || 0;
+  let total = 0;
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  for (let i = 0; i < nights; i++) {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + i);
+    const day = date.getUTCDay();
+    const isWeekend = day === 0 || day === 6;
+    total += isWeekend && weekendRate ? weekendRate : baseRate;
+  }
+  return total;
 }
 
 function BookingHeader({ backTo }: { backTo: string }) {

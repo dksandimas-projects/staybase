@@ -21,7 +21,7 @@ For architecture and stack decisions see `plan/docs/DECISIONS-ARCH.md`.
 | 10 | Guest intercom: QR-based, browser chat, no app, no login — quick requests configurable in Settings |
 | 11 | Booking statuses: Pending → Payment Uploaded → Payment Confirmed → Confirmed → Checked In → Checked Out → Cancelled |
 | 12 | Discounts: Senior Citizen 20% + PWD 20% — OSCA-mandated; guest uploads OSCA Card / PWD ID photo at booking Step 3; staff verifies or rejects in booking drawer; rejection restores full `totalPrice`, triggers discount-rejected email instructing guest to pay full amount at check-in |
-| 13 | Promo vouchers: guest enters code at Step 3 of booking flow — admin/front-desk manages in Settings |
+| 13 | Promo vouchers: guest enters code at Step 3 of booking flow — admins manage campaigns on the Rates page; front desk sees applied voucher outcomes in booking operations |
 | 13b | **Discount stacking order** (when multiple discounts apply on the same booking): **1.** Senior/PWD (20% subtotal) → **2.** Voucher (flat or percent, applied to post–Senior/PWD subtotal) → **3.** Spark Rewards member discount (percent, applied to post–voucher subtotal). Member discount only applies when the guest is signed in AND `settings/rewardsConfig.memberDiscountEnabled === true`. Implemented in `shared/utils/pricing.ts` `calculateBookingTotal()` — applied in the listed order, not cumulatively on the original subtotal. UI shows each discount as a separate line in the price summary. |
 | 14 | Walk-in bookings: front desk creates manually from dashboard — source field captures origin |
 | 15 | Housekeeping status: tracked per room as clean / dirty / in-progress — toggleable from dashboard |

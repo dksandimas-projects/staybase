@@ -1,12 +1,32 @@
+import { useNavigate } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { BedDouble, Check, RefreshCw, AlertTriangle, ShieldCheck } from "lucide-react";
+import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
+import { formatPrice } from "../utils/format";
 
 export function DashboardPage() {
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes } = useAdmin();
+  const navigate = useNavigate();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading } = useAdmin();
+
+  const toLocalDateKey = (date: Date) => {
+    const tz = config.timezone || "Asia/Manila";
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(date);
+    const year = parts.find(p => p.type === "year")?.value || "0000";
+    const month = parts.find(p => p.type === "month")?.value || "01";
+    const day = parts.find(p => p.type === "day")?.value || "01";
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayKey = toLocalDateKey(new Date());
+  const monthKey = todayKey.slice(0, 7);
 
   // Metrics Calculations
   // Per audit S5.1: guard against `rooms.length === 0` (first paint
@@ -18,33 +38,54 @@ export function DashboardPage() {
     ? 0
     : Math.round((occupiedRoomsCount / totalRoomsCount) * 100);
 
-  const activeBookingsCount = bookings.filter(b => b.status === "confirmed" || b.status === "checked-in").length;
-  const checkedInToday = bookings.filter(b => b.status === "checked-in").length;
-  const dirtyRoomsCount = rooms.filter(r => r.housekeepingStatus === "dirty").length;
+  const monthlyBookingsCount = bookings.filter((b) => b.createdAt?.startsWith(monthKey)).length;
+  const monthlyRevenue = bookings
+    .filter((b) => b.checkIn?.startsWith(monthKey) && ["confirmed", "checked-in", "checked-out"].includes(b.status))
+    .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
+  const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
+  const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
+  const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
+  const recentBookings = bookings.slice(0, 10);
+
+  if (dashboardLoading) {
+    return (
+      <div className="space-y-8 font-body">
+        <header className="space-y-2">
+          <div className="h-8 w-52 animate-pulse rounded bg-gray-200" />
+          <div className="h-4 w-80 max-w-full animate-pulse rounded bg-gray-100" />
+        </header>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+              <div className="h-4 w-24 animate-pulse rounded bg-gray-100" />
+              <div className="mt-4 h-8 w-20 animate-pulse rounded bg-gray-200" />
+              <div className="mt-3 h-3 w-32 animate-pulse rounded bg-gray-100" />
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="h-80 rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <div className="h-full animate-pulse rounded bg-gray-100" />
+          </div>
+          <div className="space-y-3 rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="h-14 animate-pulse rounded-lg bg-gray-100" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Per audit S5.3: replace the hardcoded weekly chart with a live
   // computation of occupancy rate per day for the last 7 days. A
   // booking is "active" on day D if D >= checkIn and D < checkOut and
-  // the booking is not cancelled. The rate is the number of distinct
+  // the booking is confirmed, checked-in, or checked-out. The rate is the number of distinct
   // rooms occupied divided by totalRoomsCount, or 0 when there are
   // no rooms. Days are computed in the hotel's local timezone
   // (config.timezone) to match the rest of the dashboard.
   const chartData = (() => {
     const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const toLocalDateKey = (date: Date) => {
-      const tz = config.timezone || "Asia/Manila";
-      const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: tz,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }).formatToParts(date);
-      const year = parts.find(p => p.type === "year")?.value || "0000";
-      const month = parts.find(p => p.type === "month")?.value || "01";
-      const day = parts.find(p => p.type === "day")?.value || "01";
-      return `${year}-${month}-${day}`;
-    };
-
     const today = new Date();
     const days: { day: string; rate: number }[] = [];
     for (let i = 6; i >= 0; i -= 1) {
@@ -55,7 +96,9 @@ export function DashboardPage() {
 
       const occupied = new Set<string>();
       bookings.forEach((b) => {
-        if (!b.checkIn || !b.checkOut || b.status === "cancelled") return;
+        // Legacy S5.3 breadcrumb: b.status === "cancelled" was the old exclusion;
+        // SEV-3 now uses an explicit revenue/occupancy status allowlist.
+        if (!b.checkIn || !b.checkOut || !["confirmed", "checked-in", "checked-out"].includes(b.status)) return;
         if (b.checkIn <= dayKey && dayKey < b.checkOut) {
           if (b.roomNumber) occupied.add(b.roomNumber);
         }
@@ -74,6 +117,16 @@ export function DashboardPage() {
     return acc;
   }, {} as Record<string, string>);
 
+  const openBooking = (bookingId: string) => {
+    navigate(`/bookings?bookingId=${encodeURIComponent(bookingId)}`);
+  };
+
+  const confirmPayment = async (bookingId: string) => {
+    // Legacy SEV-2 breadcrumb: updateBookingStatus(bookingId, "confirmed")
+    // SEV-3 restores the intermediate payment-confirmed state.
+    await updateBookingStatus(bookingId, "payment-confirmed");
+  };
+
   return (
     <div className="space-y-8 font-body">
       <header>
@@ -83,10 +136,128 @@ export function DashboardPage() {
 
       {/* Stats Cards Row */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} trend="+8% from last week" />
-        <StatsCard label="Active Bookings" value={String(activeBookingsCount)} />
-        <StatsCard label="Checked In Today" value={String(checkedInToday)} />
-        <StatsCard label="Dirty Rooms" value={String(dirtyRoomsCount)} trend={`${dirtyRoomsCount} urgent`} />
+        <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} />
+        <StatsCard label="Total Bookings" value={String(monthlyBookingsCount)} />
+        <StatsCard label="Revenue" value={formatPrice(monthlyRevenue)} />
+        <StatsCard label="Pending Payments" value={String(pendingPayments.length)} />
+      </div>
+
+      {/* Operational workflow sections */}
+      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <CreditCard size={18} className="text-primary" />
+              pending payment alerts
+            </h2>
+            <span className="rounded-full bg-primary-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-dark">
+              {pendingPayments.length} queued
+            </span>
+          </div>
+          <div className="space-y-3">
+            {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
+              <div key={booking.id} className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[72px_1fr_auto] sm:items-center">
+                <a
+                  href={booking.paymentProofUrl || undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white sm:w-16"
+                  aria-label={`Open payment proof for ${booking.bookingRef}`}
+                >
+                  {booking.paymentProofUrl ? (
+                    <img src={booking.paymentProofUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <CreditCard size={18} className="text-gray-400" />
+                  )}
+                </a>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-bold text-gray-900">{booking.bookingRef}</p>
+                    <StatusBadge label="payment uploaded" status="payment-uploaded" />
+                  </div>
+                  <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
+                  <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
+                </div>
+                <div className="flex flex-col gap-2 sm:w-36">
+                  {booking.paymentProofUrl && (
+                    <a
+                      href={booking.paymentProofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                    >
+                      <Eye size={12} />
+                      View Proof
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void confirmPayment(booking.id)}
+                    className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                  >
+                    Confirm Payment
+                  </button>
+                </div>
+              </div>
+            )) : (
+              <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-4 text-center text-xs font-semibold text-gray-500">
+                No payment proofs are waiting for review.
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
+          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <LogIn size={18} className="text-primary" />
+              today's arrivals
+            </h2>
+            <div className="space-y-2">
+              {todaysArrivals.length > 0 ? todaysArrivals.map((booking) => (
+                <button
+                  key={booking.id}
+                  type="button"
+                  onClick={() => openBooking(booking.id)}
+                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-left hover:bg-gray-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
+                    <span className="block text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.bookingRef}</span>
+                  </span>
+                  <ArrowRight size={14} className="shrink-0 text-gray-400" />
+                </button>
+              )) : (
+                <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No arrivals today.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <LogOut size={18} className="text-primary" />
+              today's departures
+            </h2>
+            <div className="space-y-2">
+              {todaysDepartures.length > 0 ? todaysDepartures.map((booking) => (
+                <button
+                  key={booking.id}
+                  type="button"
+                  onClick={() => openBooking(booking.id)}
+                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-left hover:bg-gray-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
+                    <span className="block text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.bookingRef}</span>
+                  </span>
+                  <ArrowRight size={14} className="shrink-0 text-gray-400" />
+                </button>
+              )) : (
+                <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No departures today.</p>
+              )}
+            </div>
+          </div>
+        </section>
       </div>
 
       {/* Room Grid and Chart grid */}
@@ -104,6 +275,7 @@ export function DashboardPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {rooms.map((room) => {
               const isDirty = room.housekeepingStatus === "dirty";
+              const isInProgress = room.housekeepingStatus === "in-progress";
               const isOccupied = room.status === "occupied";
               const isBlocked = room.status === "blocked";
 
@@ -159,14 +331,21 @@ export function DashboardPage() {
                       className={`min-h-[32px] px-3.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold transition shadow-sm active:scale-95 ${
                         isDirty
                           ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+                          : isInProgress
+                            ? "bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border border-yellow-200"
                           : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
                       }`}
-                      title="Click to toggle Clean/Dirty status"
+                      title="Click to cycle housekeeping status"
                     >
                       {isDirty ? (
                         <>
                           <AlertTriangle size={12} />
                           Dirty
+                        </>
+                      ) : isInProgress ? (
+                        <>
+                          <RefreshCw size={12} />
+                          In Progress
                         </>
                       ) : (
                         <>
@@ -190,14 +369,14 @@ export function DashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: "rgb(107 114 128)" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: "rgb(107 114 128)" }} axisLine={false} tickLine={false} />
                   <Tooltip 
-                    contentStyle={{ background: "#111827", border: "0", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
-                    itemStyle={{ color: "#fff" }}
+                    contentStyle={{ background: config.colors.sidebar, border: "0", borderRadius: "8px", color: "white", fontSize: "11px" }}
+                    itemStyle={{ color: "white" }}
                     labelStyle={{ display: "none" }}
                   />
-                  <Bar dataKey="rate" fill="#EA8A1A" radius={[4, 4, 0, 0]} barSize={24} />
+                  <Bar dataKey="rate" fill={config.colors.primary} radius={[4, 4, 0, 0]} barSize={24} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -206,11 +385,47 @@ export function DashboardPage() {
           <div className="border-t border-gray-100 pt-4 mt-4 flex items-start gap-2.5">
             <ShieldCheck className="text-primary shrink-0 mt-0.5" size={16} />
             <p className="text-[10px] text-gray-500 leading-relaxed font-semibold">
-              Weekly benchmarks verify an average occupancy of 75% for Tagbilaran City. Target goals set at 80% for summer peak ranges.
+              Weekly occupancy uses confirmed, in-house, and completed stays only, so abandoned pending bookings do not inflate the trend.
             </p>
           </div>
         </div>
       </div>
+
+      <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+            <Clock size={18} className="text-primary" />
+            recent bookings
+          </h2>
+          <button
+            type="button"
+            onClick={() => navigate("/bookings")}
+            className="min-h-[34px] rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+          >
+            View All
+          </button>
+        </div>
+        <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+          {recentBookings.length > 0 ? recentBookings.map((booking) => (
+            <button
+              key={booking.id}
+              type="button"
+              onClick={() => openBooking(booking.id)}
+              className="grid min-h-[54px] w-full gap-2 px-3 py-2 text-left hover:bg-gray-50 sm:grid-cols-[1fr_1fr_140px_120px] sm:items-center"
+            >
+              <span>
+                <span className="block text-xs font-bold text-gray-900">{booking.bookingRef}</span>
+                <span className="block truncate text-[10px] font-semibold text-gray-500">{booking.guestName}</span>
+              </span>
+              <span className="text-[10px] font-semibold text-gray-500">Room {booking.roomNumber || "TBD"} · {booking.checkIn}</span>
+              <span className="text-xs font-bold text-gray-900">{formatPrice(booking.totalPrice)}</span>
+              <StatusBadge label={booking.status.replace("-", " ")} status={booking.status} />
+            </button>
+          )) : (
+            <p className="p-4 text-center text-xs font-semibold text-gray-500">No bookings yet.</p>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

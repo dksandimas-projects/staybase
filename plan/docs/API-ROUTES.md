@@ -68,7 +68,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` for the confirmation page. |
+| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` for the confirmation page. The corporate "Continue without code" path sends `corporateFlatRate: true` — an intent flag only; the server resolves the flat rate from `roomTypes[].corporateRate` (never a client-supplied number) and a validated `corporateCode` always wins (per BI-04, booking-intercom audit 2026-07-06). |
 | `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
 | `/api/bookings/lookup` | POST | None (owner by ref+email) | Look up a single booking by `bookingRef` + `guestEmail` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}`. Response payload intentionally includes `guestName`, `guestEmail`, `guestPhone`, and `roomType`/`roomNumber` so the self-service page can display the booking back to the guest. These fields are the data-subject's own PII (per RA 10173 right to be informed + the right to access), and the endpoint enforces ref+email ownership before returning them. |
@@ -186,6 +186,15 @@ All public-facing routes (booking creation, voucher/code validation) apply a two
 5. Never proceed to business logic without a valid Turnstile response
 
 **Applies to:** `/api/bookings/create`, `/api/corporate/inquiry`, `/api/validate/voucher`, `/api/validate/corporate-code`
+
+**Bypass policy (per BI-02, booking-intercom audit 2026-07-06):** the only
+verification bypass is `NODE_ENV === "test"` (unit tests). Never accept
+sentinel tokens (`mock_token`, Cloudflare dummy tokens) outside tests, and
+never ship client-side `|| "mock_token"` fallbacks — either one turns every
+Turnstile gate into decoration. Local dev works without a bypass: requests
+from non-production origins are verified against Cloudflare's always-pass
+test secret. Turnstile tokens are single-use — clients must reset the widget
+after each token-consuming request.
 
 ### Honeypot Check
 

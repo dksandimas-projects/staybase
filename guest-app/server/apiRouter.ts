@@ -1,13 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth } from "./lib/firebase-admin";
-import { handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleEmailTrigger } from "./handlers/email";
@@ -248,17 +248,17 @@ const LOOKUP_FAILURE_THRESHOLD = 3;
 const LOOKUP_FAILURE_WINDOW_MS = 3600000;
 
 async function verifyTurnstile(token: string | undefined, req?: VercelRequest): Promise<{ success: boolean; error?: string }> {
-  // Cloudflare test keys: always verify successfully.
-  // Test bypass: NODE_ENV is "test", OR the client supplied an
-  // explicit test token (the Cloudflare "always passes" / "always
-  // fails" sentinel keys, or our internal `mock_token` from
-  // vercel dev / unit tests).
-  if (
-    process.env.NODE_ENV === "test" ||
-    token === "1x00000000000000000000AA" ||
-    token === "1x00000000000000000000000000000000" ||
-    token === "mock_token"
-  ) {
+  // Per BI-02 (booking-intercom audit 2026-07-06): the bypass is
+  // gated on NODE_ENV === "test" ONLY. The previous version also
+  // short-circuited on the literal tokens "mock_token" and the
+  // Cloudflare sentinel keys — in every environment, including
+  // production. Since every guest-app caller shipped a
+  // `|| "mock_token"` fallback in its bundle, any bot could read
+  // it and bypass Turnstile on all gated endpoints. Local dev /
+  // vercel dev does not need a sentinel: non-production origins
+  // fall through to the Cloudflare always-pass test secret below,
+  // which verifies any token the dev-sitekey widget issues.
+  if (process.env.NODE_ENV === "test") {
     return { success: true };
   }
 
@@ -412,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         success: true,
         data: {
           bookingId: "hp_" + Math.random().toString(36).substring(2, 9),
-          bookingRef: `SI-${new Date().getFullYear()}0608-099`
+          bookingRef: `${getConfiguredBookingRefPrefix()}-${new Date().getFullYear()}0608-00099`
         }
       });
     }
@@ -433,7 +433,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleCreateWalkin(req, res);
   }
 
@@ -443,7 +443,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleAddPayment(req, res);
   }
 
@@ -706,6 +706,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
     
     return await handleUndoMemberPointsRedemption(req, res);
+  }
+
+  if (domain === "members" && action === "set-active" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-set-active:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many member account update requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+    }
+    (req as any).staff = authResult;
+    return await handleSetMemberActive(req, res);
   }
 
   if (domain === "members" && action === "delete-account" && req.method === "POST") {

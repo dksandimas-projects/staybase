@@ -35,7 +35,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 > **Migration note (W3.6 + W3.7):** prior to Phase 11.9 each room also carried its own `maxCapacity`, `pricePerNight`, `weekendRate`, `corporateRate` (W3.6), `bedDefinition`, `description`, and `amenities` (W3.7). All of those fields are no longer read by the app. If the Firestore docs still contain them they are inert — the canonical values now live on the type. A one-off backfill to seed each `settings/hotelConfig.roomTypes[].{maxCapacity, pricePerNight, weekendRate, corporateRate, bedDefinition, description, amenities}` from a representative room of the same type is required if the property was running on the prior schema. See `plan/features/RATE-MANAGEMENT.md §W3.6` and `plan/features/ROOM-MANAGEMENT.md §W3.7` for the procedures.
 
-**Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
+**Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. The required delete reason is written to `roomDeletionAudit/{auditId}` before the hard delete. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
 **Auto-assignment (per `feature/booking-by-room-type`):** The public booking flow's Step 1 shows one card per room type. Clients post `roomType`; the `/api/bookings/create` transaction reads all active physical rooms of that type, sorts by `roomNumber`, picks the first non-conflicting room, and stores its `roomId` + `roomNumber` on the new booking document. The `Booking.roomId` schema is unchanged — it still points at a real `rooms/{id}` document — and `Booking.roomType` is the type value the guest selected. Staff see the assigned room in the bookings management table exactly as before.
 
@@ -74,6 +74,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `isCorporate` | boolean | `true` if booked via `/corporate/book` |
 | `corporateCode` | string | Access code used (if any) |
 | `companyName` | string | Corporate bookings only |
+| `corporate` | object \| absent | Per BI-11 (booking-intercom audit 2026-07-06): persisted only when the booking is corporate. Shape: `{ designation: string, companyAddress: string, purposeOfStay: string, billingArrangement: "personal" \| "chargeback" }`. `chargeback` triggers the LOU workflow (`DECISIONS-FEATURES.md #99`); `personal` requires a payment proof. Standard online bookings omit the field entirely. |
 | `specialRequests` | string | |
 | `status` | string | `"pending"` \| `"payment-uploaded"` \| `"payment-confirmed"` \| `"confirmed"` \| `"checked-in"` \| `"checked-out"` \| `"cancelled"` |
 | `paymentMethod` | string | `"pay-at-hotel"` \| `"gcash"` \| `"paypal"` \| other |
@@ -90,7 +91,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
 | `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
 | `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, ID type/number, emergency contact, vehicle plate, signature status |
-| `breakfastSelections` | map | Wire format `yyyy-mm-dd-guest-n` → selected silog item name; may later move to `breakfastSelections` collection |
+| `breakfastSelections` | map | Canonical silog selection store. Wire format `yyyy-mm-dd-guest-n` → selected silog item name; updated by staff in the admin booking drawer and exported by Reports. |
 | `cancellationReason` | string | |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
@@ -437,22 +438,10 @@ Single document. Managed from Settings → Breakfast tab.
 
 ---
 
-### `breakfastSelections/{selectionId}`
-
-One document per guest per day. Created by front desk at check-in.
-
-| Field | Type | Notes |
-|---|---|---|
-| `bookingId` | string | Ref to `bookings/{bookingId}` |
-| `roomNumber` | string | Denormalized |
-| `date` | string | ISO date of the breakfast morning e.g. `"2026-06-15"` |
-| `guestIndex` | number | 0-based — Guest 1 = 0, Guest 2 = 1, etc. |
-| `guestName` | string | Entered by front desk |
-| `silogId` | string | Ref to item in `settings/breakfastConfig.silogItems` |
-| `silogName` | string | Snapshot at entry time |
-| `enteredBy` | string | Staff UID |
-| `createdAt` | timestamp | |
-| `updatedAt` | timestamp | |
+Breakfast selections are intentionally stored on `bookings/{bookingId}.breakfastSelections`
+instead of a separate collection. This keeps the drawer, kitchen-prep
+report, and full backup export on one canonical source. The map key is
+`yyyy-mm-dd-guest-n`; the value is the selected silog item name.
 
 ---
 
@@ -469,16 +458,16 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | Collection | Read | Write |
 |---|---|---|
 | `rooms` | Public | Create/Update = Staff; Delete = Admin |
+| `roomDeletionAudit` | Staff/Admin only | Create = Admin only; immutable |
 | `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
 | `guests` | Owner or Staff/Admin | Create/disable via Admin SDK routes; profile update = Owner or Admin |
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
-| `corporateCodes` | Anyone (validation) | Admin only |
+| `corporateCodes` | Staff/Admin only; public validation uses `/api/corporate/validate-code` | Staff/Admin only |
 | `vouchers` | Anyone (validation) | Staff or Admin |
 | `intercoms` | Open (no auth) | Open (no auth) |
 | `members` | Owner (self) or Staff/Admin | Create = API/Admin SDK only via `/api/members/register`; Update = owner or Staff/Admin |
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
-| `breakfastSelections` | Staff/Admin only | Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
 | `storeOrders` | Open for create and guest cancellation by room/order ref | Create = anyone; Update = Staff/Admin; guest cancellation via API only |

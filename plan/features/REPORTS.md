@@ -170,14 +170,14 @@ Separate from the Sales tab — this is an operational tool for kitchen prep, no
 - [ ] **Daily kitchen prep report** — date picker (default: tomorrow) → shows total count of each silog needed for that morning
   - e.g. "Tapsilog × 4, Longsilog × 2, Tocilog × 3"
   - Grouped by silog name, sorted by count descending
-  - Only counts `breakfastSelections` entries for that date where `bookingId` links to a `confirmed` or `checked-in` booking
+  - Only counts `bookings/{bookingId}.breakfastSelections` map entries for that date on `confirmed` or `checked-in` bookings
 - [ ] Print/export kitchen prep report — simple printable list for kitchen staff (window.print() or jsPDF)
 - [ ] Unentered selections warning — if a breakfast booking is checking in today but silog selections are not yet entered, show alert
 
 > Breakfast **revenue** figures live in the Sales Report tab, not here.
 
 ### Data & Logic Checklist
-- [ ] Kitchen prep: query `breakfastSelections` where `date == selectedDate`, join to active bookings
+- [ ] Kitchen prep: scan active breakfast bookings and aggregate `breakfastSelections` map keys matching the selected date
 
 ---
 
@@ -230,7 +230,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 | **Members** | `members` | All registered loyalty members |
 | **Store Orders** | `storeOrders` | All store orders, all statuses |
 | **Store Catalog** | `storeItems` | All store items including inactive |
-| **Breakfast Selections** | `breakfastSelections` | All silog selections entered by front desk |
+| **Breakfast Selections** | `bookings.breakfastSelections` | All silog selections entered by front desk |
 | **Vouchers** | `vouchers` | All promo vouchers including expired/inactive |
 | **Corporate Inquiries** | `corporateInquiries` | All inquiry pipeline entries |
 

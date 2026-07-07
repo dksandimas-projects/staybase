@@ -8,6 +8,8 @@ import { DataTable, DataTableColumn } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { Users, Plus, Mail, Phone, Calendar, ClipboardList, Send, Sparkles, ArrowRightCircle, AlertCircle } from "lucide-react";
 import config from "@config";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { db } from "../firebase/config";
 
 export function CorporateInquiriesPage() {
   const navigate = useNavigate();
@@ -19,7 +21,8 @@ export function CorporateInquiriesPage() {
     addCorporateCode,
     convertInquiryToBooking,
     rooms,
-    roomTypes
+    roomTypes,
+    currentUser
   } = useAdmin();
   const toast = useToast();
 
@@ -31,8 +34,8 @@ export function CorporateInquiriesPage() {
 
   // Corporate Code Auto-gen states inside drawer
   const [promoCodeToGenerate, setPromoCodeToGenerate] = useState("");
-  const [corporateDoubleRate, setCorporateDoubleRate] = useState("2880");
-  const [corporateExecRate, setCorporateExecRate] = useState("4050");
+  const [corporateInquiryRates, setCorporateInquiryRates] = useState<Record<string, string>>({});
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
   // Convert-to-booking modal state
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
@@ -45,17 +48,27 @@ export function CorporateInquiriesPage() {
   const [convertRateOverride, setConvertRateOverride] = useState("");
   const [convertSubmitting, setConvertSubmitting] = useState(false);
   const [convertError, setConvertError] = useState("");
+  const canIssueAccessCode = !!selectedInquiry
+    && ["negotiating", "converted"].includes(selectedInquiry.status)
+    && !selectedInquiry.accessCodeId;
+  const newestNotes = useMemo(
+    () => [...(selectedInquiry?.notes || [])].sort((a, b) => b.at.localeCompare(a.at)),
+    [selectedInquiry?.notes]
+  );
 
   const handleRowClick = (inquiry: CorporateInquiry) => {
     setSelectedInquiry(inquiry);
     // Pre-fill a potential corporate code recommendation
     setPromoCodeToGenerate(`${inquiry.companyName.replace(/\s+/g, "").slice(0, 4).toUpperCase()}100`);
+    setCorporateInquiryRates(Object.fromEntries(
+      roomTypes.map((type) => [type.value, String(type.corporateRate || type.pricePerNight || 0)])
+    ));
     setIsDrawerOpen(true);
   };
 
-  const handleStatusChange = (status: CorporateInquiry["status"]) => {
+  const handleStatusChange = async (status: CorporateInquiry["status"]) => {
     if (selectedInquiry) {
-      updateInquiryStatus(selectedInquiry.id, status);
+      await updateInquiryStatus(selectedInquiry.id, status);
       setSelectedInquiry(prev => prev ? { ...prev, status } : null);
     }
   };
@@ -65,13 +78,14 @@ export function CorporateInquiriesPage() {
     if (!selectedInquiry || !newNoteText.trim()) return;
 
     addInquiryNote(selectedInquiry.id, newNoteText.trim());
+    const staffLabel = currentUser?.email?.split("@")[0] || "Staff";
     
     // Sync local state
     const updatedNotes = [
       ...selectedInquiry.notes,
       {
         text: newNoteText.trim(),
-        by: "admin-staff",
+        by: staffLabel,
         at: new Date().toISOString()
       }
     ];
@@ -82,35 +96,55 @@ export function CorporateInquiriesPage() {
     setNewNoteText("");
   };
 
-  const handleGenerateCode = (e: React.FormEvent) => {
+  const handleGenerateCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedInquiry || !promoCodeToGenerate.trim()) return;
 
-    addCorporateCode({
-      code: promoCodeToGenerate.trim().toUpperCase(),
+    const code = promoCodeToGenerate.trim().toUpperCase();
+    const ratePerRoomType = Object.fromEntries(
+      roomTypes.map((type) => [
+        type.value,
+        Number(corporateInquiryRates[type.value] || type.corporateRate || type.pricePerNight || 0)
+      ])
+    );
+
+    setIsGeneratingCode(true);
+    const result = await addCorporateCode({
+      code,
       companyName: selectedInquiry.companyName,
-      ratePerRoomType: {
-        "standard-double": parseFloat(corporateDoubleRate) || 2880,
-        executivo: parseFloat(corporateExecRate) || 4050
-      },
+      ratePerRoomType,
       expiresAt: "2027-12-31",
       usageCap: null,
       usageCount: 0,
       linkedInquiryId: selectedInquiry.id,
-      createdBy: "admin",
+      createdBy: currentUser?.uid || "staff",
       createdAt: new Date().toISOString(),
       isActive: true
     });
+    if (!result.success) {
+      setIsGeneratingCode(false);
+      toast.error("Corporate code not issued", result.error || "Please choose a different code.");
+      return;
+    }
 
-    // Update status to converted
-    updateInquiryStatus(selectedInquiry.id, "converted");
+    try {
+      await updateDoc(doc(db, "corporateInquiries", selectedInquiry.id), {
+        accessCodeId: code,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      setIsGeneratingCode(false);
+      toast.error("Code issued, inquiry update failed", error instanceof Error ? error.message : "Please update the inquiry manually.");
+      return;
+    }
+
+    setIsGeneratingCode(false);
     setSelectedInquiry({
       ...selectedInquiry,
-      status: "converted",
-      accessCodeId: promoCodeToGenerate.trim().toUpperCase()
+      accessCodeId: code
     });
 
-    toast.success("Corporate code issued", `Code ${promoCodeToGenerate.trim().toUpperCase()} is now active`);
+    toast.success("Corporate code issued", `Code ${code} is now active. Convert the inquiry when the booking is ready.`);
   };
 
   // Per W2.14 / decision #102 / audit S4.2: open the
@@ -368,18 +402,18 @@ export function CorporateInquiriesPage() {
               </div>
             </div>
 
-            {/* Access Code Creator (if not already converted) */}
-            {selectedInquiry.status !== "converted" && (
+            {/* Access Code Creator — negotiated rate codes are issued once an inquiry is negotiating. */}
+            {canIssueAccessCode && (
               <form onSubmit={handleGenerateCode} className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
                 <h4 className="text-xs font-bold text-primary-dark flex items-center gap-1.5">
                   <Sparkles size={14} />
                   Authorize Corporate Tariff Code
                 </h4>
                 <p className="text-[10px] text-gray-550 leading-relaxed font-semibold">
-                  Generate a client access key with pre-negotiated fixed prices. Completing this converts the inquiry.
+                  Generate a client access key with pre-negotiated fixed prices. The inquiry stays in its current pipeline stage until it is converted to a booking.
                 </p>
                 
-                <div className="grid gap-3 grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
                     Negotiated Promo Code
                     <input
@@ -390,39 +424,35 @@ export function CorporateInquiriesPage() {
                       className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs font-mono"
                     />
                   </label>
-                  
-                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
-                    Std Double Rate (PHP)
-                    <input
-                      type="number"
-                      required
-                      value={corporateDoubleRate}
-                      onChange={(e) => setCorporateDoubleRate(e.target.value)}
-                      className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs"
-                    />
-                  </label>
                 </div>
 
-                <div className="grid gap-3 grid-cols-2">
-                  <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
-                    Exec Suite Rate (PHP)
-                    <input
-                      type="number"
-                      required
-                      value={corporateExecRate}
-                      onChange={(e) => setCorporateExecRate(e.target.value)}
-                      className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs"
-                    />
-                  </label>
-                  
-                  <div className="flex items-end">
-                    <button
-                      type="submit"
-                      className="min-h-[38px] w-full rounded-lg bg-primary hover:bg-primary-dark text-[11px] font-bold text-white shadow-sm"
-                    >
-                      Issue Access Key
-                    </button>
-                  </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {roomTypes.map((type) => (
+                    <label key={type.value} className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
+                      {type.label} Rate ({config.currency})
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        value={corporateInquiryRates[type.value] ?? ""}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setCorporateInquiryRates((prev) => ({ ...prev, [type.value]: value }));
+                        }}
+                        className="min-h-[38px] w-full rounded border border-gray-200 bg-white px-2.5 text-xs"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={isGeneratingCode}
+                    className="min-h-[38px] w-full rounded-lg bg-primary hover:bg-primary-dark text-[11px] font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isGeneratingCode ? "Issuing..." : "Issue Access Key"}
+                  </button>
                 </div>
               </form>
             )}
@@ -455,9 +485,9 @@ export function CorporateInquiriesPage() {
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Discussion Ledger & Audit Notes</h3>
               
               <div className="space-y-3">
-                {selectedInquiry.notes.length > 0 ? (
+                {newestNotes.length > 0 ? (
                   <div className="divide-y divide-gray-150 border border-gray-200 rounded-lg bg-gray-50/50">
-                    {selectedInquiry.notes.map((note, idx) => (
+                    {newestNotes.map((note, idx) => (
                       <div key={idx} className="p-3 text-xs space-y-1">
                         <p className="text-gray-700 leading-normal">{note.text}</p>
                         <p className="text-[9px] text-gray-400">

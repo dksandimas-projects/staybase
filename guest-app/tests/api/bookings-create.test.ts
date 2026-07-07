@@ -261,6 +261,31 @@ const mockRequest = (body: any, method = "POST", url = "/api/bookings/create", c
   } as any;
 };
 
+// Per BI-12 (booking-intercom audit 2026-07-06): the public
+// /api/bookings/create route now rejects past check-ins. The
+// test fixtures previously hardcoded `"2026-06-15"`-style
+// strings, which became past-the-day the audit ran and started
+// failing the new check. Compute future-dated ISO strings
+// relative to the test run so the suite stays green as the
+// calendar advances (no more "update the test dates" every
+// quarter).
+const isoDate = (offsetDays: number): string => {
+  const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+};
+// 30 / 33 / 36 days out — well past the past-date check's
+// "today" floor for any reasonable test-run time. Spread
+// gives the room-type + overlap tests enough headroom to
+// detect conflicts.
+const FUTURE_CHECK_IN_1 = isoDate(30);
+const FUTURE_CHECK_OUT_1 = isoDate(33);
+const FUTURE_CHECK_IN_2 = isoDate(32);
+const FUTURE_CHECK_OUT_2 = isoDate(34);
+const FUTURE_CHECK_IN_3 = isoDate(36);
+const FUTURE_CHECK_OUT_3 = isoDate(39);
+
 describe("/api/bookings/create", () => {
   beforeEach(() => {
     // Reset state
@@ -332,8 +357,8 @@ describe("/api/bookings/create", () => {
     const validBookingBody = {
       bookingId: "booking_abc",
       roomType: "standard-double",
-      checkIn: "2026-06-15",
-      checkOut: "2026-06-18",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
       hasBreakfast: true,
       guestDetails: {
@@ -380,8 +405,8 @@ describe("/api/bookings/create", () => {
     const overlappingBody = {
       ...validBookingBody,
       bookingId: "booking_def",
-      checkIn: "2026-06-17",
-      checkOut: "2026-06-19"
+      checkIn: FUTURE_CHECK_IN_2,
+      checkOut: FUTURE_CHECK_OUT_2
     };
 
     const req2 = mockRequest(overlappingBody);
@@ -405,8 +430,8 @@ describe("/api/bookings/create", () => {
     const body = {
       bookingId: "booking_xyz",
       roomType: "standard-double",
-      checkIn: "2026-06-15",
-      checkOut: "2026-06-18",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -440,8 +465,8 @@ describe("/api/bookings/create", () => {
     const invalidCapacityBody = {
       bookingId: "booking_err",
       roomType: "standard-double",
-      checkIn: "2026-06-15",
-      checkOut: "2026-06-18",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
       guests: 10, // Exceeds type maxCapacity (4)
       hasBreakfast: false,
       guestDetails: {
@@ -477,8 +502,8 @@ describe("/api/bookings/create", () => {
     const honeypotBody = {
       bookingId: "booking_hp",
       roomType: "standard-double",
-      checkIn: "2026-06-15",
-      checkOut: "2026-06-18",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -527,8 +552,8 @@ describe("/api/bookings/create", () => {
     const invalidTurnstileBody = {
       bookingId: "booking_turnstile",
       roomType: "standard-double",
-      checkIn: "2026-06-15",
-      checkOut: "2026-06-18",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -573,8 +598,8 @@ describe("/api/bookings/create", () => {
       const body = {
         bookingId: "booking_type_first",
         roomType: "standard-double",
-        checkIn: "2026-07-01",
-        checkOut: "2026-07-03",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
         hasBreakfast: false,
         guestDetails: {
@@ -605,20 +630,23 @@ describe("/api/bookings/create", () => {
 
     test("skips a candidate room with an overlapping booking and assigns the next free one of the same type", async () => {
       // Pre-existing booking on room_101 for the same window.
+      // Per BI-12: use the dynamic future-dated fixtures so the
+      // setup overlaps the new booking's window without falling
+      // foul of the past-date check.
       mockBookings.push({
         id: "existing_booking",
         bookingId: "existing_booking",
         roomId: "room_101",
         status: "confirmed",
-        checkIn: { toDate: () => new Date("2026-07-02T00:00:00Z") },
-        checkOut: { toDate: () => new Date("2026-07-04T00:00:00Z") }
+        checkIn: { toDate: () => new Date(`${FUTURE_CHECK_IN_2}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${FUTURE_CHECK_OUT_2}T00:00:00Z`) }
       });
 
       const body = {
         bookingId: "booking_pick_second",
         roomType: "standard-double",
-        checkIn: "2026-07-01",
-        checkOut: "2026-07-05",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
         hasBreakfast: false,
         guestDetails: {
@@ -700,8 +728,8 @@ describe("/api/bookings/create", () => {
       const body = {
         bookingId: "booking_bad_type",
         roomType: "penthouse-suite",
-        checkIn: "2026-07-01",
-        checkOut: "2026-07-03",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
         hasBreakfast: false,
         guestDetails: {
@@ -923,8 +951,13 @@ describe("/api/bookings/create", () => {
         guestName: "Guest To Cancel",
         guestEmail: "cancel@guest.com",
         status: "pending",
+        voucherCode: "SAVE500",
         checkIn: { toDate: () => new Date("2026-06-12") },
         checkOut: { toDate: () => new Date("2026-06-14") }
+      };
+      mockVouchers.SAVE500 = {
+        code: "SAVE500",
+        usageCount: 2
       };
       mockBookings.push(activeBooking);
 
@@ -940,8 +973,19 @@ describe("/api/bookings/create", () => {
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith({ success: true });
 
-      expect(activeBooking.status).toBe("cancelled");
-      expect(activeBooking.cancellationReason).toBe("Change of plans");
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_to_cancel",
+        data: expect.objectContaining({
+          status: "cancelled",
+          cancellationReason: "Change of plans"
+        })
+      });
+      expect(updateCalls).toContainEqual({
+        path: "vouchers/SAVE500",
+        data: expect.objectContaining({
+          usageCount: 1
+        })
+      });
     });
 
     test("POST /api/bookings/cancel: allows self-cancel after confirmed (BF-16)", async () => {
@@ -973,8 +1017,12 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      // Status is flipped to cancelled.
-      expect(confirmedBooking.status).toBe("cancelled");
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_confirmed",
+        data: expect.objectContaining({
+          status: "cancelled"
+        })
+      });
     });
 
     test("POST /api/bookings/cancel: allows self-cancel after payment-confirmed (BF-16)", async () => {
@@ -1000,7 +1048,12 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      expect(paymentConfirmedBooking.status).toBe("cancelled");
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_payment_confirmed",
+        data: expect.objectContaining({
+          status: "cancelled"
+        })
+      });
     });
 
     test("POST /api/bookings/cancel: still rejects self-cancel after checked-in (BF-16)", async () => {

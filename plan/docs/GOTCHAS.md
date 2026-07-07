@@ -71,6 +71,7 @@ Things agents must never do. Check this file before implementing any feature.
 
 - **Notification sound requires a user gesture to unlock** — browser autoplay policy blocks audio until the user has interacted with the page. Unlock on first click after login. Do not play sound on page load.
 - **Only play notification sound when the inbox tab is not focused** — do not alert staff who are actively viewing the inbox.
+- **`Permissions-Policy` must keep `microphone=(self)` in every `vercel.json` (root, guest-app, admin-app)** — an empty allowlist (`microphone=()`) denies `getUserMedia` for the page's own origin, which silently kills the intercom WebRTC voice call in production while it keeps working in local dev (no headers there). Camera and geolocation stay fully locked (BI-06, booking-intercom audit 2026-07-06).
 
 ---
 
@@ -100,6 +101,9 @@ Things agents must never do. Check this file before implementing any feature.
 - **Honeypot rejection must be silent** — return `200` with a fake success response when honeypot is filled. Never return an error that reveals the anti-bot mechanism.
 - **Turnstile token must be verified server-side** — client-side Turnstile rendering is not enough. Always POST the token to Cloudflare's verification endpoint in the API route before processing any request.
 - **Never block a request on Turnstile verification failure with a technical error** — show a user-friendly "Something went wrong, please try again" message.
+- **Turnstile bypasses are `NODE_ENV === "test"` only** — never accept sentinel tokens (`mock_token`, Cloudflare dummy tokens) in the API route outside unit tests, and never add client-side `|| "mock_token"` fallbacks. Both shipped once and made every bot gate decorative in production (BI-02, booking-intercom audit 2026-07-06). Local dev needs no bypass: non-production origins verify against Cloudflare's always-pass test secret.
+- **Turnstile tokens are single-use** — reset the widget (`useTurnstileToken().reset()`) after every request that sent the token to siteverify, or the next submit fails with a duplicate-token error.
+- **Render Turnstile through `useTurnstileToken` with a correct `enabled` gate** — never inline the widget mount in a page effect with `[]` deps; if the container div is conditionally rendered (step-gated forms, loading skeletons), an effect that bails on a null ref will never render the widget (BI-03). And never render a fake "verified" panel without a live widget behind it (BI-01).
 
 ---
 

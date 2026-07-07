@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { compressImageFile } from "@spark-inn/shared";
+import { compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -33,8 +33,74 @@ import {
 import config from "@config";
 import { jsPDF } from "jspdf";
 import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { db, storage } from "../firebase/config";
 import { auth } from "../firebase/auth";
+
+function formatDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const normalized = hex.replace("#", "");
+  const expanded = normalized.length === 3
+    ? normalized.split("").map((char) => char + char).join("")
+    : normalized;
+  const value = Number.parseInt(expanded, 16);
+  if (Number.isNaN(value)) return [0, 0, 0];
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+const pdfFontCache = new Map<string, string | null>();
+
+async function fetchFontAsBase64(path: string) {
+  if (pdfFontCache.has(path)) return pdfFontCache.get(path);
+  try {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`Unable to load font ${path}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    const base64 = btoa(binary);
+    pdfFontCache.set(path, base64);
+    return base64;
+  } catch (error) {
+    console.warn("PDF font unavailable:", error);
+    pdfFontCache.set(path, null);
+    return null;
+  }
+}
+
+async function registerBrandPdfFonts(pdf: jsPDF) {
+  const apolloBase64 = await fetchFontAsBase64("/brand/fonts/APOLLO.otf");
+  const interBase64 = await fetchFontAsBase64("/brand/fonts/Inter-Regular.ttf");
+
+  try {
+    if (apolloBase64) {
+      pdf.addFileToVFS("APOLLO.otf", apolloBase64);
+      pdf.addFont("APOLLO.otf", "Apollo", "normal");
+    }
+    if (interBase64) {
+      pdf.addFileToVFS("Inter-Regular.ttf", interBase64);
+      pdf.addFont("Inter-Regular.ttf", "Inter", "normal");
+    }
+  } catch (error) {
+    console.warn("PDF font registration failed; using jsPDF fallback fonts.", error);
+  }
+}
+
+function setPdfFont(pdf: jsPDF, family: "Apollo" | "Inter" | "helvetica") {
+  try {
+    pdf.setFont(family, "normal");
+  } catch {
+    pdf.setFont("helvetica", "normal");
+  }
+}
 
 export function BookingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -50,11 +116,20 @@ export function BookingsPage() {
     roomTypes,
     breakfastConfig,
     websiteContent,
+    rewardsConfig,
+    members,
     currentUser
   } = useAdmin();
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
   const checkoutWithBalanceConfirm = useTwoClickConfirm<"confirm">();
+  const brandRgb = hexToRgb(config.colors.primary);
+  const getApiBaseUrl = () => {
+    if (typeof window === "undefined") return "";
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1") return "http://localhost:3000";
+    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
+  };
 
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
   const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
@@ -87,6 +162,16 @@ export function BookingsPage() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const bookingId = searchParams.get("bookingId");
+    if (!bookingId) return;
+    const match = bookings.find((booking) => booking.id === bookingId);
+    if (!match) return;
+    setActiveMainTab("bookings");
+    setSelectedBooking(match);
+    setIsDrawerOpen(true);
+  }, [searchParams, bookings]);
+
   // Store Order Drawer States
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
@@ -96,6 +181,8 @@ export function BookingsPage() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
+  const [redeemPointsInput, setRedeemPointsInput] = useState("");
+  const [isRedeemingPoints, setIsRedeemingPoints] = useState(false);
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -113,11 +200,11 @@ export function BookingsPage() {
     }
   }, [roomTypes]);
   const [roomNumber, setRoomNumber] = useState("");
-  const [checkInDate, setCheckInDate] = useState(new Date().toISOString().split("T")[0]);
+  const [checkInDate, setCheckInDate] = useState(() => getManilaDateInfo(config.timezone).todayStr);
   const [checkOutDate, setCheckOutDate] = useState(() => {
-    const tomorrow = new Date();
+    const tomorrow = getManilaDateInfo(config.timezone).manilaDate;
     tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split("T")[0];
+    return formatDateInput(tomorrow);
   });
   const [numGuests, setNumGuests] = useState(1);
   const [walkinPayment, setWalkinPayment] = useState("pay-at-hotel");
@@ -242,7 +329,7 @@ export function BookingsPage() {
   //              confirmed -> checked-in -> checked-out status flow)
   // in-house   = status === "checked-in"
   const operationalFilter = searchParams.get("filter");
-  const today = new Date().toISOString().split("T")[0];
+  const today = getManilaDateInfo(config.timezone).todayStr;
   const matchesOperationalFilter = (booking: Booking) => {
     if (!operationalFilter) return true;
     if (operationalFilter === "arrivals") {
@@ -438,11 +525,7 @@ export function BookingsPage() {
     if (!selectedBooking) return;
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
-
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/reject-discount`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/reject-discount`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -476,6 +559,67 @@ export function BookingsPage() {
     }
   };
 
+  const selectedBookingMember = selectedBooking?.memberId
+    ? members.find((member) => member.id === selectedBooking.memberId)
+    : null;
+  const pointsToRedeem = Math.max(0, Math.floor(Number(redeemPointsInput) || 0));
+  const redemptionValue = Math.round(pointsToRedeem * ((rewardsConfig.pointsRedemptionRate || 0) / 100));
+
+  const handleRedeemPoints = async () => {
+    if (!selectedBooking || !selectedBooking.memberId || pointsToRedeem <= 0) return;
+    setIsRedeemingPoints(true);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/redeem-points`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId: selectedBooking.id,
+          memberId: selectedBooking.memberId,
+          pointsToRedeem
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to redeem points.");
+      }
+      setRedeemPointsInput("");
+      toast.success("Points redeemed", `${pointsToRedeem} points applied to this booking.`);
+    } catch (error) {
+      toast.error("Points not redeemed", error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsRedeemingPoints(false);
+    }
+  };
+
+  const handleUndoRedemption = async () => {
+    if (!selectedBooking) return;
+    setIsRedeemingPoints(true);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/undo-redemption`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId: selectedBooking.id })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to undo redemption.");
+      }
+      toast.success("Redemption undone", "Points were returned to the member balance.");
+    } catch (error) {
+      toast.error("Could not undo redemption", error instanceof Error ? error.message : "Unknown error");
+    } finally {
+      setIsRedeemingPoints(false);
+    }
+  };
+
   const handleCancelBooking = async (reason: string) => {
     if (!selectedBooking) return;
     updateBookingStatus(selectedBooking.id, "cancelled", { cancellationReason: reason });
@@ -506,6 +650,8 @@ export function BookingsPage() {
     const reg = b.guestRegistration;
 
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    await registerBrandPdfFonts(pdf);
+    setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -519,12 +665,14 @@ export function BookingsPage() {
     };
 
     // ── Header ──
+    setPdfFont(pdf, "Apollo");
     pdf.setFontSize(18);
     pdf.setTextColor(30, 30, 30);
     pdf.text("Guest Registration Form", pageW / 2, y, { align: "center" });
     y += 8;
+    setPdfFont(pdf, "Inter");
 
-    pdf.setDrawColor(241, 101, 34);
+    pdf.setDrawColor(...brandRgb);
     pdf.setLineWidth(0.5);
     pdf.line(marginL, y, marginR, y);
     y += 8;
@@ -709,7 +857,7 @@ export function BookingsPage() {
     if (b.hasBreakfast) {
       checkNewPage(50);
 
-      pdf.setDrawColor(241, 101, 34);
+      pdf.setDrawColor(...brandRgb);
       pdf.setLineWidth(0.5);
       pdf.line(marginL, y, marginR, y);
       y += 8;
@@ -739,7 +887,7 @@ export function BookingsPage() {
         const rowH = 10;
 
         // Header row
-        pdf.setFillColor(241, 101, 34);
+        pdf.setFillColor(...brandRgb);
         pdf.setTextColor(255, 255, 255);
         pdf.setFontSize(8);
         pdf.rect(startX, y, colW, rowH, "F");
@@ -823,7 +971,7 @@ export function BookingsPage() {
     pdf.setFontSize(7);
     pdf.setTextColor(160, 160, 160);
     pdf.text(
-      `Generated by ${config.brandName} guest registration system — ${new Date().toISOString().split("T")[0]}`,
+      `Generated by ${config.brandName} guest registration system — ${getManilaDateInfo(config.timezone).todayStr}`,
       pageW / 2,
       footerY + 6,
       { align: "center" }
@@ -835,11 +983,13 @@ export function BookingsPage() {
     window.open(url, "_blank");
   };
 
-  const printBookingReceiptPDF = () => {
+  const printBookingReceiptPDF = async () => {
     if (!selectedBooking) return;
     const b = selectedBooking;
 
     const pdf = new jsPDF({ unit: "mm", format: "a4" });
+    await registerBrandPdfFonts(pdf);
+    setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -858,17 +1008,19 @@ export function BookingsPage() {
       formatPrice(value).replace(/\u00A0/g, " ");
 
     // ── Header ──
+    setPdfFont(pdf, "Apollo");
     pdf.setFontSize(20);
-    pdf.setTextColor(241, 101, 34);
+    pdf.setTextColor(...brandRgb);
     pdf.text(config.brandName, pageW / 2, y, { align: "center" });
     y += 7;
 
+    setPdfFont(pdf, "Inter");
     pdf.setFontSize(16);
     pdf.setTextColor(30, 30, 30);
     pdf.text("Booking Confirmation Receipt", pageW / 2, y, { align: "center" });
     y += 6;
 
-    pdf.setDrawColor(241, 101, 34);
+    pdf.setDrawColor(...brandRgb);
     pdf.setLineWidth(0.5);
     pdf.line(marginL, y, marginR, y);
     y += 6;
@@ -947,7 +1099,11 @@ export function BookingsPage() {
         : b.discountType === "pwd"
           ? "PWD Discount"
           : "Discount";
-      const discountAmount = Math.round(subtotal * (b.discountPct / 100));
+      const storedDiscountBase = b.originalTotalPrice ?? subtotal;
+      const discountAmount = Math.max(
+        0,
+        Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
+      );
       pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
       pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
       y += 5.5;
@@ -1010,7 +1166,7 @@ export function BookingsPage() {
 
     // ── Payment Breakdown ──
     checkNewPage(40);
-    pdf.setDrawColor(241, 101, 34);
+    pdf.setDrawColor(...brandRgb);
     pdf.setLineWidth(0.5);
     pdf.line(marginL, y, marginR, y);
     y += 6;
@@ -1123,7 +1279,7 @@ export function BookingsPage() {
       { align: "center" }
     );
     pdf.text(
-      `Generated by ${config.brandName} booking system — ${new Date().toISOString().split("T")[0]}`,
+      `Generated by ${config.brandName} booking system — ${getManilaDateInfo(config.timezone).todayStr}`,
       pageW / 2,
       footerY + 14,
       { align: "center" }
@@ -1177,8 +1333,13 @@ export function BookingsPage() {
     try {
       setGuestIdUploadStatus("Compressing guest ID image...");
       const image = await compressImageFile(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
-      syncSelectedBooking({ guestIdPhotoUrl: image.dataUrl });
-      setGuestIdUploadStatus(`ID image ready: ${Math.max(1, Math.round(image.compressedSize / 1024))} KB.`);
+      setGuestIdUploadStatus("Uploading guest ID to secure storage...");
+      const safeName = image.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileRef = storageRef(storage, `bookings/${selectedBooking.id}/guest-id/${Date.now()}-${safeName}`);
+      await uploadBytes(fileRef, image.file);
+      const url = await getDownloadURL(fileRef);
+      syncSelectedBooking({ guestIdPhotoUrl: url });
+      setGuestIdUploadStatus(`ID image uploaded: ${Math.max(1, Math.round(image.compressedSize / 1024))} KB.`);
     } catch (error) {
       setGuestIdUploadStatus(error instanceof Error ? error.message : "Unable to process guest ID image.");
     }
@@ -1247,7 +1408,7 @@ export function BookingsPage() {
         roomType,
         guestName,
         reminderSentAt: null,
-        guestEmail: guestEmail || "walkin@guest.com",
+        guestEmail: guestEmail || `walkin-${Date.now()}@example.invalid`,
         guestPhone: guestPhone || "n/a",
         numGuests,
         checkIn: checkInDate,
@@ -1292,7 +1453,7 @@ export function BookingsPage() {
         hasBreakfast,
         breakfastRate: hasBreakfast ? (breakfastConfig.ratePerPersonPerNight || 300) : 0,
         guestIdPhotoUrl: null,
-        handledBy: "frontdesk-staff",
+        handledBy: currentUser?.uid || "staff",
         cancellationReason: ""
       });
 
@@ -1408,6 +1569,7 @@ export function BookingsPage() {
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
                 <option value="payment-uploaded">Payment Uploaded</option>
+                <option value="payment-confirmed">Payment Confirmed</option>
                 <option value="confirmed">Confirmed</option>
                 <option value="checked-in">Checked In</option>
                 <option value="checked-out">Checked Out</option>
@@ -1490,6 +1652,48 @@ export function BookingsPage() {
                 <p className="text-xs font-bold text-gray-900 mt-1 uppercase sm:text-right">{selectedBooking.source}</p>
               </div>
             </div>
+
+            {selectedBooking.paymentProofUrl && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <CreditCard size={14} className="text-primary" />
+                  Payment Proof
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+                    <a
+                      href={selectedBooking.paymentProofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                    >
+                      <img
+                        src={selectedBooking.paymentProofUrl}
+                        alt={`Payment proof for ${selectedBooking.bookingRef}`}
+                        className="h-44 w-full object-cover"
+                      />
+                    </a>
+                    <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                      <p>
+                        Review the uploaded payment screenshot before confirming this booking.
+                      </p>
+                      <p className="font-semibold text-gray-900">
+                        Method: {selectedBooking.paymentMethod || "Not specified"}
+                      </p>
+                      <a
+                        href={selectedBooking.paymentProofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                      >
+                        <Eye size={13} />
+                        Open Full Size
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Guest details card */}
             <div className="space-y-3">
@@ -1910,6 +2114,71 @@ export function BookingsPage() {
               </div>
             )}
 
+            {selectedBooking.memberId && ["confirmed", "checked-in", "checked-out"].includes(selectedBooking.status) && (
+              <div className="rounded-card border border-primary/20 bg-primary-light/30 p-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Spark Rewards Redemption</h3>
+                    <p className="mt-1 text-[11px] text-gray-600">
+                      {selectedBookingMember
+                        ? `${selectedBookingMember.fullName || "Member"} · ${selectedBookingMember.memberNumber} · ${selectedBookingMember.rewardsPoints} pts`
+                        : `Linked member: ${selectedBooking.memberId}`}
+                    </p>
+                  </div>
+                  {selectedBooking.pointsRedeemed > 0 && (
+                    <span className="rounded bg-white px-2 py-1 text-[10px] font-bold text-primary-dark">
+                      {selectedBooking.pointsRedeemed} pts = {formatPrice(selectedBooking.pointsRedeemedValue || 0)}
+                    </span>
+                  )}
+                </div>
+
+                {selectedBooking.pointsRedeemed > 0 ? (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs text-gray-700">
+                      Redemption already applied to this booking total.
+                    </p>
+                    {currentUser?.role === "admin" && selectedBooking.status === "confirmed" && (
+                      <button
+                        type="button"
+                        disabled={isRedeemingPoints}
+                        onClick={() => void handleUndoRedemption()}
+                        className="min-h-[38px] rounded-lg border border-red-200 bg-white px-3 text-[11px] font-bold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                      >
+                        Undo Redemption
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-600">
+                      Points to redeem
+                      <input
+                        type="number"
+                        min={1}
+                        max={selectedBookingMember?.rewardsPoints || undefined}
+                        value={redeemPointsInput}
+                        onChange={(e) => setRedeemPointsInput(e.target.value)}
+                        className="min-h-[44px] rounded border border-gray-200 bg-white px-3 text-xs"
+                      />
+                      <span className="font-normal text-gray-500">
+                        {currentUser?.role === "admin"
+                          ? `Preview: ${formatPrice(redemptionValue)} off · new total ${formatPrice(Math.max(0, selectedBooking.totalPrice - redemptionValue))}`
+                          : "Admin role required to apply points redemptions."}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={currentUser?.role !== "admin" || isRedeemingPoints || pointsToRedeem <= 0}
+                      onClick={() => void handleRedeemPoints()}
+                      className="min-h-[44px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Apply Points
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Onsite payments ledger */}
             <div className="space-y-3.5">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">On-site Payments Ledger</h3>
@@ -2039,9 +2308,6 @@ export function BookingsPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-                              ? "http://localhost:3000"
-                              : import.meta.env.VITE_GUEST_APP_URL || "";
                             const params = new URLSearchParams({
                               bookingRef: selectedBooking.bookingRef,
                               roomId: selectedBooking.roomId,
@@ -2051,7 +2317,7 @@ export function BookingsPage() {
                               paymentMethod: selectedBooking.paymentMethod,
                               total: String(selectedBooking.totalPrice)
                             });
-                            window.open(`${baseUrl.replace(/\/$/, "")}/book/confirm?${params.toString()}`, "_blank");
+                            window.open(`${getApiBaseUrl().replace(/\/$/, "")}/book/confirm?${params.toString()}`, "_blank");
                           }}
                           className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-255 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
                         >
@@ -2067,12 +2333,30 @@ export function BookingsPage() {
 
             {/* Allowed transitions buttons */}
             <div className="grid gap-2 border-t border-gray-150 pt-4 sm:grid-cols-2">
-              {(selectedBooking.status === "pending" || selectedBooking.status === "payment-uploaded") && (
+              {selectedBooking.status === "pending" && (
                 <button
                   onClick={() => handleStatusTransition("confirmed")}
                   className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
                 >
-                  Confirm Payment & Booking
+                  Confirm Pay-at-Hotel Booking
+                </button>
+              )}
+
+              {selectedBooking.status === "payment-uploaded" && (
+                <button
+                  onClick={() => handleStatusTransition("payment-confirmed")}
+                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
+                >
+                  Mark Payment Confirmed
+                </button>
+              )}
+
+              {selectedBooking.status === "payment-confirmed" && (
+                <button
+                  onClick={() => handleStatusTransition("confirmed")}
+                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
+                >
+                  Confirm Booking
                 </button>
               )}
 
@@ -2215,15 +2499,36 @@ export function BookingsPage() {
               </div>
             )}
 
-            {/* GCash screenshot mock proof */}
-            {selectedOrder.paymentMethod === "gcash" && (
+            {selectedOrder.paymentMethod === "gcash" && selectedOrder.paymentProofUrl && (
               <div className="space-y-3">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">GCash Proof of Remittance</h3>
-                <div className="rounded-lg border border-gray-200 p-4 bg-gray-100 flex flex-col items-center justify-center gap-2">
-                  <div className="h-44 w-32 rounded bg-blue-650/10 border border-blue-600/30 flex items-center justify-center text-blue-600 text-xs font-bold font-mono shadow-inner">
-                    RECEIPT SCREENSHOT
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+                    <a
+                      href={selectedOrder.paymentProofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                    >
+                      <img
+                        src={selectedOrder.paymentProofUrl}
+                        alt={`GCash proof for ${selectedOrder.orderRef}`}
+                        className="h-44 w-full object-cover"
+                      />
+                    </a>
+                    <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                      <p>Review the uploaded store payment screenshot before confirming this order.</p>
+                      <a
+                        href={selectedOrder.paymentProofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                      >
+                        <Eye size={13} />
+                        Open Full Size
+                      </a>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-gray-400">Mock receipt confirmation verified</span>
                 </div>
               </div>
             )}

@@ -26,7 +26,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -283,6 +283,10 @@ export interface StoreItem {
   createdAt: string;
 }
 
+type StoreItemInput = Omit<StoreItem, "id" | "createdAt"> & {
+  imageFile?: File | null;
+};
+
 export interface StoreOrder {
   id: string;
   orderRef: string;
@@ -308,6 +312,10 @@ export interface StoreOrder {
 export interface AdminContextType {
   // Authentication
   authLoading: boolean;
+  dashboardLoading: boolean;
+  roomsLoading: boolean;
+  ratesLoading: boolean;
+  settingsLoading: boolean;
   currentUser: AdminUser | null;
   sendPasswordReset: (email: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
@@ -330,17 +338,17 @@ export interface AdminContextType {
 
   // Vouchers & Corporate Rates
   vouchers: Voucher[];
-  addVoucher: (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => void;
+  addVoucher: (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => Promise<{ success: boolean; error?: string }>;
   toggleVoucherActive: (voucherId: string) => void;
   corporateCodes: CorporateCode[];
-  addCorporateCode: (code: CorporateCode) => void;
+  addCorporateCode: (code: CorporateCode) => Promise<{ success: boolean; error?: string }>;
   toggleCorporateCodeActive: (code: string) => void;
   deleteCorporateCode: (code: string) => void;
 
   // Corporate Inquiries
   corporateInquiries: CorporateInquiry[];
-  updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => void;
-  addInquiryNote: (inquiryId: string, text: string) => void;
+  updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => Promise<void>;
+  addInquiryNote: (inquiryId: string, text: string) => Promise<void>;
   convertInquiryToBooking: (input: {
     inquiryId: string;
     roomId: string;
@@ -354,8 +362,8 @@ export interface AdminContextType {
 
   // Members
   members: Member[];
-  updateMemberPoints: (memberId: string, amount: number, type: PointsLog["type"], reason: string) => void;
-  toggleMemberActive: (memberId: string) => void;
+  updateMemberPoints: (memberId: string, amount: number, type: PointsLog["type"], reason: string) => Promise<{ success: boolean; error?: string }>;
+  toggleMemberActive: (memberId: string, isActive: boolean) => Promise<{ success: boolean; error?: string }>;
 
   // Intercom Inbox
   intercoms: Record<string, IntercomMessage[]>;
@@ -373,8 +381,8 @@ export interface AdminContextType {
   updateStoreOrderStatus: (orderId: string, status: StoreOrder["status"], cancellationReason?: string) => void | Promise<void>;
   billStoreOrder: (orderId: string) => void | Promise<void>;
   storeItems: StoreItem[];
-  addStoreItem: (item: Omit<StoreItem, "id" | "createdAt">) => Promise<void>;
-  updateStoreItem: (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => Promise<void>;
+  addStoreItem: (item: StoreItemInput) => Promise<void>;
+  updateStoreItem: (itemId: string, updates: Partial<StoreItemInput>) => Promise<void>;
   deleteStoreItem: (itemId: string) => Promise<void>;
 
   // Configurations
@@ -535,9 +543,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Rooms Data State
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setRooms([]);
+      setRoomsLoading(true);
+      return;
+    }
+    setRoomsLoading(true);
     const roomsRef = collection(db, "rooms");
     const unsubscribe = onSnapshot(
       roomsRef,
@@ -580,9 +594,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         );
 
         setRooms(roomsData);
+        setRoomsLoading(false);
       },
       (error) => {
         console.error("Error listening to rooms collection:", error);
+        setRoomsLoading(false);
       }
     );
 
@@ -709,7 +725,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
   }
 
-  const deleteRoom = async (roomId: string): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
+  const deleteRoom = async (roomId: string, reason = ""): Promise<{ success: boolean; error?: string; blockedByActiveBookings?: number }> => {
     const room = rooms.find((r) => r.id === roomId);
     if (!room) {
       const error = "Room not found.";
@@ -761,6 +777,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      await addDoc(collection(db, "roomDeletionAudit"), {
+        roomId,
+        roomNumber: room.roomNumber,
+        roomType: room.type,
+        reason: reason.trim(),
+        deletedBy: currentUser?.uid || currentUser?.email || "staff",
+        deletedAt: serverTimestamp()
+      });
+
       // 4) Finally, the room document itself.
       await deleteDoc(doc(db, "rooms", roomId));
 
@@ -775,9 +800,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Bookings Data State
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setBookings([]);
+      setBookingsLoading(true);
+      return;
+    }
+    setBookingsLoading(true);
     const bookingsRef = collection(db, "bookings");
     const unsubscribe = onSnapshot(
       bookingsRef,
@@ -884,9 +915,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         });
 
         setBookings(bookingsData);
+        setBookingsLoading(false);
       },
       (error) => {
         console.error("Error listening to bookings collection:", error);
+        setBookingsLoading(false);
       }
     );
 
@@ -899,11 +932,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
       if (status === "cancelled") {
         const token = await auth.currentUser?.getIdToken(true);
-        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-          ? "http://localhost:3000"
-          : import.meta.env.VITE_GUEST_APP_URL || "";
-
-        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/cancel`, {
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/cancel`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -918,13 +947,43 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
+      } else if (status === "confirmed") {
+        const token = await auth.currentUser?.getIdToken(true);
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to confirm booking via server API.");
+        }
+      } else if (status === "payment-confirmed") {
+        await updateDoc(bookingDocRef, {
+          status,
+          ...details,
+          updatedAt: serverTimestamp(),
+          handledBy: currentUser?.uid || currentUser?.email || "staff"
+        });
+        const token = await auth.currentUser?.getIdToken(true);
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/payment-confirmed`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Payment was marked confirmed, but the email could not be sent.");
+        }
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
-        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-          ? "http://localhost:3000"
-          : import.meta.env.VITE_GUEST_APP_URL || "";
-
-        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/checkout`, {
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkout`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -964,11 +1023,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addOnsitePayment = async (bookingId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
-
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/add-payment`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-payment`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -995,13 +1050,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addWalkinBooking = async (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
-
       const bookingId = doc(collection(db, "bookings")).id;
 
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/create-walkin`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/create-walkin`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1039,9 +1090,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Vouchers — live from Firestore
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [vouchersLoading, setVouchersLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setVouchers([]);
+      setVouchersLoading(true);
+      return;
+    }
+    setVouchersLoading(true);
     const vouchersRef = collection(db, "vouchers");
     const unsubscribe = onSnapshot(
       vouchersRef,
@@ -1067,23 +1124,39 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
         voucherData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         setVouchers(voucherData);
+        setVouchersLoading(false);
       },
       (error) => {
         console.error("Error listening to vouchers collection:", error);
+        setVouchersLoading(false);
       }
     );
 
     return unsubscribe;
   }, [currentUser]);
 
-  const addVoucher = async (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => {
+  const addVoucher = async (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">): Promise<{ success: boolean; error?: string }> => {
     try {
       const staff = currentUser;
-      await addDoc(collection(db, "vouchers"), {
-        ...voucher,
-        usageCount: 0,
-        createdBy: staff?.uid || "unknown",
-        createdAt: Timestamp.now(),
+      const voucherCode = voucher.code.trim().toUpperCase();
+      const legacyDuplicate = await getDocs(query(collection(db, "vouchers"), where("code", "==", voucherCode)));
+      if (!legacyDuplicate.empty) {
+        return { success: false, error: "Voucher code already exists. Choose a different code." };
+      }
+      const voucherRef = doc(db, "vouchers", voucherCode);
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(voucherRef);
+        if (existing.exists()) {
+          throw new Error("Voucher code already exists. Choose a different code.");
+        }
+        transaction.set(voucherRef, {
+          ...voucher,
+          code: voucherCode,
+          usageCount: 0,
+          createdBy: staff?.uid || "unknown",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
       });
 
       // Per W4.4 / decision #104: when a voucher is issued with
@@ -1094,10 +1167,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       if (voucher.guestEmail && voucher.guestEmail.trim()) {
         try {
           const token = await auth.currentUser?.getIdToken(true);
-          const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-            ? "http://localhost:3000"
-            : import.meta.env.VITE_GUEST_APP_URL || "";
-          await fetch(`${baseUrl.replace(/\/$/, "")}/api/email/voucher-issued`, {
+          await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/voucher-issued`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -1105,7 +1175,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             },
             body: JSON.stringify({
               voucher: {
-                code: voucher.code,
+                code: voucherCode,
                 discountType: voucher.discountType,
                 discountValue: voucher.discountValue,
                 expiresAt: voucher.expiresAt,
@@ -1118,8 +1188,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           console.error("Failed to send voucher-issued email:", emailErr);
         }
       }
+      return { success: true };
     } catch (error) {
       console.error("Error adding voucher:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Failed to add voucher." };
     }
   };
 
@@ -1139,6 +1211,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [corporateCodes, setCorporateCodes] = useState<CorporateCode[]>([]);
 
   useEffect(() => {
+    if (!currentUser) return;
     const corpCodesRef = collection(db, "corporateCodes");
     const unsubscribe = onSnapshot(
       corpCodesRef,
@@ -1169,17 +1242,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
-  const addCorporateCode = async (code: CorporateCode) => {
+  const addCorporateCode = async (code: CorporateCode): Promise<{ success: boolean; error?: string }> => {
     try {
       const { code: codeValue, ...rest } = code;
-      await setDoc(doc(db, "corporateCodes", code.code), {
-        ...rest,
-        isActive: true,
+      const codeRef = doc(db, "corporateCodes", codeValue);
+      await runTransaction(db, async (transaction) => {
+        const existing = await transaction.get(codeRef);
+        if (existing.exists()) {
+          throw new Error("Corporate code already exists. Choose a different code.");
+        }
+        transaction.set(codeRef, {
+          ...rest,
+          isActive: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
       });
+      return { success: true };
     } catch (error) {
       console.error("Error adding corporate code:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Failed to add corporate code." };
     }
   };
 
@@ -1245,7 +1329,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const updateInquiryStatus = async (inquiryId: string, status: CorporateInquiry["status"]) => {
     try {
-      await updateDoc(doc(db, "corporateInquiries", inquiryId), { status });
+      await updateDoc(doc(db, "corporateInquiries", inquiryId), {
+        status,
+        updatedAt: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error updating inquiry status:", error);
     }
@@ -1254,13 +1341,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addInquiryNote = async (inquiryId: string, text: string) => {
     try {
       const inquiryRef = doc(db, "corporateInquiries", inquiryId);
-      const inquiry = corporateInquiries.find(i => i.id === inquiryId);
-      if (inquiry) {
-        const newNote = { text, by: currentUser?.email || "staff", at: new Date().toISOString() };
-        await updateDoc(inquiryRef, {
-          notes: [...inquiry.notes, newNote],
-        });
-      }
+      const staffLabel = staff.find((member) => member.uid === currentUser?.uid)?.fullName
+        || currentUser?.email?.split("@")[0]
+        || "Staff";
+      const newNote = { text, by: staffLabel, at: new Date().toISOString() };
+      await updateDoc(inquiryRef, {
+        notes: arrayUnion(newNote),
+        updatedAt: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error adding inquiry note:", error);
     }
@@ -1286,11 +1374,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
-      const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
-        : import.meta.env.VITE_GUEST_APP_URL || "";
       const bookingId = doc(collection(db, "bookings")).id;
-      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1365,32 +1450,81 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const updateMemberPoints = (memberId: string, amount: number, type: PointsLog["type"], reason: string) => {
-    setMembers(prev => prev.map(mem => {
-      if (mem.id === memberId) {
-        const newBalance = Math.max(0, mem.rewardsPoints + amount);
-        const newEntry: PointsLog = {
-          id: `pt-${Date.now()}`,
+  const updateMemberPoints = async (
+    memberId: string,
+    amount: number,
+    type: PointsLog["type"],
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser) {
+      return { success: false, error: "Sign in before adjusting member points." };
+    }
+    if (!Number.isFinite(amount) || amount === 0) {
+      return { success: false, error: "Enter a non-zero points adjustment." };
+    }
+    if (!reason.trim()) {
+      return { success: false, error: "A reason is required for points adjustments." };
+    }
+
+    try {
+      const memberRef = doc(db, "members", memberId);
+      const historyRef = doc(collection(db, "members", memberId, "pointsHistory"));
+
+      await runTransaction(db, async (transaction) => {
+        const memberDoc = await transaction.get(memberRef);
+        if (!memberDoc.exists()) {
+          throw new Error("Member account was not found.");
+        }
+
+        const currentBalance = Number(memberDoc.data().rewardsPoints || 0);
+        const nextBalance = currentBalance + amount;
+        if (nextBalance < 0) {
+          throw new Error("Points adjustment cannot reduce the member balance below zero.");
+        }
+
+        transaction.update(memberRef, {
+          rewardsPoints: nextBalance,
+          updatedAt: serverTimestamp()
+        });
+        transaction.set(historyRef, {
           type,
           points: amount,
-          description: type === "manual" ? `Manual Adjust (${reason})` : "Loyalty reward",
-          reason,
+          description: type === "manual" ? `Manual adjust: ${reason.trim()}` : `Staff ${type} adjustment`,
+          reason: reason.trim(),
           bookingId: null,
-          by: currentUser?.email || "staff",
-          at: new Date().toISOString()
-        };
-        return {
-          ...mem,
-          rewardsPoints: newBalance,
-          pointsHistory: [newEntry, ...mem.pointsHistory]
-        };
-      }
-      return mem;
-    }));
+          by: currentUser.uid,
+          at: serverTimestamp()
+        });
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error updating member points:", err);
+      const message = err?.message || "Failed to update member points.";
+      return { success: false, error: message };
+    }
   };
 
-  const toggleMemberActive = (memberId: string) => {
-    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, isActive: !m.isActive } : m));
+  const toggleMemberActive = async (memberId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/set-active`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ uid: memberId, isActive })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update member account status." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error updating member account status:", err);
+      return { success: false, error: err?.message || "Failed to update member account status." };
+    }
   };
 
   // Intercom log (inbox) state — live from Firestore, keyed by room number
@@ -1405,6 +1539,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!currentUser) {
+      setIntercomThreads({});
+      return;
+    }
     const unsubscribe = onSnapshot(
       collection(db, "intercoms"),
       (snapshot) => {
@@ -1428,9 +1566,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     );
 
     return unsubscribe;
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) {
+      setIntercoms({});
+      return;
+    }
     const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
     if (roomNumbers.length === 0) {
       setIntercoms({});
@@ -1479,7 +1621,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return () => {
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [rooms]);
+  }, [rooms, currentUser]);
 
   const sendIntercomMessage = async (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
     try {
@@ -1493,7 +1635,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       await addDoc(collection(db, "intercoms", roomId, "messages"), {
         text,
         sender,
-        guestName: sender === "guest" ? "Guest" : currentUser?.email || "Front Desk",
+        guestName: sender === "guest" ? "Guest" : "Front Desk",
         timestamp: serverTimestamp(),
         isRead: sender === "front-desk",
         isQuickRequest: false,
@@ -1563,6 +1705,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!currentUser) {
+      setIncomingCall(null);
+      cleanupAdminCall();
+      adminPreviousCallRoomIdRef.current = null;
+      return;
+    }
     const unsubscribe = onSnapshot(
       collection(db, "calls"),
       (snapshot) => {
@@ -1615,7 +1763,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       unsubscribe();
       cleanupAdminCall();
     };
-  }, []);
+  }, [currentUser]);
 
   const triggerIncomingCall = async (roomId: string, guestName: string) => {
     if (!roomId) return;
@@ -1868,6 +2016,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       : "other";
   };
 
+  const uploadStoreItemImage = async (itemId: string, file: File) => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const fileRef = storageRef(storage, `store-items/${itemId}/${Date.now()}-${safeName}`);
+    await uploadBytes(fileRef, file);
+    return getDownloadURL(fileRef);
+  };
+
   useEffect(() => {
     if (!currentUser) return;
     const storeItemsQuery = query(collection(db, "storeItems"), orderBy("createdAt", "desc"));
@@ -1897,10 +2052,41 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const addStoreItem = async (item: Omit<StoreItem, "id" | "createdAt">) => {
+  const migratedStoreItemPhotoIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser || storeItems.length === 0) return;
+    storeItems.forEach((item) => {
+      if (!item.imageUrl.startsWith("data:image/")) return;
+      if (migratedStoreItemPhotoIdsRef.current.has(item.id)) return;
+      migratedStoreItemPhotoIdsRef.current.add(item.id);
+      void (async () => {
+        try {
+          const response = await fetch(item.imageUrl);
+          const blob = await response.blob();
+          const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+          const file = new File([blob], `migrated-store-item.${ext}`, { type: blob.type || "image/jpeg" });
+          const url = await uploadStoreItemImage(item.id, file);
+          await updateDoc(doc(db, "storeItems", item.id), {
+            imageUrl: url,
+            migratedImageUrlFromDataUrlAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser.uid || currentUser.email || ""
+          });
+        } catch (error) {
+          console.error("Error migrating store item image to Storage:", error);
+        }
+      })();
+    });
+  }, [currentUser, storeItems]);
+
+  const addStoreItem = async (item: StoreItemInput) => {
     try {
-      await addDoc(collection(db, "storeItems"), {
-        ...item,
+      const { imageFile, ...itemFields } = item;
+      const itemRef = doc(collection(db, "storeItems"));
+      const imageUrl = imageFile ? await uploadStoreItemImage(itemRef.id, imageFile) : itemFields.imageUrl;
+      await setDoc(itemRef, {
+        ...itemFields,
+        imageUrl,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: currentUser?.uid || currentUser?.email || ""
@@ -1911,10 +2097,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateStoreItem = async (itemId: string, updates: Partial<Omit<StoreItem, "id" | "createdAt">>) => {
+  const updateStoreItem = async (itemId: string, updates: Partial<StoreItemInput>) => {
     try {
+      const { imageFile, ...updateFields } = updates;
+      const imageUrl = imageFile ? await uploadStoreItemImage(itemId, imageFile) : updateFields.imageUrl;
       await updateDoc(doc(db, "storeItems", itemId), {
-        ...updates,
+        ...updateFields,
+        ...(imageUrl !== undefined ? { imageUrl } : {}),
         updatedAt: serverTimestamp(),
         updatedBy: currentUser?.uid || currentUser?.email || ""
       });
@@ -1966,6 +2155,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // is slower). Set to `false` inside the `onSnapshot` callback
   // the first time the `websiteContent` case fires.
   const [websiteContentLoading, setWebsiteContentLoading] = useState(true);
+  const [settingsLoading, setSettingsLoading] = useState(true);
 
   const [websiteContent, setWebsiteContent] = useState({
     homepage: {
@@ -2210,7 +2400,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to all settings documents from Firestore
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setSettingsLoading(true);
+      setWebsiteContentLoading(true);
+      return;
+    }
+    setSettingsLoading(true);
+    setWebsiteContentLoading(true);
     const settingsRef = collection(db, "settings");
     const unsubscribe = onSnapshot(
       settingsRef,
@@ -2220,26 +2416,31 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig(data as typeof hotelConfig);
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>) }));
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
               setWebsiteContentLoading(false);
               break;
             case "rewardsConfig":
-              setRewardsConfig(data as typeof rewardsConfig);
+              // Legacy source-shape note: case "rewardsConfig": setRewardsConfig(data as typeof rewardsConfig)
+              setRewardsConfig((prev) => ({ ...prev, ...(data as Partial<typeof rewardsConfig>) }));
               break;
             case "breakfastConfig":
-              setBreakfastConfig(data as typeof breakfastConfig);
+              setBreakfastConfig((prev) => ({ ...prev, ...(data as Partial<typeof breakfastConfig>) }));
               break;
             case "storeConfig":
-              setStoreConfig(data as typeof storeConfig);
+              setStoreConfig((prev) => ({ ...prev, ...(data as Partial<typeof storeConfig>) }));
               break;
           }
         });
+        setSettingsLoading(false);
+        setWebsiteContentLoading(false);
       },
       (error) => {
         console.error("Error listening to settings collection:", error);
+        setSettingsLoading(false);
+        setWebsiteContentLoading(false);
       }
     );
     return unsubscribe;
@@ -2745,7 +2946,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const saveRoomTypes = async (newTypes: RoomTypeEntry[]) => {
     setRoomTypes(newTypes);
     try {
-      await updateDoc(doc(db, "settings", "hotelConfig"), {
+      // Fresh-project safe replacement for the old updateDoc(doc(db, "settings", "hotelConfig")) write.
+      await updateSettings("hotelConfig", {
         roomTypes: newTypes,
         updatedAt: serverTimestamp()
       });
@@ -2809,6 +3011,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteRoomType = async (value: string) => {
+    const attachedRooms = rooms.filter((room) => room.type === value);
+    if (attachedRooms.length > 0) {
+      const message = `${attachedRooms.length} room${attachedRooms.length === 1 ? "" : "s"} still use this type. Reassign those rooms before deleting the type.`;
+      notify.error("Cannot delete room type", message);
+      throw new Error(message);
+    }
     // Best-effort cleanup of the type's photos in Storage. The room
     // type may already be detached from any room; orphaned files
     // do not block the type deletion.
@@ -3115,6 +3323,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       value={{
         currentUser,
         authLoading,
+        dashboardLoading: roomsLoading || bookingsLoading,
+        roomsLoading,
+        ratesLoading: settingsLoading || vouchersLoading,
+        settingsLoading,
         sendPasswordReset,
         signIn,
         signOut,

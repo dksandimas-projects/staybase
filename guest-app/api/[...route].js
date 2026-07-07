@@ -188853,6 +188853,9 @@ async function handleEmailTrigger(req, res, action) {
 }
 
 // server/handlers/bookings.ts
+function getConfiguredBookingRefPrefix() {
+  return hotel_config_default.bookingRefPrefix || "SI";
+}
 var lookupSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
   guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
@@ -188871,6 +188874,24 @@ var guestCancelSchema = external_exports.object({
   (data) => Boolean(data.guestEmail) !== Boolean(data.token),
   "Provide either an email or a lookup token (not both)."
 );
+var guestDetailsSchema = external_exports.object({
+  firstName: external_exports.string().trim().min(1).max(80),
+  lastName: external_exports.string().trim().min(1).max(80),
+  email: external_exports.string().trim().toLowerCase().email().max(160),
+  phone: external_exports.string().trim().min(7).max(32),
+  requests: external_exports.string().trim().max(1e3).optional().default(""),
+  consent: external_exports.boolean(),
+  // Corporate fields — all optional with safe defaults so
+  // non-corporate bookings validate cleanly. The handler
+  // drops them from the doc unless the booking is
+  // corporate.
+  companyName: external_exports.string().trim().max(160).optional().default(""),
+  designation: external_exports.string().trim().max(120).optional().default(""),
+  companyAddress: external_exports.string().trim().max(300).optional().default(""),
+  numRooms: external_exports.coerce.number().int().min(1).max(50).optional(),
+  purposeOfStay: external_exports.string().trim().max(120).optional().default(""),
+  preferredBillingArrangement: external_exports.string().trim().max(40).optional().default("")
+});
 async function handleCreateBooking(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -188886,18 +188907,27 @@ async function handleCreateBooking(req, res) {
     checkOut,
     guests,
     hasBreakfast,
-    guestDetails,
+    guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
     voucherCode,
     paymentMethod,
     paymentProofUrl,
     corporateCode,
+    corporateFlatRate,
     linkedInquiryId
   } = body;
-  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !guestDetails) {
+  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
   }
+  const parsedGuest = guestDetailsSchema.safeParse(rawGuestDetails);
+  if (!parsedGuest.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check your guest details \u2014 a required field is missing or invalid."
+    });
+  }
+  const guestDetails = parsedGuest.data;
   if (!guestDetails.consent) {
     return res.status(400).json({ success: false, error: "Privacy policy consent is required." });
   }
@@ -188905,6 +188935,13 @@ async function handleCreateBooking(req, res) {
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
+  const { todayStr: manilaToday } = getManilaDateInfo();
+  if (checkIn < manilaToday) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-in date cannot be in the past. Please choose a new date."
+    });
   }
   const startMs = checkInDate.getTime();
   const endMs = checkOutDate.getTime();
@@ -188916,6 +188953,7 @@ async function handleCreateBooking(req, res) {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let computedData = {};
+    let alreadyExistingBookingResponse = null;
     let assignedRoomId = "";
     let assignedRoomNumber = "";
     let detectedMemberId = null;
@@ -188948,6 +188986,25 @@ async function handleCreateBooking(req, res) {
       console.warn("ID token verify failed; continuing as anonymous booking:", memberTokenError.message);
     }
     await adminDb.runTransaction(async (transaction) => {
+      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      const existingBooking = await transaction.get(bookingDocRef);
+      if (existingBooking.exists) {
+        const existing = existingBooking.data() || {};
+        finalBookingRef = String(existing.bookingRef || "");
+        finalTotalPrice = Number(existing.totalPrice || 0);
+        assignedRoomId = String(existing.roomId || "");
+        assignedRoomNumber = String(existing.roomNumber || "");
+        alreadyExistingBookingResponse = {
+          bookingId,
+          bookingRef: finalBookingRef,
+          totalPrice: finalTotalPrice,
+          roomId: assignedRoomId,
+          roomNumber: assignedRoomNumber,
+          roomType: String(existing.roomType || roomType),
+          alreadyExists: true
+        };
+        return;
+      }
       const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
       const hotelConfigDoc = await transaction.get(hotelConfigRef);
       if (!hotelConfigDoc.exists) {
@@ -189015,9 +189072,19 @@ async function handleCreateBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
+      let corporateCodeRef = null;
       if (corporateCode) {
-        const corpCodeRef = adminDb.collection("corporateCodes").doc(corporateCode);
-        const corpCodeDoc = await transaction.get(corpCodeRef);
+        const formattedCorpCode = String(corporateCode).trim().toUpperCase();
+        corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
+        let corpCodeDoc = await transaction.get(corporateCodeRef);
+        if (!corpCodeDoc.exists) {
+          const corpCodeQuery = adminDb.collection("corporateCodes").where("code", "==", formattedCorpCode).limit(1);
+          const corpCodeQuerySnap = await transaction.get(corpCodeQuery);
+          if (!corpCodeQuerySnap.empty) {
+            corpCodeDoc = corpCodeQuerySnap.docs[0];
+            corporateCodeRef = corpCodeDoc.ref;
+          }
+        }
         if (corpCodeDoc.exists) {
           const corpData = corpCodeDoc.data();
           const corpValidation = validateCorporateCode({
@@ -189028,19 +189095,33 @@ async function handleCreateBooking(req, res) {
           });
           if (corpValidation.valid) {
             corporateDetails.isCorporate = true;
-            corporateDetails.corporateCode = corporateCode;
+            corporateDetails.corporateCode = formattedCorpCode;
             corporateDetails.companyName = corpData.companyName || "";
             if (corpData.ratePerRoomType && corpData.ratePerRoomType[roomType] !== void 0) {
               activeRoomRate = corpData.ratePerRoomType[roomType];
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
+            transaction.update(corporateCodeRef, {
+              usageCount: (corpData.usageCount || 0) + 1,
+              updatedAt: /* @__PURE__ */ new Date()
+            });
           } else {
-            activeRoomRate = typeBaseRate;
+            throw new Error(
+              `Corporate code no longer valid: ${corpValidation.error} Please re-enter your access code or continue without a code.`
+            );
           }
         } else {
-          activeRoomRate = typeBaseRate;
+          throw new Error(
+            "Corporate code no longer valid: code not recognized. Please re-enter your access code or continue without a code."
+          );
         }
+      }
+      if (!corporateDetails.isCorporate && corporateFlatRate === true) {
+        corporateDetails.isCorporate = true;
+        corporateDetails.corporateCode = "";
+        corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
+        activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
       }
       let roomTotal = 0;
       const dateCursor = new Date(checkInDate);
@@ -189061,8 +189142,16 @@ async function handleCreateBooking(req, res) {
       let appliedVoucherCode = "";
       if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
-        const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
-        const voucherDoc = await transaction.get(voucherRef);
+        let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
+        let voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb.collection("vouchers").where("code", "==", formattedCode).limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
+          }
+        }
         if (voucherDoc.exists) {
           const vData = voucherDoc.data();
           const now = /* @__PURE__ */ new Date();
@@ -189190,14 +189279,35 @@ async function handleCreateBooking(req, res) {
         // is null for normal bookings; the convert-to-booking UI (per
         // audit 1.4 SEV-1 #2) will populate it.
         linkedInquiryId: linkedInquiryId || null,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
+        // corporate flow collects `designation`,
+        // `companyAddress`, `purposeOfStay`, and
+        // `preferredBillingArrangement` at Step 2, plus the
+        // flat-rate `companyName`. None of this was persisted
+        // server-side, so staff could not tell a chargeback
+        // booking (LOU workflow per `DECISIONS-FEATURES.md #99`)
+        // from a personal-pay one and flat-rate bookings had
+        // no company at all. Persist the metadata as a nested
+        // `corporate` block **only when** the booking is
+        // corporate — non-corporate bookings never carry the
+        // field so the schema doesn't drift with empty
+        // strings. `preferredBillingArrangement` is normalized
+        // to `"personal"` or `"chargeback"`; an unrecognized
+        // value falls back to `"chargeback"` since
+        // `isCorporate: true` defaults to direct-billing
+        // semantics and the staff LOU workflow assumes
+        // chargeback.
+        ...corporateDetails.isCorporate ? {
+          corporate: {
+            designation: String(guestDetails.designation || "").trim().slice(0, 120),
+            companyAddress: String(guestDetails.companyAddress || "").trim().slice(0, 300),
+            purposeOfStay: String(guestDetails.purposeOfStay || "").trim().slice(0, 120),
+            billingArrangement: guestDetails.preferredBillingArrangement === "personal" ? "personal" : "chargeback"
+          }
+        } : {},
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
-      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      const existingBooking = await transaction.get(bookingDocRef);
-      if (existingBooking.exists) {
-        throw new Error("Booking already exists");
-      }
       transaction.set(bookingDocRef, newBooking);
       computedData = {
         guestName,
@@ -189210,6 +189320,12 @@ async function handleCreateBooking(req, res) {
         totalPrice
       };
     });
+    if (alreadyExistingBookingResponse) {
+      return res.status(200).json({
+        success: true,
+        data: alreadyExistingBookingResponse
+      });
+    }
     try {
       await sendBookingTrigger("booking-submitted", {
         ...computedData,
@@ -189224,15 +189340,15 @@ async function handleCreateBooking(req, res) {
       const freshBookingSnap = await adminDb.collection("bookings").doc(bookingId).get();
       const alreadySent = freshBookingSnap.exists && freshBookingSnap.data()?.emailNotificationsSent?.staffNewBooking;
       if (!alreadySent) {
-        await adminDb.collection("bookings").doc(bookingId).update({
-          "emailNotificationsSent.staffNewBooking": /* @__PURE__ */ new Date()
-        });
         await sendStaffNewBookingTrigger({
           ...computedData,
           bookingRef: finalBookingRef,
           guestEmail: computedData.email,
           paymentMethod,
           source: computedData.source || "online"
+        });
+        await adminDb.collection("bookings").doc(bookingId).update({
+          "emailNotificationsSent.staffNewBooking": /* @__PURE__ */ new Date()
         });
       }
     } catch (staffEmailErr) {
@@ -189261,6 +189377,16 @@ async function handleCreateBooking(req, res) {
     const isInfraError = typeof code === "string" && (code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED") || code.includes("INTERNAL"));
     let status;
     if (error.message === "Room no longer available") {
+      status = 409;
+    } else if (
+      // Per BI-10 (booking-intercom audit 2026-07-06): a
+      // corporate code that failed re-validation between the
+      // gate and the create transaction is a 409 — the code
+      // was valid when the guest confirmed, but the server
+      // cannot honor the negotiated rate anymore. The client
+      // shows the error and sends the guest back to the gate.
+      typeof error.message === "string" && error.message.startsWith("Corporate code no longer valid")
+    ) {
       status = 409;
     } else if (isInfraError) {
       status = 503;
@@ -189586,10 +189712,42 @@ async function handleCancelBooking(req, res) {
         error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
       });
     }
-    await bookingDocumentRef.update({
-      status: "cancelled",
-      cancellationReason: validReason,
-      updatedAt: /* @__PURE__ */ new Date()
+    await adminDb.runTransaction(async (transaction) => {
+      const freshBookingDoc = await transaction.get(bookingDocumentRef);
+      if (!freshBookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const freshBooking = freshBookingDoc.data() || {};
+      if (freshBooking.status === "checked-in" || freshBooking.status === "checked-out" || freshBooking.status === "cancelled") {
+        throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
+      }
+      const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
+      let voucherRef = null;
+      let voucherDoc = null;
+      if (appliedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(appliedVoucherCode);
+        voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb.collection("vouchers").where("code", "==", appliedVoucherCode).limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
+          }
+        }
+      }
+      transaction.update(bookingDocumentRef, {
+        status: "cancelled",
+        cancellationReason: validReason,
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+      if (voucherDoc?.exists && voucherRef) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
     });
     try {
       await sendBookingTrigger("booking-cancelled", {
@@ -190306,6 +190464,10 @@ async function handleConvertInquiryToBooking(req, res) {
           } else if (roomData.corporateRate) {
             ratePerNight = roomData.corporateRate;
           }
+          transaction.update(codeRef, {
+            usageCount: (codeData.usageCount || 0) + 1,
+            updatedAt: /* @__PURE__ */ new Date()
+          });
         } else if (roomData.corporateRate) {
           ratePerNight = roomData.corporateRate;
         }
@@ -190394,6 +190556,24 @@ async function handleConvertInquiryToBooking(req, res) {
         cancellationReason: "",
         // Per W2.14 / decision #102: backlink to the source inquiry
         linkedInquiryId: inquiryId,
+        // Per BI-11 (booking-intercom audit 2026-07-06): the
+        // convert-inquiry path is always corporate, so the
+        // corporate metadata block is written. The
+        // `inquiryData` shape doesn't carry the same
+        // designation / purposeOfStay fields the public
+        // corporate form collects, so we persist what's
+        // available: `specialRequirements` flows into
+        // `purposeOfStay` (the closest semantic match) and
+        // `companyName` is the company on the inquiry.
+        // `billingArrangement` is implicit (inquiry is
+        // always a chargeback) so we record "chargeback" so
+        // staff can tell the LOU workflow to fire.
+        corporate: {
+          designation: "",
+          companyAddress: "",
+          purposeOfStay: String(inquiryData.specialRequirements || "").trim().slice(0, 120),
+          billingArrangement: "chargeback"
+        },
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -190560,6 +190740,10 @@ var redeemPointsSchema = external_exports.object({
 }).strict();
 var undoRedemptionSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(120)
+}).strict();
+var setMemberActiveSchema = external_exports.object({
+  uid: external_exports.string().trim().min(1).max(160),
+  isActive: external_exports.boolean()
 }).strict();
 var eraseAccountSchema = external_exports.object({
   confirmation: external_exports.literal("erase-my-account")
@@ -190850,6 +191034,76 @@ async function handleUndoMemberPointsRedemption(req, res) {
     return res.status(400).json({
       success: false,
       error: error?.message || "We could not undo this points redemption."
+    });
+  }
+}
+async function handleSetMemberActive(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+  }
+  const parsed = setMemberActiveSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please choose a member account to update."
+    });
+  }
+  const { uid, isActive } = parsed.data;
+  try {
+    const memberRef = adminDb.collection("members").doc(uid);
+    const memberDoc = await memberRef.get();
+    if (!memberDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Member account was not found."
+      });
+    }
+    const now = /* @__PURE__ */ new Date();
+    const previousIsActive = memberDoc.data()?.isActive !== false;
+    try {
+      await memberRef.set({
+        isActive,
+        disabledAt: isActive ? null : now,
+        disabledBy: isActive ? null : staff.uid,
+        updatedAt: now
+      }, { merge: true });
+      await adminAuth.updateUser(uid, { disabled: !isActive });
+    } catch (syncErr) {
+      console.error("Member active-state sync failed, rolling back Firestore:", syncErr);
+      try {
+        await memberRef.set({
+          isActive: previousIsActive,
+          disabledAt: previousIsActive ? null : memberDoc.data()?.disabledAt || null,
+          disabledBy: previousIsActive ? null : memberDoc.data()?.disabledBy || null,
+          updatedAt: /* @__PURE__ */ new Date()
+        }, { merge: true });
+      } catch (rollbackErr) {
+        console.error("Failed to roll back member active-state:", rollbackErr);
+      }
+      throw syncErr;
+    }
+    return res.status(200).json({
+      success: true,
+      data: { uid, isActive }
+    });
+  } catch (error) {
+    if (error?.code === "auth/user-not-found") {
+      return res.status(404).json({
+        success: false,
+        error: "Member auth account was not found."
+      });
+    }
+    console.error("Member account active-state update failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update member account status. Please try again."
     });
   }
 }
@@ -191886,7 +192140,7 @@ var lookupFailures = /* @__PURE__ */ (() => {
 var LOOKUP_FAILURE_THRESHOLD = 3;
 var LOOKUP_FAILURE_WINDOW_MS = 36e5;
 async function verifyTurnstile(token2, req) {
-  if (process.env.NODE_ENV === "test" || token2 === "1x00000000000000000000AA" || token2 === "1x00000000000000000000000000000000" || token2 === "mock_token") {
+  if (process.env.NODE_ENV === "test") {
     return { success: true };
   }
   if (!token2) {
@@ -191967,7 +192221,7 @@ async function handler(req, res) {
         success: true,
         data: {
           bookingId: "hp_" + Math.random().toString(36).substring(2, 9),
-          bookingRef: `SI-${(/* @__PURE__ */ new Date()).getFullYear()}0608-099`
+          bookingRef: `${getConfiguredBookingRefPrefix()}-${(/* @__PURE__ */ new Date()).getFullYear()}0608-00099`
         }
       });
     }
@@ -192168,6 +192422,20 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleUndoMemberPointsRedemption(req, res);
+  }
+  if (domain === "members" && action === "set-active" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-set-active:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many member account update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+    }
+    req.staff = authResult;
+    return await handleSetMemberActive(req, res);
   }
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 6e4)) {

@@ -6,7 +6,7 @@
 
 ## Overview
 
-Promo vouchers allow staff to create discount codes redeemable during the guest booking flow at Step 3. Vouchers support percentage or flat ₱ discounts with optional usage caps, expiry dates, and room type restrictions. Management lives in Settings. Redemption calls a server-side validation API to prevent abuse.
+Promo vouchers allow admins to create discount codes redeemable during the guest booking flow at Step 3. Vouchers support percentage or flat ₱ discounts with optional usage caps, expiry dates, and room type restrictions. Management lives on the admin-only Rates page. Redemption calls a server-side validation API to prevent abuse.
 
 ---
 
@@ -26,14 +26,14 @@ Promo vouchers allow staff to create discount codes redeemable during the guest 
 
 ---
 
-## Admin UI Checklist (within Settings)
+## Admin UI Checklist (within Rates)
 
 - [ ] Vouchers list — table of all vouchers: code, discount type, value, usage (used/cap), expiry, status badge (Active/Inactive/Expired)
 - [ ] Create voucher form — code (unique), discount type (% or ₱), discount value, usage cap (optional), expiry date (optional), applicable room types (all or multi-select)
 - [ ] Enable / disable toggle per voucher
 - [ ] Usage stats — used count vs. cap displayed per voucher row
 - [ ] Expired vouchers shown in list with visual distinction (muted/greyed)
-- [ ] Both Admin and Front Desk can create and manage vouchers
+- [ ] Admins can create and manage vouchers; Front Desk can redeem/inspect applied voucher outcomes from booking details but cannot manage campaigns.
 
 ## Guest UI Checklist (Booking Flow Step 3)
 
@@ -46,10 +46,11 @@ Promo vouchers allow staff to create discount codes redeemable during the guest 
 
 ## Data & Logic Checklist
 
-- [ ] Voucher creation: `addDoc` to `vouchers` collection
+- [ ] Voucher creation: deterministic write to `vouchers/{code}` with duplicate-code protection
 - [ ] Voucher validation (guest): calls `/api/validate/voucher` — server-side checks: exists, `isActive`, not expired, under usage cap, room type match
 - [ ] Validation response: returns `{ valid: true, discountType, discountValue }` or `{ valid: false, reason }`
 - [ ] `usageCount` increment: happens server-side at booking creation (`/api/bookings/create`) — not at validation time
+- [ ] `usageCount` restore: if a booking with an applied voucher is cancelled before check-in, `/api/bookings/cancel` decrements the voucher usage count inside the cancellation transaction (never below 0), releasing capped voucher capacity for another guest
 - [ ] `voucherCode` and `voucherDiscount` stored on booking document
 - [ ] Discount calculation: percent voucher applies to total after senior/PWD discount; flat voucher subtracts fixed amount; total never goes below ₱0
 - [ ] Voucher and senior/PWD discount can stack — apply senior/PWD first, then voucher
@@ -62,6 +63,7 @@ Promo vouchers allow staff to create discount codes redeemable during the guest 
 - [ ] Duplicate voucher code on creation — show error "Code already exists"
 - [ ] Flat discount exceeds total — total set to ₱0, not negative
 - [ ] Voucher deactivated by admin while guest is in booking flow — server-side catch at creation
+- [ ] Voucher applied then booking cancelled — voucher usage count is restored so usage-capped campaigns count active redemptions, not abandoned bookings
 
 ## Manual QA
 
@@ -72,11 +74,11 @@ Promo vouchers allow staff to create discount codes redeemable during the guest 
 - [ ] Expired voucher returns correct error
 - [ ] Disable voucher — immediately rejected in guest flow
 - [ ] `usageCount` increments only on completed booking (not on validation)
-- [ ] Front desk account can create vouchers (not admin-only)
+- [ ] Front desk account cannot access voucher campaign management; admin account can create, disable, and email vouchers.
 
 ## References
 
 - Voucher schema: `plan/docs/BACKEND.md §vouchers`
 - Validation API: `plan/docs/API-ROUTES.md §validate`
 - Booking flow redemption step: `plan/features/BOOKING-FLOW.md §Step 3`
-- Settings page location: `plan/features/SETTINGS.md §Vouchers`
+- Rates page location: `plan/features/RATE-MANAGEMENT.md`
