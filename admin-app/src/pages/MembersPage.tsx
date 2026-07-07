@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAdmin, Member, PointsLog } from "../context/AdminContext";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -6,6 +6,8 @@ import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
 import { Award, User, Mail, Phone, Calendar, Plus, ShieldAlert, AwardIcon, Coins, History } from "lucide-react";
 import config from "@config";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { db } from "../firebase/config";
 
 export function MembersPage() {
   const { 
@@ -24,51 +26,90 @@ export function MembersPage() {
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustType, setAdjustType] = useState<PointsLog["type"]>("manual");
   const [adjustReason, setAdjustReason] = useState("");
+  const [isAdjustingPoints, setIsAdjustingPoints] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  useEffect(() => {
+    if (!selectedMember) return;
+    const latest = members.find((member) => member.id === selectedMember.id);
+    if (latest) {
+      setSelectedMember((prev) => prev ? { ...latest, pointsHistory: prev.pointsHistory } : latest);
+    }
+  }, [members, selectedMember?.id]);
+
+  useEffect(() => {
+    if (!selectedMember?.id || !isDrawerOpen) return;
+
+    const historyRef = query(
+      collection(db, "members", selectedMember.id, "pointsHistory"),
+      orderBy("at", "desc")
+    );
+    const unsubscribe = onSnapshot(
+      historyRef,
+      (snapshot) => {
+        const history = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          const at = data.at
+            ? (typeof data.at.toDate === "function" ? data.at.toDate().toISOString() : String(data.at))
+            : "";
+          return {
+            id: docSnap.id,
+            type: data.type || "manual",
+            points: Number(data.points || 0),
+            description: data.description || "",
+            reason: data.reason || "",
+            bookingId: data.bookingId || null,
+            by: data.by || "",
+            at
+          } as PointsLog;
+        });
+
+        setSelectedMember((prev) => prev ? { ...prev, pointsHistory: history } : prev);
+      },
+      (error) => {
+        console.error("Error listening to member points history:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, [selectedMember?.id, isDrawerOpen]);
 
   const handleRowClick = (member: Member) => {
     setSelectedMember(member);
     setIsDrawerOpen(true);
   };
 
-  const handlePointsSubmit = (e: React.FormEvent) => {
+  const handlePointsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMember || !adjustAmount || !adjustReason.trim()) return;
 
     const amountNum = parseInt(adjustAmount);
     if (isNaN(amountNum)) return;
 
-    // Call context modifier
-    updateMemberPoints(selectedMember.id, amountNum, adjustType, adjustReason.trim());
-
-    // Update selected member details in drawer state
-    const nextPoints = selectedMember.rewardsPoints + amountNum;
-    const newHistoryEntry: PointsLog = {
-      id: `pt-${Date.now()}`,
-      type: adjustType,
-      points: amountNum,
-      description: adjustType === "manual" ? `Manual Adjust (${adjustReason.trim()})` : "Loyalty reward",
-      reason: adjustReason.trim(),
-      bookingId: null,
-      by: "admin-staff",
-      at: new Date().toISOString()
-    };
-
-    setSelectedMember({
-      ...selectedMember,
-      rewardsPoints: Math.max(0, nextPoints),
-      pointsHistory: [newHistoryEntry, ...selectedMember.pointsHistory]
-    });
+    setIsAdjustingPoints(true);
+    const result = await updateMemberPoints(selectedMember.id, amountNum, adjustType, adjustReason.trim());
+    setIsAdjustingPoints(false);
+    if (!result.success) {
+      toast.error("Points update failed", result.error || "Please try again.");
+      return;
+    }
 
     setAdjustAmount("");
     setAdjustReason("");
     toast.success("Points balance updated", `${amountNum > 0 ? "+" : ""}${amountNum} pts — ${adjustType}`);
   };
 
-  const handleToggleAccount = () => {
-    if (selectedMember) {
-      toggleMemberActive(selectedMember.id);
-      setSelectedMember(prev => prev ? { ...prev, isActive: !prev.isActive } : null);
+  const handleToggleAccount = async () => {
+    if (!selectedMember) return;
+    const nextActive = !selectedMember.isActive;
+    setIsUpdatingStatus(true);
+    const result = await toggleMemberActive(selectedMember.id, nextActive);
+    setIsUpdatingStatus(false);
+    if (!result.success) {
+      toast.error("Account update failed", result.error || "Please try again.");
+      return;
     }
+    toast.success(nextActive ? "Member activated" : "Member suspended");
   };
 
   // DataTable column definitions
@@ -217,13 +258,14 @@ export function MembersPage() {
 
                 <button
                   onClick={handleToggleAccount}
+                  disabled={isUpdatingStatus}
                   className={`min-h-[36px] px-3.5 rounded-lg text-xs font-bold shadow-sm transition ${
                     selectedMember.isActive
                       ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
                       : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                  }`}
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
                 >
-                  {selectedMember.isActive ? "Suspend Profile" : "Activate Profile"}
+                  {isUpdatingStatus ? "Saving..." : selectedMember.isActive ? "Suspend Profile" : "Activate Profile"}
                 </button>
               </div>
 
@@ -326,9 +368,10 @@ export function MembersPage() {
 
               <button
                 type="submit"
-                className="min-h-[36px] w-full rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm"
+                disabled={isAdjustingPoints}
+                className="min-h-[36px] w-full rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Log Points Update
+                {isAdjustingPoints ? "Saving..." : "Log Points Update"}
               </button>
             </form>
 
