@@ -28,7 +28,11 @@ import {
   Save,
   ShieldCheck,
   BedDouble,
-  MoreVertical
+  MoreVertical,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Loader2
 } from "lucide-react";
 import config from "@config";
 import { jsPDF } from "jspdf";
@@ -108,6 +112,7 @@ export function BookingsPage() {
     bookings, 
     rooms, 
     updateBookingStatus, 
+    resolveEarlyCheckin,
     addOnsitePayment, 
     addWalkinBooking,
     storeOrders,
@@ -134,6 +139,11 @@ export function BookingsPage() {
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
   const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
+
+  const [earlyCheckInAction, setEarlyCheckInAction] = useState<"approve" | "decline" | null>(null);
+  const [earlyCheckInTimeOverride, setEarlyCheckInTimeOverride] = useState<string>("");
+  const [earlyCheckInStaffNote, setEarlyCheckInStaffNote] = useState<string>("");
+  const [isResolvingEarlyCheckIn, setIsResolvingEarlyCheckIn] = useState(false);
 
   // Main navigation tab
   const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">(
@@ -301,7 +311,32 @@ export function BookingsPage() {
     {
       key: "status",
       header: "Status",
-      render: (row) => <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+      render: (row) => (
+        <div className="flex items-center gap-1.5">
+          <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
+          {row.earlyCheckIn?.status === "requested" && (
+            <span
+              title="Early check-in pending review"
+              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 ring-1 ring-amber-200"
+            >
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+              </span>
+              ECK
+            </span>
+          )}
+          {row.earlyCheckIn?.status === "approved" && (
+            <span
+              title="Early check-in approved"
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200"
+            >
+              <CheckCircle2 size={9} />
+              ECK
+            </span>
+          )}
+        </div>
+      )
     },
     {
       key: "action",
@@ -2251,6 +2286,176 @@ export function BookingsPage() {
               </div>
             </div>
 
+            {/* Early Check-In Request Panel */}
+            {selectedBooking.earlyCheckIn && ["confirmed", "checked-in"].includes(selectedBooking.status) && (() => {
+              const eci = selectedBooking.earlyCheckIn!;
+              const isResolved = eci.status === "approved" || eci.status === "declined";
+              const statusColors = {
+                requested: "bg-amber-50 border-amber-200 text-amber-800",
+                approved: "bg-emerald-50 border-emerald-200 text-emerald-800",
+                declined: "bg-red-50 border-red-200 text-red-700"
+              };
+
+              return (
+                <div className="space-y-3">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <Clock size={14} className="text-primary" />
+                    Early Check-In Request
+                  </h3>
+                  <div className={`rounded-lg border p-4 space-y-3 text-xs ${statusColors[eci.status as keyof typeof statusColors] || "bg-gray-50 border-gray-200 text-gray-700"}`}>
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="font-bold uppercase tracking-wide text-[10px]">
+                        Status: {eci.status}
+                      </p>
+                      {eci.resolvedBy && (
+                        <span className="text-[10px] text-gray-500">Resolved by {eci.resolvedBy}</span>
+                      )}
+                    </div>
+
+                    <div className="grid gap-1.5 sm:grid-cols-2 text-xs">
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">Requested Time</p>
+                        <p className="font-semibold text-gray-900">{eci.requestedTime || "Not specified"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">Submitted</p>
+                        <p className="font-semibold text-gray-900">{eci.requestedAt ? new Date(eci.requestedAt).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" }) : "—"}</p>
+                      </div>
+                      {eci.notes && (
+                        <div className="sm:col-span-2">
+                          <p className="text-[10px] text-gray-500 uppercase font-bold">Guest Notes</p>
+                          <p className="italic text-gray-700">"{eci.notes}"</p>
+                        </div>
+                      )}
+                      {eci.staffNote && (
+                        <div className="sm:col-span-2">
+                          <p className="text-[10px] text-gray-500 uppercase font-bold">Staff Note</p>
+                          <p className="italic text-gray-700">"{eci.staffNote}"</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {!earlyCheckInAction && (
+                      <div className="flex gap-2 pt-1 border-t border-current/10">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEarlyCheckInAction("approve");
+                            setEarlyCheckInTimeOverride(eci.requestedTime || "");
+                            setEarlyCheckInStaffNote("");
+                          }}
+                          className="flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
+                        >
+                          <CheckCircle2 size={13} />
+                          {isResolved && eci.status === "approved" ? "Re-approve" : "Approve"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEarlyCheckInAction("decline");
+                            setEarlyCheckInTimeOverride("");
+                            setEarlyCheckInStaffNote("");
+                          }}
+                          className="flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-[11px] font-bold text-red-600 transition"
+                        >
+                          <XCircle size={13} />
+                          {isResolved && eci.status === "declined" ? "Re-decline" : "Decline"}
+                        </button>
+                      </div>
+                    )}
+
+                    {earlyCheckInAction && (
+                      <div className="space-y-3 border-t border-current/10 pt-3">
+                        <p className="text-xs font-bold text-gray-800">
+                          {earlyCheckInAction === "approve" ? "Confirm Approval" : "Confirm Decline"}
+                        </p>
+
+                        {earlyCheckInAction === "approve" && (
+                          <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                            Confirmed Check-In Time
+                            <select
+                              value={earlyCheckInTimeOverride}
+                              onChange={(e) => setEarlyCheckInTimeOverride(e.target.value)}
+                              className="min-h-[36px] w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-900 outline-none"
+                            >
+                              <option value="08:00 AM">08:00 AM</option>
+                              <option value="09:00 AM">09:00 AM</option>
+                              <option value="10:00 AM">10:00 AM</option>
+                              <option value="11:00 AM">11:00 AM</option>
+                              <option value="12:00 PM">12:00 PM</option>
+                              <option value="01:00 PM">01:00 PM</option>
+                            </select>
+                          </label>
+                        )}
+
+                        <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                          Staff Note (sent to guest)
+                          <textarea
+                            value={earlyCheckInStaffNote}
+                            onChange={(e) => setEarlyCheckInStaffNote(e.target.value)}
+                            placeholder={
+                              earlyCheckInAction === "approve"
+                                ? "e.g. Room will be ready by 10 AM, please proceed to front desk..."
+                                : "e.g. All rooms are occupied until standard check-in time..."
+                            }
+                            rows={2}
+                            className="w-full rounded border border-gray-200 bg-white p-2 text-xs text-gray-800 outline-none resize-none"
+                          />
+                        </label>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={isResolvingEarlyCheckIn}
+                            onClick={async () => {
+                              setIsResolvingEarlyCheckIn(true);
+                              try {
+                                const status = earlyCheckInAction === "approve" ? "approved" : "declined";
+                                const result = await resolveEarlyCheckin(selectedBooking.id, status, earlyCheckInStaffNote || undefined);
+                                if (!result.success) {
+                                  toast.error("Failed to resolve", result.error || "An unexpected error occurred.");
+                                } else {
+                                  toast.success(
+                                    earlyCheckInAction === "approve" ? "Early check-in approved" : "Early check-in declined",
+                                    "Guest will be notified by email."
+                                  );
+                                  setEarlyCheckInAction(null);
+                                  syncSelectedBooking({
+                                    earlyCheckIn: {
+                                      ...eci,
+                                      status,
+                                      resolvedAt: new Date().toISOString(),
+                                      resolvedBy: currentUser?.email || "Staff",
+                                      staffNote: earlyCheckInStaffNote || null
+                                    }
+                                  } as Partial<Booking>);
+                                }
+                              } finally {
+                                setIsResolvingEarlyCheckIn(false);
+                              }
+                            }}
+                            className={`flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold text-white shadow-sm transition active:scale-95 disabled:opacity-60 ${
+                              earlyCheckInAction === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"
+                            }`}
+                          >
+                            {isResolvingEarlyCheckIn ? <Loader2 size={13} className="animate-spin" /> : null}
+                            {earlyCheckInAction === "approve" ? "Send Approval" : "Send Decline"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEarlyCheckInAction(null)}
+                            className="min-h-[36px] rounded-lg border border-gray-250 px-4 text-[11px] font-bold text-gray-700 hover:bg-gray-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Checkout folio */}
             {(selectedBooking.status === "checked-in" || selectedBooking.status === "checked-out") && (
               <div className="space-y-3">
@@ -2639,8 +2844,28 @@ export function BookingsPage() {
         title="Create Walk-in Booking"
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              type="button"
+              form="walkin-form"
+              onClick={() => setIsModalOpen(false)}
+              className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <PrimaryButton
+              type="submit"
+              form="walkin-form"
+              disabled={!roomNumber || isWalkinSubmitting}
+              className="min-w-[150px]"
+            >
+              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
+            </PrimaryButton>
+          </div>
+        }
       >
-        <form onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
+        <form id="walkin-form" onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Full Name
             <input
@@ -2816,24 +3041,6 @@ export function BookingsPage() {
               <span>Final Total Price:</span>
               <span>{formatPrice(priceOverride !== "" ? Number(priceOverride) : totalPrice)}</span>
             </div>
-          </div>
-
-          {/* Action Row */}
-          <div className="flex gap-3 pt-2 justify-end">
-            <button
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              className="min-h-[44px] px-5 rounded-lg border border-gray-250 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <PrimaryButton
-              type="submit"
-              disabled={!roomNumber || isWalkinSubmitting}
-              className="min-w-[150px]"
-            >
-              {isWalkinSubmitting ? "Confirming..." : "Confirm Reservation"}
-            </PrimaryButton>
           </div>
         </form>
       </Modal>

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth } from "./lib/firebase-admin";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount, handleResolveEarlyCheckin } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
@@ -447,6 +447,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleConfirmBooking(req, res);
   }
 
+  if (domain === "bookings" && action === "early-checkin-resolve" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-early-checkin-resolve:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    
+    return await handleResolveEarlyCheckin(req, res);
+  }
+
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 60000)) {
       return res.status(429).json({ success: false, error: "Too many checkout requests. Please try again in a minute." });
@@ -860,18 +874,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
       }
       (req as any).staff = authResult;
+    } else if (action === "early-checkin-request") {
+      const authResult = await authenticateStaff(req);
+      if (!authResult.success) {
+        const userAuth = await authenticateUser(req);
+        if (!userAuth.success) {
+          return res.status(401).json({ success: false, error: "Authentication required." });
+        }
+        (req as any).user = userAuth;
+      } else {
+        (req as any).staff = authResult;
+      }
     } else if (req.headers.authorization) {
       const authResult = await authenticateStaff(req);
       if (!authResult.success) {
-        if (action === "early-checkin-request") {
-          const userAuth = await authenticateUser(req);
-          if (!userAuth.success) {
-            return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
-          }
-          (req as any).user = userAuth;
-        } else {
-          return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
-        }
+        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
       } else {
         (req as any).staff = authResult;
       }
