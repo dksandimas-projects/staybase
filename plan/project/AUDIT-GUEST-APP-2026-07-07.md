@@ -47,8 +47,8 @@
 | **SEV-1 (critical)** | 0 | 3 | **3** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
 | **SEV-3 (minor)** | 0 | 7 | **7** |
-| **SEV-4 (nit / doc drift)** | 4 | 1 | **5** |
-| **Total** | **4** | **15** | **19** |
+| **SEV-4 (nit / doc drift)** | 0 | 5 | **5** |
+| **Total** | **0** | **19** | **19** |
 
 The public marketing shell (heroes, content fallback chain, branding
 overrides, SEO meta, PWA), the rooms catalog, the corporate inquiry form,
@@ -90,6 +90,11 @@ helper and replacing the UTC "today" call sites in guest date logic.
 by recording the Phase 1/Phase 2 product decision in
 `DECISIONS-FEATURES.md #114`: Phase 1 shows provider-conflict messages;
 self-service `linkWithPopup` remains Phase 2 work.
+
+**2026-07-07 SEV-4 update:** GA-15, GA-17, GA-18, and GA-19 were fixed
+in `7de3b92` (`fix: repair guest app sev4 audit issues`). This closes
+the guest-app audit: all 19 findings are fixed or otherwise resolved in
+code/spec.
 
 ### Top 5 to fix first
 
@@ -450,7 +455,7 @@ cancelled stays for the portal.
 ## SEV-4 — Nits & doc drift (5)
 
 ### GA-15 — White-label hard-rule violations: unused `config.rewardsName`, hardcoded brand/city strings, hardcoded prod hostnames in the API router
-**Status:** Open
+**Status:** Fixed in `7de3b92`
 **File:** `guest-app/src/pages/HomePage.tsx:351, 356`, `guest-app/src/pages/SignUpPage.tsx:108`, `guest-app/src/pages/BookingConfirmPage.tsx:319`, `guest-app/src/pages/ProfilePage.tsx:154, 337`, `guest-app/src/pages/StaysPage.tsx:90`, `guest-app/src/App.tsx:74, 90, 130, 154`, `guest-app/server/apiRouter.ts:46-57`, `guest-app/src/pages/ProfilePage.tsx:119-123`
 
 `hotel.config.ts` defines `rewardsName` for exactly this, yet "Spark
@@ -467,6 +472,12 @@ Turnstile production detection pointed at Spark Inn. `ProfilePage`'s
 delete-account call also hardcodes `http://localhost:3000` as the dev
 base URL. (Copy *editability* is out of scope here — see the
 2026-07-01 content audit; these are the config-token violations.)
+
+**Fixed in `7de3b92`:** replaced audited app/meta strings with
+`config.rewardsName`, `config.brandName`, and configured address fields,
+derived API production hosts/origins from `config.domain` /
+`config.adminDomain`, removed the profile delete-account localhost base
+URL literal, and rebuilt `guest-app/api/[...route].js`.
 
 ### GA-16 — "Today" computed in UTC across guest date logic
 **Status:** Fixed in `cb13846`
@@ -486,7 +497,7 @@ now supplies day keys for homepage, booking, corporate booking, date
 picker minimums, and early check-in filtering.
 
 ### GA-17 — Navbar drift: "Sign in" instead of the specced "Join Rewards" CTA; no member avatar photo
-**Status:** Open
+**Status:** Fixed in `7de3b92`
 **File:** `guest-app/src/components/Navbar.tsx:180-190` (logged-out link), `:126-128` (initial-letter avatar), `guest-app/src/context/GuestAuthContext.tsx:16-28`
 
 `SPARK-REWARDS.md §Guest Authentication` specs a logged-out "Join
@@ -498,8 +509,13 @@ everywhere (Navbar, Profile page — where the spec also lists "Profile
 photo (from Google or uploaded)" and nothing renders it). Either build
 to spec or update the spec to the shipped design.
 
+**Fixed in `7de3b92`:** `MemberProfile` now maps `photoUrl`, navbar
+desktop/mobile member UI renders the provider photo when present, the
+profile page shows the photo/initial fallback, and logged-out navbar CTA
+links to `/rewards` as "Join Rewards".
+
 ### GA-18 — Portal spec drift bundle: one-shot points history, unused `isActive`, no disabled-member handling
-**Status:** Open
+**Status:** Fixed in `7de3b92`
 **File:** `guest-app/src/pages/RewardsPage.tsx:51-57` (getDocs), `guest-app/src/context/GuestAuthContext.tsx:96` (`isActive` mapped, never consumed)
 
 (a) Points history is a one-time `getDocs`; the spec says `onSnapshot`
@@ -512,8 +528,14 @@ currently does nothing at all — fix jointly with AA-01. (c) Sign-up
 validation is submit-time only (spec: inline on blur) — lowest priority
 of the three.
 
+**Fixed in `7de3b92`:** points history now uses an `onSnapshot`
+listener with cleanup, `AccountLayout` redirects inactive members to
+`/contact?member=disabled`, and `ContactPage` renders the disabled
+member message. Inline-on-blur signup validation remains polish-level
+future work outside this closed audit batch.
+
 ### GA-19 — `plan/guest-app/CLAUDE.md` drift: stale routes table, "no auth" claim, and Firebase-usage table
-**Status:** Open
+**Status:** Fixed in `7de3b92`
 **File:** `plan/guest-app/CLAUDE.md`
 
 One sync pass needed: the routes table names `CorporatePage.tsx` and
@@ -528,6 +550,10 @@ hardening) and omits the `members` doc listener, `pointsHistory`,
 rewardsConfig, websiteContent}` reads; the component notes list
 `BookingSummary.tsx` (actual: `BookingSummaryCard.tsx`). Also fold in
 the GA-13 decision when updating `HOMEPAGE.md`.
+
+**Fixed in `7de3b92`:** synced the guest-app context overview, routes
+table, Firebase usage table, no-direct-bookings-read guidance, and auth
+convention to the current Spark Rewards and API-mediated guest model.
 
 ---
 
@@ -591,7 +617,7 @@ the GA-13 decision when updating `HOMEPAGE.md`.
 | 1 (`fix/audit-ga-sev1`) | GA-01, GA-02, GA-03 (+GA-14 rides along) | Member stays endpoint, contact-form Turnstile + honeypot, early check-in auth contract | Fixed in `2b5b187` |
 | 2 (`fix/audit-ga-sev2`) | GA-04, GA-05, GA-06, GA-07 (+GA-16 rides along) | Date defaults, enrollment error surfacing, remarks migration, Google-consent decision | Fixed in `cb13846` |
 | 3 (`fix/audit-ga-sev3`) | GA-08 … GA-13 | Rate-limit keys, rewardsConfig wiring, member-state gating, account linking, modal carousel, homepage badge | Fixed in `7a6cf79` |
-| 4 | GA-15, GA-17 … GA-19 | White-label tokens, navbar/portal drift, doc sync | Open |
+| 4 (`fix/audit-ga-sev4`) | GA-15, GA-17 … GA-19 | White-label tokens, navbar/portal drift, doc sync | Fixed in `7de3b92` |
 
 **Fix-order notes:**
 - GA-01, GA-03, and GA-14 landed together in `2b5b187` — the new
