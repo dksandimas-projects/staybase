@@ -1129,6 +1129,7 @@ export function SettingsPage() {
   const [isStoreItemModalOpen, setIsStoreItemModalOpen] = useState(false);
   const [storeCategoryFilter, setStoreCategoryFilter] = useState<StoreCategory | "all">("all");
   const [storeItemPhotoDataUrl, setStoreItemPhotoDataUrl] = useState("");
+  const [storeItemPhotoFile, setStoreItemPhotoFile] = useState<File | null>(null);
   const [storeItemPhotoStatus, setStoreItemPhotoStatus] = useState("");
 
   // 6. Intercom Config states
@@ -1445,6 +1446,7 @@ export function SettingsPage() {
     const item = storeItems.find(storeItem => storeItem.id === itemId);
     setEditingStoreItemId(itemId);
     setStoreItemPhotoDataUrl(item?.imageUrl ?? "");
+    setStoreItemPhotoFile(null);
     setStoreItemPhotoStatus("");
     setIsStoreItemModalOpen(true);
   };
@@ -1453,6 +1455,7 @@ export function SettingsPage() {
     setIsStoreItemModalOpen(false);
     setEditingStoreItemId(null);
     setStoreItemPhotoDataUrl("");
+    setStoreItemPhotoFile(null);
     setStoreItemPhotoStatus("");
   };
 
@@ -1477,8 +1480,9 @@ export function SettingsPage() {
       setStoreItemPhotoStatus("Compressing image...");
       const image = await compressImageFile(file, { maxWidth: 1200, maxHeight: 1200, quality: 0.84 });
       setStoreItemPhotoDataUrl(image.dataUrl);
+      setStoreItemPhotoFile(image.file);
       setStoreItemPhotoStatus(
-        `Compressed to ${Math.max(1, Math.round(image.compressedSize / 1024))} KB at ${image.width}x${image.height}.`
+        `Compressed to ${Math.max(1, Math.round(image.compressedSize / 1024))} KB at ${image.width}x${image.height}. It will upload to Storage on save.`
       );
     } catch (error) {
       setStoreItemPhotoStatus(error instanceof Error ? error.message : "Unable to process image.");
@@ -1498,6 +1502,7 @@ export function SettingsPage() {
       price: Number(formData.get("price") || 0),
       stock: hasUnlimitedStock ? null : Math.max(0, stockValue),
       imageUrl: storeItemPhotoDataUrl,
+      imageFile: storeItemPhotoFile,
       isActive: formData.get("isActive") === "on"
     };
 
