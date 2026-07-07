@@ -190587,6 +190587,7 @@ async function handleConvertInquiryToBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
       const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
       let ratePerNight = Number(roomData.pricePerNight || 0);
+      let codeUsageUpdate = null;
       if (ratePerNightOverride !== void 0 && ratePerNightOverride !== null) {
         ratePerNight = ratePerNightOverride;
       } else if (inquiryData.accessCodeId) {
@@ -190600,10 +190601,13 @@ async function handleConvertInquiryToBooking(req, res) {
           } else if (roomData.corporateRate) {
             ratePerNight = roomData.corporateRate;
           }
-          transaction.update(codeRef, {
-            usageCount: (codeData.usageCount || 0) + 1,
-            updatedAt: /* @__PURE__ */ new Date()
-          });
+          codeUsageUpdate = {
+            ref: codeRef,
+            data: {
+              usageCount: (codeData.usageCount || 0) + 1,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          };
         } else if (roomData.corporateRate) {
           ratePerNight = roomData.corporateRate;
         }
@@ -190616,6 +190620,11 @@ async function handleConvertInquiryToBooking(req, res) {
       let sequence = 1;
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
+      }
+      if (codeUsageUpdate) {
+        transaction.update(codeUsageUpdate.ref, codeUsageUpdate.data);
+      }
+      if (counterDoc.exists) {
         transaction.update(counterRef, { count: sequence });
       } else {
         transaction.set(counterRef, { count: 1 });

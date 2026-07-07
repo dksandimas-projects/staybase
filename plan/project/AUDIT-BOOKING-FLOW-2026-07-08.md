@@ -29,10 +29,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 1 | **1** |
-| **SEV-2 (major)** | 0 | 1 | **1** |
+| **SEV-2 (major)** | 0 | 2 | **2** |
 | **SEV-3 (minor)** | 0 | 1 | **1** |
 | **SEV-4 (nit / spec drift)** | 0 | 2 | **2** |
-| **Total** | **0** | **5** | **5** |
+| **Total** | **0** | **6** | **6** |
 
 **Remediation status: fixed on `codex/fix-booking-flow-readiness`.** The flows are in strong shape overall — the
 BI-* fixes landed and the server is authoritative on every field the spec
@@ -43,6 +43,16 @@ Verification after fixes:
 - `npm run test:api -w guest-app` — 38 files, 284 tests passing
 - `npm run build:api -w guest-app` — committed API bundle regenerated
 - `npm run typecheck -w guest-app` — passing
+
+**Post-fix verification pass (2026-07-08):** BR-01..BR-05 confirmed fixed by
+re-review + independent re-run of the suite/typecheck/bundle. The re-review
+also swept every `runTransaction` block in `guest-app/server/handlers/` for
+the BR-01 pattern and found **one residual instance** in the staff
+convert-inquiry path — logged as BR-06 below and fixed on
+`fix/convert-inquiry-read-after-write` (39 files, 286 tests passing;
+typecheck clean; API bundle regenerated). All other transactions
+(`members.ts`, `store.ts`, `reference.ts`, and the seven in `bookings.ts`)
+are correctly ordered.
 
 Original blocker summary:
 
@@ -125,7 +135,7 @@ end. Must land together with BR-03 so the ordering is enforced by tests.
 
 ---
 
-## SEV-2 — Major (1)
+## SEV-2 — Major (2)
 
 ### BR-02 — `BookingPage` never resets the single-use Turnstile token; voucher Apply consumes the Confirm token
 **Status:** Fixed
@@ -165,6 +175,32 @@ call it (a) after every `/api/validate/voucher` response in
 `handleApplyVoucher`, and (b) after every `/api/bookings/create` response in
 `handleConfirmBooking` (success path navigates away; error paths must reset
 before re-enabling Confirm).
+
+### BR-06 — Read-after-write in the convert-inquiry transaction: converting a code-attached inquiry always 500
+**Status:** Fixed on `fix/convert-inquiry-read-after-write`
+**File:** `guest-app/server/handlers/corporate-inquiries.ts:232` (code
+`usageCount` write), `:250` (booking-ref counter read)
+
+Found during the post-fix verification sweep: `handleConvertInquiryToBooking`
+had the same read-after-write ordering as BR-01. When an inquiry carries an
+`accessCodeId` and staff provides no `ratePerNightOverride`, the code's
+`usageCount` increment (added alongside BI-07) queued a transaction write
+before the booking-ref counter read, so the SDK guard described in BR-01
+aborted the transaction — every conversion of a code-attached inquiry failed
+with a 500. Staff-side only (decision #102 flow), with a workaround (enter a
+manual rate override, which skips the code branch), hence SEV-2 rather than
+SEV-1. It stayed green in tests because `batch-9-convert-inquiry.test.ts` is
+source-pattern only and exercised no transaction at runtime.
+
+**Fix:** same deferral pattern as BR-01 — the code usage update is stashed in
+a local during the read phase and applied after the counter read, so the
+transaction is strictly reads-then-writes. New runtime suite
+`guest-app/tests/api/convert-inquiry-read-order.test.ts` mocks the
+transaction with the BR-03 read-after-write enforcement and covers both the
+code-attached conversion (asserting success + `usageCount` increment +
+negotiated `ratePerRoomType` rate) and the no-code fallback to
+`room.corporateRate`; the code-attached test was confirmed to fail with the
+exact SDK error against the pre-fix handler.
 
 ---
 
