@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -119,6 +119,7 @@ export function BookingsPage() {
     updateStoreOrderStatus,
     billStoreOrder,
     roomTypes,
+    seasonalRateOverrides,
     breakfastConfig,
     websiteContent,
     rewardsConfig,
@@ -267,6 +268,16 @@ export function BookingsPage() {
   const selectedRoomDetails = rooms.find(r => r.roomNumber === roomNumber);
   const selectedRoomType = roomTypes.find(t => t.value === selectedRoomDetails?.type);
   const ratePerNight = selectedRoomType?.pricePerNight || 0;
+  const roomChargeTotal = selectedRoomType
+    ? calculateSeasonalAwareRoomTotal({
+        checkIn: `${checkInDate}T00:00:00Z`,
+        checkOut: `${checkOutDate}T00:00:00Z`,
+        roomType: selectedRoomType.value,
+        baseRate: selectedRoomType.pricePerNight,
+        weekendRate: selectedRoomType.weekendRate,
+        seasonalRateOverrides
+      })
+    : 0;
   
   // Calculate nights
   const getNumNights = () => {
@@ -278,7 +289,7 @@ export function BookingsPage() {
   };
   const numNights = getNumNights();
   const brekkieRate = breakfastConfig.ratePerPersonPerNight || 300;
-  const totalPrice = ratePerNight * numNights + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
+  const totalPrice = roomChargeTotal + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
 
   // Table Columns Setup
   const columns: Array<DataTableColumn<Booking>> = [
@@ -2865,7 +2876,8 @@ export function BookingsPage() {
           </div>
         }
       >
-        <form id="walkin-form" onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
+        <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
+          <span className="sr-only">Confirm Reservation</span>
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Full Name
             <input
@@ -3029,7 +3041,7 @@ export function BookingsPage() {
             </div>
             <div className="flex justify-between text-gray-600">
               <span>Accommodation Cost:</span>
-              <span>{formatPrice(ratePerNight * numNights)}</span>
+              <span>{formatPrice(roomChargeTotal)}</span>
             </div>
             {hasBreakfast && (
               <div className="flex justify-between text-gray-500">

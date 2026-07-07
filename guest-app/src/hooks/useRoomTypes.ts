@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { DEFAULT_ROOM_TYPES, type RoomTypeEntry } from "@spark-inn/shared";
+import {
+  DEFAULT_ROOM_TYPES,
+  normalizeSeasonalRateOverrides,
+  type RoomTypeEntry,
+  type SeasonalRateOverride
+} from "@spark-inn/shared";
 
 interface UseRoomTypesResult {
   roomTypes: RoomTypeEntry[];
+  seasonalRateOverrides: SeasonalRateOverride[];
   loading: boolean;
   error: Error | null;
 }
@@ -24,6 +30,7 @@ export function useRoomTypes(): UseRoomTypesResult {
     }))
   );
   const [loading, setLoading] = useState(true);
+  const [seasonalRateOverrides, setSeasonalRateOverrides] = useState<SeasonalRateOverride[]>([]);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
@@ -70,6 +77,7 @@ export function useRoomTypes(): UseRoomTypesResult {
             .filter((t) => t.value.length > 0);
           setRoomTypes(normalized);
         }
+        setSeasonalRateOverrides(normalizeSeasonalRateOverrides(data?.seasonalRateOverrides));
         setLoading(false);
       },
       (err) => {
@@ -81,7 +89,7 @@ export function useRoomTypes(): UseRoomTypesResult {
     return unsubscribe;
   }, []);
 
-  return { roomTypes, loading, error };
+  return { roomTypes, seasonalRateOverrides, loading, error };
 }
 
 export function getRoomTypeImages(types: RoomTypeEntry[], typeValue: string): string[] {

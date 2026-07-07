@@ -113,6 +113,33 @@ export interface EarlyCheckInDetails {
   staffNote: string | null;
 }
 
+export interface SeasonalRateOverride {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  rate: number;
+  roomTypeValues: string[];
+  isActive: boolean;
+}
+
+export interface RoomBlock {
+  id: string;
+  roomId: string;
+  roomNumber: string;
+  roomType: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  notes: string;
+  status: "active" | "cancelled";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+}
+
 export interface Booking {
   id: string;
   bookingRef: string;

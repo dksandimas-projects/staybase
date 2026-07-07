@@ -4,6 +4,7 @@ import { AdminLayout } from "./components/AdminLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { BookingsPage } from "./pages/BookingsPage";
+import { CalendarPage } from "./pages/CalendarPage";
 import { RoomsPage } from "./pages/RoomsPage";
 import { RatesPage } from "./pages/RatesPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -23,6 +24,7 @@ export function App() {
         <Route element={<AdminLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/bookings" element={<BookingsPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/rooms" element={<RoomsPage />} />
           <Route path="/rates" element={<RatesPage />} />
           <Route path="/reports" element={<ReportsPage />} />

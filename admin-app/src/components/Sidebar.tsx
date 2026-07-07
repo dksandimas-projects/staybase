@@ -25,6 +25,7 @@ import { useFocusTrap } from "../utils/useFocusTrap";
 const navItems = [
   { label: "Dashboard", to: "/", icon: Home },
   { label: "Bookings", to: "/bookings", icon: CalendarDays },
+  { label: "Calendar", to: "/calendar", icon: CalendarDays },
   { label: "Rooms", to: "/rooms", icon: BedDouble },
   { label: "Rates", to: "/rates", icon: Tag },
   { label: "Reports", to: "/reports", icon: BarChart3 },

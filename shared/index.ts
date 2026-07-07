@@ -15,6 +15,7 @@ export * from "./utils/points";
 export * from "./utils/pricing";
 export * from "./utils/publicSiteCache";
 export * from "./utils/references";
+export * from "./utils/seasonalRates";
 export * from "./utils/storageJanitor";
 export * from "./utils/storePaymentMethods";
 export * from "./utils/vouchers";
