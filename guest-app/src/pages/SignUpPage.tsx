@@ -13,7 +13,7 @@ import { useGuestAuth } from "../context/GuestAuthContext";
 export function SignUpPage() {
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion();
-  const { signUpWithEmail, signInWithGoogle, loading } = useGuestAuth();
+  const { signUpWithEmail, signInWithGoogle, registerCurrentMember, loading } = useGuestAuth();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -76,13 +76,18 @@ export function SignUpPage() {
 
   const handleGoogleSignIn = async () => {
     setErrorMsg("");
+    if (!consent) {
+      setErrorMsg("You must agree to the Privacy Policy and Terms of Service before joining Spark Rewards with Google.");
+      return;
+    }
     setIsGoogleLoading(true);
     try {
       await signInWithGoogle();
+      await registerCurrentMember();
       navigate("/account/profile");
     } catch (err: any) {
       if (err?.code !== "auth/popup-closed-by-user") {
-        setErrorMsg("Google sign-in failed. Please try again.");
+        setErrorMsg(err?.message || "Google sign-in failed. Please try again.");
       }
     } finally {
       setIsGoogleLoading(false);

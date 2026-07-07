@@ -25,8 +25,8 @@ export function useRooms() {
             isActive: data.isActive !== false,
             status: data.status || "available",
             housekeepingStatus: data.housekeepingStatus || "clean",
-            blockReason: data.blockReason || "",
-            remarks: data.remarks || "",
+            blockReason: "",
+            remarks: "",
             createdAt: data.createdAt?.toDate() || new Date(),
             updatedAt: data.updatedAt?.toDate() || new Date(),
           });

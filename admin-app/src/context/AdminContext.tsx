@@ -26,7 +26,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { arrayUnion, collection, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, deleteField, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -553,10 +553,48 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
     setRoomsLoading(true);
     const roomsRef = collection(db, "rooms");
-    const unsubscribe = onSnapshot(
+    const roomPrivateRef = collection(db, "roomPrivate");
+    let latestRooms: Array<Room & { legacyRemarks?: string; legacyBlockReason?: string }> = [];
+    let latestPrivate = new Map<string, { remarks: string; blockReason: string }>();
+
+    const publishRooms = () => {
+      const merged = latestRooms.map((room) => {
+        const privateData = latestPrivate.get(room.id);
+        return {
+          ...room,
+          remarks: privateData?.remarks ?? room.legacyRemarks ?? "",
+          blockReason: privateData?.blockReason ?? room.legacyBlockReason ?? ""
+        };
+      });
+      merged.sort((a, b) =>
+        a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
+      );
+      setRooms(merged);
+      setRoomsLoading(false);
+    };
+
+    const migrateLegacyPrivateFields = (roomId: string, data: any) => {
+      const hasLegacyRemarks = typeof data.remarks === "string" && data.remarks.length > 0;
+      const hasLegacyBlockReason = typeof data.blockReason === "string" && data.blockReason.length > 0;
+      if (!hasLegacyRemarks && !hasLegacyBlockReason) return;
+
+      void setDoc(doc(db, "roomPrivate", roomId), {
+        ...(hasLegacyRemarks ? { remarks: data.remarks } : {}),
+        ...(hasLegacyBlockReason ? { blockReason: data.blockReason } : {}),
+        updatedAt: serverTimestamp()
+      }, { merge: true }).then(() => updateDoc(doc(db, "rooms", roomId), {
+        ...(hasLegacyRemarks ? { remarks: deleteField() } : {}),
+        ...(hasLegacyBlockReason ? { blockReason: deleteField() } : {}),
+        updatedAt: serverTimestamp()
+      })).catch((error) => {
+        console.error("Error migrating room private fields:", error);
+      });
+    };
+
+    const unsubscribeRooms = onSnapshot(
       roomsRef,
       (snapshot) => {
-        const roomsData: Room[] = [];
+        const roomsData: Array<Room & { legacyRemarks?: string; legacyBlockReason?: string }> = [];
         const parseDateString = (val: any) => {
           if (!val) return null;
           if (typeof val.toDate === "function") {
@@ -572,6 +610,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         };
         snapshot.forEach((doc) => {
           const data = doc.data();
+          migrateLegacyPrivateFields(doc.id, data);
           roomsData.push({
             id: doc.id,
             name: data.name || "",
@@ -582,19 +621,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             housekeepingStatus: data.housekeepingStatus || "clean",
             blockedFrom: parseDateString(data.blockedFrom),
             blockedTo: parseDateString(data.blockedTo),
-            blockReason: data.blockReason || "",
-            remarks: data.remarks || "",
+            blockReason: "",
+            remarks: "",
+            legacyBlockReason: data.blockReason || "",
+            legacyRemarks: data.remarks || "",
             qrToken: data.qrToken || ""
           });
         });
 
-        // Consistent natural sort by room number
-        roomsData.sort((a, b) =>
-          a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true })
-        );
-
-        setRooms(roomsData);
-        setRoomsLoading(false);
+        latestRooms = roomsData;
+        publishRooms();
       },
       (error) => {
         console.error("Error listening to rooms collection:", error);
@@ -602,7 +638,29 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    return unsubscribe;
+    const unsubscribePrivate = onSnapshot(
+      roomPrivateRef,
+      (snapshot) => {
+        latestPrivate = new Map(
+          snapshot.docs.map((privateDoc) => {
+            const data = privateDoc.data();
+            return [privateDoc.id, {
+              remarks: data.remarks || "",
+              blockReason: data.blockReason || ""
+            }];
+          })
+        );
+        publishRooms();
+      },
+      (error) => {
+        console.error("Error listening to roomPrivate collection:", error);
+      }
+    );
+
+    return () => {
+      unsubscribeRooms();
+      unsubscribePrivate();
+    };
   }, [currentUser]);
 
   const toggleHousekeepingStatus = async (roomId: string) => {
@@ -636,13 +694,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const updateRoomConfig = async (roomId: string, updates: Partial<Room>) => {
     try {
       const roomRef = doc(db, "rooms", roomId);
+      const privateUpdates: Record<string, any> = {};
+      if ("remarks" in updates) {
+        privateUpdates.remarks = updates.remarks || "";
+      }
+      if ("blockReason" in updates) {
+        privateUpdates.blockReason = updates.blockReason || "";
+      }
       const dataToUpdate: Record<string, any> = {
         ...updates,
         updatedAt: serverTimestamp()
       };
       delete dataToUpdate.id; // Exclude ID from updates payload
+      delete dataToUpdate.remarks;
+      delete dataToUpdate.blockReason;
 
       await updateDoc(roomRef, dataToUpdate);
+      if (Object.keys(privateUpdates).length > 0) {
+        await setDoc(doc(db, "roomPrivate", roomId), {
+          ...privateUpdates,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
     } catch (error) {
       console.error("Error updating room config in Firestore:", error);
     }
@@ -655,11 +728,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const toDate = new Date(`${dates.to}T23:59:59`);
       await updateDoc(roomRef, {
         status: "blocked",
-        blockReason: reason,
         blockedFrom: Timestamp.fromDate(fromDate),
         blockedTo: Timestamp.fromDate(toDate),
         updatedAt: serverTimestamp()
       });
+      await setDoc(doc(db, "roomPrivate", roomId), {
+        blockReason: reason,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
     } catch (error) {
       console.error("Error adding room block in Firestore:", error);
     }
@@ -687,14 +763,19 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         isActive: input.isActive,
         status: input.status,
         housekeepingStatus: input.housekeepingStatus,
-        blockReason: input.status === "blocked" ? (input.blockReason || "") : "",
         blockedFrom: null,
         blockedTo: null,
-        remarks: input.remarks || "",
         qrToken: "",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+      if (input.remarks || (input.status === "blocked" && input.blockReason)) {
+        await setDoc(doc(db, "roomPrivate", docRef.id), {
+          remarks: input.remarks || "",
+          blockReason: input.status === "blocked" ? (input.blockReason || "") : "",
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
 
       return { success: true, roomId: docRef.id };
     } catch (error) {
@@ -786,7 +867,14 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         deletedAt: serverTimestamp()
       });
 
-      // 4) Finally, the room document itself.
+      // 4) Staff-only private room notes.
+      try {
+        await deleteDoc(doc(db, "roomPrivate", roomId));
+      } catch (privateErr) {
+        console.warn(`Private room notes cleanup for room ${roomId} skipped:`, privateErr);
+      }
+
+      // 5) Finally, the room document itself.
       await deleteDoc(doc(db, "rooms", roomId));
 
       return { success: true };

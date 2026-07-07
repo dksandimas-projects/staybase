@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { User, Mail, Phone, Calendar, Trash2, Shield, Award, Sparkles, CheckCircle2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { User, Mail, Phone, Calendar, Trash2, Shield, Award, Sparkles, CheckCircle2, AlertCircle } from "lucide-react";
 import config from "@config";
 import { AccountLayout } from "../components/AccountLayout";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -12,12 +13,14 @@ import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCre
 import { auth, db } from "../firebase/config";
 
 export function ProfilePage() {
-  const { user, memberProfile, refreshMemberProfile } = useGuestAuth();
+  const { user, memberProfile, refreshMemberProfile, registerCurrentMember } = useGuestAuth();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [isEnrolling, setIsEnrolling] = useState(false);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -47,8 +50,12 @@ export function ProfilePage() {
     if (!user) return;
     setIsSaving(true);
     setShowSuccessAlert(false);
+    setProfileError("");
 
     try {
+      if (!memberProfile) {
+        throw new Error("Join Spark Rewards first so we can save your member profile details.");
+      }
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
       // Update Firebase Auth profile
@@ -66,8 +73,24 @@ export function ProfilePage() {
       setTimeout(() => setShowSuccessAlert(false), 3000);
     } catch (err) {
       console.error("Profile update failed:", err);
+      setProfileError(err instanceof Error ? err.message : "We couldn't update your profile. Please try again.");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleJoinRewards = async () => {
+    setIsEnrolling(true);
+    setProfileError("");
+    try {
+      await registerCurrentMember();
+      setShowSuccessAlert(true);
+      setTimeout(() => setShowSuccessAlert(false), 3000);
+    } catch (err) {
+      console.error("Member enrollment failed:", err);
+      setProfileError(err instanceof Error ? err.message : "We could not join Spark Rewards right now. Please try again.");
+    } finally {
+      setIsEnrolling(false);
     }
   };
 
@@ -154,6 +177,25 @@ export function ProfilePage() {
     <AccountLayout activeTab="profile" title="My Profile" subtitle="Manage your Spark Rewards account details.">
       <div className="space-y-8">
         {/* Spark Rewards Card */}
+        {user && !memberProfile && (
+          <div className="rounded-card bg-primary-light p-5 ring-1 ring-primary/20">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-bold text-primary-dark">Finish joining {config.rewardsName}</p>
+                <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                  Create your member profile to save account details, link eligible stays, and use rewards features. By joining, you agree to the{" "}
+                  <Link to="/privacy" className="font-semibold text-primary hover:underline">Privacy Policy</Link>{" "}
+                  and{" "}
+                  <Link to="/terms" className="font-semibold text-primary hover:underline">Terms of Service</Link>.
+                </p>
+              </div>
+              <PrimaryButton type="button" onClick={handleJoinRewards} disabled={isEnrolling} className="shrink-0">
+                {isEnrolling ? "Joining..." : "Join Rewards"}
+              </PrimaryButton>
+            </div>
+          </div>
+        )}
+
         {memberProfile?.isMember && (
           <div className="rounded-xl overflow-hidden shadow-sm" style={{ background: `linear-gradient(135deg, ${config.colors.sidebar}, ${config.colors.sidebar}ee)` }}>
             <div className="p-6 text-white">
@@ -192,6 +234,13 @@ export function ProfilePage() {
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-800 flex items-start gap-2">
               <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
               <span>Profile updated successfully.</span>
+            </div>
+          )}
+
+          {profileError && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              <span>{profileError}</span>
             </div>
           )}
 

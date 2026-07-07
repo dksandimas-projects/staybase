@@ -28,6 +28,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
+  getDateKeyInTimezone,
   getNumNights,
   staggerChild,
   staggerContainer,
@@ -100,23 +101,6 @@ function formatStayDate(value: string) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
-const getTodayIso = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
-const getTomorrowIso = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
 export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
@@ -155,8 +139,8 @@ export function BookingPage() {
     ? Number(rewardsConfig?.memberDiscountPct) || 0
     : 0;
 
-  const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getTodayIso());
-  const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getTomorrowIso());
+  const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
+  const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
