@@ -1,15 +1,16 @@
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight } from "lucide-react";
+import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads } = useAdmin();
 
   const toLocalDateKey = (date: Date) => {
     const tz = config.timezone || "Asia/Manila";
@@ -46,6 +47,31 @@ export function DashboardPage() {
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
   const recentBookings = bookings.slice(0, 10);
+
+  // Active Intercom Threads Calculations
+  const activeIntercomThreads = useMemo(() => {
+    if (!intercomThreads || !intercoms) return [];
+    
+    return Object.values(intercomThreads)
+      .filter((thread) => {
+        // Active (unresolved) OR has unread guest messages
+        if (!thread.resolved) return true;
+        const messages = intercoms[thread.roomNumber] || [];
+        const hasUnread = messages.some((m) => m.sender === "guest" && !m.isRead);
+        return hasUnread;
+      })
+      .map((thread) => {
+        const messages = intercoms[thread.roomNumber] || [];
+        const lastMessage = messages[messages.length - 1];
+        const unreadCount = messages.filter((m) => m.sender === "guest" && !m.isRead).length;
+        return {
+          ...thread,
+          lastMessage,
+          unreadCount
+        };
+      })
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()); // Latest first
+  }, [intercomThreads, intercoms]);
 
   if (dashboardLoading) {
     return (
@@ -254,6 +280,66 @@ export function DashboardPage() {
                 </button>
               )) : (
                 <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No departures today.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <h2 className="mb-3 flex items-center justify-between gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+              <span className="flex items-center gap-2">
+                <MessageSquare size={18} className="text-primary" />
+                Active Guest Chats
+              </span>
+              {activeIntercomThreads.some(t => t.unreadCount > 0) && (
+                <span className="rounded-full bg-green-105 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-green-700">
+                  Unread
+                </span>
+              )}
+            </h2>
+            <div className="space-y-2">
+              {activeIntercomThreads.length > 0 ? (
+                activeIntercomThreads.slice(0, 5).map((thread) => {
+                  const hasUnread = thread.unreadCount > 0;
+                  return (
+                    <button
+                      key={thread.roomId}
+                      type="button"
+                      onClick={() => navigate(`/intercom?room=${encodeURIComponent(thread.roomNumber)}`)}
+                      className={`flex min-h-[48px] w-full items-center justify-between gap-3 rounded-lg border px-3 text-left transition hover:bg-gray-50 ${
+                        hasUnread ? "border-green-300 bg-green-50/20 shadow-sm" : "border-gray-200"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 rounded-full ${hasUnread ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
+                          <span className="text-xs font-bold text-gray-900">Room {thread.roomNumber}</span>
+                          <span className="text-[10px] font-semibold text-gray-400">· {thread.guestName}</span>
+                        </div>
+                        {thread.lastMessage ? (
+                          <p className="truncate mt-0.5 text-[10px] text-gray-600 font-semibold leading-normal">
+                            <span className="font-bold text-gray-550">{thread.lastMessage.sender === "guest" ? "Guest: " : "Staff: "}</span>
+                            {thread.lastMessage.text}
+                          </p>
+                        ) : (
+                          <p className="mt-0.5 text-[10px] text-gray-400 italic">No messages yet</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {hasUnread && (
+                          <span className="rounded-full bg-green-500 px-2 py-0.5 text-[9px] font-bold text-white leading-none">
+                            {thread.unreadCount}
+                          </span>
+                        )}
+                        <ExternalLink size={12} className="text-gray-400" />
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 text-center text-gray-400 rounded-lg bg-gray-50 border border-dashed border-gray-200">
+                  <MessageSquare size={24} className="text-gray-300 mb-1.5" />
+                  <p className="text-xs font-semibold text-gray-500">No active guest chats.</p>
+                </div>
               )}
             </div>
           </div>

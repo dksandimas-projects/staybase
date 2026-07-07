@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAdmin, IntercomMessage, StoreOrder } from "../context/AdminContext";
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
@@ -32,8 +32,28 @@ export function IntercomInboxPage() {
   } = useAdmin();
   const { isMobile } = useBreakpoint();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const roomQueryParam = searchParams.get("room") || "";
+
   // Active chat selection
   const [selectedRoomNumber, setSelectedRoomNumber] = useState<string>("");
+
+  useEffect(() => {
+    if (roomQueryParam) {
+      setSelectedRoomNumber(roomQueryParam);
+      // If the selected thread is resolved, auto-switch filter toresolved
+      // so the staff member can see it, otherwise it might stay hidden.
+      const thread = intercomThreads[roomQueryParam];
+      if (thread && thread.resolved) {
+        setThreadFilter("resolved");
+      }
+      
+      // Clean up the URL search params
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("room");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [roomQueryParam, intercomThreads]);
   const [threadFilter, setThreadFilter] = useState<"active" | "resolved">("active");
   const [replyText, setReplyText] = useState("");
   const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
