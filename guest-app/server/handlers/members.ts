@@ -21,6 +21,11 @@ const undoRedemptionSchema = z.object({
   bookingId: z.string().trim().min(1).max(120)
 }).strict();
 
+const setMemberActiveSchema = z.object({
+  uid: z.string().trim().min(1).max(160),
+  isActive: z.boolean()
+}).strict();
+
 const eraseAccountSchema = z.object({
   confirmation: z.literal("erase-my-account")
 }).strict();
@@ -361,6 +366,85 @@ export async function handleUndoMemberPointsRedemption(req: any, res: any) {
     return res.status(400).json({
       success: false,
       error: error?.message || "We could not undo this points redemption."
+    });
+  }
+}
+
+export async function handleSetMemberActive(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+  }
+
+  const parsed = setMemberActiveSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please choose a member account to update."
+    });
+  }
+
+  const { uid, isActive } = parsed.data;
+
+  try {
+    const memberRef = adminDb.collection("members").doc(uid);
+    const memberDoc = await memberRef.get();
+    if (!memberDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Member account was not found."
+      });
+    }
+
+    const now = new Date();
+    const previousIsActive = memberDoc.data()?.isActive !== false;
+
+    try {
+      await memberRef.set({
+        isActive,
+        disabledAt: isActive ? null : now,
+        disabledBy: isActive ? null : staff.uid,
+        updatedAt: now
+      }, { merge: true });
+      await adminAuth.updateUser(uid, { disabled: !isActive });
+    } catch (syncErr) {
+      console.error("Member active-state sync failed, rolling back Firestore:", syncErr);
+      try {
+        await memberRef.set({
+          isActive: previousIsActive,
+          disabledAt: previousIsActive ? null : memberDoc.data()?.disabledAt || null,
+          disabledBy: previousIsActive ? null : memberDoc.data()?.disabledBy || null,
+          updatedAt: new Date()
+        }, { merge: true });
+      } catch (rollbackErr) {
+        console.error("Failed to roll back member active-state:", rollbackErr);
+      }
+      throw syncErr;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: { uid, isActive }
+    });
+  } catch (error: any) {
+    if (error?.code === "auth/user-not-found") {
+      return res.status(404).json({
+        success: false,
+        error: "Member auth account was not found."
+      });
+    }
+
+    console.error("Member account active-state update failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update member account status. Please try again."
     });
   }
 }
