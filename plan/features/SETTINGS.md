@@ -116,6 +116,9 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 - [ ] Delete staff account (with confirmation modal)
 - [ ] Admin-only — front desk cannot see or access this tab
 - [ ] Account creation uses Firebase Admin SDK via API route — not client-side `createUserWithEmailAndPassword`
+- [x] Edit staff account details — name, email, phone, and role via a dedicated edit modal
+- [x] Reset staff password — support setting new password directly or triggering standard password reset email link
+- [x] Update staff account endpoint uses Vercel API route `/api/admin/update-staff` with transactional consistency and auth rollback on failure
 
 ---
 
