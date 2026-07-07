@@ -5,9 +5,9 @@ import { resolve } from "node:path";
 // Regression test for SEV-1 (Phase 2 W2.4 #92): the Early Check-In
 // button on RewardsPage was a fake "open the intercom chat or call
 // the desk" hint. Per W2.4 / decision #92, it should:
-// 1. Find the next upcoming confirmed/checked-in booking for the member
+// 1. Ask the authenticated member stays endpoint for guest-safe bookings
 // 2. Show the request (auto-pick if only 1, picker if >1, error if 0)
-// 3. POST to /api/email/early-checkin-request with the bookingId
+// 3. POST to /api/email/early-checkin-request with the bookingId + member token
 // 4. Show a success confirmation
 
 describe("RewardsPage.tsx — early check-in real submission (decision #92)", () => {
@@ -16,30 +16,31 @@ describe("RewardsPage.tsx — early check-in real submission (decision #92)", ()
     "utf8"
   );
 
-  it("uses the where import from firebase/firestore (needed for the booking query)", () => {
-    expect(src).toMatch(/import\s*\{[^}]*\bwhere\b[^}]*\}\s*from\s*["']firebase\/firestore["']/);
+  it("does not query the staff-only bookings collection from the guest client", () => {
+    expect(src).not.toMatch(/collection\(db,\s*["']bookings["']\)/);
+    expect(src).not.toMatch(/where\(['"]memberId['"]/);
   });
 
-  it("has an UpcomingBooking interface that matches the booking query shape", () => {
+  it("has an UpcomingBooking interface that matches the member stays response shape", () => {
     expect(src).toMatch(/interface UpcomingBooking/);
     expect(src).toMatch(/bookingRef:\s*string/);
-    expect(src).toMatch(/checkIn:\s*any/);
+    expect(src).toMatch(/checkIn:\s*string/);
   });
 
-  it("defines a useEffect that loads bookings when the modal opens", () => {
+  it("defines a useEffect that loads member stays when the modal opens", () => {
     expect(src).toMatch(/useEffect/);
     expect(src).toMatch(/setShowEarlyCheckIn/);
-    expect(src).toMatch(/getDocs\(/);
+    expect(src).toMatch(/fetch\(["']\/api\/members\/stays["']/);
+    expect(src).toMatch(/Authorization:\s*`Bearer \$\{idToken\}`/);
   });
 
-  it("filters the query to memberId == user.uid, status in [confirmed, checked-in]", () => {
-    expect(src).toMatch(/where\(['"]memberId['"]/);
-    expect(src).toMatch(/where\(['"]status['"].*?['"]in['"]/);
+  it("filters the member stays response to confirmed/checked-in upcoming bookings", () => {
+    expect(src).toMatch(/\["confirmed",\s*"checked-in"\]\.includes\(stay\.status\)/);
+    expect(src).toMatch(/stay\.checkIn\s*>=\s*todayStr/);
   });
 
-  it("filters to bookings with checkIn >= today and sorts ascending", () => {
-    expect(src).toMatch(/checkIn\.getTime\(\)\s*>=\s*today/);
-    expect(src).toMatch(/sort\(\(a, b\) => a\.checkIn\.getTime\(\) - b\.checkIn\.getTime\(\)\)/);
+  it("sorts upcoming bookings ascending by check-in", () => {
+    expect(src).toMatch(/sort\(\(a: UpcomingBooking, b: UpcomingBooking\) => a\.checkIn\.localeCompare\(b\.checkIn\)\)/);
   });
 
   it("shows an error when there are no upcoming bookings", () => {
@@ -55,9 +56,10 @@ describe("RewardsPage.tsx — early check-in real submission (decision #92)", ()
     expect(src).toMatch(/Pick the one/);
   });
 
-  it("POSTs to /api/email/early-checkin-request with the bookingId", () => {
+  it("POSTs to /api/email/early-checkin-request with the bookingId and member token", () => {
     expect(src).toMatch(/fetch\(["']\/api\/email\/early-checkin-request["']/);
     expect(src).toMatch(/body:\s*JSON\.stringify\(\{\s*bookingId/);
+    expect(src).toMatch(/Authorization:\s*`Bearer \$\{await user!\.getIdToken\(\)\}`/);
   });
 
   it("shows a success confirmation after submission", () => {

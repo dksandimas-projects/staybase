@@ -6,9 +6,9 @@ import config from "@config";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { cn } from "../utils/cn";
 import { fadeUp } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { useTurnstileToken } from "../hooks/useTurnstileToken";
 
 export function ContactPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -32,9 +32,15 @@ export function ContactPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [honeypot, setHoneypot] = useState("");
+  const turnstile = useTurnstileToken();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!turnstile.token) {
+      setSubmitError("Please complete the verification check, then send your message again.");
+      return;
+    }
     setIsSubmitting(true);
     setShowSuccess(false);
     setSubmitError("");
@@ -47,7 +53,9 @@ export function ContactPage() {
           name: name.trim(),
           email: email.trim(),
           subject: subject.trim(),
-          message: message.trim()
+          message: message.trim(),
+          turnstileToken: turnstile.token,
+          _hp: honeypot
         })
       });
       const data = await res.json().catch(() => null);
@@ -59,10 +67,12 @@ export function ContactPage() {
       setEmail("");
       setSubject("");
       setMessage("");
+      setHoneypot("");
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (error: any) {
       setSubmitError(error?.message || "We could not send your message. Please try again in a moment.");
     } finally {
+      turnstile.reset();
       setIsSubmitting(false);
     }
   };
@@ -218,6 +228,21 @@ export function ContactPage() {
                   )}
 
                   <form onSubmit={handleSubmit} className="space-y-5">
+                    <label
+                      className="absolute h-px w-px overflow-hidden opacity-0 pointer-events-none"
+                      aria-hidden="true"
+                      tabIndex={-1}
+                    >
+                      Website
+                      <input
+                        type="text"
+                        name="_hp"
+                        value={honeypot}
+                        onChange={(e) => setHoneypot(e.target.value)}
+                        tabIndex={-1}
+                        autoComplete="off"
+                      />
+                    </label>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="grid gap-2 text-xs font-semibold text-gray-700">
                         Full Name
@@ -268,10 +293,14 @@ export function ContactPage() {
                       />
                     </label>
 
+                    <div className="pt-1">
+                      <div ref={turnstile.containerRef} />
+                    </div>
+
                     <div className="pt-2">
                       <PrimaryButton 
                         type="submit" 
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !turnstile.token}
                         className="w-full sm:w-auto min-w-[150px]"
                       >
                         {isSubmitting ? "Sending message..." : "Send Message"}

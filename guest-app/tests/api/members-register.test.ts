@@ -54,7 +54,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
   };
 });
 
-import { handleRegisterMember } from "../../server/handlers/members";
+import { handleListMemberStays, handleRegisterMember } from "../../server/handlers/members";
 
 const mockResponse = () => {
   const res: any = {};
@@ -163,5 +163,63 @@ describe("/api/members/register handler", () => {
     await handleRegisterMember({ ...authedReq, method: "GET" }, res);
 
     expect(res.status).toHaveBeenCalledWith(405);
+  });
+
+  test("lists deduped member stays through a guest-safe projection", async () => {
+    mockBookingDocs.push(
+      {
+        id: "booking_1",
+        ref: { path: "bookings/booking_1" },
+        data: () => ({
+          bookingRef: "SI-20260710-001",
+          lookupToken: "lookup_1",
+          roomNumber: "101",
+          roomType: "standard",
+          roomName: "Standard Room",
+          guestEmail: "guest@example.test",
+          memberId: "member_123",
+          checkIn: new Date("2026-07-10T00:00:00.000Z"),
+          checkOut: new Date("2026-07-12T00:00:00.000Z"),
+          numNights: 2,
+          totalPrice: 5000,
+          status: "pending",
+          hasBreakfast: true,
+          paymentProofUrl: "https://example.test/private-proof.jpg",
+          remarks: "Internal staff note"
+        })
+      },
+      {
+        id: "booking_2",
+        ref: { path: "bookings/booking_2" },
+        data: () => ({
+          bookingRef: "SI-20260701-001",
+          lookupToken: "lookup_2",
+          guestEmail: "guest@example.test",
+          memberId: "",
+          checkIn: new Date("2026-07-01T00:00:00.000Z"),
+          checkOut: new Date("2026-07-02T00:00:00.000Z"),
+          status: "checked-out"
+        })
+      }
+    );
+    const res = mockResponse();
+
+    await handleListMemberStays({ ...authedReq, method: "GET" }, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const payload = (res.json as any).mock.calls[0][0];
+    expect(payload.success).toBe(true);
+    expect(payload.data.stays).toHaveLength(2);
+    expect(payload.data.stays[0]).toMatchObject({
+      id: "booking_1",
+      bookingRef: "SI-20260710-001",
+      lookupToken: "lookup_1",
+      checkIn: "2026-07-10",
+      checkOut: "2026-07-12",
+      status: "pending",
+      hasBreakfast: true
+    });
+    expect(payload.data.stays[0]).not.toHaveProperty("paymentProofUrl");
+    expect(payload.data.stays[0]).not.toHaveProperty("remarks");
   });
 });

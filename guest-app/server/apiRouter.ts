@@ -7,7 +7,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleEmailTrigger } from "./handlers/email";
@@ -685,6 +685,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleRegisterMember(req, res);
   }
 
+  if (domain === "members" && action === "stays" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-stays:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many stay lookup requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateUser(req);
+    if (!authResult.success) {
+      return res.status(401).json({ success: false, error: authResult.error });
+    }
+    (req as any).user = authResult;
+
+    return await handleListMemberStays(req, res);
+  }
+
   if (domain === "members" && action === "redeem-points" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
@@ -830,9 +844,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } else if (req.headers.authorization) {
       const authResult = await authenticateStaff(req);
       if (!authResult.success) {
-        return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+        if (action === "early-checkin-request") {
+          const userAuth = await authenticateUser(req);
+          if (!userAuth.success) {
+            return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+          }
+          (req as any).user = userAuth;
+        } else {
+          return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+        }
+      } else {
+        (req as any).staff = authResult;
       }
-      (req as any).staff = authResult;
     }
 
     

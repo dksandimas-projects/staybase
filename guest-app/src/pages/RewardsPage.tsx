@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles } from "lucide-react";
-import { collection, query, getDocs, orderBy, where } from "firebase/firestore";
+import { collection, query, getDocs, orderBy } from "firebase/firestore";
 import config from "@config";
 import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
@@ -12,8 +12,8 @@ interface UpcomingBooking {
   id: string;
   bookingRef: string;
   roomName?: string;
-  checkIn: any;
-  checkOut: any;
+  checkIn: string;
+  checkOut: string;
 }
 
 interface PointsTransaction {
@@ -29,6 +29,9 @@ function toDateStr(value: any): string {
   if (value instanceof Date) return value.toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" });
   if (typeof value === "object" && typeof value.toDate === "function") {
     return value.toDate().toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" });
+  }
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00`).toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" });
   }
   return String(value);
 }
@@ -91,24 +94,27 @@ export function RewardsPage() {
     setEarlyCheckInSent(null);
     (async () => {
       try {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const bkSnap = await getDocs(
-          query(
-            collection(db, "bookings"),
-            where("memberId", "==", user!.uid),
-            where("status", "in", ["confirmed", "checked-in"])
-          )
-        );
+        const idToken = await user!.getIdToken();
+        const response = await fetch("/api/members/stays", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${idToken}` }
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || "Unable to load your bookings.");
+        }
         if (cancelled) return;
-        const today = new Date(`${todayStr}T00:00:00Z`).getTime();
-        const upcoming: UpcomingBooking[] = bkSnap.docs
-          .map((d) => {
-            const data = d.data();
-            const ci = data.checkIn?.toDate ? data.checkIn.toDate() : new Date(data.checkIn);
-            return { id: d.id, bookingRef: data.bookingRef, roomName: data.roomName, checkIn: ci, checkOut: data.checkOut };
-          })
-          .filter((b) => b.checkIn.getTime() >= today)
-          .sort((a, b) => a.checkIn.getTime() - b.checkIn.getTime());
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const upcoming: UpcomingBooking[] = (result.data?.stays || [])
+          .filter((stay: any) => ["confirmed", "checked-in"].includes(stay.status) && stay.checkIn >= todayStr)
+          .map((stay: any) => ({
+            id: stay.id,
+            bookingRef: stay.bookingRef,
+            roomName: stay.roomName || stay.roomType,
+            checkIn: stay.checkIn,
+            checkOut: stay.checkOut
+          }))
+          .sort((a: UpcomingBooking, b: UpcomingBooking) => a.checkIn.localeCompare(b.checkIn));
         setUpcomingBookings(upcoming);
         if (upcoming.length === 0) {
           setEarlyCheckInError("No upcoming booking found. Book a stay first to request early check-in.");
@@ -131,7 +137,10 @@ export function RewardsPage() {
     try {
       const response = await fetch("/api/email/early-checkin-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${await user!.getIdToken()}`
+        },
         body: JSON.stringify({ bookingId })
       });
       const result = await response.json();
