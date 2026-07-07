@@ -87,15 +87,14 @@ describe("Audit Batch 3 (BI-12 + BI-16) — past-date rejection + guest details 
       // computed from the browser's `new Date()`.
       expect(corporateBookingSrc).not.toMatch(/"2026-06-12"/);
       expect(corporateBookingSrc).not.toMatch(/"2026-06-14"/);
-      // Mirrors the BookingPage helper pair (BI-12 audit fix).
-      expect(corporateBookingSrc).toMatch(/getTodayIso\s*=\s*\(\)\s*=>\s*\{/);
-      expect(corporateBookingSrc).toMatch(/getTomorrowIso\s*=\s*\(\)\s*=>\s*\{/);
-      // The useState defaults must call the helpers, not literal strings.
+      // Mirrors BookingPage's timezone-aware shared helper.
+      expect(corporateBookingSrc).toMatch(/getDateKeyInTimezone\(config\.timezone,\s*1\)/);
+      expect(corporateBookingSrc).toMatch(/getDateKeyInTimezone\(config\.timezone,\s*2\)/);
       expect(corporateBookingSrc).toMatch(
-        /useState\(searchParams\.get\(\s*["']checkIn["']\s*\)\s*\?\?\s*getTodayIso\(\)\)/
+        /useState\(searchParams\.get\(\s*["']checkIn["']\s*\)\s*\?\?\s*getDateKeyInTimezone\(config\.timezone,\s*1\)\)/
       );
       expect(corporateBookingSrc).toMatch(
-        /useState\(searchParams\.get\(\s*["']checkOut["']\s*\)\s*\?\?\s*getTomorrowIso\(\)\)/
+        /useState\(searchParams\.get\(\s*["']checkOut["']\s*\)\s*\?\?\s*getDateKeyInTimezone\(config\.timezone,\s*2\)\)/
       );
     });
   });

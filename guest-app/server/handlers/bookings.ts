@@ -9,6 +9,9 @@ export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
 }
 
+const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+
 // Per BF-21 (booking-flow audit 2026-06-26): the public
 // self-service endpoints (`/api/bookings/lookup`,
 // `/api/bookings/cancel`) accept a bookingRef + guestEmail
@@ -200,6 +203,9 @@ export async function handleCreateBooking(req: any, res: any) {
   // Basic Input Validation
   if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
+  }
+  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
+    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
   }
 
   // Per BI-11 (booking-intercom audit 2026-07-06): validate +
@@ -415,7 +421,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // Overlapping booking check for this candidate
         const overlapQuery = adminDb.collection("bookings")
           .where("roomId", "==", candidate.id)
-          .where("status", "!=", "cancelled");
+          .where("status", "in", ROOM_OCCUPYING_STATUSES);
         const overlapSnapshot = await transaction.get(overlapQuery);
         const hasConflict = overlapSnapshot.docs.some((doc) => {
           const data = doc.data();
@@ -658,7 +664,11 @@ export async function handleCreateBooking(req: any, res: any) {
               usageCount: (vData.usageCount || 0) + 1,
               updatedAt: new Date()
             });
+          } else {
+            throw new Error("Voucher no longer valid");
           }
+        } else {
+          throw new Error("Voucher no longer valid");
         }
       }
 
@@ -946,6 +956,8 @@ export async function handleCreateBooking(req: any, res: any) {
     let status: number;
     if (error.message === "Room no longer available") {
       status = 409;
+    } else if (error.message === "Voucher no longer valid") {
+      status = 409;
     } else if (
       // Per BI-10 (booking-intercom audit 2026-07-06): a
       // corporate code that failed re-validation between the
@@ -992,6 +1004,9 @@ export async function handleCreateWalkin(req: any, res: any) {
   if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
   }
+  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
+    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
+  }
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -1013,6 +1028,15 @@ export async function handleCreateWalkin(req: any, res: any) {
     let newBooking: Record<string, any> | null = null;
 
     await adminDb.runTransaction(async (transaction) => {
+      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      // Per LR-C1: Firestore requires all transaction reads before
+      // writes. Keep the idempotency read with the rest of the read
+      // phase so immediate-check-in walkins can safely update the room.
+      const existingWalkin = await transaction.get(bookingDocRef);
+      if (existingWalkin.exists) {
+        throw new Error("Booking already exists");
+      }
+
       // 1. Fetch Room Details
       const roomRef = adminDb.collection("rooms").doc(roomId);
       const roomDoc = await transaction.get(roomRef);
@@ -1061,7 +1085,7 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 2. Overlapping Booking Check
       const bookingsQuery = adminDb.collection("bookings")
         .where("roomId", "==", roomId)
-        .where("status", "!=", "cancelled");
+        .where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
       
       const hasConflict = bookingsSnapshot.docs.some((doc) => {
@@ -1115,9 +1139,6 @@ export async function handleCreateWalkin(req: any, res: any) {
       let sequence = 1;
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
-        transaction.update(counterRef, { count: sequence });
-      } else {
-        transaction.set(counterRef, { count: 1 });
       }
 
       // Per H3 (hardening batch 2026-06-26): sequence
@@ -1198,13 +1219,10 @@ export async function handleCreateWalkin(req: any, res: any) {
         transaction.update(roomRef, { status: "occupied" });
       }
 
-      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      // Per BF-03: same idempotency check as handleCreateBooking
-      // — a walkin retry with the same preallocated `bookingId`
-      // would otherwise overwrite the prior record.
-      const existingWalkin = await transaction.get(bookingDocRef);
-      if (existingWalkin.exists) {
-        throw new Error("Booking already exists");
+      if (counterDoc.exists) {
+        transaction.update(counterRef, { count: sequence });
+      } else {
+        transaction.set(counterRef, { count: 1 });
       }
       transaction.set(bookingDocRef, newBooking);
     });
@@ -1259,12 +1277,15 @@ export async function handleRejectDiscount(req: any, res: any) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
 
-    // Per BF-05 (booking-flow audit 2026-06-26): the booking's
-    // `originalTotalPrice` is the full pre-Senior/PWD subtotal.
-    // If a voucher was also applied, the new total restores the
-    // voucher deduction too.
+    // Per LR-L2: preserve the booking's existing workflow status
+    // and re-apply the Spark Rewards member discount after removing
+    // only the rejected Senior/PWD discount. Stacking remains:
+    // subtotal -> voucher -> member discount.
     const voucherDiscount = Number(bookingData.voucherDiscount || 0);
-    const restoredTotalPrice = Math.max(originalTotalPrice - voucherDiscount, 0);
+    const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
+    const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
+    const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
     // Per BF-15 (booking-flow audit 2026-06-26): the
     // `discountRejectedBy` field is a staff UID per the
@@ -1280,7 +1301,6 @@ export async function handleRejectDiscount(req: any, res: any) {
       discountRejectionReason: reason || "",
       discountPct: 0,
       totalPrice: restoredTotalPrice,
-      status: "pending",
       updatedAt: new Date()
     };
 
@@ -1290,7 +1310,7 @@ export async function handleRejectDiscount(req: any, res: any) {
       await sendBookingTrigger("discount-rejected", {
         ...bookingData,
         discountRejectionReason: reason || "",
-        totalPrice: originalTotalPrice
+        totalPrice: restoredTotalPrice
       });
     } catch (emailErr) {
       console.error("Failed to send discount rejection email:", emailErr);
@@ -1414,6 +1434,7 @@ export async function handleCancelBooking(req: any, res: any) {
       }
 
       const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
+      const appliedCorporateCode = String(freshBooking.corporateCode || "").trim().toUpperCase();
       let voucherRef: any = null;
       let voucherDoc: any = null;
       if (appliedVoucherCode) {
@@ -1430,6 +1451,22 @@ export async function handleCancelBooking(req: any, res: any) {
           }
         }
       }
+      let corporateCodeRef: any = null;
+      let corporateCodeDoc: any = null;
+      if (appliedCorporateCode) {
+        corporateCodeRef = adminDb.collection("corporateCodes").doc(appliedCorporateCode);
+        corporateCodeDoc = await transaction.get(corporateCodeRef);
+        if (!corporateCodeDoc.exists) {
+          const corporateCodeQuery = adminDb.collection("corporateCodes")
+            .where("code", "==", appliedCorporateCode)
+            .limit(1);
+          const corporateCodeQuerySnap = await transaction.get(corporateCodeQuery);
+          if (!corporateCodeQuerySnap.empty) {
+            corporateCodeDoc = corporateCodeQuerySnap.docs[0];
+            corporateCodeRef = corporateCodeDoc.ref;
+          }
+        }
+      }
 
       transaction.update(bookingDocumentRef, {
         status: "cancelled",
@@ -1441,6 +1478,13 @@ export async function handleCancelBooking(req: any, res: any) {
         const voucherData = voucherDoc.data() || {};
         transaction.update(voucherRef, {
           usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: new Date()
+        });
+      }
+      if (corporateCodeDoc?.exists && corporateCodeRef) {
+        const corporateCodeData = corporateCodeDoc.data() || {};
+        transaction.update(corporateCodeRef, {
+          usageCount: Math.max((Number(corporateCodeData.usageCount) || 0) - 1, 0),
           updatedAt: new Date()
         });
       }
@@ -1671,6 +1715,68 @@ export async function handleConfirmBooking(req: any, res: any) {
   }
 }
 
+export async function handleCheckinBooking(req: any, res: any) {
+  const { bookingId } = req.body;
+  if (!bookingId) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const checkedInBy = req.staff?.uid || "staff";
+
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const bookingData = bookingDoc.data() || {};
+      if (!["confirmed", "payment-confirmed"].includes(bookingData.status)) {
+        throw new Error(`Booking can only be checked in from confirmed or payment-confirmed status (current: ${bookingData.status}).`);
+      }
+      if (!bookingData.roomId) {
+        throw new Error("Booking has no assigned room.");
+      }
+
+      const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) {
+        throw new Error("Assigned room not found.");
+      }
+      const roomData = roomDoc.data() || {};
+      if (roomData.status === "blocked") {
+        throw new Error("Assigned room is blocked and cannot be checked in.");
+      }
+
+      const activeCheckinQuery = adminDb.collection("bookings")
+        .where("roomId", "==", String(bookingData.roomId))
+        .where("status", "==", "checked-in")
+        .limit(1);
+      const activeCheckinSnap = await transaction.get(activeCheckinQuery);
+      const occupiedByOtherBooking = activeCheckinSnap.docs.some((doc: any) => doc.id !== bookingId);
+      if (occupiedByOtherBooking) {
+        throw new Error("Assigned room is already occupied by another checked-in booking.");
+      }
+
+      transaction.update(bookingRef, {
+        status: "checked-in",
+        checkedInAt: new Date(),
+        checkedInBy,
+        updatedAt: new Date()
+      });
+      transaction.update(roomRef, {
+        status: "occupied",
+        updatedAt: new Date()
+      });
+    });
+
+    return res.status(200).json({ success: true, data: { status: "checked-in" } });
+  } catch (error: any) {
+    console.error("Check-in booking handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
 export async function handleCheckoutBooking(req: any, res: any) {
   const { bookingId } = req.body;
   if (!bookingId) {
@@ -1717,8 +1823,6 @@ export async function handleCheckoutBooking(req: any, res: any) {
       if (!membersSnap.empty) {
         memberDoc = membersSnap.docs[0];
         memberId = memberDoc.id;
-        // Persist the link for future use
-        await bookingRef.update({ memberId });
       }
     }
 
@@ -1739,13 +1843,47 @@ export async function handleCheckoutBooking(req: any, res: any) {
     }
 
     await adminDb.runTransaction(async (transaction) => {
-      transaction.update(bookingRef, {
+      const freshBookingDoc = await transaction.get(bookingRef);
+      if (!freshBookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const freshBookingData = freshBookingDoc.data()!;
+      if (freshBookingData.status !== "checked-in") {
+        throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
+      }
+
+      const memberRef = memberId && pointsAwarded > 0
+        ? adminDb.collection("members").doc(memberId)
+        : null;
+      const memberDocInTransaction = memberRef
+        ? await transaction.get(memberRef)
+        : null;
+      const { todayStr } = getManilaDateInfo();
+      const checkoutDate = new Date(`${todayStr}T00:00:00Z`);
+      const originalCheckIn = toDateOrNull(freshBookingData.checkIn);
+      const originalCheckOut = toDateOrNull(freshBookingData.checkOut);
+      const shouldTruncateStay = originalCheckIn
+        && originalCheckOut
+        && checkoutDate > originalCheckIn
+        && checkoutDate < originalCheckOut;
+
+      const bookingUpdate: Record<string, any> = {
         status: "checked-out",
         checkedOutAt: new Date(),
         checkedOutBy,
         pointsAwarded,
         updatedAt: new Date()
-      });
+      };
+      if (memberId && freshBookingData.memberId !== memberId) {
+        bookingUpdate.memberId = memberId;
+      }
+      if (shouldTruncateStay && originalCheckIn) {
+        bookingUpdate.checkOut = Timestamp.fromDate(checkoutDate);
+        bookingUpdate.numNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 86400000), 1);
+        bookingUpdate.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
+      }
+
+      transaction.update(bookingRef, bookingUpdate);
 
       if (bookingData.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
@@ -1770,27 +1908,23 @@ export async function handleCheckoutBooking(req: any, res: any) {
         );
       }
 
-      if (memberId && pointsAwarded > 0) {
-        const memberRef = adminDb.collection("members").doc(memberId);
-        const memberDoc = await transaction.get(memberRef);
-        if (memberDoc.exists) {
-          const currentPoints = Number(memberDoc.data()?.rewardsPoints || 0);
-          transaction.update(memberRef, {
-            rewardsPoints: currentPoints + pointsAwarded,
-            updatedAt: new Date()
-          });
+      if (memberId && pointsAwarded > 0 && memberRef && memberDocInTransaction?.exists) {
+        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+        transaction.update(memberRef, {
+          rewardsPoints: currentPoints + pointsAwarded,
+          updatedAt: new Date()
+        });
 
-          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
-          transaction.set(historyRef, {
-            type: "earn",
-            points: pointsAwarded,
-            bookingId,
-            bookingRef: bookingData.bookingRef,
-            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
-            by: checkedOutBy,
-            createdAt: new Date()
-          });
-        }
+        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+        transaction.set(historyRef, {
+          type: "earn",
+          points: pointsAwarded,
+          bookingId,
+          bookingRef: bookingData.bookingRef,
+          description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+          by: checkedOutBy,
+          createdAt: new Date()
+        });
       }
     });
 

@@ -200,7 +200,7 @@ const mockRequest = (body: any) => ({
 } as any);
 
 const baseBody = {
-  bookingId: "walkin_bf04_a",
+  bookingId: "walkinBf04A",
   roomType: "standard-double",
   checkIn: "2026-08-04",
   checkOut: "2026-08-06",
@@ -268,7 +268,7 @@ describe("BF-04 — staff-new-booking email is deduped against the persisted ema
     expect(res.status).toHaveBeenCalledWith(200);
     expect(sendStaffNewBookingTrigger).toHaveBeenCalledTimes(1);
     // The dedup timestamp was written.
-    expect(bookingDocs["walkin_bf04_a"].emailNotificationsSent?.staffNewBooking).toBeInstanceOf(Date);
+    expect(bookingDocs["walkinBf04A"].emailNotificationsSent?.staffNewBooking).toBeInstanceOf(Date);
   });
 
   test("second booking creation (different id) on a fresh doc still fires once", async () => {
@@ -277,7 +277,7 @@ describe("BF-04 — staff-new-booking email is deduped against the persisted ema
     await handler(req1, res1);
     expect(sendStaffNewBookingTrigger).toHaveBeenCalledTimes(1);
 
-    const req2 = mockRequest({ ...baseBody, bookingId: "walkin_bf04_b" });
+    const req2 = mockRequest({ ...baseBody, bookingId: "walkinBf04B" });
     const res2 = mockResponse();
     await handler(req2, res2);
     expect(sendStaffNewBookingTrigger).toHaveBeenCalledTimes(2);
@@ -320,7 +320,7 @@ describe("BF-04 — staff-new-booking email is deduped against the persisted ema
     // written the timestamp, then directly verify the
     // alreadySent detection logic by checking that the dedup
     // marker survives a re-read.
-    bookingDocs["walkin_bf04_c"] = {
+    bookingDocs["walkinBf04C"] = {
       emailNotificationsSent: { staffNewBooking: new Date("2026-08-01T00:00:00Z") }
     };
     // The re-read via the post-commit block:
@@ -329,7 +329,7 @@ describe("BF-04 — staff-new-booking email is deduped against the persisted ema
     // Verify by reading the same path the handler reads.
     const freshSnap = await (
       await import("../../server/lib/firebase-admin")
-    ).adminDb.collection("bookings").doc("walkin_bf04_c").get();
+    ).adminDb.collection("bookings").doc("walkinBf04C").get();
     expect(freshSnap.exists).toBe(true);
     const alreadySent = (freshSnap.data() as any)?.emailNotificationsSent?.staffNewBooking;
     expect(alreadySent).toBeInstanceOf(Date);

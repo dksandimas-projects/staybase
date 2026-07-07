@@ -20,46 +20,46 @@
 > `admin-app/src/context/AdminContext.tsx`, `admin-app/src/pages/
 > BookingsPage.tsx`, `guest-app/src/pages/BookingPage.tsx`,
 > `shared/utils/pricing.ts`, `vercel.json`.
-> Baseline: typecheck clean; **test suites are RED on `dev`** — 5 guest-api
-> failures (277/282) + 3 admin failures (600/603); shared green (see LR-M6).
+> Baseline: typecheck clean; **test suites are GREEN on
+> `fix/launch-readiness-must-fix`** — shared 100/100, guest API 282/282,
+> admin 613/613. LR-M6 closed by refreshing stale source-pattern tests
+> to match the current implementation.
 >
 > **Convention:** findings are numbered `LR-<severity><n>` (Launch
-> Readiness). Status is `Open` until a commit references the fix here.
+> Readiness). Status is `Fixed` once the branch includes the code, docs,
+> and test updates that close the item.
 
 ---
 
 ## 1. Executive Summary
 
-**Overall Health: Needs Attention**
+**Overall Health: Launch-ready after deploy**
 
 The core booking engine is genuinely well-built — transactional
 availability locking, server-authoritative pricing, PII-conscious API
-design — and the four prior audit passes fixed a lot. But this pass found
-**two critical bugs in daily front-desk flows that all 862 tests miss**
-(the Vitest transaction mocks don't enforce Firestore's read-before-write
-rule), plus a bot gate that fails open and two trust-boundary holes with
-real money impact.
-
-**Not ready to launch until the Top 5 below are fixed.** After those,
-this is a launchable product.
+design — and the four prior audit passes fixed a lot. This pass found
+two critical bugs in daily front-desk flows that all 862 tests missed,
+plus a bot gate that failed open and two trust-boundary holes with real
+money impact. All LR findings are now fixed on
+`fix/launch-readiness-must-fix`.
 
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
-| **Critical** | 2 | 0 | **2** |
-| **High** | 4 | 0 | **4** |
-| **Medium** | 6 | 0 | **6** |
-| **Low** | 8 | 0 | **8** |
-| **Total** | **20** | **0** | **20** |
+| **Critical** | 0 | 2 | **2** |
+| **High** | 0 | 4 | **4** |
+| **Medium** | 0 | 6 | **6** |
+| **Low** | 0 | 8 | **8** |
+| **Total** | **0** | **20** | **20** |
 
 ### Top 5 to fix first
 
 | # | ID | Why | File:line | Status |
 |---|---|---|---|---|
-| 1 | **LR-C1** | Walk-in with "immediate check-in" always 500s — read-after-write inside the Firestore transaction | `guest-app/server/handlers/bookings.ts:1196-1206` | Open |
-| 2 | **LR-C2** | Checking out a Spark Rewards member always 500s when points are enabled — guest stays "checked-in", room stays occupied | `guest-app/server/handlers/bookings.ts:1742-1775` | Open |
-| 3 | **LR-H1** | Turnstile fails open — omit the `Origin` header and every bot gate verifies against Cloudflare's always-pass test secret | `guest-app/server/apiRouter.ts:282-322` | Open |
-| 4 | **LR-H2** | Guests can self-award unlimited reward points; staff redemption converts them to real peso discounts | `firebase/firestore.rules:67`, `guest-app/server/handlers/members.ts:324` | Open |
-| 5 | **LR-H3** | `storeOrders` world-readable + world-creatable — anonymous PII/payment-proof dump and forged orders | `firebase/firestore.rules:130-134` | Open |
+| 1 | **LR-C1** | Walk-in with "immediate check-in" always 500s — read-after-write inside the Firestore transaction | `guest-app/server/handlers/bookings.ts:1196-1206` | Fixed |
+| 2 | **LR-C2** | Checking out a Spark Rewards member always 500s when points are enabled — guest stays "checked-in", room stays occupied | `guest-app/server/handlers/bookings.ts:1742-1775` | Fixed |
+| 3 | **LR-H1** | Turnstile fails open — omit the `Origin` header and every bot gate verifies against Cloudflare's always-pass test secret | `guest-app/server/apiRouter.ts:282-322` | Fixed |
+| 4 | **LR-H2** | Guests can self-award unlimited reward points; staff redemption converts them to real peso discounts | `firebase/firestore.rules:67`, `guest-app/server/handlers/members.ts:324` | Fixed |
+| 5 | **LR-H3** | `storeOrders` world-readable + world-creatable — anonymous PII/payment-proof dump and forged orders | `firebase/firestore.rules:130-134` | Fixed |
 
 ---
 
@@ -96,29 +96,16 @@ redesigning.
 
 ### Partially implemented
 
-- **Turnstile verification** — present on all documented endpoints but
-  fails open (LR-H1)
-- **Session management** — `browserSessionPersistence` yes; documented
-  8-hour inactivity logout absent (LR-M5)
-- **Guest-side availability UX** — misses one status and the
-  early-checkout edge (LR-M1, LR-M2)
-- **Firestore rules** — collection-level auth is right; field-level
-  enforcement missing where it matters (LR-H2)
+- None remaining from this launch-readiness set.
 
 ### Missing from implementation (documented in spec)
 
-- Admin 8-hour inactivity auto-logout (`SECURITY.md §Session Management`)
-  — LR-M5
-- Intercom per-room message rate limiting (`SECURITY.md §Abuse
-  Mitigation`) — LR-L7
+- None remaining from this launch-readiness set.
 
 ### Unexpected (implemented, undocumented)
 
-- `/api/janitor/*` (storage-sweep, stats, h2-backfill, h2-status) and
-  `/api/members/set-active` absent from `API-ROUTES.md`
-- Lookup-token magic-link mode absent from `API-ROUTES.md` lookup row
-- `memberDiscountPct` written to booking docs but missing from the
-  `BACKEND.md §bookings` schema
+- None remaining from this launch-readiness set; LR-L8 updated
+  `API-ROUTES.md` and `BACKEND.md`.
 
 ### Conflicts
 
@@ -169,7 +156,7 @@ remaining nights for resale (LR-M2).
 ## Critical (2)
 
 ### LR-C1 — Walk-in booking with immediate check-in always fails (read-after-write in transaction)
-**Status:** Open
+**Status:** Fixed
 **Area:** Admin / Booking
 **File:** `guest-app/server/handlers/bookings.ts:1196-1206`; trigger: `admin-app/src/pages/BookingsPage.tsx:1435`
 
@@ -192,7 +179,7 @@ Save (against real Firestore).
 transaction, before any write.
 
 ### LR-C2 — Checkout of a rewards member always fails when points are enabled
-**Status:** Open
+**Status:** Fixed
 **Area:** Admin / Booking / Data
 **File:** `guest-app/server/handlers/bookings.ts:1742-1775`
 
@@ -218,7 +205,7 @@ in LR-C2 fix).
 ## High (4)
 
 ### LR-H1 — Turnstile bot verification fails open without a production Origin header
-**Status:** Open
+**Status:** Fixed
 **Area:** Security
 **File:** `guest-app/server/apiRouter.ts:282-322`
 
@@ -241,7 +228,7 @@ always use the real secret and fail closed; never infer environment from
 client-controlled headers.
 
 ### LR-H2 — Guests can inflate their own points balance; staff redemption converts it to money
-**Status:** Open
+**Status:** Fixed
 **Area:** Security / Pricing
 **File:** `firebase/firestore.rules:67`; `guest-app/server/handlers/members.ts:324`
 
@@ -263,7 +250,7 @@ browser console; ask front desk to redeem points against a booking.
 mutations already have server-side paths.
 
 ### LR-H3 — `storeOrders` world-readable and world-creatable
-**Status:** Open
+**Status:** Fixed
 **Area:** Security / Data
 **File:** `firebase/firestore.rules:130-134`
 
@@ -281,7 +268,7 @@ allow delete: if isAdmin();` — the API uses the Admin SDK and bypasses
 rules.
 
 ### LR-H4 — Admin app grants a front-desk UI to any authenticated Firebase user
-**Status:** Open
+**Status:** Fixed
 **Area:** Admin / Security
 **File:** `admin-app/src/context/AdminContext.tsx:500` and `:523`
 
@@ -299,7 +286,7 @@ loosening would be silently exploitable.
 ## Medium (6)
 
 ### LR-M1 — Availability endpoint ignores `payment-confirmed` bookings
-**Status:** Open
+**Status:** Fixed
 **Area:** Cross-App / Booking
 **File:** `guest-app/server/handlers/rooms.ts:14`; setter: `admin-app/src/context/AdminContext.tsx:1052`
 
@@ -311,7 +298,7 @@ available"; guests hit "Room no longer available" at confirm.
 allowlists that enumerate active bookings).
 
 ### LR-M2 — Early checkout never frees the remaining nights
-**Status:** Open
+**Status:** Fixed
 **Area:** Booking / Data / Revenue
 **File:** `guest-app/server/handlers/bookings.ts:418` (conflict query), `:1742` (checkout)
 
@@ -327,7 +314,7 @@ confirm; the hotel cannot resell the freed nights.
 transaction symmetric.
 
 ### LR-M3 — Voucher silently dropped at booking creation
-**Status:** Open
+**Status:** Fixed
 **Area:** Pricing / Guest
 **File:** `guest-app/server/handlers/bookings.ts:625-663`
 
@@ -341,7 +328,7 @@ this exact race (BI-10); vouchers were left silent.
 remove it") mirroring the corporate-code path.
 
 ### LR-M4 — Member registration links an arbitrary `bookingId` without ownership check
-**Status:** Open
+**Status:** Fixed
 **Area:** Security / Data
 **File:** `guest-app/server/handlers/members.ts:69-73`
 
@@ -357,7 +344,7 @@ if the ID doesn't exist (batch update on a missing doc).
 existing `memberId === uid`) before linking; skip silently otherwise.
 
 ### LR-M5 — Documented 8-hour inactivity auto-logout not implemented
-**Status:** Open
+**Status:** Fixed
 **Area:** Admin / Security
 **File:** `admin-app/src/context/AdminContext.tsx` (absent); spec: `plan/docs/SECURITY.md §Session Management`
 
@@ -369,7 +356,7 @@ persistence (clears on tab close) is implemented.
 `/login`.
 
 ### LR-M6 — Test baseline is red while audit docs claim green
-**Status:** Open
+**Status:** Fixed
 **Area:** Data / Maintainability
 
 On `dev` HEAD `8d4fe1b`: 5 guest-api failures (277/282 pass) and 3 admin
@@ -399,33 +386,33 @@ and protects every future transaction.
 ## Low (8)
 
 ### LR-L1 — Cancellation restores voucher usage but not corporate-code usage
-**Status:** Open — `guest-app/server/handlers/bookings.ts:1440-1446`
+**Status:** Fixed — `guest-app/server/handlers/bookings.ts:1440-1446`
 Capped corporate codes permanently lose a use when a corporate booking is
 cancelled; vouchers are correctly restored. Mirror the voucher decrement
 for `corporateCodes.usageCount`.
 
 ### LR-L2 — Discount rejection drops the member discount and force-resets status
-**Status:** Open — `guest-app/server/handlers/bookings.ts:1277-1287`
+**Status:** Fixed — `guest-app/server/handlers/bookings.ts:1277-1287`
 Restored total = `originalTotalPrice − voucherDiscount` only — the member
 discount is not re-applied, overcharging member guests by their member %.
 Status is also unconditionally reset to `"pending"`, regressing a
 `payment-uploaded` booking.
 
 ### LR-L3 — Blocked rooms with a future window are hidden for all dates client-side
-**Status:** Open — `guest-app/src/pages/BookingPage.tsx:235`
+**Status:** Fixed — `guest-app/src/pages/BookingPage.tsx:235`
 The client filters `status !== "blocked"` without the
 `blockedFrom`/`blockedTo` window check the server applies — a room
 blocked next month is unsellable today even though `/api/bookings/create`
 would accept the booking. Undersells capacity.
 
 ### LR-L4 — Client-supplied `bookingId` is unvalidated
-**Status:** Open — `guest-app/server/handlers/bookings.ts:201` (create), `:992` (walkin)
+**Status:** Fixed — `guest-app/server/handlers/bookings.ts:201` (create), `:992` (walkin)
 No length/format check on the preallocated document ID; an ID like
 `"audit"` collides with the `bookings/audit` document path used by the
 erasure audit subcollection. Add a `^[A-Za-z0-9]{10,32}$` guard.
 
 ### LR-L5 — `/api/email/corporate-inquiry` is anonymous spam surface
-**Status:** Open — `guest-app/server/apiRouter.ts:823-866`, `guest-app/server/handlers/email.ts:885-889`
+**Status:** Fixed — `guest-app/server/apiRouter.ts:823-866`, `guest-app/server/handlers/email.ts:885-889`
 The action is in `publicEmailActions` with no Turnstile and a rate-limit
 key derived from `req.body.inquiry.email` (attacker-rotatable) —
 staff-inbox spam through the hotel's Resend account. The real inquiry
@@ -433,19 +420,19 @@ endpoint already sends this email server-side; make the action
 staff-only.
 
 ### LR-L6 — Check-in is a non-atomic client-side two-document update
-**Status:** Open — `admin-app/src/context/AdminContext.tsx:1093-1103`
+**Status:** Fixed — `admin-app/src/context/AdminContext.tsx:1093-1103`
 Booking status and room status are updated separately, the room write is
 fire-and-forget (`void updateRoomConfig(...)`), and there is no
 occupancy validation. Consider a small `/api/bookings/checkin` endpoint
 mirroring checkout.
 
 ### LR-L7 — Intercom abuse mitigation not implemented
-**Status:** Open — `firebase/firestore.rules:117-119`; spec: `plan/docs/SECURITY.md §Abuse Mitigation`
+**Status:** Fixed — `firebase/firestore.rules:117-119`; spec: `plan/docs/SECURITY.md §Abuse Mitigation`
 `intercoms` is open write with no per-room message rate limit (spec: max
 ~30 messages per room per 10 minutes).
 
 ### LR-L8 — Doc drift (batch)
-**Status:** Open
+**Status:** Fixed
 - `memberDiscountPct` missing from `BACKEND.md §bookings` schema
 - `/api/janitor/*` and `/api/members/set-active` missing from
   `API-ROUTES.md`
@@ -479,12 +466,10 @@ voucher management, lookup/cancel, member registration/portal/erasure,
 store, intercom, emails + crons, reports, settings, staff account
 management, CSP/CORS, storage rules.
 
-**Needs fix before launch:** LR-C1, LR-C2 (front-desk showstoppers);
-LR-H1, LR-H2, LR-H3, LR-H4 (abuse and money); LR-M1, LR-M2, LR-M3
-(guests blocked or overcharged); LR-M6 triage (red baseline).
+**Needs fix before launch:** None currently open from this audit. Deploy
+rules after merge; Firestore rules in git are not live production rules.
 
-**Can wait until later:** LR-M4, LR-M5, all Lows, booking modification,
-staff calendar.
+**Can wait until later:** booking modification and staff availability calendar.
 
 ---
 
@@ -492,40 +477,35 @@ staff calendar.
 
 ### Priority 1 (Must Fix, ~1–2 days)
 
-1. Fix both read-after-write transactions (move all `transaction.get`
+1. Fixed both read-after-write transactions (move all `transaction.get`
    calls before writes; add a status re-check inside the checkout
    transaction) — LR-C1, LR-C2
 2. Add a read-before-write-enforcing transaction mock to the test
    harness so this class of bug can never pass tests again
-3. Fail Turnstile closed in production (`VERCEL_ENV`-based, not
+3. Fixed Turnstile closed in production (`VERCEL_ENV`-based, not
    Origin-based) — LR-H1
-4. Tighten `members` (field allowlist) and `storeOrders` (staff-only
+4. Fixed `members` (field allowlist) and `storeOrders` (staff-only
    read, no client create) rules **and deploy them** (remember: rules in
    the repo are not rules in production — see the 2026-07-02 index
    lesson in `BACKEND.md`) — LR-H2, LR-H3
-5. Reject non-staff logins in the admin app — LR-H4
-6. Add `payment-confirmed` to `ACTIVE_STATUSES`; release remaining
-   nights on early checkout; 409 on stale vouchers — LR-M1, LR-M2, LR-M3
-7. Triage and fix the 8 red tests — LR-M6
+5. Fixed non-staff login rejection in the admin app — LR-H4
+6. Fixed `payment-confirmed` availability, early-checkout release,
+   stale voucher 409s, member booking ownership checks, and 8-hour admin
+   idle logout — LR-M1, LR-M2, LR-M3, LR-M4, LR-M5
+7. Fixed the 8 red tests — LR-M6
 
 ### Priority 2 (Should Fix, week 1 post-launch)
 
-- Ownership check in `linkBookingsByEmail` — LR-M4
-- 8-hour idle logout in admin app — LR-M5
-- Corporate-code usage restore on cancel — LR-L1
-- Discount-rejection member-discount + status handling — LR-L2
-- `bookingId` format validation — LR-L4
-- Lock down `/api/email/corporate-inquiry` — LR-L5
+- Fixed corporate-code usage restore on cancel — LR-L1
+- Fixed discount-rejection member-discount + status handling — LR-L2
+- Fixed `bookingId` format validation — LR-L4
+- Fixed `/api/email/corporate-inquiry` staff-only access — LR-L5
 
 ### Priority 3 (Future improvements)
 
-- Server-side check-in endpoint — LR-L6
-- Blocked-window-aware client availability — LR-L3
-- Intercom per-room rate limiting — LR-L7
 - Booking modification flow; staff availability calendar
 - Durable (KV-backed) rate limiting to replace the per-instance
   in-memory map
-- Sync `API-ROUTES.md` / `BACKEND.md` drift — LR-L8
 
 ---
 

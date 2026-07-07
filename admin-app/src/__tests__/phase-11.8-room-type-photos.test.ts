@@ -151,7 +151,7 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
     });
 
     it("RoomsPage reads imageUrls from the type entry directly", () => {
-      expect(roomsPageSrc).toMatch(/selectedTypeEntry\.imageUrls/);
+      expect(roomsPageSrc).toMatch(/selectedTypeEntry\?\.imageUrls\.filter\(Boolean\)/);
       expect(roomsPageSrc).not.toMatch(/selectedRoom\.imageUrls/);
     });
 

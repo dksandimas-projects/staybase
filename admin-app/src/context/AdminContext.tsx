@@ -475,6 +475,7 @@ export interface AdminContextType {
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
+const ADMIN_IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 
 function isStaffRole(role: unknown): role is StaffRole {
   return role === "admin" || role === "front-desk";
@@ -497,7 +498,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
       try {
         const tokenResult = await getIdTokenResult(firebaseUser, true);
-        const role = isStaffRole(tokenResult.claims.role) ? tokenResult.claims.role : "front-desk";
+        if (!isStaffRole(tokenResult.claims.role)) {
+          await firebaseSignOut(auth);
+          setCurrentUser(null);
+          return;
+        }
+        const role = tokenResult.claims.role;
 
         setCurrentUser({
           uid: firebaseUser.uid,
@@ -514,13 +520,45 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const resetIdleTimer = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = setTimeout(() => {
+        void firebaseSignOut(auth).finally(() => {
+          setCurrentUser(null);
+        });
+      }, ADMIN_IDLE_TIMEOUT_MS);
+    };
+
+    const events = ["click", "keydown", "mousemove", "scroll", "touchstart", "visibilitychange"];
+    events.forEach((eventName) => window.addEventListener(eventName, resetIdleTimer, { passive: true }));
+    resetIdleTimer();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      events.forEach((eventName) => window.removeEventListener(eventName, resetIdleTimer));
+    };
+  }, [currentUser]);
+
   const signIn = async (email: string, password: string) => {
     setAuthLoading(true);
     try {
       await setPersistence(auth, browserSessionPersistence);
       const credential = await signInWithEmailAndPassword(auth, email, password);
       const tokenResult = await getIdTokenResult(credential.user, true);
-      const role = isStaffRole(tokenResult.claims.role) ? tokenResult.claims.role : "front-desk";
+      if (!isStaffRole(tokenResult.claims.role)) {
+        await firebaseSignOut(auth);
+        setCurrentUser(null);
+        throw new Error("This account is not authorized for the admin dashboard.");
+      }
+      const role = tokenResult.claims.role;
 
       setCurrentUser({
         uid: credential.user.uid,
@@ -1083,22 +1121,26 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to checkout booking via server API.");
         }
+      } else if (status === "checked-in") {
+        const token = await auth.currentUser?.getIdToken(true);
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkin`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to check in booking via server API.");
+        }
       } else {
         const updatePayload: Record<string, any> = {
           status,
           ...details,
           updatedAt: serverTimestamp()
         };
-
-        if (status === "checked-in") {
-          const booking = bookings.find(b => b.id === bookingId);
-          if (booking) {
-            const matchedRoom = rooms.find(r => r.roomNumber === booking.roomNumber);
-            if (matchedRoom) {
-              void updateRoomConfig(matchedRoom.id, { status: "occupied" });
-            }
-          }
-        }
 
         await updateDoc(bookingDocRef, updatePayload);
       }

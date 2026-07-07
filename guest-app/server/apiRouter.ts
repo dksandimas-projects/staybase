@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth } from "./lib/firebase-admin";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
@@ -18,6 +18,7 @@ const staffOnlyEmailActions = new Set([
   "payment-confirmed",
   "booking-confirmed",
   "discount-rejected",
+  "corporate-inquiry",
   // Per W4.4 / decision #104: the 8 new templates are
   // server-triggered from authenticated mutations; the public
   // /api/email/* endpoint only re-sends for guest-driven actions.
@@ -39,7 +40,6 @@ const publicEmailActions = new Set([
   "booking-confirmed",
   "checkin-reminder",
   "booking-cancelled",
-  "corporate-inquiry",
   "discount-rejected",
   "early-checkin-request"
 ]);
@@ -269,56 +269,35 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
     return { success: false, error: "Bot verification token is missing." };
   }
 
-  // Check the origin/referer to see if this is a production request.
-  //
-  // Per BF-24 (booking-flow audit 2026-06-26): the previous logic
-  // silently fell through to the Cloudflare test secret whenever
-  // the Origin header was missing or not on the allowlist. A bot
-  // that simply omits Origin would verify successfully against
-  // the always-pass test secret. The new rule: in production, the
-  // request must (a) be on the CORS allowlist, OR (b) carry a
-  // valid TURNSTILE_SECRET_KEY configured locally. Requests
-  // missing Origin AND lacking a configured secret are rejected.
+  // Per LR-H1: production is determined from trusted server
+  // environment, never client-controlled Origin/Referer. A request
+  // that omits Origin must still verify against the real secret in
+  // production.
+  const isProduction = process.env.VERCEL_ENV === "production";
   const requestOrigin = (req?.headers.origin || req?.headers.referer || "") as string;
-  let isProduction = false;
-  let originAllowed = false;
+  let originAllowed = !isProduction;
   try {
     if (requestOrigin) {
       const originHost = new URL(requestOrigin).hostname;
       if (PRODUCTION_GUEST_HOSTS.has(originHost)) {
-        isProduction = true;
         originAllowed = true;
       }
     }
   } catch (parseErr) {
-    // Per BF-25 (booking-flow audit 2026-06-26): the previous
-    // version silently fell through to non-production on any
-    // URL parse failure. Log at debug level so the issue is
-    // visible in Vercel logs (no behavior change — the origin
-    // genuinely couldn't be parsed, so non-production is
-    // still the right fallback for local + vercel dev).
     console.debug("Turnstile origin parse failed:", parseErr);
   }
 
-  // If the request looks like a production request, require the
-  // real secret. If it doesn't look like production (no Origin or
-  // non-allowlisted host), allow the test secret so vercel dev +
-  // local curl probes still work.
-  const usingTestSecret = !isProduction;
+  if (isProduction && requestOrigin && !originAllowed) {
+    return { success: false, error: "Bot verification failed. Please try again." };
+  }
+
   const secret = isProduction
     ? process.env.TURNSTILE_SECRET_KEY
     : "1x0000000000000000000000000000000AA";
 
   if (!secret) {
-    // Per BF-24: in production, missing secret is a deployment
-    // misconfiguration — fail closed instead of letting the
-    // request through.
-    if (isProduction) {
-      console.error("TURNSTILE_SECRET_KEY is required for production booking creation.");
-      return { success: false, error: "Bot verification is not configured. Please try again later." };
-    }
-    console.warn("⚠️ Missing TURNSTILE_SECRET_KEY in server environment.");
-    return { success: true };
+    console.error("TURNSTILE_SECRET_KEY is required for production bot verification.");
+    return { success: false, error: "Bot verification is not configured. Please try again later." };
   }
 
   try {
@@ -338,12 +317,6 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
     console.error("Turnstile verification error:", err);
     return { success: false, error: "Turnstile connection failed. Please try again." };
   }
-
-  // Reference `originAllowed` so the linter doesn't strip the var
-  // (used in future tightening: reject mismatched-origin production
-  // requests up front, before any Cloudflare call).
-  void originAllowed;
-  void usingTestSecret;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -486,6 +459,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
     
     return await handleCheckoutBooking(req, res);
+  }
+
+  if (domain === "bookings" && action === "checkin" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkin:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many check-in requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleCheckinBooking(req, res);
   }
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
@@ -820,7 +807,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
 
-  if (domain === "email" && publicEmailActions.has(action) && (req.method === "POST" || isCronEmailMethod)) {
+  const isKnownEmailAction = publicEmailActions.has(action) || staffOnlyEmailActions.has(action);
+  if (domain === "email" && isKnownEmailAction && (req.method === "POST" || isCronEmailMethod)) {
     const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
     if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 3600000)) {
       return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });

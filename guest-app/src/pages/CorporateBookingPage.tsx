@@ -313,9 +313,18 @@ export function CorporateBookingPage() {
   const typeAvailability = useMemo(() => {
     const reqStart = new Date(`${checkIn}T00:00:00Z`);
     const reqEnd = new Date(`${checkOut}T00:00:00Z`);
+    const isRoomBlockedForStay = (room: { status: string; blockedFrom?: string | Date | null; blockedTo?: string | Date | null }) => {
+      if (room.status !== "blocked") return false;
+      if (!room.blockedFrom || !room.blockedTo) return true;
+      const blockedFrom = new Date(`${String(room.blockedFrom).split("T")[0]}T00:00:00Z`);
+      const blockedTo = new Date(`${String(room.blockedTo).split("T")[0]}T00:00:00Z`);
+      if (isNaN(blockedFrom.getTime()) || isNaN(blockedTo.getTime())) return true;
+      return blockedFrom < reqEnd && blockedTo > reqStart;
+    };
+
     return roomTypes.map((type) => {
       const candidates = rooms.filter(
-        (room) => room.type === type.value && room.isActive && room.status !== "blocked"
+        (room) => room.type === type.value && room.isActive && !isRoomBlockedForStay(room)
       );
       const bookedRoomIds = new Set(
         bookedRanges
