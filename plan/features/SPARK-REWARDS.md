@@ -40,7 +40,7 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### Data & Logic Checklist
 - [ ] Firebase Auth: `signInWithGoogle()` (Google OAuth provider) + `signInWithEmailAndPassword()` + `createUserWithEmailAndPassword()`
-- [ ] On first Google Sign-In: after Firebase Auth succeeds, POST `/api/members/register` with the guest Firebase ID token if `members/{uid}` does not exist or is not enrolled
+- [ ] Google Sign-In is authentication only. Enrollment requires an explicit join action with Privacy Policy / Terms consent: `/signup` checks the consent box before calling `registerCurrentMember()`, and signed-in non-members can join from Rewards/Profile surfaces.
 - [ ] On email/password signup: create Firebase Auth user, then POST `/api/members/register` with the guest Firebase ID token to create/enroll `members/{uid}`
 - [ ] `onAuthStateChanged` listener in guest auth context — unsubscribe on cleanup
 - [ ] Guest auth context separate from admin auth context — different Firebase Auth flows, same Firebase project
@@ -52,8 +52,8 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### UI Checklist
 - [ ] Post-booking prompt (Step 4 — Confirmation page) — "Join Spark Rewards and earn points on this stay!" CTA — shown only to non-members / logged-out guests
-- [ ] One-click join if already signed in — POST `/api/members/register`, no extra form
-- [ ] If not signed in — show Google Sign-In + quick email signup inline on confirmation page
+- [ ] One-click join if already signed in — explicit action calls `registerCurrentMember()` / POST `/api/members/register` and surfaces failures inline
+- [ ] If not signed in — show Google Sign-In + quick email signup inline on confirmation page; Google auth must not auto-enroll until the guest chooses the join action
 - [ ] Standalone signup at `/rewards` — marketing page with program overview + sign-up form
 - [ ] Homepage CTA — "Join Spark Rewards" link in navbar and/or footer
 

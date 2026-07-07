@@ -23,13 +23,13 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `isActive` | boolean | `false` = hidden from guest site |
 | `status` | string | `"available"` \| `"occupied"` \| `"blocked"` |
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
-| `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| `""` |
 | `blockedFrom` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
 | `blockedTo` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
-| `remarks` | string | Internal staff notes |
 | `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+> **Staff-only room notes are not stored on `rooms`.** Internal `remarks` and `blockReason` live in `roomPrivate/{roomId}` so the public guest app can continue reading active room documents without exposing operational notes. `AdminContext` merges the private doc for staff views and lazily migrates any legacy public `remarks` / `blockReason` values into `roomPrivate`, then deletes them from the public room doc.
 
 > **Photos, pricing, capacity, bed description, and amenities are NOT stored on individual rooms.** They all live on the **room type** — see `settings/hotelConfig.roomTypes[]` below. The guest site (room cards, room detail, booking flow, homepage featured rooms) and admin app join `roomType` on `Room.type` at query time. The Settings → Room Types table is the single edit surface: rates, photos, bed setup, description, and amenities all flow from there. Upload path for type photos: Firebase Storage `room-types/{typeValue}/{filename}` (public read, staff write — see `firebase/storage.rules`).
 
@@ -38,6 +38,21 @@ See `plan/docs/API-ROUTES.md` for API layer.
 **Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. The required delete reason is written to `roomDeletionAudit/{auditId}` before the hard delete. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
 **Auto-assignment (per `feature/booking-by-room-type`):** The public booking flow's Step 1 shows one card per room type. Clients post `roomType`; the `/api/bookings/create` transaction reads all active physical rooms of that type, sorts by `roomNumber`, picks the first non-conflicting room, and stores its `roomId` + `roomNumber` on the new booking document. The `Booking.roomId` schema is unchanged — it still points at a real `rooms/{id}` document — and `Booking.roomType` is the type value the guest selected. Staff see the assigned room in the bookings management table exactly as before.
+
+---
+
+### `roomPrivate/{roomId}`
+
+Staff-only extension document for room fields that must never be public. Document IDs match `rooms/{roomId}`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `remarks` | string | Internal staff notes |
+| `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| custom staff note \| `""` |
+| `createdAt` | timestamp | Optional; set on first private doc creation |
+| `updatedAt` | timestamp | Updated whenever staff notes or block reason change |
+
+Firestore rules: read/create/update require `isStaff()`, delete requires `isAdmin()`. The guest app must not read this collection.
 
 ---
 

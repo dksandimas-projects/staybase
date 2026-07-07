@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { getDateKeyInTimezone } from "@spark-inn/shared";
+import config from "@config";
 import { cn } from "../utils/cn";
 
 type DateRangePickerOrientation = "horizontal" | "vertical";
@@ -12,7 +14,7 @@ interface DateRangePickerProps {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return getDateKeyInTimezone(config.timezone);
 }
 
 export function DateRangePicker({
@@ -26,7 +28,10 @@ export function DateRangePicker({
     if (!checkIn) return todayIso();
     const next = new Date(`${checkIn}T00:00:00`);
     next.setDate(next.getDate() + 1);
-    return next.toISOString().slice(0, 10);
+    const year = next.getFullYear();
+    const month = String(next.getMonth() + 1).padStart(2, "0");
+    const day = String(next.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   }, [checkIn]);
 
   return (

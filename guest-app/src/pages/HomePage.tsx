@@ -2,7 +2,7 @@ import { BedDouble, Car, Coffee, Gift, MapPin, Palmtree, Search, Sparkles, Star,
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { fadeUp, staggerChild, staggerContainer } from "@spark-inn/shared";
+import { fadeUp, getDateKeyInTimezone, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Footer } from "../components/Footer";
@@ -55,8 +55,8 @@ export function HomePage() {
   const { rooms, loading } = useRooms();
   const { roomTypes } = useRoomTypes();
   const { homepage } = usePublicSiteContent();
-  const [checkIn, setCheckIn] = useState("2026-06-12");
-  const [checkOut, setCheckOut] = useState("2026-06-14");
+  const [checkIn, setCheckIn] = useState(() => getDateKeyInTimezone(config.timezone, 1));
+  const [checkOut, setCheckOut] = useState(() => getDateKeyInTimezone(config.timezone, 2));
   const [guests, setGuests] = useState(2);
 
   // Resolve `featuredTypeValues` to a list of physical rooms

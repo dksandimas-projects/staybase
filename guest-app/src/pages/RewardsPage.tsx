@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles } from "lucide-react";
 import { collection, query, getDocs, orderBy } from "firebase/firestore";
+import { getDateKeyInTimezone } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
@@ -104,7 +105,7 @@ export function RewardsPage() {
           throw new Error(result?.error || "Unable to load your bookings.");
         }
         if (cancelled) return;
-        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStr = getDateKeyInTimezone(config.timezone);
         const upcoming: UpcomingBooking[] = (result.data?.stays || [])
           .filter((stay: any) => ["confirmed", "checked-in"].includes(stay.status) && stay.checkIn >= todayStr)
           .map((stay: any) => ({
