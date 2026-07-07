@@ -190741,6 +190741,10 @@ var redeemPointsSchema = external_exports.object({
 var undoRedemptionSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(120)
 }).strict();
+var setMemberActiveSchema = external_exports.object({
+  uid: external_exports.string().trim().min(1).max(160),
+  isActive: external_exports.boolean()
+}).strict();
 var eraseAccountSchema = external_exports.object({
   confirmation: external_exports.literal("erase-my-account")
 }).strict();
@@ -191030,6 +191034,76 @@ async function handleUndoMemberPointsRedemption(req, res) {
     return res.status(400).json({
       success: false,
       error: error?.message || "We could not undo this points redemption."
+    });
+  }
+}
+async function handleSetMemberActive(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+  }
+  const parsed = setMemberActiveSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please choose a member account to update."
+    });
+  }
+  const { uid, isActive } = parsed.data;
+  try {
+    const memberRef = adminDb.collection("members").doc(uid);
+    const memberDoc = await memberRef.get();
+    if (!memberDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Member account was not found."
+      });
+    }
+    const now = /* @__PURE__ */ new Date();
+    const previousIsActive = memberDoc.data()?.isActive !== false;
+    try {
+      await memberRef.set({
+        isActive,
+        disabledAt: isActive ? null : now,
+        disabledBy: isActive ? null : staff.uid,
+        updatedAt: now
+      }, { merge: true });
+      await adminAuth.updateUser(uid, { disabled: !isActive });
+    } catch (syncErr) {
+      console.error("Member active-state sync failed, rolling back Firestore:", syncErr);
+      try {
+        await memberRef.set({
+          isActive: previousIsActive,
+          disabledAt: previousIsActive ? null : memberDoc.data()?.disabledAt || null,
+          disabledBy: previousIsActive ? null : memberDoc.data()?.disabledBy || null,
+          updatedAt: /* @__PURE__ */ new Date()
+        }, { merge: true });
+      } catch (rollbackErr) {
+        console.error("Failed to roll back member active-state:", rollbackErr);
+      }
+      throw syncErr;
+    }
+    return res.status(200).json({
+      success: true,
+      data: { uid, isActive }
+    });
+  } catch (error) {
+    if (error?.code === "auth/user-not-found") {
+      return res.status(404).json({
+        success: false,
+        error: "Member auth account was not found."
+      });
+    }
+    console.error("Member account active-state update failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to update member account status. Please try again."
     });
   }
 }
@@ -192348,6 +192422,20 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleUndoMemberPointsRedemption(req, res);
+  }
+  if (domain === "members" && action === "set-active" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-set-active:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many member account update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+    }
+    req.staff = authResult;
+    return await handleSetMemberActive(req, res);
   }
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 6e4)) {

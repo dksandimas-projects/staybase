@@ -1491,6 +1491,48 @@ export function BookingsPage() {
               </div>
             </div>
 
+            {selectedBooking.paymentProofUrl && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <CreditCard size={14} className="text-primary" />
+                  Payment Proof
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+                    <a
+                      href={selectedBooking.paymentProofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                    >
+                      <img
+                        src={selectedBooking.paymentProofUrl}
+                        alt={`Payment proof for ${selectedBooking.bookingRef}`}
+                        className="h-44 w-full object-cover"
+                      />
+                    </a>
+                    <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                      <p>
+                        Review the uploaded payment screenshot before confirming this booking.
+                      </p>
+                      <p className="font-semibold text-gray-900">
+                        Method: {selectedBooking.paymentMethod || "Not specified"}
+                      </p>
+                      <a
+                        href={selectedBooking.paymentProofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                      >
+                        <Eye size={13} />
+                        Open Full Size
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Guest details card */}
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Guest Information</h3>
@@ -2215,15 +2257,36 @@ export function BookingsPage() {
               </div>
             )}
 
-            {/* GCash screenshot mock proof */}
-            {selectedOrder.paymentMethod === "gcash" && (
+            {selectedOrder.paymentMethod === "gcash" && selectedOrder.paymentProofUrl && (
               <div className="space-y-3">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">GCash Proof of Remittance</h3>
-                <div className="rounded-lg border border-gray-200 p-4 bg-gray-100 flex flex-col items-center justify-center gap-2">
-                  <div className="h-44 w-32 rounded bg-blue-650/10 border border-blue-600/30 flex items-center justify-center text-blue-600 text-xs font-bold font-mono shadow-inner">
-                    RECEIPT SCREENSHOT
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+                    <a
+                      href={selectedOrder.paymentProofUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                    >
+                      <img
+                        src={selectedOrder.paymentProofUrl}
+                        alt={`GCash proof for ${selectedOrder.orderRef}`}
+                        className="h-44 w-full object-cover"
+                      />
+                    </a>
+                    <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                      <p>Review the uploaded store payment screenshot before confirming this order.</p>
+                      <a
+                        href={selectedOrder.paymentProofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                      >
+                        <Eye size={13} />
+                        Open Full Size
+                      </a>
+                    </div>
                   </div>
-                  <span className="text-[10px] text-gray-400">Mock receipt confirmation verified</span>
                 </div>
               </div>
             )}
