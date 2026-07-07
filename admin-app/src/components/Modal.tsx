@@ -163,7 +163,7 @@ function DesktopModalPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex h-full w-full flex-col"
+        className="flex h-full max-h-full w-full flex-col"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4">
           <h2 id={titleId} className="text-lg font-semibold text-gray-950">{title}</h2>
