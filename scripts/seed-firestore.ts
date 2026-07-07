@@ -12,6 +12,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { config as dotenv } from "dotenv";
+import { DEFAULT_ROOM_TYPES } from "../shared/constants";
 
 // Load env from guest-app/.env
 dotenv({ path: resolve(process.cwd(), "guest-app/.env") });
@@ -50,6 +51,7 @@ async function seedHotelConfig() {
   console.log("\n📋 Seeding settings/hotelConfig...");
   await setDoc("settings", "hotelConfig", {
     hotelName: "spark inn",
+    roomTypes: [...DEFAULT_ROOM_TYPES],
     legalName: "Spark Inn Hotel Corp",
     tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
     address: {
