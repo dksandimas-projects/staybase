@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "guest-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:vite", "-w", "guest-app"],
+      "port": 3000
+    },
+    {
+      "name": "admin-app",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "admin-app"],
+      "port": 5173
+    }
+  ]
+}
