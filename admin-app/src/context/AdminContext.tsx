@@ -312,6 +312,10 @@ export interface StoreOrder {
 export interface AdminContextType {
   // Authentication
   authLoading: boolean;
+  dashboardLoading: boolean;
+  roomsLoading: boolean;
+  ratesLoading: boolean;
+  settingsLoading: boolean;
   currentUser: AdminUser | null;
   sendPasswordReset: (email: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
@@ -343,8 +347,8 @@ export interface AdminContextType {
 
   // Corporate Inquiries
   corporateInquiries: CorporateInquiry[];
-  updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => void;
-  addInquiryNote: (inquiryId: string, text: string) => void;
+  updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => Promise<void>;
+  addInquiryNote: (inquiryId: string, text: string) => Promise<void>;
   convertInquiryToBooking: (input: {
     inquiryId: string;
     roomId: string;
@@ -539,9 +543,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Rooms Data State
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setRooms([]);
+      setRoomsLoading(true);
+      return;
+    }
+    setRoomsLoading(true);
     const roomsRef = collection(db, "rooms");
     const unsubscribe = onSnapshot(
       roomsRef,
@@ -584,9 +594,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         );
 
         setRooms(roomsData);
+        setRoomsLoading(false);
       },
       (error) => {
         console.error("Error listening to rooms collection:", error);
+        setRoomsLoading(false);
       }
     );
 
@@ -788,9 +800,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Bookings Data State
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setBookings([]);
+      setBookingsLoading(true);
+      return;
+    }
+    setBookingsLoading(true);
     const bookingsRef = collection(db, "bookings");
     const unsubscribe = onSnapshot(
       bookingsRef,
@@ -897,9 +915,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         });
 
         setBookings(bookingsData);
+        setBookingsLoading(false);
       },
       (error) => {
         console.error("Error listening to bookings collection:", error);
+        setBookingsLoading(false);
       }
     );
 
@@ -1070,9 +1090,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Vouchers — live from Firestore
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [vouchersLoading, setVouchersLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setVouchers([]);
+      setVouchersLoading(true);
+      return;
+    }
+    setVouchersLoading(true);
     const vouchersRef = collection(db, "vouchers");
     const unsubscribe = onSnapshot(
       vouchersRef,
@@ -1098,9 +1124,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
         voucherData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         setVouchers(voucherData);
+        setVouchersLoading(false);
       },
       (error) => {
         console.error("Error listening to vouchers collection:", error);
+        setVouchersLoading(false);
       }
     );
 
@@ -1313,7 +1341,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const addInquiryNote = async (inquiryId: string, text: string) => {
     try {
       const inquiryRef = doc(db, "corporateInquiries", inquiryId);
-      const newNote = { text, by: currentUser?.email || "staff", at: new Date().toISOString() };
+      const staffLabel = staff.find((member) => member.uid === currentUser?.uid)?.fullName
+        || currentUser?.email?.split("@")[0]
+        || "Staff";
+      const newNote = { text, by: staffLabel, at: new Date().toISOString() };
       await updateDoc(inquiryRef, {
         notes: arrayUnion(newNote),
         updatedAt: serverTimestamp()
@@ -2124,6 +2155,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // is slower). Set to `false` inside the `onSnapshot` callback
   // the first time the `websiteContent` case fires.
   const [websiteContentLoading, setWebsiteContentLoading] = useState(true);
+  const [settingsLoading, setSettingsLoading] = useState(true);
 
   const [websiteContent, setWebsiteContent] = useState({
     homepage: {
@@ -2368,7 +2400,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Subscribe to all settings documents from Firestore
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setSettingsLoading(true);
+      setWebsiteContentLoading(true);
+      return;
+    }
+    setSettingsLoading(true);
+    setWebsiteContentLoading(true);
     const settingsRef = collection(db, "settings");
     const unsubscribe = onSnapshot(
       settingsRef,
@@ -2396,9 +2434,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               break;
           }
         });
+        setSettingsLoading(false);
+        setWebsiteContentLoading(false);
       },
       (error) => {
         console.error("Error listening to settings collection:", error);
+        setSettingsLoading(false);
+        setWebsiteContentLoading(false);
       }
     );
     return unsubscribe;
@@ -3281,6 +3323,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       value={{
         currentUser,
         authLoading,
+        dashboardLoading: roomsLoading || bookingsLoading,
+        roomsLoading,
+        ratesLoading: settingsLoading || vouchersLoading,
+        settingsLoading,
         sendPasswordReset,
         signIn,
         signOut,
