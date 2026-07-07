@@ -31,11 +31,22 @@
 
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
-| **SEV-1 (critical)** | 3 | 0 | **3** |
+| **SEV-1 (critical)** | 0 | 3 | **3** |
 | **SEV-2 (major)** | 6 | 0 | **6** |
 | **SEV-3 (minor)** | 12 | 0 | **12** |
 | **SEV-4 (nit / doc drift)** | 11 | 0 | **11** |
-| **Total** | **32** | **0** | **32** |
+| **Total** | **29** | **3** | **32** |
+
+> **Fix update — 2026-07-07:** The three SEV-1 findings were fixed in
+> `9627f8a` (`fix: address critical admin audit bugs`), merged to `dev`
+> in `e79cc9d` (`fix: merge critical admin audit fixes`), with the
+> post-merge version recorded in `e79d82d` (`v0.119.12`). Regression
+> coverage was added in
+> `admin-app/src/__tests__/audit-admin-critical-2026-07-07.test.ts`.
+> The original audit narrative below is retained for context; SEV-1
+> findings AA-01, AA-02, and AA-03 are now fixed. Cross-referenced
+> non-SEV-1 follow-ups such as AA-19 remain open until their own status
+> entries are updated.
 
 The admin shell (auth, routing, responsive layout, focus traps, toasts,
 DataTable), the QR management page, the intercom inbox, store order
@@ -65,9 +76,9 @@ shape. The critical problems cluster in three places:
 
 | # | ID | Why | File:line | Status |
 |---|---|---|---|---|
-| 1 | **AA-01** | Member points adjustments + suspensions vanish on refresh; success toast lies to staff | `admin-app/src/context/AdminContext.tsx:1368-1394`, `admin-app/src/pages/MembersPage.tsx:33-72` | Open |
-| 2 | **AA-02** | Staff confirmation never sends the guest a booking-confirmed email — the server endpoint exists and is never called | `admin-app/src/context/AdminContext.tsx:939-957`, `guest-app/server/handlers/bookings.ts:1593` | Open |
-| 3 | **AA-03** | Payment proofs are unviewable (booking drawer) or faked ("Mock receipt confirmation verified" panel) — staff verifies real money blind | `admin-app/src/pages/BookingsPage.tsx:2219-2228` (mock), drawer (missing proof section) | Open |
+| 1 | **AA-01** | Member points adjustments + suspensions vanish on refresh; success toast lies to staff | `admin-app/src/context/AdminContext.tsx:1368-1394`, `admin-app/src/pages/MembersPage.tsx:33-72` | Fixed in `9627f8a` |
+| 2 | **AA-02** | Staff confirmation never sends the guest a booking-confirmed email — the server endpoint exists and is never called | `admin-app/src/context/AdminContext.tsx:939-957`, `guest-app/server/handlers/bookings.ts:1593` | Fixed in `9627f8a` |
+| 3 | **AA-03** | Payment proofs are unviewable (booking drawer) or faked ("Mock receipt confirmation verified" panel) — staff verifies real money blind | `admin-app/src/pages/BookingsPage.tsx:2219-2228` (mock), drawer (missing proof section) | Fixed in `9627f8a` |
 | 4 | **AA-06** | Rates page displays stale default rates and Save writes them over live rates | `admin-app/src/pages/RatesPage.tsx:67-115` | Open |
 | 5 | **AA-07** | Inquiry-generated corporate codes write the rate map key `executivo` (typo) — negotiated executive rates never apply; and non-admin staff get a success toast on a write Firestore rejects | `admin-app/src/pages/CorporateInquiriesPage.tsx:85-114` | Open |
 
@@ -76,7 +87,7 @@ shape. The critical problems cluster in three places:
 ## SEV-1 — Critical (3)
 
 ### AA-01 — Member points adjustment and suspend/activate are local-state mocks
-**Status:** Open
+**Status:** Fixed in `9627f8a` (merged to `dev` in `e79cc9d`)
 **File:** `admin-app/src/context/AdminContext.tsx:1368-1394` (`updateMemberPoints`, `toggleMemberActive`), `admin-app/src/pages/MembersPage.tsx:33-72`
 
 `updateMemberPoints` and `toggleMemberActive` only call `setMembers(...)` —
@@ -102,8 +113,16 @@ subscribe to the `pointsHistory` subcollection for the drawer, and route
 suspension through a new admin API (`disableUser` + `isActive: false`),
 mirroring `/api/admin/disable-staff`.
 
+**Fixed:** `updateMemberPoints` now persists balance changes and
+`pointsHistory` entries in a Firestore transaction, `MembersPage` now
+subscribes to `members/{uid}/pointsHistory` while the drawer is open, and
+member suspension/activation now routes through authenticated
+`/api/members/set-active`, which updates both `members/{uid}.isActive`
+and Firebase Auth disabled state. Success toasts are only shown after the
+write/API call succeeds.
+
 ### AA-02 — Booking confirmation bypasses `/api/bookings/confirm` — guest never emailed
-**Status:** Open
+**Status:** Fixed in `9627f8a` (merged to `dev` in `e79cc9d`)
 **File:** `admin-app/src/context/AdminContext.tsx:896-962` (`updateBookingStatus`), `admin-app/src/pages/BookingsPage.tsx:2070-2077`; server: `guest-app/server/apiRouter.ts:460-471`, `guest-app/server/handlers/bookings.ts:1593-1660`
 
 `updateBookingStatus` routes `cancelled` and `checked-out` through the
@@ -122,8 +141,13 @@ state is entirely unreachable from the UI (see AA-18).
 token/base-URL pattern as cancel/checkout) and surface its error in the
 drawer.
 
+**Fixed:** the `confirmed` transition in `updateBookingStatus` now calls
+`POST /api/bookings/confirm` with the staff ID token, so the existing
+server-side status validation and booking-confirmed email dedup logic
+run for staff confirmations.
+
 ### AA-03 — Payment proofs unviewable in booking drawer; store drawer shows a fake "verified" receipt
-**Status:** Open
+**Status:** Fixed in `9627f8a` (merged to `dev` in `e79cc9d`)
 **File:** `admin-app/src/pages/BookingsPage.tsx` (drawer, `paymentProofUrl` never rendered), `:2219-2228` (store GCash mock)
 
 The booking detail drawer renders guest info, registration, discounts,
@@ -142,6 +166,12 @@ falsely believes something was verified.
 pattern as the discount-ID image) in both drawers for
 `payment-uploaded`/pending bookings and for online-paid store orders;
 delete the mock panel.
+
+**Fixed:** the booking drawer now renders `booking.paymentProofUrl` as a
+thumbnail with an open-full-size link, and the store-order drawer now
+renders `order.paymentProofUrl` for GCash orders. The hardcoded
+"RECEIPT SCREENSHOT" / "Mock receipt confirmation verified" panel was
+removed.
 
 ---
 
@@ -630,15 +660,16 @@ admin-only.
 
 | Batch | Findings | Theme | Status |
 |---|---|---|---|
-| 1 (`fix/audit-aa-sev1`) | AA-01, AA-02, AA-03 | Real member writes, confirm-email endpoint, payment proof visibility | Open |
+| 1 (`fix/admin-critical-audit-2026-07-07`) | AA-01, AA-02, AA-03 | Real member writes, confirm-email endpoint, payment proof visibility | Fixed in `9627f8a`; merged to `dev` in `e79cc9d` |
 | 2 (`fix/audit-aa-sev2`) | AA-04, AA-05, AA-06, AA-07, AA-08, AA-09 | Storage migration for embedded images, rates form hydration, corporate code integrity, dashboard operational sections | Open |
 | 3 (`fix/audit-aa-sev3`) | AA-10 … AA-22 | Route guard normalization, mobile sign-out, timezone, exports, room/type editing, status model, redemption panel, white-label, API base URL | Open |
 | 4 | AA-23 … AA-33 | Nits, doc sync, role-surface decisions | Open |
 
 **Fix-order notes:**
-- AA-02 and AA-18 touch the same transition buttons — land together.
-- AA-03 (proof display) and AA-09 (pending-payments dashboard section)
-  share the proof-thumbnail component — build once.
+- AA-02 is fixed; AA-18 still touches the same status-transition area if
+  the `payment-confirmed` intermediate state is introduced later.
+- AA-03 is fixed; AA-09 can reuse the proof-thumbnail pattern now present
+  in the booking and store-order drawers.
 - AA-04/AA-05 need a small migration for existing base64 docs before the
   UI switch, or old items render broken.
 - AA-07(4)/AA-33 require a product decision (front-desk vs admin for code
