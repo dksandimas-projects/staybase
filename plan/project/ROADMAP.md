@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 8, 2026 (added Phase 12 item: early check-in approval workflow — spec in `plan/features/SPARK-REWARDS.md §Phase 2 — Early Check-In Approval Workflow`. Previous update July 2: Phase 11.8 fully shipped on `dev` — PR 1 + PR 2 (docs) + PR 3 `feat/content-tier-a-hotel` all merged; 1 docs PR (`7eafbea`) recording the missing Firestore composite index for `/api/rooms/availability`; 1 test fix (`38884ee`) repairing a stale regex path in `batch-9-convert-inquiry.test.ts` that was silently failing on every `npm test` since the api-router was relocated to `guest-app/server/`; 579/579 tests passing, typecheck clean, preflight clean)
+> Last updated: July 8, 2026 (added Phase 12 item: email preview interface in Admin Settings, and early check-in approval workflow spec. Previous update July 2: Phase 11.8 fully shipped on `dev` — PR 1 + PR 2 (docs) + PR 3 `feat/content-tier-a-hotel` all merged; 1 docs PR (`7eafbea`) recording the missing Firestore composite index for `/api/rooms/availability`; 1 test fix (`38884ee`) repairing a stale regex path in `batch-9-convert-inquiry.test.ts` that was silently failing on every `npm test` since the api-router was relocated to `guest-app/server/`; 579/579 tests passing, typecheck clean, preflight clean)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -980,6 +980,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
 - ⏸ Early check-in approval workflow — persist member early check-in requests on the booking (`earlyCheckIn` map), approve/decline from the booking drawer, guest confirmation email + status in My Stays/My Rewards, arrivals-list badge. Today the request ends at a staff notification email with no record on the booking. Full spec: `plan/features/SPARK-REWARDS.md §Phase 2 — Early Check-In Approval Workflow`
+- 🔄 Email preview interface — add a preview to the sample email templates in Admin Settings (Active Email Triggers). Add an authenticated server-side route `/api/email/preview` that renders templates with realistic mock data, and display it in an iframe inside a preview modal/drawer in SettingsPage.
 
 ---
 
