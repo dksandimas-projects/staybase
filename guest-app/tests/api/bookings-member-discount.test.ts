@@ -219,7 +219,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
 
   test("does not throw ReferenceError when Authorization header is present", async () => {
     const body = {
-      bookingId: "booking_bf01_a",
+      bookingId: "bookingBf01A",
       roomType: "standard-double",
       checkIn: "2026-07-15",
       checkOut: "2026-07-17",
@@ -253,7 +253,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const { adminAuth } = await import("../../server/lib/firebase-admin");
 
     const body = {
-      bookingId: "booking_bf01_b",
+      bookingId: "bookingBf01B",
       roomType: "standard-double",
       checkIn: "2026-07-15",
       checkOut: "2026-07-17",
@@ -283,7 +283,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
 
   test("booking doc carries memberId, memberDiscountPct, and a discounted totalPrice", async () => {
     const body = {
-      bookingId: "booking_bf01_c",
+      bookingId: "bookingBf01C",
       roomType: "standard-double",
       checkIn: "2026-07-15",
       checkOut: "2026-07-17",
@@ -311,7 +311,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    const bookingWrite = setCalls.find((c) => c.path === "bookings/booking_bf01_c");
+    const bookingWrite = setCalls.find((c) => c.path === "bookings/bookingBf01C");
     expect(bookingWrite).toBeDefined();
     expect(bookingWrite.data.memberId).toBe("member_uid_1");
     expect(bookingWrite.data.memberDiscountPct).toBe(10);
@@ -320,7 +320,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
 
   test("anonymous booking (no Authorization header) succeeds with no member discount", async () => {
     const body = {
-      bookingId: "booking_bf01_d",
+      bookingId: "bookingBf01D",
       roomType: "standard-double",
       checkIn: "2026-07-15",
       checkOut: "2026-07-17",
@@ -344,7 +344,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    const bookingWrite = setCalls.find((c) => c.path === "bookings/booking_bf01_d");
+    const bookingWrite = setCalls.find((c) => c.path === "bookings/bookingBf01D");
     expect(bookingWrite).toBeDefined();
     expect(bookingWrite.data.memberId).toBeNull();
     expect(bookingWrite.data.memberDiscountPct).toBe(0);
@@ -353,7 +353,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
 
   test("invalid/expired ID token falls through to anonymous booking", async () => {
     const body = {
-      bookingId: "booking_bf01_e",
+      bookingId: "bookingBf01E",
       roomType: "standard-double",
       checkIn: "2026-07-15",
       checkOut: "2026-07-17",
@@ -377,7 +377,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    const bookingWrite = setCalls.find((c) => c.path === "bookings/booking_bf01_e");
+    const bookingWrite = setCalls.find((c) => c.path === "bookings/bookingBf01E");
     expect(bookingWrite.data.memberId).toBeNull();
     expect(bookingWrite.data.totalPrice).toBe(4000);
   });

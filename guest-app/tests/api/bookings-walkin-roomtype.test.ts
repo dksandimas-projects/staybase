@@ -193,7 +193,7 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     // passes against typeEntry.maxCapacity=4. The fix means the
     // booking is created (not rejected).
     const body = {
-      bookingId: "walkin_bf02_a",
+      bookingId: "walkinBf02A",
       roomId: "room_101",
       checkIn: "2026-08-04", // Tue
       checkOut: "2026-08-06", // Thu (no weekend nights)
@@ -222,7 +222,7 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
 
   test("computes ratePerNight from the type entry's pricePerNight (not the dead room-doc field)", async () => {
     const body = {
-      bookingId: "walkin_bf02_b",
+      bookingId: "walkinBf02B",
       roomId: "room_101",
       checkIn: "2026-08-04",
       checkOut: "2026-08-06",
@@ -244,7 +244,7 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    const bookingWrite = setCalls.find((c) => c.path === "bookings/walkin_bf02_b");
+    const bookingWrite = setCalls.find((c) => c.path === "bookings/walkinBf02B");
     // 2 nights @ ₱2000 (type entry) = ₱4000.
     // Pre-fix, this would have been 2 nights @ ₱100 (dead room-doc
     // field) = ₱200.
@@ -257,7 +257,7 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     // typeWeekendRate = 2500, typeBaseRate = 2000.
     // Expected total: 2500 * 2 = 5000.
     const body = {
-      bookingId: "walkin_bf02_c",
+      bookingId: "walkinBf02C",
       roomId: "room_101",
       checkIn: "2026-08-08",
       checkOut: "2026-08-10",
@@ -279,14 +279,14 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    const bookingWrite = setCalls.find((c) => c.path === "bookings/walkin_bf02_c");
+    const bookingWrite = setCalls.find((c) => c.path === "bookings/walkinBf02C");
     expect(bookingWrite.data.totalPrice).toBe(5000);
   });
 
   test("rejects when guest count exceeds the type entry's maxCapacity", async () => {
     // 5 guests — type's maxCapacity is 4. Should reject.
     const body = {
-      bookingId: "walkin_bf02_d",
+      bookingId: "walkinBf02D",
       roomId: "room_101",
       checkIn: "2026-08-04",
       checkOut: "2026-08-06",
@@ -310,12 +310,12 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     expect(res.status).toHaveBeenCalledWith(500);
     const jsonArg = (res.json as any).mock.calls[0][0];
     expect(jsonArg.error).toBe("Guest count exceeds room capacity of 4.");
-    expect(setCalls.find((c) => c.path === "bookings/walkin_bf02_d")).toBeUndefined();
+    expect(setCalls.find((c) => c.path === "bookings/walkinBf02D")).toBeUndefined();
   });
 
   test("transaction reads settings/hotelConfig inside the transaction body", async () => {
     const body = {
-      bookingId: "walkin_bf02_e",
+      bookingId: "walkinBf02E",
       roomId: "room_101",
       checkIn: "2026-08-04",
       checkOut: "2026-08-06",
@@ -344,7 +344,7 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     mockRooms["room_101"].type = "defunct-room-type";
 
     const body = {
-      bookingId: "walkin_bf02_f",
+      bookingId: "walkinBf02F",
       roomId: "room_101",
       checkIn: "2026-08-04",
       checkOut: "2026-08-06",
@@ -368,6 +368,6 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     expect(res.status).toHaveBeenCalledWith(500);
     const jsonArg = (res.json as any).mock.calls[0][0];
     expect(jsonArg.error).toBe("Room type is not available.");
-    expect(setCalls.find((c) => c.path === "bookings/walkin_bf02_f")).toBeUndefined();
+    expect(setCalls.find((c) => c.path === "bookings/walkinBf02F")).toBeUndefined();
   });
 });

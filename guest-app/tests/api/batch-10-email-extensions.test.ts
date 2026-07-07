@@ -197,14 +197,11 @@ describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => 
 
     it("AdminContext.addVoucher does NOT post when guestEmail is empty", () => {
       // The email block is wrapped in `if (voucher.guestEmail && voucher.guestEmail.trim())`.
-      const addFn = adminContextSrc.match(
-        /const\s+addVoucher\s*=\s*async\s*\(/
+      const addBlock = adminContextSrc.match(
+        /if\s*\(\s*voucher\.guestEmail\s*&&\s*voucher\.guestEmail\.trim\(\)\s*\)\s*\{[\s\S]*?\}\s*catch\s*\(\s*emailErr\s*\)\s*\{/
       );
-      expect(addFn, "expected to find addVoucher definition").toBeTruthy();
-      const fnStart = addFn!.index!;
-      const fnEnd = adminContextSrc.indexOf("};", fnStart);
-      const fnBody = adminContextSrc.slice(fnStart, fnEnd + 2);
-      expect(fnBody).toMatch(/if\s*\(\s*voucher\.guestEmail\s*&&\s*voucher\.guestEmail\.trim\(\)\s*\)/);
+      expect(addBlock, "expected to find guarded addVoucher email block").toBeTruthy();
+      expect(addBlock![0]).toMatch(/api\/email\/voucher-issued/);
     });
 
     it("RatesPage form passes guestEmail through to addVoucher", () => {

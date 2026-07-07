@@ -131,10 +131,9 @@ describe("Phase 11.9 — Room type carries bed/description/amenities (W3.7)", ()
     // and emits the per-room fields. Find it by anchoring on the
     // "rooms/" path in the onSnapshot call.
     const roomsMapperBlock = (() => {
-      const m = adminContextSrc.match(
-        /onSnapshot\([\s\S]*?setRooms\([\s\S]*?\}\);[\s\S]*?\}/m
-      );
-      return m ? m[0] : "";
+      const start = adminContextSrc.indexOf("const unsubscribeRooms = onSnapshot");
+      const end = adminContextSrc.indexOf("latestRooms = roomsData;", start);
+      return start > -1 && end > -1 ? adminContextSrc.slice(start, end) : "";
     })();
 
     // The createRoom function is the action wired into the context

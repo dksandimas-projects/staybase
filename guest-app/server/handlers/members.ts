@@ -51,6 +51,7 @@ function getStaff(req: any) {
 async function linkBookingsByEmail(email: string, uid: string, explicitBookingId?: string) {
   let linkedCount = 0;
   const batch = adminDb.batch();
+  const linkedPaths = new Set<string>();
 
   const bookingsSnapshot = await adminDb
     .collection("bookings")
@@ -63,13 +64,22 @@ async function linkBookingsByEmail(email: string, uid: string, explicitBookingId
       return;
     }
     batch.update(bookingDoc.ref, { memberId: uid, updatedAt: new Date() });
+    linkedPaths.add(bookingDoc.ref.path);
     linkedCount += 1;
   });
 
   if (explicitBookingId) {
     const bookingRef = adminDb.collection("bookings").doc(explicitBookingId);
-    batch.update(bookingRef, { memberId: uid, updatedAt: new Date() });
-    linkedCount += 1;
+    const bookingDoc = await bookingRef.get();
+    if (bookingDoc.exists && !linkedPaths.has(bookingRef.path)) {
+      const data = bookingDoc.data() || {};
+      const bookingEmail = String(data.guestEmail || "").trim().toLowerCase();
+      const alreadyLinkedToCaller = data.memberId === uid;
+      if ((bookingEmail && bookingEmail === email) || alreadyLinkedToCaller) {
+        batch.update(bookingRef, { memberId: uid, updatedAt: new Date() });
+        linkedCount += 1;
+      }
+    }
   }
 
   if (linkedCount > 0) {

@@ -108,7 +108,7 @@ describe("BF-05 — handleRejectDiscount restores totalPrice to pre-Senior/PWD s
     const updateData = updateCalls.find((c) => c.ref === "bookings/booking_1")?.data;
     expect(updateData.totalPrice).toBe(3500);
     expect(updateData.discountPct).toBe(0);
-    expect(updateData.status).toBe("pending");
+    expect(updateData).not.toHaveProperty("status");
     expect(mockBookings["booking_1"].totalPrice).toBe(3500);
   });
 

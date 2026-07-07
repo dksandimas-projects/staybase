@@ -10,6 +10,13 @@ export function useRooms() {
 
   useEffect(() => {
     const roomsRef = collection(db, "rooms");
+    const parseDateString = (value: any) => {
+      if (!value) return null;
+      if (typeof value.toDate === "function") return value.toDate().toISOString().split("T")[0];
+      if (value instanceof Date) return value.toISOString().split("T")[0];
+      if (typeof value === "string") return value.split("T")[0];
+      return null;
+    };
 
     const unsubscribe = onSnapshot(
       roomsRef,
@@ -25,6 +32,8 @@ export function useRooms() {
             isActive: data.isActive !== false,
             status: data.status || "available",
             housekeepingStatus: data.housekeepingStatus || "clean",
+            blockedFrom: parseDateString(data.blockedFrom),
+            blockedTo: parseDateString(data.blockedTo),
             blockReason: "",
             remarks: "",
             createdAt: data.createdAt?.toDate() || new Date(),

@@ -471,6 +471,22 @@ export function IntercomPage() {
     });
   };
 
+  const canSendGuestMessage = () => {
+    if (!roomNumber) return false;
+    const now = Date.now();
+    const key = `intercomRate:${roomNumber}`;
+    try {
+      const recent = JSON.parse(localStorage.getItem(key) || "[]")
+        .filter((value: unknown) => typeof value === "number" && now - value < 10 * 60 * 1000);
+      if (recent.length >= 30) return false;
+      recent.push(now);
+      localStorage.setItem(key, JSON.stringify(recent));
+    } catch {
+      return true;
+    }
+    return true;
+  };
+
   // Name Prompt Submission
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -485,6 +501,10 @@ export function IntercomPage() {
   const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean; isCancelledOrder?: boolean }) => {
     if (!roomNumber || !guestName.trim()) return;
     setMessageError("");
+    if (!canSendGuestMessage()) {
+      setMessageError("Too many messages sent from this room. Please wait a few minutes or call the front desk.");
+      return;
+    }
 
     try {
       await setDoc(doc(db, "intercoms", roomNumber), {

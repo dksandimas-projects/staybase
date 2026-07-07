@@ -98,6 +98,7 @@ Firestore rules: read/create/update require `isStaff()`, delete requires `isAdmi
 | `notes` | string | Internal staff notes |
 | `handledBy` | string | Staff UID |
 | `memberId` | string \| null | Firebase Auth UID of member (if booked while logged in or linked post-registration) |
+| `memberDiscountPct` | number | Spark Rewards member discount percent applied at booking creation (0 if none); used when recomputing totals after discount rejection |
 | `pointsRedeemed` | number | Points redeemed by staff against this booking (0 if none) |
 | `pointsRedeemedValue` | number | ₱ value of redeemed points deducted from `totalPrice` (0 if none) |
 | `pointsRedeemedBy` | string \| null | Staff UID who applied the redemption |
@@ -479,15 +480,15 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
 | `corporateCodes` | Staff/Admin only; public validation uses `/api/corporate/validate-code` | Staff/Admin only |
-| `vouchers` | Anyone (validation) | Staff or Admin |
-| `intercoms` | Open (no auth) | Open (no auth) |
+| `vouchers` | Staff/Admin only; public validation uses `/api/validate/voucher` | Staff or Admin |
+| `intercoms` | Open (no auth) | Open with field validation on messages; guest UI throttles message sends; staff can moderate |
 | `members` | Owner (self) or Staff/Admin | Create = API/Admin SDK only via `/api/members/register`; Update = owner or Staff/Admin |
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
-| `storeOrders` | Open for create and guest cancellation by room/order ref | Create = anyone; Update = Staff/Admin; guest cancellation via API only |
+| `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; Update = Staff/Admin; guest cancellation via API only |
 | `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment`; no updates or deletes |
-| `settings/rewardsConfig` | Authenticated guests (needed for booking discount + My Rewards display) | Admin only |
+| `settings/rewardsConfig` | Public via `settings/{documentId}` rule; non-sensitive booking/member display config | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |
 

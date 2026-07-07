@@ -19,6 +19,10 @@ const rewardsSrc = readFileSync(
   resolve(__dirname, "../../../guest-app/src/pages/RewardsLandingPage.tsx"),
   "utf8"
 );
+const guestAuthSrc = readFileSync(
+  resolve(__dirname, "../../../guest-app/src/context/GuestAuthContext.tsx"),
+  "utf8"
+);
 
 describe("Phase 11.6 Batch 7 — notification mute + real enroll flow", () => {
   describe("W2.9 — per-staff notification sound mute", () => {
@@ -104,13 +108,14 @@ describe("Phase 11.6 Batch 7 — notification mute + real enroll flow", () => {
     });
 
     it("calls /api/members/register with a Bearer token on enroll", () => {
-      expect(rewardsSrc).toMatch(
+      expect(rewardsSrc).toMatch(/registerCurrentMember\(\)/);
+      expect(guestAuthSrc).toMatch(
         /fetch\(\s*["']\/api\/members\/register["']/
       );
-      expect(rewardsSrc).toMatch(
+      expect(guestAuthSrc).toMatch(
         /Authorization:\s*`Bearer\s+\$\{idToken\}`/
       );
-      expect(rewardsSrc).toMatch(/method:\s*["']POST["']/);
+      expect(guestAuthSrc).toMatch(/method:\s*["']POST["']/);
     });
 
     it("no longer uses setTimeout to fake the enroll", () => {

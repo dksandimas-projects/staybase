@@ -355,7 +355,7 @@ describe("/api/bookings/create", () => {
     mockRooms["room_102"].isActive = false;
 
     const validBookingBody = {
-      bookingId: "booking_abc",
+      bookingId: "bookingAbc1",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
@@ -384,12 +384,12 @@ describe("/api/bookings/create", () => {
     expect(res1.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       data: expect.objectContaining({
-        bookingId: "booking_abc"
+        bookingId: "bookingAbc1"
       })
     }));
 
     // Add first booking to DB to simulate success
-    const createdBooking = setCalls.find(call => call.path === "bookings/booking_abc")?.data;
+    const createdBooking = setCalls.find(call => call.path === "bookings/bookingAbc1")?.data;
     expect(createdBooking).toBeDefined();
     // Convert checkIn date to simulate Firestore read (which uses toDate method)
     mockBookings.push({
@@ -404,7 +404,7 @@ describe("/api/bookings/create", () => {
     // Second booking request with overlapping dates
     const overlappingBody = {
       ...validBookingBody,
-      bookingId: "booking_def",
+      bookingId: "bookingDef1",
       checkIn: FUTURE_CHECK_IN_2,
       checkOut: FUTURE_CHECK_OUT_2
     };
@@ -428,7 +428,7 @@ describe("/api/bookings/create", () => {
     mockRooms["room_102"].status = "blocked";
 
     const body = {
-      bookingId: "booking_xyz",
+      bookingId: "bookingXyz1",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
@@ -463,7 +463,7 @@ describe("/api/bookings/create", () => {
   test("does not leave partial writes after timeout or abort", async () => {
     // Room count exceeds capacity - should throw and fail transaction before writing
     const invalidCapacityBody = {
-      bookingId: "booking_err",
+      bookingId: "bookingErr1",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
@@ -500,7 +500,7 @@ describe("/api/bookings/create", () => {
 
   test("honeypot triggering skips database write and returns silent success", async () => {
     const honeypotBody = {
-      bookingId: "booking_hp",
+      bookingId: "bookingHp01",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
@@ -527,7 +527,7 @@ describe("/api/bookings/create", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     // Per BF-44 (booking-flow audit 2026-06-26): the fake
     // success now always returns a fresh random bookingId;
-    // the bot's preallocated `booking_hp` is NOT echoed
+    // the bot's preallocated `bookingHp01` is NOT echoed
     // back (it would leak the real preallocated ID into the
     // bot's response).
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
@@ -539,7 +539,7 @@ describe("/api/bookings/create", () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       data: expect.not.objectContaining({
-        bookingId: "booking_hp"
+        bookingId: "bookingHp01"
       })
     }));
 
@@ -550,7 +550,7 @@ describe("/api/bookings/create", () => {
 
   test("Turnstile token validation blocks invalid inputs", async () => {
     const invalidTurnstileBody = {
-      bookingId: "booking_turnstile",
+      bookingId: "bookingTurnstile1",
       roomType: "standard-double",
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
@@ -596,7 +596,7 @@ describe("/api/bookings/create", () => {
   describe("room-type booking (auto-assign first free physical room of type)", () => {
     test("picks the first free room of the requested type", async () => {
       const body = {
-        bookingId: "booking_type_first",
+        bookingId: "bookingTypeFirst1",
         roomType: "standard-double",
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
@@ -620,7 +620,7 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      const created = setCalls.find((c) => c.path === "bookings/booking_type_first")?.data;
+      const created = setCalls.find((c) => c.path === "bookings/bookingTypeFirst1")?.data;
       expect(created).toBeDefined();
       // Should auto-assign one of the two standard-double rooms.
       expect(["room_101", "room_102"]).toContain(created.roomId);
@@ -643,7 +643,7 @@ describe("/api/bookings/create", () => {
       });
 
       const body = {
-        bookingId: "booking_pick_second",
+        bookingId: "bookingPickSecond1",
         roomType: "standard-double",
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
@@ -667,7 +667,7 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      const created = setCalls.find((c) => c.path === "bookings/booking_pick_second")?.data;
+      const created = setCalls.find((c) => c.path === "bookings/bookingPickSecond1")?.data;
       expect(created).toBeDefined();
       // room_101 is occupied; transaction should auto-pick room_102.
       expect(created.roomId).toBe("room_102");
@@ -693,7 +693,7 @@ describe("/api/bookings/create", () => {
       });
 
       const body = {
-        bookingId: "booking_no_room",
+        bookingId: "bookingNoRoom1",
         roomType: "standard-double",
         checkIn: "2026-08-02",
         checkOut: "2026-08-04",
@@ -721,12 +721,12 @@ describe("/api/bookings/create", () => {
         success: false,
         error: "Room no longer available"
       });
-      expect(setCalls.find((c) => c.path === "bookings/booking_no_room")).toBeUndefined();
+      expect(setCalls.find((c) => c.path === "bookings/bookingNoRoom1")).toBeUndefined();
     });
 
     test("rejects an unknown roomType with a user-facing error", async () => {
       const body = {
-        bookingId: "booking_bad_type",
+        bookingId: "bookingBadType1",
         roomType: "penthouse-suite",
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
@@ -754,14 +754,14 @@ describe("/api/bookings/create", () => {
         success: false,
         error: "Selected room type is not available."
       }));
-      expect(setCalls.find((c) => c.path === "bookings/booking_bad_type")).toBeUndefined();
+      expect(setCalls.find((c) => c.path === "bookings/bookingBadType1")).toBeUndefined();
     });
   });
 
   describe("staff actions (walk-ins, payments, discount rejections, cancellations)", () => {
     test("POST /api/bookings/create-walkin: creates booking with override", async () => {
       const walkinBody = {
-        bookingId: "walkin_123",
+        bookingId: "walkin12345",
         roomId: "room_101",
         checkIn: "2026-06-15",
         checkOut: "2026-06-18",
@@ -786,11 +786,11 @@ describe("/api/bookings/create", () => {
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
         success: true,
         data: expect.objectContaining({
-          bookingId: "walkin_123"
+          bookingId: "walkin12345"
         })
       }));
 
-      const createdWalkin = setCalls.find(call => call.path === "bookings/walkin_123")?.data;
+      const createdWalkin = setCalls.find(call => call.path === "bookings/walkin12345")?.data;
       expect(createdWalkin).toBeDefined();
       expect(createdWalkin.totalPrice).toBe(5000);
       expect(createdWalkin.originalTotalPrice).toBe(6000); // standard: 2000 per night * 3 nights = 6000
@@ -802,7 +802,7 @@ describe("/api/bookings/create", () => {
       process.env.NODE_ENV = "production";
 
       const walkinBody = {
-        bookingId: "walkin_auth",
+        bookingId: "walkinAuth1",
         roomId: "room_101",
         checkIn: "2026-06-15",
         checkOut: "2026-06-18",
@@ -836,7 +836,7 @@ describe("/api/bookings/create", () => {
       process.env.NODE_ENV = "production";
 
       const walkinBody = {
-        bookingId: "walkin_auth",
+        bookingId: "walkinAuth1",
         roomId: "room_101",
         checkIn: "2026-06-15",
         checkOut: "2026-06-18",

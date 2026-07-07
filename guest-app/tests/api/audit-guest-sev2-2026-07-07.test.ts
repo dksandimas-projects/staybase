@@ -33,12 +33,12 @@ describe("Guest app SEV-2 audit fixes", () => {
 
   test("member registration failures surface through auth/profile UI instead of console-only paths", () => {
     const authSrc = read("guest-app/src/context/GuestAuthContext.tsx");
-    expect(authSrc).toMatch(/throw new Error\(result\?\.error/);
+    expect(authSrc).toMatch(/throw new Error\(result\?\.error \|\|/);
 
     const profileSrc = read("guest-app/src/pages/ProfilePage.tsx");
     expect(profileSrc).toMatch(/profileError/);
     expect(profileSrc).toMatch(/registerCurrentMember/);
-    expect(profileSrc).toMatch(/Join Spark Rewards first/);
+    expect(profileSrc).toMatch(/Join \$\{config\.rewardsName\} first/);
   });
 
   test("guest room hydration never maps staff-only room private fields", () => {
