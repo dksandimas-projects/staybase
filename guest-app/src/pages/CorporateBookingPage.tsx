@@ -551,11 +551,13 @@ export function CorporateBookingPage() {
     setActiveCode("");
     setDiscountPercent(0);
     setIsFlatRate(false);
+    setRatePerRoomType({});
     setAccessCode("");
     sessionStorage.removeItem("corp_companyName");
     sessionStorage.removeItem("corp_code");
     sessionStorage.removeItem("corp_discount");
     sessionStorage.removeItem("corp_isFlatRate");
+    sessionStorage.removeItem("corp_ratePerRoomType");
   }
 
   // Per BI-05: compress + upload the receipt to the preallocated
@@ -714,10 +716,34 @@ export function CorporateBookingPage() {
         });
         setSearchParams(params);
       } else {
-        setSubmitError(result.error || "Booking submission failed. Please try again.");
+        const errorMessage = result.error || "Booking submission failed. Please try again.";
+        setSubmitError(errorMessage);
         // Tokens are single-use; mint a fresh one for the retry.
         reviewTurnstile.reset();
         setIsSubmitting(false);
+
+        if (errorMessage.startsWith("Corporate code no longer valid")) {
+          handleClearValidation();
+          setCodeError(errorMessage);
+          const next = new URLSearchParams(searchParams);
+          next.delete("step");
+          next.delete("roomType");
+          setSelectedRoomType("");
+          setSearchParams(next);
+          return;
+        }
+
+        if (errorMessage === "Room no longer available") {
+          setSubmitError("Sorry, no rooms of this type are available for your selected dates. Please go back and pick another room type.");
+          setTimeout(() => {
+            const next = new URLSearchParams(searchParams);
+            next.set("step", "select-room");
+            next.delete("roomType");
+            setSelectedRoomType("");
+            setSearchParams(next);
+            setSubmitError("");
+          }, 5000);
+        }
       }
     } catch {
       setSubmitError("Unable to submit booking. Please check your connection and try again.");

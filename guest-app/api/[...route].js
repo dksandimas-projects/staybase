@@ -189085,6 +189085,7 @@ async function handleCreateBooking(req, res) {
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
+      let corporateCodeUsageUpdate = null;
       if (corporateCode) {
         const formattedCorpCode = String(corporateCode).trim().toUpperCase();
         corporateCodeRef = adminDb.collection("corporateCodes").doc(formattedCorpCode);
@@ -189114,10 +189115,13 @@ async function handleCreateBooking(req, res) {
             } else if (typeCorporateRate) {
               activeRoomRate = typeCorporateRate;
             }
-            transaction.update(corporateCodeRef, {
-              usageCount: (corpData.usageCount || 0) + 1,
-              updatedAt: /* @__PURE__ */ new Date()
-            });
+            corporateCodeUsageUpdate = {
+              ref: corporateCodeRef,
+              data: {
+                usageCount: (corpData.usageCount || 0) + 1,
+                updatedAt: /* @__PURE__ */ new Date()
+              }
+            };
           } else {
             throw new Error(
               `Corporate code no longer valid: ${corpValidation.error} Please re-enter your access code or continue without a code.`
@@ -189152,6 +189156,7 @@ async function handleCreateBooking(req, res) {
       const subtotal = roomTotal + breakfastTotal;
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
+      let voucherUsageUpdate = null;
       if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
         let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
@@ -189182,10 +189187,13 @@ async function handleCreateBooking(req, res) {
               voucherDiscount = vData.discountValue;
             }
             voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
-            transaction.update(voucherRef, {
-              usageCount: (vData.usageCount || 0) + 1,
-              updatedAt: /* @__PURE__ */ new Date()
-            });
+            voucherUsageUpdate = {
+              ref: voucherRef,
+              data: {
+                usageCount: (vData.usageCount || 0) + 1,
+                updatedAt: /* @__PURE__ */ new Date()
+              }
+            };
           } else {
             throw new Error("Voucher no longer valid");
           }
@@ -189224,13 +189232,21 @@ async function handleCreateBooking(req, res) {
       let sequence = 1;
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
-        transaction.update(counterRef, { count: sequence });
-      } else {
-        transaction.set(counterRef, { count: 1 });
       }
       const bookingRef = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
+      if (corporateCodeUsageUpdate) {
+        transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
+      }
+      if (voucherUsageUpdate) {
+        transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
+      }
+      if (counterDoc.exists) {
+        transaction.update(counterRef, { count: sequence });
+      } else {
+        transaction.set(counterRef, { count: 1 });
+      }
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       const newBooking = {
         bookingRef,
@@ -189333,7 +189349,8 @@ async function handleCreateBooking(req, res) {
         checkIn,
         checkOut,
         numNights,
-        totalPrice
+        totalPrice,
+        source: corporateDetails.isCorporate ? "corporate" : "online"
       };
     });
     if (alreadyExistingBookingResponse) {
@@ -189848,13 +189865,12 @@ async function handleAddPayment(req, res) {
       const bookingData = bookingDoc.data();
       bookingDataSnapshot = bookingData;
       const paymentsRef = bookingRef.collection("payments");
-      const newPaymentRef = paymentsRef.doc();
-      transaction.set(newPaymentRef, paymentRecord);
       const paymentsSnapshot = await transaction.get(paymentsRef);
-      totalPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
+      const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         const data = docSnap.data();
         return sum + Number(data.amount || 0);
       }, 0);
+      totalPaid = existingPaid + numericAmount;
       totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
@@ -189865,6 +189881,8 @@ async function handleAddPayment(req, res) {
           "emailNotificationsSent.staffNewPayment": /* @__PURE__ */ new Date()
         });
       }
+      const newPaymentRef = paymentsRef.doc();
+      transaction.set(newPaymentRef, paymentRecord);
     });
   } catch (error) {
     if (error.message === "Booking not found") {
@@ -190569,6 +190587,7 @@ async function handleConvertInquiryToBooking(req, res) {
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
       const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
       let ratePerNight = Number(roomData.pricePerNight || 0);
+      let codeUsageUpdate = null;
       if (ratePerNightOverride !== void 0 && ratePerNightOverride !== null) {
         ratePerNight = ratePerNightOverride;
       } else if (inquiryData.accessCodeId) {
@@ -190582,10 +190601,13 @@ async function handleConvertInquiryToBooking(req, res) {
           } else if (roomData.corporateRate) {
             ratePerNight = roomData.corporateRate;
           }
-          transaction.update(codeRef, {
-            usageCount: (codeData.usageCount || 0) + 1,
-            updatedAt: /* @__PURE__ */ new Date()
-          });
+          codeUsageUpdate = {
+            ref: codeRef,
+            data: {
+              usageCount: (codeData.usageCount || 0) + 1,
+              updatedAt: /* @__PURE__ */ new Date()
+            }
+          };
         } else if (roomData.corporateRate) {
           ratePerNight = roomData.corporateRate;
         }
@@ -190598,6 +190620,11 @@ async function handleConvertInquiryToBooking(req, res) {
       let sequence = 1;
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
+      }
+      if (codeUsageUpdate) {
+        transaction.update(codeUsageUpdate.ref, codeUsageUpdate.data);
+      }
+      if (counterDoc.exists) {
         transaction.update(counterRef, { count: sequence });
       } else {
         transaction.set(counterRef, { count: 1 });

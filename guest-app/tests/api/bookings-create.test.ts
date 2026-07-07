@@ -5,6 +5,7 @@ import handler from "../../server/apiRouter";
 let mockRooms: Record<string, any> = {};
 let mockSettings: Record<string, any> = {};
 let mockVouchers: Record<string, any> = {};
+let mockCorporateCodes: Record<string, any> = {};
 let mockCounters: Record<string, any> = {};
 let mockBookings: any[] = [];
 
@@ -39,6 +40,18 @@ vi.mock("../../server/lib/firebase-admin", () => {
               data: () => found
             };
           }
+        }
+        if (coll === "corporateCodes" && mockCorporateCodes[docId]) {
+          return {
+            exists: true,
+            data: () => mockCorporateCodes[docId]
+          };
+        }
+        if (coll === "vouchers" && mockVouchers[docId]) {
+          return {
+            exists: true,
+            data: () => mockVouchers[docId]
+          };
         }
         return { exists: false };
       },
@@ -108,6 +121,10 @@ vi.mock("../../server/lib/firebase-admin", () => {
           pool = Object.entries(mockRooms).map(([id, data]) => ({ id, ...data }));
         } else if (collName === "bookings") {
           pool = mockBookings.map((b: any) => ({ id: b.id || b.bookingId || b.bookingRef, ...b }));
+        } else if (collName === "vouchers") {
+          pool = Object.entries(mockVouchers).map(([id, data]) => ({ id, ...data }));
+        } else if (collName === "corporateCodes") {
+          pool = Object.entries(mockCorporateCodes).map(([id, data]) => ({ id, ...data }));
         }
         let filtered = pool;
         for (const f of filters) {
@@ -187,6 +204,16 @@ vi.mock("../../server/lib/firebase-admin", () => {
         return { exists: false };
       }
 
+      if (coll === "corporateCodes") {
+        if (mockCorporateCodes[docId]) {
+          return {
+            exists: true,
+            data: () => mockCorporateCodes[docId]
+          };
+        }
+        return { exists: false };
+      }
+
       if (coll === "counters") {
         if (mockCounters[docId]) {
           return {
@@ -226,7 +253,39 @@ vi.mock("../../server/lib/firebase-admin", () => {
       return createDocRef(path);
     }),
     runTransaction: vi.fn().mockImplementation(async (callback: any) => {
-      return await callback(mockTransaction);
+      let hasWrites = false;
+      const readAfterWriteMessage = "Firestore transactions require all reads to be executed before all writes.";
+      const transaction = {
+        get: vi.fn().mockImplementation(async (ref: any) => {
+          if (hasWrites) {
+            throw new Error(readAfterWriteMessage);
+          }
+          return mockTransaction.get(ref);
+        }),
+        getAll: vi.fn().mockImplementation(async (...refs: any[]) => {
+          if (hasWrites) {
+            throw new Error(readAfterWriteMessage);
+          }
+          return Promise.all(refs.map((ref) => mockTransaction.get(ref)));
+        }),
+        set: vi.fn().mockImplementation((ref: any, data: any) => {
+          hasWrites = true;
+          return mockTransaction.set(ref, data);
+        }),
+        update: vi.fn().mockImplementation((ref: any, data: any) => {
+          hasWrites = true;
+          return mockTransaction.update(ref, data);
+        }),
+        create: vi.fn().mockImplementation((ref: any, data: any) => {
+          hasWrites = true;
+          return mockTransaction.set(ref, data);
+        }),
+        delete: vi.fn().mockImplementation((ref: any) => {
+          hasWrites = true;
+          updateCalls.push({ path: ref.path, data: { __deleted: true } });
+        })
+      };
+      return await callback(transaction);
     })
   };
 
@@ -340,6 +399,7 @@ describe("/api/bookings/create", () => {
       }
     };
     mockVouchers = {};
+    mockCorporateCodes = {};
     mockCounters = {};
     mockBookings = [];
     setCalls = [];
@@ -755,6 +815,112 @@ describe("/api/bookings/create", () => {
         error: "Selected room type is not available."
       }));
       expect(setCalls.find((c) => c.path === "bookings/bookingBadType1")).toBeUndefined();
+    });
+  });
+
+  describe("transaction read/write ordering regressions", () => {
+    test("valid corporate-code booking increments usageCount and still succeeds", async () => {
+      mockCorporateCodes.CORP500 = {
+        code: "CORP500",
+        companyName: "Acme Travel",
+        isActive: true,
+        expiresAt: { toDate: () => new Date(`${isoDate(90)}T00:00:00Z`) },
+        usageCap: 10,
+        usageCount: 2,
+        ratePerRoomType: {
+          "standard-double": 1500
+        }
+      };
+
+      const body = {
+        bookingId: "bookingCorp1",
+        roomType: "standard-double",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Corporate",
+          lastName: "Guest",
+          email: "corp@example.com",
+          phone: "09171234567",
+          consent: true,
+          companyName: "Client-entered name"
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        corporateCode: "corp500",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const created = setCalls.find((c) => c.path === "bookings/bookingCorp1")?.data;
+      expect(created).toBeDefined();
+      expect(created.isCorporate).toBe(true);
+      expect(created.source).toBe("corporate");
+      expect(created.companyName).toBe("Acme Travel");
+      expect(created.ratePerNight).toBe(1500);
+      expect(updateCalls).toContainEqual({
+        path: "corporateCodes/CORP500",
+        data: expect.objectContaining({
+          usageCount: 3
+        })
+      });
+    });
+
+    test("valid voucher booking increments usageCount and still succeeds", async () => {
+      mockVouchers.SAVE500 = {
+        code: "SAVE500",
+        discountType: "fixed",
+        discountValue: 500,
+        isActive: true,
+        expiresAt: { toDate: () => new Date(`${isoDate(90)}T00:00:00Z`) },
+        usageCap: 10,
+        usageCount: 4,
+        applicableRoomTypes: []
+      };
+
+      const body = {
+        bookingId: "bookingVoucher1",
+        roomType: "standard-double",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Voucher",
+          lastName: "Guest",
+          email: "voucher@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        voucherCode: "save500",
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const created = setCalls.find((c) => c.path === "bookings/bookingVoucher1")?.data;
+      expect(created).toBeDefined();
+      expect(created.voucherCode).toBe("SAVE500");
+      expect(created.voucherDiscount).toBe(500);
+      expect(updateCalls).toContainEqual({
+        path: "vouchers/SAVE500",
+        data: expect.objectContaining({
+          usageCount: 5
+        })
+      });
     });
   });
 
