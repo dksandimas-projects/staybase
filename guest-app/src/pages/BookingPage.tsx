@@ -212,7 +212,11 @@ export function BookingPage() {
   // render is always the loading skeleton or Step 1, so the widget
   // never mounted and every submit fell back to `"mock_token"`
   // (which the server no longer accepts — see BI-02).
-  const { token: turnstileToken, containerRef: turnstileContainerRef } = useTurnstileToken({
+  const {
+    token: turnstileToken,
+    containerRef: turnstileContainerRef,
+    reset: resetTurnstile
+  } = useTurnstileToken({
     enabled: isReviewStep
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -596,6 +600,7 @@ export function BookingPage() {
       setVoucherError(friendly);
       setVoucherApplied(false);
     } finally {
+      resetTurnstile();
       setIsValidatingVoucher(false);
     }
   }
@@ -743,6 +748,7 @@ export function BookingPage() {
       navigate(`/book/confirm?${confirmParams.toString()}`);
     } catch (err: any) {
       console.error("Confirm booking error:", err);
+      resetTurnstile();
       if (err.message === "Room no longer available") {
         setSubmitError("Sorry, no rooms of this type are available for your selected dates. Please go back and pick another room type.");
         // Auto redirect to Step 1 after 5 seconds
