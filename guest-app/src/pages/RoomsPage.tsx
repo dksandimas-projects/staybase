@@ -1,5 +1,6 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import { fadeUp, staggerContainer } from "@spark-inn/shared";
 import { Footer } from "../components/Footer";
 import { Modal } from "../components/Modal";
@@ -22,10 +23,17 @@ export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes, loading } = useRoomTypes();
   const [selectedTypeValue, setSelectedTypeValue] = useState<string | null>(null);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
 
   const selectedTypeEntry = selectedTypeValue
     ? roomTypes.find((t) => t.value === selectedTypeValue) ?? null
     : null;
+  const selectedPhotos = selectedTypeEntry?.imageUrls.filter(Boolean) ?? [];
+  const selectedPhoto = selectedPhotos[selectedPhotoIndex] ?? null;
+
+  useEffect(() => {
+    setSelectedPhotoIndex(0);
+  }, [selectedTypeValue]);
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -108,11 +116,53 @@ export function RoomsPage() {
         {selectedTypeEntry ? (
           <div className="space-y-6">
             <div className="overflow-hidden rounded-card bg-section-bg">
-              <img
-                src={selectedTypeEntry.imageUrls[0]}
-                alt={selectedTypeEntry.label}
-                className="h-72 w-full object-cover"
-              />
+              {selectedPhoto ? (
+                <div className="relative">
+                  <img
+                    src={selectedPhoto}
+                    alt={`${selectedTypeEntry.label} photo ${selectedPhotoIndex + 1}`}
+                    className="h-72 w-full object-cover"
+                  />
+                  {selectedPhotos.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPhotoIndex((index) => (index - 1 + selectedPhotos.length) % selectedPhotos.length)}
+                        className="absolute left-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-gray-900 shadow-sm transition hover:bg-white"
+                        aria-label="Previous room photo"
+                      >
+                        <ChevronLeft size={20} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPhotoIndex((index) => (index + 1) % selectedPhotos.length)}
+                        className="absolute right-3 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-gray-900 shadow-sm transition hover:bg-white"
+                        aria-label="Next room photo"
+                      >
+                        <ChevronRight size={20} />
+                      </button>
+                      <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2">
+                        {selectedPhotos.map((photo, index) => (
+                          <button
+                            key={`${photo}-${index}`}
+                            type="button"
+                            onClick={() => setSelectedPhotoIndex(index)}
+                            className={`h-2.5 w-2.5 rounded-full transition ${index === selectedPhotoIndex ? "bg-white" : "bg-white/50"}`}
+                            aria-label={`Show room photo ${index + 1}`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div
+                  className="flex h-72 w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400"
+                  aria-label={`No photo for ${selectedTypeEntry.label}`}
+                >
+                  Photo coming soon
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">

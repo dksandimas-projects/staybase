@@ -192303,7 +192303,7 @@ async function handler(req, res) {
   const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (domain === "bookings" && action === "create" && req.method === "POST") {
-    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 5, 6e4)) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-create:${ip}`, 5, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many booking requests. Please try again in a minute." });
     }
     if (req.body && typeof req.body === "object" && req.body._hp) {
@@ -192417,7 +192417,7 @@ async function handler(req, res) {
     return await handleRoomAvailability(req, res);
   }
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
-    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 20, 6e4)) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
     }
     const verification = await verifyTurnstile(req.body?.turnstileToken, req);
@@ -192427,7 +192427,7 @@ async function handler(req, res) {
     return await handleValidateVoucher(req, res);
   }
   if (domain === "validate" && action === "corporate-code" && req.method === "POST") {
-    if (process.env.NODE_ENV !== "test" && isRateLimited(ip, 10, 6e4)) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-corporate-code:${ip}`, 10, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
     }
     const verification = await verifyTurnstile(req.body?.turnstileToken, req);

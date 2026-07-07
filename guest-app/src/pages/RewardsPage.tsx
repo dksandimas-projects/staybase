@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles } from "lucide-react";
-import { collection, query, getDocs, orderBy } from "firebase/firestore";
+import { collection, doc, query, getDoc, getDocs, orderBy } from "firebase/firestore";
 import { getDateKeyInTimezone } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
@@ -25,6 +25,24 @@ interface PointsTransaction {
   type: string;
 }
 
+interface RewardsConfig {
+  pointsEnabled: boolean;
+  earningMode: "per-booking" | "per-spend";
+  pointsPerBooking: number;
+  pointsPerHundred: number;
+  memberDiscountEnabled: boolean;
+  memberDiscountPct: number;
+}
+
+const DEFAULT_REWARDS_CONFIG: RewardsConfig = {
+  pointsEnabled: true,
+  earningMode: "per-spend",
+  pointsPerBooking: 50,
+  pointsPerHundred: 10,
+  memberDiscountEnabled: true,
+  memberDiscountPct: 10
+};
+
 function toDateStr(value: any): string {
   if (!value) return "";
   if (value instanceof Date) return value.toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" });
@@ -40,6 +58,7 @@ function toDateStr(value: any): string {
 export function RewardsPage() {
   const { user, memberProfile } = useGuestAuth();
   const [transactions, setTransactions] = useState<PointsTransaction[]>([]);
+  const [rewardsConfig, setRewardsConfig] = useState<RewardsConfig>(DEFAULT_REWARDS_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
   const [showEarlyCheckIn, setShowEarlyCheckIn] = useState(false);
   const [upcomingBookings, setUpcomingBookings] = useState<UpcomingBooking[]>([]);
@@ -52,16 +71,30 @@ export function RewardsPage() {
     if (!user?.uid) { setIsLoading(false); return; }
 
     let cancelled = false;
-    async function fetchHistory() {
+    async function fetchRewardsData() {
       try {
-        const q = query(
-          collection(db, "members", user!.uid, "pointsHistory"),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
+        const [configSnap, historySnap] = await Promise.all([
+          getDoc(doc(db, "settings", "rewardsConfig")),
+          getDocs(query(
+            collection(db, "members", user!.uid, "pointsHistory"),
+            orderBy("createdAt", "desc")
+          ))
+        ]);
         if (cancelled) return;
 
-        const records: PointsTransaction[] = snapshot.docs.map((docSnap) => {
+        if (configSnap.exists()) {
+          const data = configSnap.data();
+          setRewardsConfig({
+            pointsEnabled: data.pointsEnabled !== false,
+            earningMode: data.earningMode === "per-booking" ? "per-booking" : "per-spend",
+            pointsPerBooking: Number(data.pointsPerBooking ?? DEFAULT_REWARDS_CONFIG.pointsPerBooking),
+            pointsPerHundred: Number(data.pointsPerHundred ?? DEFAULT_REWARDS_CONFIG.pointsPerHundred),
+            memberDiscountEnabled: data.memberDiscountEnabled !== false,
+            memberDiscountPct: Number(data.memberDiscountPct ?? DEFAULT_REWARDS_CONFIG.memberDiscountPct)
+          });
+        }
+
+        const records: PointsTransaction[] = historySnap.docs.map((docSnap) => {
           const data = docSnap.data();
           return {
             id: docSnap.id,
@@ -78,7 +111,7 @@ export function RewardsPage() {
         if (!cancelled) setIsLoading(false);
       }
     }
-    fetchHistory();
+    fetchRewardsData();
     return () => { cancelled = true; };
   }, [user]);
 
@@ -158,31 +191,37 @@ export function RewardsPage() {
   };
 
   const pointsBalance = memberProfile?.rewardsPoints || 0;
+  const pointsEnabled = rewardsConfig.pointsEnabled !== false;
+  const memberDiscountEnabled = rewardsConfig.memberDiscountEnabled !== false && rewardsConfig.memberDiscountPct > 0;
+  const earningCopy = rewardsConfig.earningMode === "per-booking"
+    ? `Earn ${rewardsConfig.pointsPerBooking.toLocaleString()} points per completed stay.`
+    : `Earn ${rewardsConfig.pointsPerHundred.toLocaleString()} points per ${formatPrice(100)} spent.`;
 
   return (
     <AccountLayout activeTab="rewards" title="My Rewards" subtitle="Track your Spark Rewards points and member perks.">
       <div className="space-y-8">
-        {/* Points Balance Card */}
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 text-center">
-          <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/10 mb-4">
-            <Award size={28} className="text-primary" />
+        {pointsEnabled && (
+          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 text-center">
+            <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/10 mb-4">
+              <Award size={28} className="text-primary" />
+            </div>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Your Points Balance</p>
+            <p className="text-5xl font-heading text-gray-950 mt-2">
+              {pointsBalance.toLocaleString()}
+            </p>
+            <p className="text-xs text-gray-500 mt-2">Standard Member</p>
           </div>
-          <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Your Points Balance</p>
-          <p className="text-5xl font-heading text-gray-950 mt-2">
-            {pointsBalance.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-500 mt-2">Standard Member</p>
-        </div>
+        )}
 
         {/* Perks */}
         <div className="grid gap-4 sm:grid-cols-2">
-          {memberProfile?.memberNumber && (
+          {memberDiscountEnabled && (
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
               <div className="flex items-center gap-2 mb-2">
                 <Star size={16} className="text-primary" />
                 <span className="text-xs font-bold text-gray-900">Member Rate</span>
               </div>
-              <p className="text-xs text-gray-500">You get exclusive member pricing on direct bookings.</p>
+              <p className="text-xs text-gray-500">You get {rewardsConfig.memberDiscountPct}% off every booking as a member.</p>
             </div>
           )}
 
@@ -286,7 +325,7 @@ export function RewardsPage() {
           </div>
         )}
 
-        {/* Points History */}
+        {pointsEnabled && (
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Points History</h2>
@@ -330,18 +369,20 @@ export function RewardsPage() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Info */}
+        {pointsEnabled && (
         <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
           <Info size={16} className="text-primary shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-bold text-primary-dark">How Points Work</p>
             <p className="text-[10px] text-gray-600 mt-1 leading-relaxed">
-              Points are earned when you check out of a completed stay. The earning rate is configured by the hotel.
+              {earningCopy} Points are earned when you check out of a completed stay.
               Points can be redeemed by the front desk against future bookings. Contact the front desk for redemption requests.
             </p>
           </div>
         </div>
+        )}
       </div>
     </AccountLayout>
   );
