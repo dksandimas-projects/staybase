@@ -4557,7 +4557,6 @@ export function SettingsPage() {
           </form>
         ) : null}
       </Modal>
-    </Modal>
     </div>
   );
 }
