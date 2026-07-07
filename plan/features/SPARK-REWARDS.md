@@ -40,7 +40,7 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### Data & Logic Checklist
 - [ ] Firebase Auth: `signInWithGoogle()` (Google OAuth provider) + `signInWithEmailAndPassword()` + `createUserWithEmailAndPassword()`
-- [ ] On first Google Sign-In: after Firebase Auth succeeds, POST `/api/members/register` with the guest Firebase ID token if `members/{uid}` does not exist or is not enrolled
+- [ ] Google Sign-In is authentication only. Enrollment requires an explicit join action with Privacy Policy / Terms consent: `/signup` checks the consent box before calling `registerCurrentMember()`, and signed-in non-members can join from Rewards/Profile surfaces.
 - [ ] On email/password signup: create Firebase Auth user, then POST `/api/members/register` with the guest Firebase ID token to create/enroll `members/{uid}`
 - [ ] `onAuthStateChanged` listener in guest auth context — unsubscribe on cleanup
 - [ ] Guest auth context separate from admin auth context — different Firebase Auth flows, same Firebase project
@@ -52,8 +52,8 @@ Spark Rewards is spark inn's guest loyalty program. Guests can register as membe
 
 ### UI Checklist
 - [ ] Post-booking prompt (Step 4 — Confirmation page) — "Join Spark Rewards and earn points on this stay!" CTA — shown only to non-members / logged-out guests
-- [ ] One-click join if already signed in — POST `/api/members/register`, no extra form
-- [ ] If not signed in — show Google Sign-In + quick email signup inline on confirmation page
+- [ ] One-click join if already signed in — explicit action calls `registerCurrentMember()` / POST `/api/members/register` and surfaces failures inline
+- [ ] If not signed in — show Google Sign-In + quick email signup inline on confirmation page; Google auth must not auto-enroll until the guest chooses the join action
 - [ ] Standalone signup at `/rewards` — marketing page with program overview + sign-up form
 - [ ] Homepage CTA — "Join Spark Rewards" link in navbar and/or footer
 
@@ -123,10 +123,10 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 
 ### Data & Logic Checklist
 - [ ] Profile: `getDoc` / `updateDoc` on `members/{uid}`
-- [ ] Stays: query `bookings` where `memberId == uid` OR `guestEmail == member.email` — ordered by `checkIn` desc
+- [ ] Stays: call `GET /api/members/stays` with the guest Firebase ID token; the API matches `memberId == uid` OR `guestEmail == token.email`, dedupes, and returns a guest-safe booking subset only
 - [ ] Points history: `onSnapshot` on `members/{uid}/pointsHistory` subcollection
 - [ ] Points balance + rewards config: fetch `members/{uid}.rewardsPoints` + `settings/rewardsConfig` on load
-- [ ] Early check-in request: `addDoc` to `intercoms/{roomId}/messages` tagged `isEarlyCheckInRequest: true` OR POST to `/api/email/early-checkin-request` if no active room — always shown to members regardless of rewards config
+- [ ] Early check-in request: POST to `/api/email/early-checkin-request` with the guest Firebase ID token and selected `bookingId`; the API verifies `booking.memberId == uid` OR `booking.guestEmail == token.email` before emailing staff — always shown to members regardless of rewards config
 - [ ] Member discount: if `settings/rewardsConfig.memberDiscountEnabled`, show discount badge in booking Step 1 for logged-in members (auto-applied) — if disabled, no discount shown
 - [ ] Points awarded on booking checkout: if `settings/rewardsConfig.pointsEnabled`, compute points earned from booking `totalPrice` or flat per-booking value per `rewardsConfig` — `updateDoc` on `members/{uid}.rewardsPoints` + `addDoc` to pointsHistory when booking status changes to `checked-out`; triggered server-side via API route
 - [ ] Points redemption: POST `/api/members/redeem-points`; API transaction validates member balance and redemption rate, updates booking totals, deducts points, and writes points history
@@ -177,11 +177,11 @@ These are documented here for awareness. Define before starting Phase 2:
 
 **Account linking — email conflict between Google and email/password:**
 - [ ] Guest signs up with email/password first, then later tries Google Sign-In with the same email → Firebase throws `auth/account-exists-with-different-credential`
-- [ ] On this error: show message "An account with this email already exists. Sign in with your password first, then you can link Google to your account."
-- [ ] After successful email/password sign-in: show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider
-- [ ] Once linked: guest can sign in with either Google or email/password going forward
+- [ ] Phase 1 behavior: show a provider-conflict message that tells the guest to use the existing sign-in method first; full self-service `linkWithPopup(googleProvider)` is deferred.
+- [ ] Phase 2 behavior: after successful email/password sign-in, show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider
+- [ ] Once linked in Phase 2: guest can sign in with either Google or email/password going forward
 - [ ] Guest signs up with Google first, then tries email/password sign-in with the same email → Firebase throws `auth/account-exists-with-different-credential`
-- [ ] On this error: show message "This email is linked to a Google account. Sign in with Google instead." with a Google Sign-In button
+- [ ] Phase 1 behavior: show a provider-conflict message that tells the guest to sign in with the existing method first
 - [ ] All booking linkage by email applies regardless of auth provider — the email is the identity anchor, not the provider
 
 ## Manual QA
@@ -191,8 +191,8 @@ These are documented here for awareness. Define before starting Phase 2:
 - [ ] Post-booking registration prompt appears on Step 4 for non-members
 - [ ] Past bookings linked to member account on registration (by email) — My Stays shows previous anonymous bookings immediately after sign-up
 - [ ] My Stays shows correct booking history
-- [ ] Email/password account + Google Sign-In same email → account linking prompt shown, both providers work after linking
-- [ ] Google account + email/password same email → directed to Google Sign-In with friendly message
+- [ ] Email/password account + Google Sign-In same email → provider-conflict message shown; self-service linking is deferred to Phase 2
+- [ ] Google account + email/password same email → provider-conflict message shown; self-service linking is deferred to Phase 2
 - [ ] My Rewards shows points balance (0 for new members)
 - [ ] Early check-in request reaches front desk
 - [ ] Admin member list shows all members with correct data

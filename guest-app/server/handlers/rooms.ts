@@ -11,7 +11,7 @@ import { adminDb } from "../lib/firebase-admin";
 // Bookings with these statuses occupy the room and must be excluded from
 // availability. `cancelled` is intentionally omitted — cancelled bookings
 // release the room.
-const ACTIVE_STATUSES = ["pending", "payment-uploaded", "confirmed", "checked-in"];
+const ACTIVE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 
 interface AvailabilityQuery {
   checkIn?: string;

@@ -50,7 +50,7 @@ The public homepage at `/`. First impression for all guests — must emotionally
 - [ ] Fetch `settings/websiteContent` on load for hero content, amenities, featuredTypeValues, services section, and Spark Rewards section
 - [ ] Resolve `featuredTypeValues` to physical rooms — for each type value, find the first *active* room of that type; skip types with no active rooms; cap the resolved list at `MAX_FEATURED_TYPES = 3` from `shared/constants`
 - [ ] Availability checker submits to `/rooms` with date + guest count as query params
-- [ ] Featured rooms show real-time availability badge based on current bookings
+- [ ] Featured room cards do not show per-room operational status badges. Guests choose dates in the booking flow, where real availability is computed server-side; homepage cards are type-driven marketing cards.
 - [ ] Handle case where `featuredTypeValues` is empty — fall back to the first `MAX_FEATURED_TYPES` *distinct* types that have at least one active room (NOT raw room IDs — that was the bug the type-driven model fixes)
 - [ ] Spark Rewards section: check auth state — show "Join" CTA if not logged in or not a member; show "Welcome back" if logged-in member
 - [ ] Hero photo falls back to `data/homepage.ts → homepageHeroImage` when `homepage.heroPhotoUrl` is empty — see `plan/features/SETTINGS.md §Branding` for the upload UI

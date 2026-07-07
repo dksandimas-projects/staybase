@@ -1,17 +1,18 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { Mail, Phone, MapPin, Send, MessageSquare, CheckCircle2, AlertCircle, Share2, Facebook, Instagram } from "lucide-react";
 import config from "@config";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { cn } from "../utils/cn";
 import { fadeUp } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { useTurnstileToken } from "../hooks/useTurnstileToken";
 
 export function ContactPage() {
   const shouldReduceMotion = useReducedMotion();
+  const [searchParams] = useSearchParams();
   // Per Phase 11.8 PR 3: address / phone / email / socials are
   // admin-editable from Settings → Hotel Info. The hook value
   // wins when set; the deploy-time `hotel.config.ts` value is
@@ -23,6 +24,7 @@ export function ContactPage() {
   const facebook = contact?.facebookUrl || config.facebookUrl;
   const instagram = contact?.instagramUrl || config.instagramUrl;
   const mapQuery = encodeURIComponent(addressString);
+  const showDisabledMemberMessage = searchParams.get("member") === "disabled";
 
   // Contact Form states
   const [name, setName] = useState("");
@@ -32,9 +34,15 @@ export function ContactPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [honeypot, setHoneypot] = useState("");
+  const turnstile = useTurnstileToken();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!turnstile.token) {
+      setSubmitError("Please complete the verification check, then send your message again.");
+      return;
+    }
     setIsSubmitting(true);
     setShowSuccess(false);
     setSubmitError("");
@@ -47,7 +55,9 @@ export function ContactPage() {
           name: name.trim(),
           email: email.trim(),
           subject: subject.trim(),
-          message: message.trim()
+          message: message.trim(),
+          turnstileToken: turnstile.token,
+          _hp: honeypot
         })
       });
       const data = await res.json().catch(() => null);
@@ -59,10 +69,12 @@ export function ContactPage() {
       setEmail("");
       setSubject("");
       setMessage("");
+      setHoneypot("");
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (error: any) {
       setSubmitError(error?.message || "We could not send your message. Please try again in a moment.");
     } finally {
+      turnstile.reset();
       setIsSubmitting(false);
     }
   };
@@ -90,6 +102,12 @@ export function ContactPage() {
             <p className="mx-auto max-w-lg text-sm text-gray-650">
               Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist.
             </p>
+            {showDisabledMemberMessage && (
+              <div className="mx-auto mt-4 flex max-w-lg items-start gap-2 rounded-lg border border-primary/20 bg-white p-3 text-left text-xs text-gray-700">
+                <AlertCircle size={14} className="mt-0.5 shrink-0 text-primary" />
+                <span>Your account has been disabled. Please contact us so our team can help.</span>
+              </div>
+            )}
           </div>
         </section>
 
@@ -218,6 +236,21 @@ export function ContactPage() {
                   )}
 
                   <form onSubmit={handleSubmit} className="space-y-5">
+                    <label
+                      className="absolute h-px w-px overflow-hidden opacity-0 pointer-events-none"
+                      aria-hidden="true"
+                      tabIndex={-1}
+                    >
+                      Website
+                      <input
+                        type="text"
+                        name="_hp"
+                        value={honeypot}
+                        onChange={(e) => setHoneypot(e.target.value)}
+                        tabIndex={-1}
+                        autoComplete="off"
+                      />
+                    </label>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <label className="grid gap-2 text-xs font-semibold text-gray-700">
                         Full Name
@@ -268,10 +301,14 @@ export function ContactPage() {
                       />
                     </label>
 
+                    <div className="pt-1">
+                      <div ref={turnstile.containerRef} />
+                    </div>
+
                     <div className="pt-2">
                       <PrimaryButton 
                         type="submit" 
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || !turnstile.token}
                         className="w-full sm:w-auto min-w-[150px]"
                       >
                         {isSubmitting ? "Sending message..." : "Send Message"}
@@ -290,7 +327,7 @@ export function ContactPage() {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
             <div className="text-center">
               <h2 className="font-heading text-3xl text-gray-950 lowercase">find our resort</h2>
-              <p className="text-xs text-gray-500 mt-2">Located strategically in Tagbilaran City, Bohol</p>
+              <p className="text-xs text-gray-500 mt-2">Located strategically in {config.address.city}, {config.address.region}</p>
             </div>
 
             <motion.div

@@ -1,9 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Calendar, Sparkles, ArrowRight, HelpCircle, Loader2 } from "lucide-react";
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
+import { Calendar, Sparkles, ArrowRight, HelpCircle, Loader2, AlertCircle } from "lucide-react";
 import config from "@config";
-import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatPrice } from "../utils/format";
@@ -33,47 +31,44 @@ function toDateStr(value: any): string {
   if (typeof value === "object" && typeof value.toDate === "function") {
     return value.toDate().toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" });
   }
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00`).toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" });
+  }
   return String(value);
 }
 
 export function StaysPage() {
-  const { user, memberProfile } = useGuestAuth();
+  const { user } = useGuestAuth();
   const [stays, setStays] = useState<StayRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    if (!user?.email) { setIsLoading(false); return; }
+    if (!user) { setIsLoading(false); return; }
 
     let cancelled = false;
     async function fetchStays() {
       try {
-        const q = query(
-          collection(db, "bookings"),
-          where("guestEmail", "==", user!.email!.toLowerCase()),
-          orderBy("createdAt", "desc")
-        );
-        const snapshot = await getDocs(q);
-        if (cancelled) return;
-
-        const records: StayRecord[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            bookingRef: data.bookingRef || "",
-            lookupToken: data.lookupToken || "",
-            roomNumber: data.roomNumber || "",
-            roomType: data.roomType || "",
-            checkIn: toDateStr(data.checkIn),
-            checkOut: toDateStr(data.checkOut),
-            numNights: data.numNights || 0,
-            totalPrice: data.totalPrice || 0,
-            status: data.status || "",
-            hasBreakfast: data.hasBreakfast || false
-          };
+        setLoadError("");
+        const idToken = await user!.getIdToken();
+        const response = await fetch("/api/members/stays", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${idToken}` }
         });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success) {
+          throw new Error(result?.error || "We could not load your stays right now.");
+        }
+        if (cancelled) return;
+        const records: StayRecord[] = (result.data?.stays || []).map((stay: StayRecord) => ({
+          ...stay,
+          checkIn: toDateStr(stay.checkIn),
+          checkOut: toDateStr(stay.checkOut)
+        }));
         setStays(records);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to fetch stays:", err);
+        if (!cancelled) setLoadError(err?.message || "We could not load your stays right now.");
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -82,16 +77,26 @@ export function StaysPage() {
     return () => { cancelled = true; };
   }, [user]);
 
-  const upcomingStays = stays.filter((s) => s.status === "confirmed" || s.status === "checked-in");
+  const upcomingStays = stays.filter((s) => ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"].includes(s.status));
   const pastStays = stays.filter((s) => s.status === "checked-out");
   const cancelledStays = stays.filter((s) => s.status === "cancelled");
 
   return (
-    <AccountLayout activeTab="stays" title="My Stays" subtitle="Your booking history at spark inn.">
+    <AccountLayout activeTab="stays" title="My Stays" subtitle={`Your booking history at ${config.brandName}.`}>
       {isLoading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">
           <Loader2 size={24} className="animate-spin mr-2" />
           <span className="text-sm">Loading your stays...</span>
+        </div>
+      ) : loadError ? (
+        <div className="rounded-card bg-white p-8 shadow-sm ring-1 ring-red-100">
+          <div className="flex items-start gap-3 text-red-700">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-bold">Unable to load your stays.</p>
+              <p className="mt-1 text-xs text-red-600">{loadError} Please refresh or contact the front desk if this continues.</p>
+            </div>
+          </div>
         </div>
       ) : stays.length === 0 ? (
         <div className="rounded-card bg-white p-12 shadow-sm ring-1 ring-gray-200 text-center">

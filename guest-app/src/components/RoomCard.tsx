@@ -25,6 +25,7 @@ interface RoomCardProps {
   typeAmenities?: string[];
   onDetails?: () => void;
   bookingQuery?: string;
+  showStatusBadge?: boolean;
 }
 
 export function RoomCard({
@@ -36,7 +37,8 @@ export function RoomCard({
   typeDescription,
   typeAmenities,
   onDetails,
-  bookingQuery = ""
+  bookingQuery = "",
+  showStatusBadge = true
 }: RoomCardProps) {
   const shouldReduceMotion = useReducedMotion();
   const fallback = DEFAULT_ROOM_TYPES.find((type) => type.value === room.type);
@@ -79,7 +81,9 @@ export function RoomCard({
             <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">{typeLabel}</span>
             <h3 className="mt-3 text-lg font-semibold text-gray-950">{room.name}</h3>
           </div>
-          <StatusBadge label={room.status === "available" ? "Available" : "Blocked"} status={room.status} />
+          {showStatusBadge ? (
+            <StatusBadge label={room.status === "available" ? "Available" : "Unavailable"} status={room.status} />
+          ) : null}
         </div>
         <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{description}</p>
         <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">

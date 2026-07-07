@@ -250,6 +250,7 @@ async function sendEmail(to: string, subject: string, html: string) {
 async function findBooking(req: VercelRequest, options: { requireGuestMatch: boolean }) {
   const { bookingId, bookingRef, guestEmail } = req.body || {};
   let snapshot: any = null;
+  const user = (req as any).user || {};
 
   if (bookingId) {
     const doc = await adminDb.collection("bookings").doc(String(bookingId)).get();
@@ -257,7 +258,7 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
     snapshot = doc;
   } else if (bookingRef) {
     let query: any = adminDb.collection("bookings").where("bookingRef", "==", String(bookingRef).trim()).limit(1);
-    if (options.requireGuestMatch) {
+    if (options.requireGuestMatch && !user.uid) {
       if (!guestEmail) {
         throw new Error("Booking reference and guest email are required.");
       }
@@ -275,7 +276,15 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
   }
 
   const booking = { id: snapshot.id, ...snapshot.data() };
-  if (options.requireGuestMatch && bookingId) {
+  if (options.requireGuestMatch && user.uid) {
+    const emailMatches =
+      user.email &&
+      String((booking as any).guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
+    const memberMatches = String((booking as any).memberId || "") === String(user.uid);
+    if (!emailMatches && !memberMatches) {
+      return null;
+    }
+  } else if (options.requireGuestMatch && bookingId) {
     if (!guestEmail) {
       throw new Error("Guest email is required.");
     }

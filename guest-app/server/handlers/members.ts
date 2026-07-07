@@ -30,6 +30,16 @@ const eraseAccountSchema = z.object({
   confirmation: z.literal("erase-my-account")
 }).strict();
 
+const STAY_STATUSES = [
+  "pending",
+  "payment-uploaded",
+  "payment-confirmed",
+  "confirmed",
+  "checked-in",
+  "checked-out",
+  "cancelled"
+];
+
 function getAuthUser(req: any) {
   return (req as any).user || {};
 }
@@ -41,6 +51,7 @@ function getStaff(req: any) {
 async function linkBookingsByEmail(email: string, uid: string, explicitBookingId?: string) {
   let linkedCount = 0;
   const batch = adminDb.batch();
+  const linkedPaths = new Set<string>();
 
   const bookingsSnapshot = await adminDb
     .collection("bookings")
@@ -53,13 +64,22 @@ async function linkBookingsByEmail(email: string, uid: string, explicitBookingId
       return;
     }
     batch.update(bookingDoc.ref, { memberId: uid, updatedAt: new Date() });
+    linkedPaths.add(bookingDoc.ref.path);
     linkedCount += 1;
   });
 
   if (explicitBookingId) {
     const bookingRef = adminDb.collection("bookings").doc(explicitBookingId);
-    batch.update(bookingRef, { memberId: uid, updatedAt: new Date() });
-    linkedCount += 1;
+    const bookingDoc = await bookingRef.get();
+    if (bookingDoc.exists && !linkedPaths.has(bookingRef.path)) {
+      const data = bookingDoc.data() || {};
+      const bookingEmail = String(data.guestEmail || "").trim().toLowerCase();
+      const alreadyLinkedToCaller = data.memberId === uid;
+      if ((bookingEmail && bookingEmail === email) || alreadyLinkedToCaller) {
+        batch.update(bookingRef, { memberId: uid, updatedAt: new Date() });
+        linkedCount += 1;
+      }
+    }
   }
 
   if (linkedCount > 0) {
@@ -69,6 +89,97 @@ async function linkBookingsByEmail(email: string, uid: string, explicitBookingId
   return linkedCount;
 }
 
+function toMillis(value: any): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value?.toDate === "function") return value.toDate().getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toIsoDate(value: any): string {
+  if (!value) return "";
+  const date = value instanceof Date
+    ? value
+    : typeof value?.toDate === "function"
+      ? value.toDate()
+      : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function projectStay(bookingDoc: any) {
+  const data = bookingDoc.data() || {};
+  return {
+    id: bookingDoc.id,
+    bookingRef: data.bookingRef || "",
+    lookupToken: data.lookupToken || "",
+    roomNumber: data.roomNumber || "",
+    roomType: data.roomType || "",
+    roomName: data.roomName || data.roomType || "",
+    checkIn: toIsoDate(data.checkIn),
+    checkOut: toIsoDate(data.checkOut),
+    numNights: Number(data.numNights || 0),
+    totalPrice: Number(data.totalPrice || 0),
+    status: data.status || "",
+    hasBreakfast: Boolean(data.hasBreakfast)
+  };
+}
+
+function staySortRank(status: string): number {
+  if (["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"].includes(status)) return 0;
+  if (status === "checked-out") return 1;
+  if (status === "cancelled") return 2;
+  return 3;
+}
+
+export async function handleListMemberStays(req: any, res: any) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const authUser = getAuthUser(req);
+  if (!authUser.uid || !authUser.email) {
+    return res.status(401).json({ success: false, error: "Sign in to view your stays." });
+  }
+
+  try {
+    const uid = String(authUser.uid);
+    const email = String(authUser.email).trim().toLowerCase();
+    const byIdSnap = await adminDb.collection("bookings").where("memberId", "==", uid).get();
+    const byEmailSnap = await adminDb.collection("bookings").where("guestEmail", "==", email).get();
+    const deduped = new Map<string, any>();
+
+    [...byIdSnap.docs, ...byEmailSnap.docs].forEach((bookingDoc: any) => {
+      const data = bookingDoc.data() || {};
+      const belongsToMember = data.memberId === uid || String(data.guestEmail || "").trim().toLowerCase() === email;
+      if (belongsToMember && STAY_STATUSES.includes(data.status || "")) {
+        deduped.set(bookingDoc.id, bookingDoc);
+      }
+    });
+
+    const stays = Array.from(deduped.values())
+      .sort((a: any, b: any) => {
+        const aData = a.data() || {};
+        const bData = b.data() || {};
+        const rankDelta = staySortRank(aData.status || "") - staySortRank(bData.status || "");
+        if (rankDelta !== 0) return rankDelta;
+        const aTime = toMillis(aData.checkIn);
+        const bTime = toMillis(bData.checkIn);
+        return staySortRank(aData.status || "") === 0 ? aTime - bTime : bTime - aTime;
+      })
+      .map(projectStay);
+
+    return res.status(200).json({ success: true, data: { stays } });
+  } catch (error) {
+    console.error("Member stays lookup failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "We could not load your stays right now. Please try again."
+    });
+  }
+}
+
 export async function handleRegisterMember(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -76,7 +187,7 @@ export async function handleRegisterMember(req: any, res: any) {
 
   const authUser = getAuthUser(req);
   if (!authUser.uid || !authUser.email) {
-    return res.status(401).json({ success: false, error: "Sign in before joining Spark Rewards." });
+    return res.status(401).json({ success: false, error: `Sign in before joining ${config.rewardsName}.` });
   }
 
   const parsed = registerMemberSchema.safeParse(req.body || {});
@@ -153,7 +264,7 @@ export async function handleRegisterMember(req: any, res: any) {
     console.error("Member registration failed:", error);
     return res.status(500).json({
       success: false,
-      error: "We could not join Spark Rewards right now. Please try again."
+      error: `We could not join ${config.rewardsName} right now. Please try again.`
     });
   }
 }

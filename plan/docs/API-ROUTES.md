@@ -47,7 +47,7 @@ Guest member routes require a valid Firebase ID token for the signed-in guest. T
 | `/api/email/checkin-reminder` | 1 day before check-in | Guest |
 | `/api/email/booking-cancelled` | Booking cancelled | Guest |
 | `/api/email/discount-rejected` | Staff rejects Senior/PWD discount ID | Guest |
-| `/api/email/corporate-inquiry` | New corporate inquiry submitted | Staff (admin email) |
+| `/api/email/corporate-inquiry` | Staff-only manual resend path for a corporate inquiry notification. Normal public submissions use `/api/corporate/inquiry`, which sends the staff email server-side after Turnstile + honeypot validation. | Staff (admin email) |
 | `/api/email/early-checkin-request` | Spark Rewards member requests early check-in for an upcoming booking (from My Rewards page or Intercom) | Staff (admin email) |
 | `/api/email/voucher-issued` | Staff re-send path for the voucher-issued template. The normal addVoucher flow fires the email inline from the AdminContext; this endpoint exists for the "Email to guest" action on an existing voucher. Body: `{ voucher: { code, discountType, discountValue, expiresAt, applicableRoomTypes, guestEmail } }`. Recipient (`voucher.guestEmail`) is server-controlled. | Staff |
 | `/api/email/store-order-placed` | Triggered by `handleCreateStoreOrder` after the transaction commits; not exposed as a public endpoint. Recipient is looked up server-side from `bookings/{bookingId}.guestEmail`. | Guest (server-resolved) |
@@ -71,9 +71,10 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` for the confirmation page. The corporate "Continue without code" path sends `corporateFlatRate: true` — an intent flag only; the server resolves the flat rate from `roomTypes[].corporateRate` (never a client-supplied number) and a validated `corporateCode` always wins (per BI-04, booking-intercom audit 2026-07-06). |
 | `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
-| `/api/bookings/lookup` | POST | None (owner by ref+email) | Look up a single booking by `bookingRef` + `guestEmail` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}`. Response payload intentionally includes `guestName`, `guestEmail`, `guestPhone`, and `roomType`/`roomNumber` so the self-service page can display the booking back to the guest. These fields are the data-subject's own PII (per RA 10173 right to be informed + the right to access), and the endpoint enforces ref+email ownership before returning them. |
+| `/api/bookings/lookup` | POST | None (owner by ref+email or ref+lookup token) | Look up a single booking by `bookingRef` plus either `guestEmail` or magic-link `lookupToken` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}`. Response payload intentionally includes `guestName`, `guestEmail`, `guestPhone`, and `roomType`/`roomNumber` so the self-service page can display the booking back to the guest. These fields are the data-subject's own PII (per RA 10173 right to be informed + the right to access), and the endpoint enforces ref+email or ref+token ownership before returning them. |
 | `/api/bookings/add-payment` | POST | Staff | Append onsite payment audit record to `bookings/{bookingId}/payments`; fires `payment-confirmed` email when running total reaches `totalPrice` |
 | `/api/bookings/confirm` | POST | Staff | Flip `pending`/`payment-uploaded` → `confirmed`; fires `booking-confirmed` email |
+| `/api/bookings/checkin` | POST | Staff | Flip `confirmed`/`payment-confirmed` → `checked-in` inside a transaction; validates the assigned room is not blocked or occupied by another checked-in booking, then atomically marks the room `occupied` |
 | `/api/bookings/checkout` | POST | Staff | Flip `checked-in` → `checked-out`; atomically frees the room (`status: "available"`, `housekeepingStatus: "dirty"`) and, if the booking is linked to a Spark Rewards member (or the guest email matches an existing member), awards points per `settings/rewardsConfig.earningMode` (`per-spend` or `per-booking`) and writes a `members/{uid}/pointsHistory` entry. Falls back gracefully (no points) if points are disabled. |
 | `/api/bookings/reject-discount` | POST | Staff | Reject Senior/PWD discount ID — restores `totalPrice`, sets rejection fields, triggers discount-rejected email |
 
@@ -157,16 +158,31 @@ Staff accounts must be created and disabled through these Admin SDK routes. Neve
 
 ---
 
+### Janitor Routes (`/api/janitor/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/janitor/storage-sweep` | GET/POST | Cron secret | Delete orphaned Storage upload folders for preallocated booking IDs whose booking document was never created |
+| `/api/janitor/stats` | GET | Cron secret | Return recent storage-sweep run history for operator inspection |
+| `/api/janitor/h2-backfill` | GET/POST | Cron secret | Backfill lookup tokens onto legacy booking documents in resumable batches |
+| `/api/janitor/h2-status` | GET | Cron secret | Report lookup-token backfill progress |
+
+Janitor routes are operational endpoints. They must not be called from guest-facing UI and must be protected with `CRON_SECRET`.
+
+---
+
 ### Member Routes (`/api/members/*`)
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/members/register` | POST | Signed-in guest | Enroll the authenticated guest in Spark Rewards, generate the sequential `memberNumber`, create or update `members/{uid}`, and link past bookings by email |
+| `/api/members/stays` | GET | Signed-in guest | Return the calling member's guest-safe booking history by `memberId == uid` or `guestEmail == token.email`. Response includes display fields only (`bookingRef`, `lookupToken`, room, dates, nights, total, status, breakfast flag) and never returns staff-only fields such as `paymentProofUrl`, `notes`, or `remarks`. |
 | `/api/members/redeem-points` | POST | Staff | Redeem member points against a booking; transactionally deducts member balance, lowers `booking.totalPrice`, stores redemption fields, and appends a `pointsHistory` entry |
 | `/api/members/undo-redemption` | POST | Admin | Undo a points redemption while the booking is still `confirmed`; transactionally restores booking total, returns member points, clears redemption fields, and logs the reversal |
+| `/api/members/set-active` | POST | Admin | Suspend or reactivate a Spark Rewards member account; updates the member document and Firebase Auth disabled state together |
 | `/api/members/delete-account` | POST | Signed-in guest | Erase the calling member's account per RA 10173 right to erasure: anonymize every linked booking (write a no-PII audit record to `bookings/audit/records/{id}` first, then scrub `guestName` / `guestEmail` / `guestPhone` / `memberId`), recursively delete the `pointsHistory` subcollection, delete `members/{uid}`, and delete the Firebase Auth user. Body must include `{ confirmation: "erase-my-account" }`. |
 
-Member registration must be server-side because `memberNumber` is sequential and cannot be trusted to client code. Guest apps may update editable profile fields after enrollment where Firestore rules allow it, but they must not create member documents or assign `memberNumber` directly.
+Member registration must be server-side because `memberNumber` is sequential and cannot be trusted to client code. Guest apps may update editable profile fields after enrollment where Firestore rules allow it, but they must not create member documents or assign `memberNumber` directly. Member booking history must go through `/api/members/stays`; guest clients must not read the staff-only `bookings` collection directly.
 Points redemption routes are server-side because they change booking money fields and member balances together. Never update those documents independently from client code.
 Account erasure is server-side because the call must transactionally audit + anonymize linked bookings, recursively wipe subcollections, and remove the Auth user. The client must never delete the member document or `pointsHistory` entries directly — the handler is the only safe path.
 The audit collection `bookings/audit/records/{id}` is staff-read-only via Firestore rules (`allow read: if isStaff(); allow write: if false;`); only Admin SDK writes from the API route are permitted.

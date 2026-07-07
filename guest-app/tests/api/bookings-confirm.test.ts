@@ -300,7 +300,7 @@ describe("walk-in booking creation booking-confirmed trigger", () => {
   });
 
   const baseWalkinBody = {
-    bookingId: "walkin_1",
+    bookingId: "walkin00001",
     roomId: "room_101",
     checkIn: "2026-06-16",
     checkOut: "2026-06-18",

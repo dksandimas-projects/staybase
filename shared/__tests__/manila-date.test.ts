@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getManilaDateInfo } from "../utils/bookingDates";
+import { getDateKeyInTimezone, getManilaDateInfo } from "../utils/bookingDates";
 
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was previously duplicated in
@@ -34,6 +34,14 @@ describe("getManilaDateInfo (BF-42 shared helper)", () => {
     // Strip the dashes from `todayStr`; it should equal
     // `todayCompact`.
     expect(info.todayStr.replace(/-/g, "")).toBe(info.todayCompact);
+  });
+
+  test("getDateKeyInTimezone returns today/tomorrow keys in the configured timezone", () => {
+    const today = getDateKeyInTimezone("Asia/Manila", 0);
+    const tomorrow = getDateKeyInTimezone("Asia/Manila", 1);
+    expect(today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(tomorrow).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(tomorrow > today).toBe(true);
   });
 
   test("manilaDate is a Date anchored at 00:00 local", () => {

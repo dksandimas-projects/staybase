@@ -27,8 +27,8 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 - [ ] **Add Room** button — full-width orange on mobile (below the subtitle), inline right-aligned on tablet+. Opens a Modal with the create form.
 - [ ] Room list — card grid of all rooms with name, type, status badge, housekeeping badge, active/inactive toggle, and an "active bookings" count
 - [ ] Edit room — click/tap opens edit drawer
-- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), initial status, initial housekeeping status, internal remarks, visible-on-guest-site checkbox. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type. Per W3.7, `bedDefinition`, `description`, and `amenities` also live on the room type. All of these are managed in **Settings → Room Types** and inherited automatically. A short pointer in the create modal points staff to that section. Photos are added later via the type's Photos modal.
-- [ ] Room edit form fields: name, type (dropdown), status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). Bed description, full description, amenities, `maxCapacity`, and the rate matrix all live on the room type and are edited in **Settings → Room Types** (W3.6 + W3.7). The drawer shows the inherited bed description and amenities in a read-only "Bed Setup (inherited from type)" block, sourced from the joined `roomTypes` entry.
+- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), initial status, initial housekeeping status, internal remarks, visible-on-guest-site checkbox. Public room fields write to `rooms/{roomId}`; internal remarks write to staff-only `roomPrivate/{roomId}`. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type. Per W3.7, `bedDefinition`, `description`, and `amenities` also live on the room type. All of these are managed in **Settings → Room Types** and inherited automatically. A short pointer in the create modal points staff to that section. Photos are added later via the type's Photos modal.
+- [ ] Room edit form fields: name, type (dropdown), status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). Public fields update `rooms/{roomId}`; staff-only `remarks` and `blockReason` update `roomPrivate/{roomId}`. Bed description, full description, amenities, `maxCapacity`, and the rate matrix all live on the room type and are edited in **Settings → Room Types** (W3.6 + W3.7). The drawer shows the inherited bed description and amenities in a read-only "Bed Setup (inherited from type)" block, sourced from the joined `roomTypes` entry.
 - [ ] Block reason selector — shown only when status = Blocked: Maintenance / Hold / Other
 - [ ] Active/inactive toggle — inactive = hidden from guest site
 - [ ] Save button — explicit save, not auto-save
@@ -41,20 +41,21 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 
 - [ ] `onSnapshot` on `rooms` collection — all rooms real-time
 - [ ] **Create room**: `addDoc(collection(db, "rooms"), { ... })` with `serverTimestamp()` for `createdAt`/`updatedAt`. Reject if `roomNumber` already exists (case-insensitive trim compare). Form validation via `CreateRoomSchema` (Zod) in `@spark-inn/shared/schemas/room`.
-- [ ] Room edit: `updateDoc` on `rooms/{roomId}` — update all edited fields + `updatedAt`
+- [ ] Room edit: `updateDoc` on `rooms/{roomId}` for public fields + `updatedAt`; `setDoc(..., { merge: true })` on `roomPrivate/{roomId}` for staff-only `remarks` / `blockReason`
 - [ ] Photo upload: `uploadBytes` to Firebase Storage at `rooms/{roomId}/{filename}`, then `getDownloadURL`, then `updateDoc` to append URL to `imageUrls[]`
 - [ ] Photo delete: remove URL from `imageUrls[]` via `updateDoc`, optionally delete from Storage
 - [ ] Active toggle: `updateDoc` sets `isActive: true/false`
 - [ ] Status change to Blocked: require `blockReason` — do not allow save without it
-- [ ] **Block a room for a date range**: write `blockedFrom: Timestamp`, `blockedTo: Timestamp`, `blockReason: string` to the room doc *(Per `DECISIONS-FEATURES.md #78`)*. The booking creation transaction iterates the room's active block ranges and rejects any booking whose dates overlap. The previous lossy approach (string-encoding the date range into `blockReason`) is replaced.
+- [ ] **Block a room for a date range**: write `blockedFrom: Timestamp`, `blockedTo: Timestamp` to the public room doc and `blockReason: string` to staff-only `roomPrivate/{roomId}` *(updates `DECISIONS-FEATURES.md #78` for GA-06)*. The booking creation transaction iterates the room's active block ranges and rejects any booking whose dates overlap. The previous lossy approach (string-encoding the date range into `blockReason`) is replaced.
 - [ ] **Delete room (admin-only)**: hard delete `rooms/{roomId}` plus cascade cleanup of:
+  - `roomPrivate/{roomId}` staff-only notes (best-effort)
   - `rooms/{roomId}/*` photos in Storage (best-effort, `listAll` + `deleteObject` each)
   - `intercoms/{roomNumber}` thread document
   - `intercoms/{roomNumber}/messages/*` subcollection (via `getDocs` + `deleteDoc` each)
   - `calls/{roomNumber}` document
   - `calls/{roomNumber}/iceCandidates/*` subcollection
 - [ ] **Active-booking guard**: a room with any booking in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, or `checked-in` status cannot be deleted. The UI surfaces the count and the user must cancel or check out the bookings first.
-- [ ] **Firestore security**: room delete is admin-only (`allow delete: if isAdmin()`). Front-desk and admin can still create, update, and toggle.
+- [ ] **Firestore security**: room delete is admin-only (`allow delete: if isAdmin()`). Front-desk and admin can still create, update, and toggle public rooms. `roomPrivate/{roomId}` is staff-read/write and admin-delete only; guests never receive internal `remarks` or `blockReason`.
 - [ ] **Historical booking integrity**: bookings keep their denormalized `roomNumber` / `roomType` after a room is deleted. The `roomId` pointer becomes orphaned but the human-readable fields survive for receipts and audit logs.
 
 ## Edge Cases & States

@@ -2,34 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 
-// Per BI-12 (booking-intercom audit 2026-07-06): the previous
-// implementation seeded `checkIn` / `checkOut` with literal
-// Phase 0.5 wireframe default dates that became past-the-day
-// the audit ran. A guest who never touched the date picker was
-// booking a stay that had already ended. The server-side
-// past-date rejection (BI-12 in
-// `bookings.ts:handleCreateBooking`) is the durable fix; these
-// local helpers ensure the client's *initial* state is also
-// valid, so the picker never opens with an already-rejected
-// date and the URL-seeded defaults match what a fresh visitor
-// would see on the regular `/book` page. Mirrors
-// `BookingPage.tsx:101-115`.
-const getTodayIso = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
-const getTomorrowIso = () => {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
 import {
   ArrowLeft,
   BedDouble,
@@ -60,6 +32,7 @@ import {
 import {
   calculateBookingTotal,
   compressImageFile,
+  getDateKeyInTimezone,
   getNumNights,
   staggerChild,
   staggerContainer,
@@ -140,8 +113,8 @@ export function CorporateBookingPage() {
   });
 
   // Booking states
-  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? getTodayIso());
-  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? getTomorrowIso());
+  const [checkIn, setCheckIn] = useState(searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
+  const [checkOut, setCheckOut] = useState(searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
   const [guests, setGuests] = useState(Number(searchParams.get("guests") ?? 2));
   // Per the room-type booking refactor: Step 1 now shows one card
   // per room type (not per physical room). The guest picks a type;
@@ -340,9 +313,18 @@ export function CorporateBookingPage() {
   const typeAvailability = useMemo(() => {
     const reqStart = new Date(`${checkIn}T00:00:00Z`);
     const reqEnd = new Date(`${checkOut}T00:00:00Z`);
+    const isRoomBlockedForStay = (room: { status: string; blockedFrom?: string | Date | null; blockedTo?: string | Date | null }) => {
+      if (room.status !== "blocked") return false;
+      if (!room.blockedFrom || !room.blockedTo) return true;
+      const blockedFrom = new Date(`${String(room.blockedFrom).split("T")[0]}T00:00:00Z`);
+      const blockedTo = new Date(`${String(room.blockedTo).split("T")[0]}T00:00:00Z`);
+      if (isNaN(blockedFrom.getTime()) || isNaN(blockedTo.getTime())) return true;
+      return blockedFrom < reqEnd && blockedTo > reqStart;
+    };
+
     return roomTypes.map((type) => {
       const candidates = rooms.filter(
-        (room) => room.type === type.value && room.isActive && room.status !== "blocked"
+        (room) => room.type === type.value && room.isActive && !isRoomBlockedForStay(room)
       );
       const bookedRoomIds = new Set(
         bookedRanges

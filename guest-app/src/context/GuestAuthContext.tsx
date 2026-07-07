@@ -11,6 +11,7 @@ import {
   type User
 } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import config from "@config";
 import { auth, db } from "../firebase/config";
 
 export interface MemberProfile {
@@ -25,6 +26,7 @@ export interface MemberProfile {
   tier: string;
   memberSince: string;
   authProvider: string;
+  photoUrl: string;
 }
 
 interface GuestAuthContextValue {
@@ -34,6 +36,7 @@ interface GuestAuthContextValue {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, firstName: string, lastName: string, phone: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  registerCurrentMember: () => Promise<void>;
   signOut: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   refreshMemberProfile: () => Promise<void>;
@@ -47,17 +50,21 @@ export function useGuestAuth(): GuestAuthContextValue {
   return ctx;
 }
 
-async function registerMember(idToken: string): Promise<void> {
+async function registerMember(
+  idToken: string,
+  profile: { fullName?: string; phone?: string; photoUrl?: string; authProvider?: "google" | "email" } = {}
+): Promise<void> {
   const res = await fetch("/api/members/register", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`
-    }
+    },
+    body: JSON.stringify(profile)
   });
   const result = await res.json().catch(() => null);
   if (!res.ok || !result?.success) {
-    console.error("Member registration failed:", result?.error);
+    throw new Error(result?.error || `We could not join ${config.rewardsName} right now. Please try again.`);
   }
 }
 
@@ -97,7 +104,8 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
           rewardsPoints: data.rewardsPoints || 0,
           tier: data.tier || "standard",
           memberSince: data.memberSince || "",
-          authProvider: data.authProvider || ""
+          authProvider: data.authProvider || "",
+          photoUrl: data.photoUrl || user.photoURL || ""
         });
       } else {
         setMemberProfile(null);
@@ -123,7 +131,8 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
         rewardsPoints: data.rewardsPoints || 0,
         tier: data.tier || "standard",
         memberSince: data.memberSince || "",
-        authProvider: data.authProvider || ""
+        authProvider: data.authProvider || "",
+        photoUrl: data.photoUrl || user.photoURL || ""
       });
     }
   };
@@ -152,7 +161,11 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
       });
 
       const idToken = await credential.user.getIdToken();
-      await registerMember(idToken);
+      await registerMember(idToken, {
+        fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
+        phone: phone.trim(),
+        authProvider: "email"
+      });
     } finally {
       setLoading(false);
     }
@@ -162,14 +175,28 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      const credential = await signInWithPopup(auth, provider);
-
-      // Auto-register as member if not already enrolled
-      const idToken = await credential.user.getIdToken();
-      await registerMember(idToken);
+      await signInWithPopup(auth, provider);
     } finally {
       setLoading(false);
     }
+  };
+
+  const registerCurrentMember = async () => {
+    const current = auth.currentUser;
+    if (!current) {
+      throw new Error(`Please sign in before joining ${config.rewardsName}.`);
+    }
+    const providerId = current.providerData.some((provider) => provider.providerId === "google.com")
+      ? "google"
+      : "email";
+    const idToken = await current.getIdToken();
+    await registerMember(idToken, {
+      fullName: current.displayName || "",
+      phone: current.phoneNumber || "",
+      photoUrl: current.photoURL || "",
+      authProvider: providerId
+    });
+    await refreshMemberProfile();
   };
 
   const signOut = async () => {
@@ -191,6 +218,7 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,
+        registerCurrentMember,
         signOut,
         sendPasswordReset,
         refreshMemberProfile

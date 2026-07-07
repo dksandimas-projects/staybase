@@ -23,13 +23,13 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `isActive` | boolean | `false` = hidden from guest site |
 | `status` | string | `"available"` \| `"occupied"` \| `"blocked"` |
 | `housekeepingStatus` | string | `"clean"` \| `"dirty"` \| `"in-progress"` |
-| `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| `""` |
 | `blockedFrom` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
 | `blockedTo` | timestamp \| null | Optional date-range block (per `DECISIONS-FEATURES.md #78`) |
-| `remarks` | string | Internal staff notes |
 | `qrToken` | string | Optional regenerated QR route token; fallback QR value uses the room document ID |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+> **Staff-only room notes are not stored on `rooms`.** Internal `remarks` and `blockReason` live in `roomPrivate/{roomId}` so the public guest app can continue reading active room documents without exposing operational notes. `AdminContext` merges the private doc for staff views and lazily migrates any legacy public `remarks` / `blockReason` values into `roomPrivate`, then deletes them from the public room doc.
 
 > **Photos, pricing, capacity, bed description, and amenities are NOT stored on individual rooms.** They all live on the **room type** — see `settings/hotelConfig.roomTypes[]` below. The guest site (room cards, room detail, booking flow, homepage featured rooms) and admin app join `roomType` on `Room.type` at query time. The Settings → Room Types table is the single edit surface: rates, photos, bed setup, description, and amenities all flow from there. Upload path for type photos: Firebase Storage `room-types/{typeValue}/{filename}` (public read, staff write — see `firebase/storage.rules`).
 
@@ -38,6 +38,21 @@ See `plan/docs/API-ROUTES.md` for API layer.
 **Lifecycle:** Rooms are created via the admin `/rooms` page (`AdminContext.createRoom`, validated by `CreateRoomSchema` in `@spark-inn/shared/schemas/room`) and deleted via the same page (`AdminContext.deleteRoom`). Deletion is **admin-only** at the Firestore rules layer and is blocked client-side when any active booking (status in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, `checked-in`) still references the room. The required delete reason is written to `roomDeletionAudit/{auditId}` before the hard delete. On delete, the cascade cleans up: Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}` + messages subcollection, and `calls/{roomNumber}` + `iceCandidates` subcollection. Historical bookings retain their denormalized `roomNumber` / `roomType` so receipts and audit logs remain readable; only the live `roomId` pointer is removed.
 
 **Auto-assignment (per `feature/booking-by-room-type`):** The public booking flow's Step 1 shows one card per room type. Clients post `roomType`; the `/api/bookings/create` transaction reads all active physical rooms of that type, sorts by `roomNumber`, picks the first non-conflicting room, and stores its `roomId` + `roomNumber` on the new booking document. The `Booking.roomId` schema is unchanged — it still points at a real `rooms/{id}` document — and `Booking.roomType` is the type value the guest selected. Staff see the assigned room in the bookings management table exactly as before.
+
+---
+
+### `roomPrivate/{roomId}`
+
+Staff-only extension document for room fields that must never be public. Document IDs match `rooms/{roomId}`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `remarks` | string | Internal staff notes |
+| `blockReason` | string | `"Maintenance"` \| `"Hold"` \| `"Other"` \| custom staff note \| `""` |
+| `createdAt` | timestamp | Optional; set on first private doc creation |
+| `updatedAt` | timestamp | Updated whenever staff notes or block reason change |
+
+Firestore rules: read/create/update require `isStaff()`, delete requires `isAdmin()`. The guest app must not read this collection.
 
 ---
 
@@ -83,6 +98,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 | `notes` | string | Internal staff notes |
 | `handledBy` | string | Staff UID |
 | `memberId` | string \| null | Firebase Auth UID of member (if booked while logged in or linked post-registration) |
+| `memberDiscountPct` | number | Spark Rewards member discount percent applied at booking creation (0 if none); used when recomputing totals after discount rejection |
 | `pointsRedeemed` | number | Points redeemed by staff against this booking (0 if none) |
 | `pointsRedeemedValue` | number | ₱ value of redeemed points deducted from `totalPrice` (0 if none) |
 | `pointsRedeemedBy` | string \| null | Staff UID who applied the redemption |
@@ -464,15 +480,15 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
 | `corporateCodes` | Staff/Admin only; public validation uses `/api/corporate/validate-code` | Staff/Admin only |
-| `vouchers` | Anyone (validation) | Staff or Admin |
-| `intercoms` | Open (no auth) | Open (no auth) |
+| `vouchers` | Staff/Admin only; public validation uses `/api/validate/voucher` | Staff or Admin |
+| `intercoms` | Open (no auth) | Open with field validation on messages; guest UI throttles message sends; staff can moderate |
 | `members` | Owner (self) or Staff/Admin | Create = API/Admin SDK only via `/api/members/register`; Update = owner or Staff/Admin |
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
-| `storeOrders` | Open for create and guest cancellation by room/order ref | Create = anyone; Update = Staff/Admin; guest cancellation via API only |
+| `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; Update = Staff/Admin; guest cancellation via API only |
 | `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment`; no updates or deletes |
-| `settings/rewardsConfig` | Authenticated guests (needed for booking discount + My Rewards display) | Admin only |
+| `settings/rewardsConfig` | Public via `settings/{documentId}` rule; non-sensitive booking/member display config | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |
 

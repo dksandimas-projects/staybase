@@ -22,14 +22,13 @@ import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
 import { fadeUp, staggerContainer, staggerChild } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
-import { auth } from "../firebase/auth";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { REWARDS_HERO_LQIP } from "../data/homepage";
 
 export function RewardsLandingPage() {
   const shouldReduceMotion = useReducedMotion();
   const navigate = useNavigate();
-  const { user, memberProfile, loading, refreshMemberProfile } = useGuestAuth();
+  const { user, memberProfile, loading, refreshMemberProfile, registerCurrentMember } = useGuestAuth();
   const { rewards } = usePublicSiteContent();
   const heroPhoto = rewards.heroPhotoUrl;
   const heroEyebrow = rewards.heroEyebrow;
@@ -45,10 +44,9 @@ export function RewardsLandingPage() {
 
   useEffect(() => {
     if (!loading && user && memberProfile?.isMember) {
-      // Already a member — nothing to do, the UI shows the "Go to
-      // My Rewards" CTA instead.
+      navigate("/account/rewards", { replace: true });
     }
-  }, [loading, memberProfile?.isMember, user]);
+  }, [loading, memberProfile?.isMember, navigate, user]);
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -63,32 +61,14 @@ export function RewardsLandingPage() {
     setEnrolling(true);
     setEnrollError("");
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
-        setEnrollError("Please sign in again before joining Spark Rewards.");
-        setEnrolling(false);
-        return;
-      }
-      const res = await fetch("/api/members/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`
-        }
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        setEnrollError(data?.error || "We could not join Spark Rewards right now. Please try again.");
-        setEnrolling(false);
-        return;
-      }
+      await registerCurrentMember();
       // Refresh the local member profile from Firestore so the UI
       // flips to the "member" state without a hard reload.
       await refreshMemberProfile();
       navigate("/account/rewards");
     } catch (err) {
       console.error("Member enrollment failed:", err);
-      setEnrollError("We could not join Spark Rewards right now. Please try again.");
+      setEnrollError(`We could not join ${config.rewardsName} right now. Please try again.`);
       setEnrolling(false);
     }
   };
@@ -138,7 +118,7 @@ export function RewardsLandingPage() {
             {!loading && !user && (
               <>
                 <PrimaryButton to="/signup" className="min-w-[220px] shadow-lg drop-shadow-md">
-                  Join Spark Rewards
+                  Join {config.rewardsName}
                 </PrimaryButton>
                 <GhostButton
                   to="/signin"
@@ -167,7 +147,7 @@ export function RewardsLandingPage() {
                     Enrolling...
                   </span>
                 ) : (
-                  "Enroll in Spark Rewards (One-Click)"
+                  `Enroll in ${config.rewardsName} (One-Click)`
                 )}
               </PrimaryButton>
             )}
@@ -261,7 +241,7 @@ export function RewardsLandingPage() {
               <p className="text-xs font-semibold uppercase tracking-widest text-primary">Member Privileges</p>
               <h2 className="mt-3 font-heading text-3xl text-gray-950 sm:text-4xl">Your World of Perks</h2>
               <p className="mt-4 text-sm text-gray-600">
-                Beyond points redemption, Spark Rewards offers a suite of exclusive privileges designed to elevate your stay.
+                Beyond points redemption, {config.rewardsName} offers a suite of exclusive privileges designed to elevate your stay.
               </p>
             </div>
             {!loading && !user && (
@@ -390,7 +370,7 @@ export function RewardsLandingPage() {
         <div className="container mx-auto px-6 text-center relative z-10">
           <h2 className="font-heading text-3xl md:text-4xl text-white mb-4">Start earning today.</h2>
           <p className="text-white/90 text-sm md:text-base mb-8 max-w-xl mx-auto leading-relaxed">
-            Join our community of travelers and experience a more rewarding way to stay in Tagbilaran City, Bohol.
+            Join our community of travelers and experience a more rewarding way to stay in {config.address.city}, {config.address.region}.
           </p>
 
           {!loading && !user && (
@@ -409,7 +389,7 @@ export function RewardsLandingPage() {
               className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-8 py-3.5 text-sm font-semibold text-primary shadow-lg transition hover:bg-gray-50 active:scale-95 disabled:opacity-60"
               disabled={enrolling}
             >
-              {enrolling ? "Enrolling..." : "Join Spark Rewards"}
+              {enrolling ? "Enrolling..." : `Join ${config.rewardsName}`}
             </button>
           )}
 

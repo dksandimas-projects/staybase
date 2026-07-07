@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { User, Mail, Phone, Calendar, Trash2, Shield, Award, Sparkles, CheckCircle2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { User, Mail, Phone, Calendar, Trash2, Shield, Award, Sparkles, CheckCircle2, AlertCircle } from "lucide-react";
 import config from "@config";
 import { AccountLayout } from "../components/AccountLayout";
 import { PrimaryButton } from "../components/PrimaryButton";
@@ -12,12 +13,14 @@ import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCre
 import { auth, db } from "../firebase/config";
 
 export function ProfilePage() {
-  const { user, memberProfile, refreshMemberProfile } = useGuestAuth();
+  const { user, memberProfile, refreshMemberProfile, registerCurrentMember } = useGuestAuth();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [isEnrolling, setIsEnrolling] = useState(false);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -47,8 +50,12 @@ export function ProfilePage() {
     if (!user) return;
     setIsSaving(true);
     setShowSuccessAlert(false);
+    setProfileError("");
 
     try {
+      if (!memberProfile) {
+        throw new Error(`Join ${config.rewardsName} first so we can save your member profile details.`);
+      }
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
       // Update Firebase Auth profile
@@ -66,8 +73,24 @@ export function ProfilePage() {
       setTimeout(() => setShowSuccessAlert(false), 3000);
     } catch (err) {
       console.error("Profile update failed:", err);
+      setProfileError(err instanceof Error ? err.message : "We couldn't update your profile. Please try again.");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleJoinRewards = async () => {
+    setIsEnrolling(true);
+    setProfileError("");
+    try {
+      await registerCurrentMember();
+      setShowSuccessAlert(true);
+      setTimeout(() => setShowSuccessAlert(false), 3000);
+    } catch (err) {
+      console.error("Member enrollment failed:", err);
+      setProfileError(err instanceof Error ? err.message : `We could not join ${config.rewardsName} right now. Please try again.`);
+    } finally {
+      setIsEnrolling(false);
     }
   };
 
@@ -118,7 +141,7 @@ export function ProfilePage() {
       // Firebase Auth directly from the client.
       const token = await auth.currentUser?.getIdToken();
       const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
+        ? window.location.origin
         : import.meta.env.VITE_GUEST_APP_URL || "";
       const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/members/delete-account`, {
         method: "POST",
@@ -151,9 +174,28 @@ export function ProfilePage() {
   const isEmailProvider = user?.providerData?.some((p) => p.providerId === "password");
 
   return (
-    <AccountLayout activeTab="profile" title="My Profile" subtitle="Manage your Spark Rewards account details.">
+    <AccountLayout activeTab="profile" title="My Profile" subtitle={`Manage your ${config.rewardsName} account details.`}>
       <div className="space-y-8">
         {/* Spark Rewards Card */}
+        {user && !memberProfile && (
+          <div className="rounded-card bg-primary-light p-5 ring-1 ring-primary/20">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-bold text-primary-dark">Finish joining {config.rewardsName}</p>
+                <p className="mt-1 text-xs leading-relaxed text-gray-600">
+                  Create your member profile to save account details, link eligible stays, and use rewards features. By joining, you agree to the{" "}
+                  <Link to="/privacy" className="font-semibold text-primary hover:underline">Privacy Policy</Link>{" "}
+                  and{" "}
+                  <Link to="/terms" className="font-semibold text-primary hover:underline">Terms of Service</Link>.
+                </p>
+              </div>
+              <PrimaryButton type="button" onClick={handleJoinRewards} disabled={isEnrolling} className="shrink-0">
+                {isEnrolling ? "Joining..." : "Join Rewards"}
+              </PrimaryButton>
+            </div>
+          </div>
+        )}
+
         {memberProfile?.isMember && (
           <div className="rounded-xl overflow-hidden shadow-sm" style={{ background: `linear-gradient(135deg, ${config.colors.sidebar}, ${config.colors.sidebar}ee)` }}>
             <div className="p-6 text-white">
@@ -188,10 +230,35 @@ export function ProfilePage() {
             <p className="text-[10px] text-gray-500 mt-0.5">Update your name and contact information.</p>
           </div>
 
+          <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-3">
+            {memberProfile?.photoUrl || user?.photoURL ? (
+              <img
+                src={memberProfile?.photoUrl || user?.photoURL || ""}
+                alt=""
+                className="h-12 w-12 rounded-full object-cover"
+              />
+            ) : (
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+                {(memberProfile?.fullName || user?.displayName || user?.email || "M").charAt(0).toUpperCase()}
+              </span>
+            )}
+            <div>
+              <p className="text-xs font-bold text-gray-900">Profile photo</p>
+              <p className="text-[10px] text-gray-500">Shown from your sign-in provider when available.</p>
+            </div>
+          </div>
+
           {showSuccessAlert && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-xs text-green-800 flex items-start gap-2">
               <CheckCircle2 size={14} className="shrink-0 mt-0.5" />
               <span>Profile updated successfully.</span>
+            </div>
+          )}
+
+          {profileError && (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              <span>{profileError}</span>
             </div>
           )}
 
@@ -334,7 +401,7 @@ export function ProfilePage() {
           <Modal open={showDeleteModal} onClose={() => !isDeleting && setShowDeleteModal(false)} title="Delete your account?">
             <div className="space-y-4">
               <p className="text-sm text-gray-600 leading-relaxed">
-                This will permanently delete your Spark Rewards account, including your points balance ({memberProfile?.rewardsPoints || 0} pts), points history, and your personal data (name, email, phone, profile photo).
+                This will permanently delete your {config.rewardsName} account, including your points balance ({memberProfile?.rewardsPoints || 0} pts), points history, and your personal data (name, email, phone, profile photo).
               </p>
               <p className="text-sm text-gray-600 leading-relaxed">
                 Your booking history will be anonymized: the system will keep the booking reference, dates, room type, and total for our internal accounting and RA 11862 recordkeeping, but your name, email, and phone will be removed from each booking.

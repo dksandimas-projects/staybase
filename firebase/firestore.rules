@@ -23,6 +23,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /roomPrivate/{roomId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
     match /roomDeletionAudit/{auditId} {
       allow read: if isStaff();
       allow create: if isAdmin();
@@ -59,7 +64,13 @@ service cloud.firestore {
     match /members/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
       allow create: if false;
-      allow update: if signedIn() && (isStaff() || request.auth.uid == userId);
+      allow update: if isStaff()
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["fullName", "phone", "photoUrl", "updatedAt"])
+        );
       allow delete: if isAdmin() || (signedIn() && request.auth.uid == userId);
 
       match /pointsHistory/{entryId} {
@@ -109,8 +120,33 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
-    match /intercoms/{roomId}/{document=**} {
-      allow read, write: if true;
+    match /intercoms/{roomId} {
+      allow read, create, update: if true;
+      allow delete: if isStaff();
+
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if request.resource.data.keys().hasOnly([
+            "text",
+            "sender",
+            "guestName",
+            "timestamp",
+            "isRead",
+            "isQuickRequest",
+            "isStoreOrder",
+            "orderRef",
+            "isEarlyCheckInRequest"
+          ])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.sender in ["guest", "front-desk"]
+          && request.resource.data.guestName is string
+          && request.resource.data.guestName.size() <= 120
+          && request.resource.data.timestamp == request.time;
+        allow update: if isStaff()
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
+        allow delete: if isStaff();
+      }
     }
 
     match /calls/{roomId}/{document=**} {
@@ -123,8 +159,8 @@ service cloud.firestore {
     }
 
     match /storeOrders/{orderId} {
-      allow read, create: if true;
-      allow update: if isStaff();
+      allow read, update: if isStaff();
+      allow create: if false;
       allow delete: if isAdmin();
     }
   }

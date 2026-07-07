@@ -45,12 +45,15 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
 
   it("defines an ALLOWED_ORIGINS Set built from production + dev origins", () => {
     expect(src).toMatch(/ALLOWED_ORIGINS\s*=\s*new Set/);
-    expect(src).toMatch(/https:\/\/sparkinnbohol\.com/);
-    expect(src).toMatch(/https:\/\/www\.sparkinnbohol\.com/);
-    expect(src).toMatch(/https:\/\/admin\.sparkinnbohol\.com/);
+    expect(src).toMatch(/configuredGuestHost/);
+    expect(src).toMatch(/configuredAdminHost/);
+    expect(src).toMatch(/`https:\/\/\$\{configuredGuestHost\}`/);
+    expect(src).toMatch(/`https:\/\/www\.\$\{configuredGuestHost\}`/);
+    expect(src).toMatch(/`https:\/\/\$\{configuredAdminHost\}`/);
     // Dev origins
-    expect(src).toMatch(/localhost:5173/); // guest-app
-    expect(src).toMatch(/localhost:5174/); // admin-app
+    expect(src).toMatch(/localhost:5173/);
+    expect(src).toMatch(/localhost:5174/);
+    expect(src).toMatch(/localhost:3000/);
   });
 
   it("echoes the request Origin only if it matches the allowlist", () => {
@@ -63,10 +66,10 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
     expect(src).toMatch(/setHeader\(\s*["']Vary["']\s*,\s*["']Origin["']\s*\)/);
   });
 
-  it("keeps the API entrypoint free of risky runtime imports before preflight", () => {
-    expect(src).not.toMatch(/from\s+["']@config["']/);
-    expect(src).not.toMatch(/from\s+["']\.\.\/\.\.\/hotel\.config["']/);
-    expect(src).not.toMatch(/from\s+["']@spark-inn\/shared["']/);
+  it("keeps the root API entrypoint as a tiny shim before preflight", () => {
+    expect(rootApiSrc).not.toMatch(/from\s+["']@config["']/);
+    expect(rootApiSrc).not.toMatch(/from\s+["']\.\.\/\.\.\/hotel\.config["']/);
+    expect(rootApiSrc).not.toMatch(/from\s+["']@spark-inn\/shared["']/);
   });
 
   it("exposes the guest-app API from the repo root for root-directory Vercel deployments", () => {

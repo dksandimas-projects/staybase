@@ -82,6 +82,7 @@ export function Navbar({ overHero = false }: NavbarProps) {
   };
 
   const displayName = memberProfile?.fullName || user?.displayName || user?.email?.split("@")[0] || "Member";
+  const avatarUrl = memberProfile?.photoUrl || user?.photoURL || "";
 
   return (
     <header
@@ -123,9 +124,13 @@ export function Navbar({ overHero = false }: NavbarProps) {
                   solid ? "text-gray-700 hover:bg-gray-100" : "text-white hover:bg-white/10"
                 )}
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">
-                  {displayName.charAt(0).toUpperCase()}
-                </span>
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover ring-1 ring-white/60" />
+                ) : (
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-white text-xs font-bold">
+                    {displayName.charAt(0).toUpperCase()}
+                  </span>
+                )}
                 <span className="hidden lg:inline max-w-[100px] truncate">{displayName}</span>
                 <ChevronDown size={14} className={cn("transition", showDropdown && "rotate-180")} />
               </button>
@@ -179,13 +184,13 @@ export function Navbar({ overHero = false }: NavbarProps) {
             </div>
           ) : (
             <Link
-              to="/signin"
+              to="/rewards"
               className={cn(
                 "text-sm font-medium transition",
                 solid ? "text-gray-700 hover:text-primary" : "text-white hover:text-primary-light"
               )}
             >
-              Sign in
+              Join Rewards
             </Link>
           )}
         </div>
@@ -228,7 +233,16 @@ export function Navbar({ overHero = false }: NavbarProps) {
             {user ? (
               <>
                 <div className="border-t border-gray-100 pt-3 mt-2">
-                  <p className="px-3 text-xs font-bold text-gray-900 mb-2">{displayName}</p>
+                  <div className="flex items-center gap-2 px-3 mb-2">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                    ) : (
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+                        {displayName.charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <p className="text-xs font-bold text-gray-900">{displayName}</p>
+                  </div>
                   {memberProfile?.memberNumber && (
                     <p className="px-3 text-[10px] text-primary font-semibold mb-2">{memberProfile.memberNumber}</p>
                   )}
@@ -264,11 +278,11 @@ export function Navbar({ overHero = false }: NavbarProps) {
               </>
             ) : (
               <Link
-                to="/signin"
+                to="/rewards"
                 className="rounded-lg px-3 py-3 text-sm font-medium text-gray-700"
                 onClick={() => setIsOpen(false)}
               >
-                Sign in
+                Join Rewards
               </Link>
             )}
           </div>

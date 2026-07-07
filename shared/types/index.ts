@@ -85,6 +85,8 @@ export interface Room {
   housekeepingStatus: HousekeepingStatus;
   blockReason: string;
   remarks: string;
+  blockedFrom?: string | Date | null;
+  blockedTo?: string | Date | null;
   qrToken?: string;
   createdAt: Date;
   updatedAt: Date;

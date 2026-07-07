@@ -10,6 +10,7 @@ import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { useGuestAuth } from "../context/GuestAuthContext";
 import { useRoomTypes } from "../hooks/useRoomTypes";
 import { formatPrice } from "../utils/format";
 
@@ -26,6 +27,7 @@ export function BookingConfirmPage() {
   const [searchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes } = useRoomTypes();
+  const { user, memberProfile } = useGuestAuth();
 
   // The payment-method label shown to the guest is now sourced
   // from `settings/hotelConfig.paymentMethods[].label` (admin-
@@ -148,6 +150,8 @@ export function BookingConfirmPage() {
   });
 
   const isOnlinePayment = rawPaymentMethod === "gcash" || rawPaymentMethod === "bank";
+  const isRewardsMember = !!user && !!memberProfile?.isMember;
+  const showRewardsJoinPrompt = !isRewardsMember;
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -307,39 +311,40 @@ export function BookingConfirmPage() {
           </PrimaryButton>
         </motion.div>
 
-        {/* Spark Rewards Sign-up Incentive Block */}
-        <motion.div
-          className="mt-10 rounded-xl border border-primary/20 bg-sidebar p-6 text-white shadow-md"
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.45, duration: 0.45 }}
-        >
-          <div className="flex items-center gap-2">
-            <Sparkles size={20} className="text-primary animate-pulse" />
-            <h3 className="text-lg font-bold">Join Spark Rewards</h3>
-          </div>
-          <p className="mt-2 text-sm text-gray-300">
-            Sign up now to earn points on this stay and unlock member-only benefits for your next visit!
-          </p>
-          <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-gray-300">
+        {showRewardsJoinPrompt && (
+          <motion.div
+            className="mt-10 rounded-xl border border-primary/20 bg-sidebar p-6 text-white shadow-md"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.45, duration: 0.45 }}
+          >
             <div className="flex items-center gap-2">
-              <Star size={14} className="text-primary" />
-              <span>Earn Points</span>
+              <Sparkles size={20} className="text-primary animate-pulse" />
+              <h3 className="text-lg font-bold">Join {config.rewardsName}</h3>
             </div>
-            <div className="flex items-center gap-2">
-              <Star size={14} className="text-primary" />
-              <span>Member Discounts</span>
+            <p className="mt-2 text-sm text-gray-300">
+              Sign up now to earn points on this stay and unlock member-only benefits for your next visit!
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-gray-300">
+              <div className="flex items-center gap-2">
+                <Star size={14} className="text-primary" />
+                <span>Earn Points</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Star size={14} className="text-primary" />
+                <span>Member Discounts</span>
+              </div>
             </div>
-          </div>
-          <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-            <PrimaryButton to="/signup" className="w-full text-xs font-semibold py-2">
-              Sign up with email
-            </PrimaryButton>
-            <GhostButton to="/rewards" className="w-full text-xs font-semibold border-white text-white hover:bg-white/10 py-2">
-              Learn more
-            </GhostButton>
-          </div>
-        </motion.div>
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+              <PrimaryButton to={user ? "/rewards" : "/signup"} className="w-full text-xs font-semibold py-2">
+                {user ? "Join Rewards" : "Sign up with email"}
+              </PrimaryButton>
+              <GhostButton to="/rewards" className="w-full text-xs font-semibold border-white text-white hover:bg-white/10 py-2">
+                Learn more
+              </GhostButton>
+            </div>
+          </motion.div>
+        )}
       </section>
 
       <Footer />

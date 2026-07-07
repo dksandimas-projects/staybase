@@ -10,10 +10,21 @@ import { GhostButton } from "../components/GhostButton";
 import { scaleIn } from "@spark-inn/shared";
 import { useGuestAuth } from "../context/GuestAuthContext";
 
+function getAuthConflictMessage(error: any): string | null {
+  const code = error?.code || "";
+  if (code === "auth/email-already-in-use") {
+    return "An account with this email already exists. Sign in with your existing method first.";
+  }
+  if (code === "auth/account-exists-with-different-credential") {
+    return "This email is already linked to another sign-in method. Sign in with that method first, then ask the front desk to link providers if needed.";
+  }
+  return null;
+}
+
 export function SignUpPage() {
   const navigate = useNavigate();
   const shouldReduceMotion = useReducedMotion();
-  const { signUpWithEmail, signInWithGoogle, loading } = useGuestAuth();
+  const { signUpWithEmail, signInWithGoogle, registerCurrentMember, loading } = useGuestAuth();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -60,8 +71,9 @@ export function SignUpPage() {
       navigate("/account/profile");
     } catch (err: any) {
       const code = err?.code || "";
-      if (code === "auth/email-already-in-use") {
-        setErrorMsg("An account with this email already exists. Try signing in instead.");
+      const conflictMessage = getAuthConflictMessage(err);
+      if (conflictMessage) {
+        setErrorMsg(conflictMessage);
       } else if (code === "auth/invalid-email") {
         setErrorMsg("Please enter a valid email address.");
       } else if (code === "auth/weak-password") {
@@ -76,13 +88,18 @@ export function SignUpPage() {
 
   const handleGoogleSignIn = async () => {
     setErrorMsg("");
+    if (!consent) {
+      setErrorMsg(`You must agree to the Privacy Policy and Terms of Service before joining ${config.rewardsName} with Google.`);
+      return;
+    }
     setIsGoogleLoading(true);
     try {
       await signInWithGoogle();
+      await registerCurrentMember();
       navigate("/account/profile");
     } catch (err: any) {
       if (err?.code !== "auth/popup-closed-by-user") {
-        setErrorMsg("Google sign-in failed. Please try again.");
+        setErrorMsg(getAuthConflictMessage(err) || err?.message || "Google sign-in failed. Please try again.");
       }
     } finally {
       setIsGoogleLoading(false);
@@ -105,7 +122,7 @@ export function SignUpPage() {
           />
           <h1 className="font-heading text-3xl text-gray-950">Create your account</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Join Spark Rewards and earn points on every stay at {config.brandName}.
+            Join {config.rewardsName} and earn points on every stay at {config.brandName}.
           </p>
         </div>
 
