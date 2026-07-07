@@ -46,9 +46,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 3 | **3** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
-| **SEV-3 (minor)** | 6 | 1 | **7** |
+| **SEV-3 (minor)** | 0 | 7 | **7** |
 | **SEV-4 (nit / doc drift)** | 4 | 1 | **5** |
-| **Total** | **10** | **9** | **19** |
+| **Total** | **4** | **15** | **19** |
 
 The public marketing shell (heroes, content fallback chain, branding
 overrides, SEO meta, PWA), the rooms catalog, the corporate inquiry form,
@@ -84,6 +84,12 @@ the member portal without client-side `bookings` reads.
 in `cb13846` (`fix: repair guest app sev2 audit issues`). The same batch
 also closed GA-16 by adding a shared `config.timezone`-aware date-key
 helper and replacing the UTC "today" call sites in guest date logic.
+
+**2026-07-07 SEV-3 update:** GA-08 through GA-13 were fixed in
+`7a6cf79` (`fix: repair guest app sev3 audit issues`). GA-11 was closed
+by recording the Phase 1/Phase 2 product decision in
+`DECISIONS-FEATURES.md #114`: Phase 1 shows provider-conflict messages;
+self-service `linkWithPopup` remains Phase 2 work.
 
 ### Top 5 to fix first
 
@@ -305,7 +311,7 @@ and `DECISIONS-FEATURES.md #112` recording the product decision.
 ## SEV-3 — Minor (7)
 
 ### GA-08 — Booking create, voucher validate, and corporate-code validate share one bare-IP rate-limit bucket
-**Status:** Open
+**Status:** Fixed in `7a6cf79`
 **File:** `guest-app/server/apiRouter.ts:399` (`isRateLimited(ip, 5, …)` create), `:575` (voucher, same `ip` key), `:591` (corporate-code, same `ip` key)
 
 Every other endpoint namespaces its cache key
@@ -317,8 +323,13 @@ gets a spurious 429 "Too many booking requests" when they finally press
 Book — with a fresh Turnstile token wasted per retry. **Fix:** namespace
 the three keys like every other route.
 
+**Fixed in `7a6cf79`:** namespaced the booking-create,
+voucher-validation, and corporate-code validation buckets as
+`bookings-create:${ip}`, `validate-voucher:${ip}`, and
+`validate-corporate-code:${ip}`. Rebuilt `guest-app/api/[...route].js`.
+
 ### GA-09 — My Rewards page ignores `settings/rewardsConfig` entirely
-**Status:** Open
+**Status:** Fixed in `7a6cf79`
 **File:** `guest-app/src/pages/RewardsPage.tsx:150-190, 324-334`
 
 Per `SPARK-REWARDS.md §My Rewards`: hide the points section when
@@ -331,8 +342,13 @@ generic paragraph, and the "Member Rate" card is gated on
 shows the percentage. `BookingPage.tsx:421` already fetches
 `settings/rewardsConfig` for the live discount — reuse that read here.
 
+**Fixed in `7a6cf79`:** `RewardsPage` now reads
+`settings/rewardsConfig`, hides the points balance/history when
+`pointsEnabled` is false, renders the configured earn rate, and only
+shows the member discount card when `memberDiscountEnabled` is active.
+
 ### GA-10 — Member-state gating missing on marketing surfaces: members are told to "Join Spark Rewards" everywhere
-**Status:** Open
+**Status:** Fixed in `7a6cf79`
 **File:** `guest-app/src/pages/HomePage.tsx:343-381` (promo section), `guest-app/src/pages/BookingConfirmPage.tsx:310-342` (post-booking block), `guest-app/src/pages/RewardsLandingPage.tsx:96-97`
 
 `HOMEPAGE.md` specs the rewards promo to flip to "Welcome back,
@@ -346,8 +362,14 @@ prompted to join the program they're in. (`RewardsLandingPage` handles
 the three auth states in its CTAs but shows a CTA instead of the
 specced redirect for members — fold the doc decision into the fix.)
 
+**Fixed in `7a6cf79`:** homepage rewards copy now branches to
+"Welcome back" + `/account/rewards` for members, booking confirmation
+hides the join prompt for members and routes signed-in non-members to
+the explicit join surface, and `/rewards` redirects existing members to
+their dashboard.
+
 ### GA-11 — Account-linking edge cases unhandled: cross-provider conflicts collapse into generic errors
-**Status:** Open
+**Status:** Fixed in `7a6cf79`
 **File:** `guest-app/src/pages/SignInPage.tsx:46-57, 67-73`, `guest-app/src/pages/SignUpPage.tsx:61-90`
 
 `SPARK-REWARDS.md §Account linking` specs the full
@@ -360,8 +382,15 @@ Please try again." (a retry that can never succeed), and no linking
 flow exists anywhere. Also missing from the spec'd flow: the "We found
 bookings under a different email. Would you like to link them?" prompt.
 
+**Fixed in `7a6cf79`:** Phase 1 now special-cases
+`auth/account-exists-with-different-credential` and
+`auth/email-already-in-use` with provider-conflict copy instead of
+generic retry messages. The full `linkWithPopup` and booking-email
+mismatch prompts were explicitly deferred to Phase 2 in
+`DECISIONS-FEATURES.md #114` and `SPARK-REWARDS.md`.
+
 ### GA-12 — Rooms detail modal: no photo carousel and a broken image when the type has no photos
-**Status:** Open
+**Status:** Fixed in `7a6cf79`
 **File:** `guest-app/src/pages/RoomsPage.tsx:108-156`
 
 `ROOMS-PAGE.md` specs the modal with "all photos carousel … multiple
@@ -372,8 +401,12 @@ management feature. And unlike the cards (which have the "Photo coming
 soon" branch), the modal has no empty-URL fallback: a type with no
 photos renders a broken `<img src={undefined}>` block.
 
+**Fixed in `7a6cf79`:** room detail modals now render a multi-photo
+carousel with previous/next controls, dot selection, and a "Photo
+coming soon" fallback when a room type has no gallery.
+
 ### GA-13 — Homepage featured cards label occupied rooms "Blocked" and leak per-room operational status
-**Status:** Open
+**Status:** Fixed in `7a6cf79`
 **File:** `guest-app/src/components/RoomCard.tsx:82`, consumer `guest-app/src/pages/HomePage.tsx:260-271`
 
 The featured card renders `StatusBadge` with
@@ -387,6 +420,11 @@ based on current bookings" line predates the guest-side bookings-read
 ban and can't be implemented as written. **Fix:** drop the badge from
 the homepage cards (or drive it from `/api/rooms/availability` for a
 default date range) and update `HOMEPAGE.md` to match the decision.
+
+**Fixed in `7a6cf79`:** `RoomCard` accepts `showStatusBadge`, homepage
+featured cards pass `showStatusBadge={false}`, occupied rooms no longer
+render as public "Blocked" marketing cards, and `HOMEPAGE.md` plus
+`DECISIONS-FEATURES.md #113` record the decision.
 
 ### GA-14 — My Stays hides pending bookings and deviates from the specced ordering/matching
 **Status:** Fixed in `2b5b187`
@@ -552,7 +590,7 @@ the GA-13 decision when updating `HOMEPAGE.md`.
 |---|---|---|---|
 | 1 (`fix/audit-ga-sev1`) | GA-01, GA-02, GA-03 (+GA-14 rides along) | Member stays endpoint, contact-form Turnstile + honeypot, early check-in auth contract | Fixed in `2b5b187` |
 | 2 (`fix/audit-ga-sev2`) | GA-04, GA-05, GA-06, GA-07 (+GA-16 rides along) | Date defaults, enrollment error surfacing, remarks migration, Google-consent decision | Fixed in `cb13846` |
-| 3 (`fix/audit-ga-sev3`) | GA-08 … GA-13 | Rate-limit keys, rewardsConfig wiring, member-state gating, account linking, modal carousel, homepage badge | Open |
+| 3 (`fix/audit-ga-sev3`) | GA-08 … GA-13 | Rate-limit keys, rewardsConfig wiring, member-state gating, account linking, modal carousel, homepage badge | Fixed in `7a6cf79` |
 | 4 | GA-15, GA-17 … GA-19 | White-label tokens, navbar/portal drift, doc sync | Open |
 
 **Fix-order notes:**
@@ -567,7 +605,9 @@ the GA-13 decision when updating `HOMEPAGE.md`.
   are lazily migrated to `roomPrivate/{roomId}`, and admin room writes
   now keep those fields in the staff-only doc.
 - GA-07's product decision landed in `DECISIONS-FEATURES.md #112`; GA-13
-  still needs a product decision before coding.
+  landed in `DECISIONS-FEATURES.md #113`.
+- GA-11's self-service provider linking was deferred to Phase 2 in
+  `DECISIONS-FEATURES.md #114`; Phase 1 now shows conflict messages.
 - GA-16's shared timezone helper landed in `cb13846`; AA-12 can consume
   the same helper when the admin audit batch is addressed.
 
