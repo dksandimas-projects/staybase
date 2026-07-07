@@ -45,10 +45,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 3 | **3** |
-| **SEV-2 (major)** | 4 | 0 | **4** |
+| **SEV-2 (major)** | 0 | 4 | **4** |
 | **SEV-3 (minor)** | 6 | 1 | **7** |
-| **SEV-4 (nit / doc drift)** | 5 | 0 | **5** |
-| **Total** | **15** | **4** | **19** |
+| **SEV-4 (nit / doc drift)** | 4 | 1 | **5** |
+| **Total** | **10** | **9** | **19** |
 
 The public marketing shell (heroes, content fallback chain, branding
 overrides, SEO meta, PWA), the rooms catalog, the corporate inquiry form,
@@ -80,6 +80,11 @@ also closed GA-14 because `/api/members/stays` now returns pending /
 payment-uploaded stays, matches by `memberId` OR guest email, and drives
 the member portal without client-side `bookings` reads.
 
+**2026-07-07 SEV-2 update:** GA-04, GA-05, GA-06, and GA-07 were fixed
+in `cb13846` (`fix: repair guest app sev2 audit issues`). The same batch
+also closed GA-16 by adding a shared `config.timezone`-aware date-key
+helper and replacing the UTC "today" call sites in guest date logic.
+
 ### Top 5 to fix first
 
 | # | ID | Why | File:line | Status |
@@ -87,8 +92,8 @@ the member portal without client-side `bookings` reads.
 | 1 | **GA-02** | Contact form is 100% dead — every submit 400s on the missing Turnstile token | `guest-app/src/pages/ContactPage.tsx:43-52`, `guest-app/server/apiRouter.ts:626-645` | Fixed in `2b5b187` |
 | 2 | **GA-01** | My Stays always "No stays yet"; early check-in can't load bookings — guest client queries a staff-only collection | `guest-app/src/pages/StaysPage.tsx:49-55`, `guest-app/src/pages/RewardsPage.tsx:95-101`, `firebase/firestore.rules:27` | Fixed in `2b5b187` |
 | 3 | **GA-03** | Early check-in submit fails even with GA-01 fixed — endpoint demands a guest email the member client never sends | `guest-app/src/pages/RewardsPage.tsx:132-136`, `guest-app/server/handlers/email.ts:277-285` | Fixed in `2b5b187` |
-| 4 | **GA-06** | Internal staff `remarks` publicly readable on every room doc — GOTCHAS-forbidden data exposure | `firebase/firestore.rules:17-24`, `guest-app/src/hooks/useRooms.ts:29` | Open |
-| 5 | **GA-04** | Homepage availability checker ships hardcoded June 2026 dates — now in the past, forwarded straight into `/book` | `guest-app/src/pages/HomePage.tsx:58-59` | Open |
+| 4 | **GA-06** | Internal staff `remarks` publicly readable on every room doc — GOTCHAS-forbidden data exposure | `firebase/firestore.rules:17-24`, `guest-app/src/hooks/useRooms.ts:29` | Fixed in `cb13846` |
+| 5 | **GA-04** | Homepage availability checker ships hardcoded June 2026 dates — now in the past, forwarded straight into `/book` | `guest-app/src/pages/HomePage.tsx:58-59` | Fixed in `cb13846` |
 
 ---
 
@@ -195,7 +200,7 @@ anonymous ref/email ownership path. Added
 ## SEV-2 — Major (4)
 
 ### GA-04 — Homepage availability checker seeded with hardcoded past dates
-**Status:** Open
+**Status:** Fixed in `cb13846`
 **File:** `guest-app/src/pages/HomePage.tsx:58-59`, `guest-app/src/components/DateRangePicker.tsx:14-16, 44`
 
 `checkIn`/`checkOut` are initialized to the literals `"2026-06-12"` /
@@ -213,8 +218,14 @@ availability noise / server-side validation errors at submit. Violates
 already does (and per GA-16, host the helpers in `shared/utils/dates.ts`
 computed in `config.timezone`, then reuse in both places).
 
+**Fixed in `cb13846`:** added `getDateKeyInTimezone` in
+`shared/utils/bookingDates.ts` and reused it for the homepage,
+booking/corporate booking defaults, date picker minimums, and early
+check-in date filtering. Added shared helper coverage plus
+`audit-guest-sev2-2026-07-07.test.ts`.
+
 ### GA-05 — Member enrollment failure is silent: signed-in users with no member doc, profile Save fails with no feedback
-**Status:** Open
+**Status:** Fixed in `cb13846`
 **File:** `guest-app/src/context/GuestAuthContext.tsx:50-62` (`registerMember` swallows), `:140-173` (signup + Google flows), `guest-app/src/pages/ProfilePage.tsx:45-72` (`handleSaveChanges` catch is console-only)
 
 `registerMember` logs `console.error` and returns on any failure —
@@ -234,8 +245,13 @@ error + retry), give `handleSaveChanges` a visible error state, and
 self-heal on portal mount (if `user && !memberProfile`, offer/trigger
 re-registration).
 
+**Fixed in `cb13846`:** `registerMember` now throws API failures, email
+signup surfaces those errors, Profile save has a visible error state,
+and signed-in non-members get an explicit "Join Rewards" recovery panel
+driven by `registerCurrentMember()`.
+
 ### GA-06 — Internal staff `remarks` are world-readable on every room document
-**Status:** Open
+**Status:** Fixed in `cb13846`
 **File:** `firebase/firestore.rules:17-24` (`rooms` read: `if true`), `guest-app/src/hooks/useRooms.ts:29` (client hydrates `remarks`)
 
 GOTCHAS: "Never expose `remarks` field to guest-app — room remarks are
@@ -254,8 +270,13 @@ staff-read rules), migrate existing values, and drop `remarks` from the
 guest `Room` mapping. Same pattern the vouchers/corporate-codes
 tightening followed in BI-08.
 
+**Fixed in `cb13846`:** introduced staff-only `roomPrivate/{roomId}`
+rules, moved admin `remarks` / `blockReason` reads and writes there,
+added lazy migration/deletion for legacy public fields, and stopped the
+guest room hook from hydrating public `remarks` or `blockReason`.
+
 ### GA-07 — Google sign-in silently enrolls guests into Spark Rewards without privacy consent
-**Status:** Open
+**Status:** Fixed in `cb13846`
 **File:** `guest-app/src/context/GuestAuthContext.tsx:161-173` (`signInWithGoogle` auto-registers), `guest-app/src/pages/SignUpPage.tsx:52-55, 264-284` (consent enforced on the email path only), `guest-app/src/pages/SignInPage.tsx:60-74`
 
 The email signup blocks account creation until the Privacy Policy /
@@ -274,6 +295,10 @@ record acceptance alongside registration, or (b) split sign-in from
 enrollment — after first Google sign-in, land non-members on the
 `/rewards` one-click enroll (which is an explicit act) instead of
 auto-registering. Record the choice in `DECISIONS-FEATURES.md`.
+
+**Fixed in `cb13846`:** chose option (b) for sign-in and explicit
+enrollment, with `/signup` enforcing consent before Google enrollment
+and `DECISIONS-FEATURES.md #112` recording the product decision.
 
 ---
 
@@ -406,7 +431,7 @@ base URL. (Copy *editability* is out of scope here — see the
 2026-07-01 content audit; these are the config-token violations.)
 
 ### GA-16 — "Today" computed in UTC across guest date logic
-**Status:** Open
+**Status:** Fixed in `cb13846`
 **File:** `guest-app/src/components/DateRangePicker.tsx:14-16`, `guest-app/src/pages/BookingPage.tsx:103-118`, `guest-app/src/pages/RewardsPage.tsx:94-103`
 
 Same class as AA-12 (admin audit): `new Date().toISOString()` is the
@@ -417,6 +442,10 @@ hotel timezone") misclassifies today's arrival. Fix once: hoist a
 `config.timezone`-aware day-key helper into `shared/utils/dates.ts`
 (AA-12 wants the same helper for the admin app) and use it in all three
 places + GA-04's defaults.
+
+**Fixed in `cb13846`:** `getDateKeyInTimezone(config.timezone, offset)`
+now supplies day keys for homepage, booking, corporate booking, date
+picker minimums, and early check-in filtering.
 
 ### GA-17 — Navbar drift: "Sign in" instead of the specced "Join Rewards" CTA; no member avatar photo
 **Status:** Open
@@ -522,9 +551,9 @@ the GA-13 decision when updating `HOMEPAGE.md`.
 | Batch | Findings | Theme | Status |
 |---|---|---|---|
 | 1 (`fix/audit-ga-sev1`) | GA-01, GA-02, GA-03 (+GA-14 rides along) | Member stays endpoint, contact-form Turnstile + honeypot, early check-in auth contract | Fixed in `2b5b187` |
-| 2 (`fix/audit-ga-sev2`) | GA-04, GA-05, GA-06, GA-07 | Date defaults, enrollment error surfacing, remarks migration, Google-consent decision | Open |
+| 2 (`fix/audit-ga-sev2`) | GA-04, GA-05, GA-06, GA-07 (+GA-16 rides along) | Date defaults, enrollment error surfacing, remarks migration, Google-consent decision | Fixed in `cb13846` |
 | 3 (`fix/audit-ga-sev3`) | GA-08 … GA-13 | Rate-limit keys, rewardsConfig wiring, member-state gating, account linking, modal carousel, homepage badge | Open |
-| 4 | GA-15 … GA-19 | White-label tokens, timezone helper, navbar/portal drift, doc sync | Open |
+| 4 | GA-15, GA-17 … GA-19 | White-label tokens, navbar/portal drift, doc sync | Open |
 
 **Fix-order notes:**
 - GA-01, GA-03, and GA-14 landed together in `2b5b187` — the new
@@ -534,14 +563,13 @@ the GA-13 decision when updating `HOMEPAGE.md`.
 - GA-02 landed in `2b5b187` using the shared `useTurnstileToken` pattern
   (explicit render + expired/error callbacks + reset) — do not
   reintroduce the BI-02 sentinel-token fallback.
-- GA-06 needs a small migration (copy existing `remarks` to the
-  staff-only location) before dropping the field from public docs, and
-  an admin-app touch (RoomsPage edit drawer reads/writes the new path).
-- GA-07 and GA-13 need product decisions first — record both in
-  `DECISIONS-FEATURES.md` before coding.
-- GA-16's shared timezone helper is the same one AA-12 (admin audit)
-  calls for — build once in `shared/utils/dates.ts`, consume from both
-  apps.
+- GA-06 landed in `cb13846`: existing public `remarks` / `blockReason`
+  are lazily migrated to `roomPrivate/{roomId}`, and admin room writes
+  now keep those fields in the staff-only doc.
+- GA-07's product decision landed in `DECISIONS-FEATURES.md #112`; GA-13
+  still needs a product decision before coding.
+- GA-16's shared timezone helper landed in `cb13846`; AA-12 can consume
+  the same helper when the admin audit batch is addressed.
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `535c176`.
