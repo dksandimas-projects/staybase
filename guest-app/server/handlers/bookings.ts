@@ -5,6 +5,10 @@ import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REG
 import { z } from "zod";
 import config from "../../../hotel.config";
 
+export function getConfiguredBookingRefPrefix() {
+  return config.bookingRefPrefix || "SI";
+}
+
 // Per BF-21 (booking-flow audit 2026-06-26): the public
 // self-service endpoints (`/api/bookings/lookup`,
 // `/api/bookings/cancel`) accept a bookingRef + guestEmail
@@ -255,6 +259,7 @@ export async function handleCreateBooking(req: any, res: any) {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let computedData: any = {};
+    let alreadyExistingBookingResponse: any = null;
     // Captured inside the transaction so the response payload
     // can surface the auto-assigned physical room.
     let assignedRoomId = "";
@@ -321,6 +326,26 @@ export async function handleCreateBooking(req: any, res: any) {
 
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
+      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      const existingBooking = await transaction.get(bookingDocRef);
+      if (existingBooking.exists) {
+        const existing = existingBooking.data() || {};
+        finalBookingRef = String(existing.bookingRef || "");
+        finalTotalPrice = Number(existing.totalPrice || 0);
+        assignedRoomId = String(existing.roomId || "");
+        assignedRoomNumber = String(existing.roomNumber || "");
+        alreadyExistingBookingResponse = {
+          bookingId,
+          bookingRef: finalBookingRef,
+          totalPrice: finalTotalPrice,
+          roomId: assignedRoomId,
+          roomNumber: assignedRoomNumber,
+          roomType: String(existing.roomType || roomType),
+          alreadyExists: true
+        };
+        return;
+      }
+
       // 1. Load the room type entry from `settings/hotelConfig`.
       // Per W3.6 + W3.7, rate matrix + max capacity live on the
       // type, not on individual room docs. Reading the type here
@@ -584,7 +609,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // lookup (read inside the transaction so a recently
         // deactivated voucher is caught by the re-validation
         // below).
-        const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
+        let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         let voucherDoc = await transaction.get(voucherRef);
         if (!voucherDoc.exists) {
           const voucherQuery = adminDb
@@ -594,6 +619,7 @@ export async function handleCreateBooking(req: any, res: any) {
           const voucherQuerySnap = await transaction.get(voucherQuery);
           if (!voucherQuerySnap.empty) {
             voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
           }
         }
         if (voucherDoc.exists) {
@@ -813,20 +839,6 @@ export async function handleCreateBooking(req: any, res: any) {
         updatedAt: new Date()
       };
 
-      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      // Per BF-03 (booking-flow audit 2026-06-26): the
-      // preallocated `bookingId` is a Firestore document ID
-      // generated client-side before payment-proof + discount-ID
-      // uploads. A client retry after a network blip where the
-      // original write committed would hand the same ID to the
-      // second request, and a blind `set` would clobber the prior
-      // booking (including any staff-applied status changes,
-      // the daily counter, and the bookingRef). The existence
-      // check + abort makes the create truly idempotent.
-      const existingBooking = await transaction.get(bookingDocRef);
-      if (existingBooking.exists) {
-        throw new Error("Booking already exists");
-      }
       transaction.set(bookingDocRef, newBooking);
 
       computedData = {
@@ -846,6 +858,12 @@ export async function handleCreateBooking(req: any, res: any) {
     // the confirmation page. The booking doc also stores both.
     // (assignedRoomId / assignedRoomNumber were captured inside the
     // transaction above.)
+    if (alreadyExistingBookingResponse) {
+      return res.status(200).json({
+        success: true,
+        data: alreadyExistingBookingResponse
+      });
+    }
 
     // Send acknowledgment email outside the transaction via Resend
     try {
@@ -879,15 +897,15 @@ export async function handleCreateBooking(req: any, res: any) {
       const alreadySent = freshBookingSnap.exists
         && (freshBookingSnap.data() as any)?.emailNotificationsSent?.staffNewBooking;
       if (!alreadySent) {
-        await adminDb.collection("bookings").doc(bookingId).update({
-          "emailNotificationsSent.staffNewBooking": new Date()
-        });
         await sendStaffNewBookingTrigger({
           ...computedData,
           bookingRef: finalBookingRef,
           guestEmail: computedData.email,
           paymentMethod,
           source: computedData.source || "online"
+        });
+        await adminDb.collection("bookings").doc(bookingId).update({
+          "emailNotificationsSent.staffNewBooking": new Date()
         });
       }
     } catch (staffEmailErr) {
@@ -1381,10 +1399,51 @@ export async function handleCancelBooking(req: any, res: any) {
       });
     }
 
-    await bookingDocumentRef.update({
-      status: "cancelled",
-      cancellationReason: validReason,
-      updatedAt: new Date()
+    await adminDb.runTransaction(async (transaction) => {
+      const freshBookingDoc = await transaction.get(bookingDocumentRef);
+      if (!freshBookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const freshBooking = freshBookingDoc.data() || {};
+      if (
+        freshBooking.status === "checked-in"
+        || freshBooking.status === "checked-out"
+        || freshBooking.status === "cancelled"
+      ) {
+        throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
+      }
+
+      const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
+      let voucherRef: any = null;
+      let voucherDoc: any = null;
+      if (appliedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(appliedVoucherCode);
+        voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb.collection("vouchers")
+            .where("code", "==", appliedVoucherCode)
+            .limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
+          }
+        }
+      }
+
+      transaction.update(bookingDocumentRef, {
+        status: "cancelled",
+        cancellationReason: validReason,
+        updatedAt: new Date()
+      });
+
+      if (voucherDoc?.exists && voucherRef) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: new Date()
+        });
+      }
     });
 
     try {

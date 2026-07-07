@@ -29,8 +29,9 @@
 > in `bcb1b38` (`fix/audit-bi-sev2`, shared VERSION 0.119.8); BI-12 + BI-16
 > from SEV-3 fixed in `f080ed1` (`fix/audit-bi-sev3`, shared VERSION
 > 0.119.9). Typecheck + full test suite (99 shared / 262 guest-api /
-> 580 admin) pass; API bundle rebuilt and committed. SEV-3 BI-13..BI-18
-> and SEV-4 BI-19..BI-23 remain open.
+> 580 admin) pass; API bundle rebuilt and committed. Batch 4 fixed
+> BI-13..BI-15, BI-17..BI-18, and BI-19..BI-23 in the current working
+> tree; typecheck + full suite pass and API bundle rebuilt.
 
 ---
 
@@ -40,9 +41,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 6 (`f20c0bb`) | **6** |
 | **SEV-2 (major)** | 0 | 5 (`bcb1b38`) | **5** |
-| **SEV-3 (minor)** | 5 | 2 (`f080ed1`) | **7** |
-| **SEV-4 (nit / doc drift)** | 5 | 0 | **5** |
-| **Total** | **10** | **13** | **23** |
+| **SEV-3 (minor)** | 0 | 7 (`f080ed1` + Batch 4) | **7** |
+| **SEV-4 (nit / doc drift)** | 0 | 5 (Batch 4) | **5** |
+| **Total** | **0** | **23** | **23** |
 
 The server side of the booking flow (`handleCreateBooking`, `handleCreateWalkin`,
 availability transaction, ref counter, discount stacking, idempotency, email
@@ -399,7 +400,8 @@ completed-in-the-past stay. Fix both: dynamic defaults + a server-side
 past-date rejection (with a small grace window for timezone skew).
 
 ### BI-13 — Wireframe placeholder copy shipped on Step 1
-**Status:** Open
+**Status:** **Fixed in Batch 4** — Step 1 copy now describes live availability
+instead of wireframe/static data.
 **File:** `guest-app/src/pages/BookingPage.tsx:1420`
 
 Step 1 subheading reads: "Choose dates, guests, and a room option. **This is
@@ -407,7 +409,9 @@ static wireframe data shaped for the future booking context.**" — leftover
 from the Phase 0.5 wireframe, visible to every guest.
 
 ### BI-14 — Corporate gate: "unlocked an extra 0% discount"
-**Status:** Open
+**Status:** **Fixed in Batch 4** — verified-state copy and the room-card badge
+now say "Negotiated rate applied"; the dead additional-percent price path was
+removed from the UI calculation.
 **File:** `guest-app/src/pages/CorporateBookingPage.tsx:691-693`
 
 `discountPercent` is always set to 0 on successful validation (decision #101
@@ -418,7 +422,8 @@ discount". Related dead code: the `discountPercent` rate math and the
 non-zero value. Replace with "Negotiated rate applied" per decision #101.
 
 ### BI-15 — Guest stepper hardcodes a max of 6 in both flows
-**Status:** Open
+**Status:** **Fixed in Batch 4** — both public and corporate guest steppers now
+clamp to the maximum `maxCapacity` across the live room type catalog.
 **File:** `guest-app/src/pages/BookingPage.tsx:567`, `CorporateBookingPage.tsx:382` (`Math.min(Math.max(n, 1), 6)`)
 
 The Step 1 guest stepper clamps at literal `6`. Room types are dynamic
@@ -449,7 +454,9 @@ Reuse/extend `GuestDetailsSchema` (note its field names differ —
 + `.max()` caps.
 
 ### BI-17 — Idempotent-retry conflict surfaces as a raw error; guest loses their booking ref
-**Status:** Open
+**Status:** **Fixed in Batch 4** — duplicate preallocated booking IDs now return
+`200` with the existing booking reference, total, assigned room, and
+`alreadyExists: true` without re-sending staff notifications.
 **File:** `guest-app/server/handlers/bookings.ts:615-618` (`throw new Error("Booking already exists")` → 500), `guest-app/src/pages/BookingPage.tsx:756-772`
 
 BF-03's existence check correctly prevents overwrites, but the retry UX is a
@@ -460,7 +467,8 @@ exists" and never learns their reference. Return the existing doc's
 the doc it just read) so the client can proceed to confirmation.
 
 ### BI-18 — Step 1 card totals ignore weekend rates
-**Status:** Open
+**Status:** **Fixed in Batch 4** — public Step 1 room cards now pass a
+weekend-aware `roomTotal` into the shared total calculator.
 **File:** `guest-app/src/pages/BookingPage.tsx:1511-1521`
 
 The per-type card totals (`roomOnlyTotal` / `breakfastTotal`) call
@@ -475,7 +483,9 @@ fine — corporate rates don't use weekend pricing.)
 ## SEV-4 — Nits & doc drift (5)
 
 ### BI-19 — Voucher usage not restored on cancellation
-**Status:** Open
+**Status:** **Fixed in Batch 4** — cancellation now decrements an applied
+voucher's `usageCount` inside the cancellation transaction (never below zero),
+and `VOUCHERS.md` documents the restore-on-cancel policy.
 **File:** `guest-app/server/handlers/bookings.ts:451-454` (increment), `handleCancelBooking` (no decrement)
 
 `usageCount` increments inside the create transaction but a cancelled booking
@@ -483,7 +493,9 @@ never releases the slot, so capped vouchers under-deliver. Decide policy
 (restore on cancel vs burn on use) and document it in `VOUCHERS.md`.
 
 ### BI-20 — Honeypot fake response hardcodes the `SI-` prefix
-**Status:** Open
+**Status:** **Fixed in Batch 4** — fake booking refs now use
+`config.bookingRefPrefix` via a lazy config load and the real 5-digit sequence
+shape.
 **File:** `guest-app/server/apiRouter.ts:415`
 
 The fake success ref is `` `SI-${year}0608-099` `` — hardcoded brand prefix
@@ -492,7 +504,9 @@ The fake success ref is `` `SI-${year}0608-099` `` — hardcoded brand prefix
 `config.bookingRefPrefix` + a 5-digit sequence.
 
 ### BI-21 — Upload size/type limits not enforced client-side
-**Status:** Open
+**Status:** **Fixed in Batch 4** — regular booking discount-ID/payment-proof,
+corporate payment-proof, and intercom store-proof uploads now enforce
+JPG/PNG/WEBP and 5MB before upload.
 **File:** `guest-app/src/pages/BookingPage.tsx:650-689`; spec `BOOKING-FLOW.md §Step 3` ("Accepts jpg/png/webp, max 5MB")
 
 Discount-ID and payment-proof pickers rely on `accept="image/*"` and
@@ -502,7 +516,9 @@ is only caught (if at all) by compression failure. Add an explicit size/type
 guard with a friendly error. Same applies to the intercom store-proof upload.
 
 ### BI-22 — Admin inbox lists message-less occupied rooms (spec drift)
-**Status:** Open
+**Status:** **Fixed in Batch 4** — existing UI behavior is retained and
+`INTERCOM-INBOX.md` now documents occupied message-less rooms as a staff
+greeting affordance.
 **File:** `admin-app/src/pages/IntercomInboxPage.tsx:184-187`; spec `INTERCOM-INBOX.md §Edge Cases` ("Room has no messages yet — do not show in conversation list")
 
 The thread list is `rooms.filter(room => room.status === "occupied" || intercoms[room.roomNumber])`,
@@ -512,7 +528,8 @@ but it contradicts the spec. Either update `INTERCOM-INBOX.md` to bless the
 behavior or filter to rooms with messages.
 
 ### BI-23 — `staff-new-booking` dedup marker written before the send
-**Status:** Open
+**Status:** **Fixed in Batch 4** — the dedup marker is written only after
+`sendStaffNewBookingTrigger` succeeds, preserving retryability if Resend fails.
 **File:** `guest-app/server/handlers/bookings.ts:666-684`
 
 The `emailNotificationsSent.staffNewBooking` timestamp is written **before**
@@ -626,7 +643,7 @@ Write the marker after a successful send, or accept at-most-once and note it.
 | 1 (`fix/audit-bi-sev1`) | BI-01, BI-02, BI-03, BI-04, BI-05, BI-06 | All SEV-1: Turnstile real end-to-end, corporate pricing/proof, mic policy | **Fixed in `f20c0bb`** |
 | 2 (`fix/audit-bi-sev2`) | BI-07, BI-08, BI-09, BI-10, BI-11 | All SEV-2: corporate flow correctness + rules tightening + input wiring | **Fixed in `bcb1b38`** |
 | 3 (`fix/audit-bi-sev3`) | BI-12, BI-16 | Server-side input validation + past-date rejection | **Fixed in `f080ed1`** |
-| 4 | BI-13, BI-14, BI-15, BI-17, BI-18, BI-19 … BI-23 | Copy, UX, nits, doc drift | Open |
+| 4 | BI-13, BI-14, BI-15, BI-17, BI-18, BI-19 … BI-23 | Copy, UX, nits, doc drift | **Fixed in Batch 4** |
 
 ## Status legend
 - **Open** — no fix landed; the finding is reproducible on `dev` @ `c593560`.

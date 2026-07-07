@@ -188853,6 +188853,9 @@ async function handleEmailTrigger(req, res, action) {
 }
 
 // server/handlers/bookings.ts
+function getConfiguredBookingRefPrefix() {
+  return hotel_config_default.bookingRefPrefix || "SI";
+}
 var lookupSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
   guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
@@ -188950,6 +188953,7 @@ async function handleCreateBooking(req, res) {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
     let computedData = {};
+    let alreadyExistingBookingResponse = null;
     let assignedRoomId = "";
     let assignedRoomNumber = "";
     let detectedMemberId = null;
@@ -188982,6 +188986,25 @@ async function handleCreateBooking(req, res) {
       console.warn("ID token verify failed; continuing as anonymous booking:", memberTokenError.message);
     }
     await adminDb.runTransaction(async (transaction) => {
+      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      const existingBooking = await transaction.get(bookingDocRef);
+      if (existingBooking.exists) {
+        const existing = existingBooking.data() || {};
+        finalBookingRef = String(existing.bookingRef || "");
+        finalTotalPrice = Number(existing.totalPrice || 0);
+        assignedRoomId = String(existing.roomId || "");
+        assignedRoomNumber = String(existing.roomNumber || "");
+        alreadyExistingBookingResponse = {
+          bookingId,
+          bookingRef: finalBookingRef,
+          totalPrice: finalTotalPrice,
+          roomId: assignedRoomId,
+          roomNumber: assignedRoomNumber,
+          roomType: String(existing.roomType || roomType),
+          alreadyExists: true
+        };
+        return;
+      }
       const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
       const hotelConfigDoc = await transaction.get(hotelConfigRef);
       if (!hotelConfigDoc.exists) {
@@ -189119,13 +189142,14 @@ async function handleCreateBooking(req, res) {
       let appliedVoucherCode = "";
       if (voucherCode && !corporateDetails.isCorporate) {
         const formattedCode = voucherCode.trim().toUpperCase();
-        const voucherRef = adminDb.collection("vouchers").doc(formattedCode);
+        let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         let voucherDoc = await transaction.get(voucherRef);
         if (!voucherDoc.exists) {
           const voucherQuery = adminDb.collection("vouchers").where("code", "==", formattedCode).limit(1);
           const voucherQuerySnap = await transaction.get(voucherQuery);
           if (!voucherQuerySnap.empty) {
             voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
           }
         }
         if (voucherDoc.exists) {
@@ -189284,11 +189308,6 @@ async function handleCreateBooking(req, res) {
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
-      const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
-      const existingBooking = await transaction.get(bookingDocRef);
-      if (existingBooking.exists) {
-        throw new Error("Booking already exists");
-      }
       transaction.set(bookingDocRef, newBooking);
       computedData = {
         guestName,
@@ -189301,6 +189320,12 @@ async function handleCreateBooking(req, res) {
         totalPrice
       };
     });
+    if (alreadyExistingBookingResponse) {
+      return res.status(200).json({
+        success: true,
+        data: alreadyExistingBookingResponse
+      });
+    }
     try {
       await sendBookingTrigger("booking-submitted", {
         ...computedData,
@@ -189315,15 +189340,15 @@ async function handleCreateBooking(req, res) {
       const freshBookingSnap = await adminDb.collection("bookings").doc(bookingId).get();
       const alreadySent = freshBookingSnap.exists && freshBookingSnap.data()?.emailNotificationsSent?.staffNewBooking;
       if (!alreadySent) {
-        await adminDb.collection("bookings").doc(bookingId).update({
-          "emailNotificationsSent.staffNewBooking": /* @__PURE__ */ new Date()
-        });
         await sendStaffNewBookingTrigger({
           ...computedData,
           bookingRef: finalBookingRef,
           guestEmail: computedData.email,
           paymentMethod,
           source: computedData.source || "online"
+        });
+        await adminDb.collection("bookings").doc(bookingId).update({
+          "emailNotificationsSent.staffNewBooking": /* @__PURE__ */ new Date()
         });
       }
     } catch (staffEmailErr) {
@@ -189687,10 +189712,42 @@ async function handleCancelBooking(req, res) {
         error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
       });
     }
-    await bookingDocumentRef.update({
-      status: "cancelled",
-      cancellationReason: validReason,
-      updatedAt: /* @__PURE__ */ new Date()
+    await adminDb.runTransaction(async (transaction) => {
+      const freshBookingDoc = await transaction.get(bookingDocumentRef);
+      if (!freshBookingDoc.exists) {
+        throw new Error("Booking not found.");
+      }
+      const freshBooking = freshBookingDoc.data() || {};
+      if (freshBooking.status === "checked-in" || freshBooking.status === "checked-out" || freshBooking.status === "cancelled") {
+        throw new Error(`Booking cannot be cancelled because its status is already ${freshBooking.status}. Please contact the front desk.`);
+      }
+      const appliedVoucherCode = String(freshBooking.voucherCode || "").trim().toUpperCase();
+      let voucherRef = null;
+      let voucherDoc = null;
+      if (appliedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(appliedVoucherCode);
+        voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb.collection("vouchers").where("code", "==", appliedVoucherCode).limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
+          }
+        }
+      }
+      transaction.update(bookingDocumentRef, {
+        status: "cancelled",
+        cancellationReason: validReason,
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+      if (voucherDoc?.exists && voucherRef) {
+        const voucherData = voucherDoc.data() || {};
+        transaction.update(voucherRef, {
+          usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
     });
     try {
       await sendBookingTrigger("booking-cancelled", {
@@ -192090,7 +192147,7 @@ async function handler(req, res) {
         success: true,
         data: {
           bookingId: "hp_" + Math.random().toString(36).substring(2, 9),
-          bookingRef: `SI-${(/* @__PURE__ */ new Date()).getFullYear()}0608-099`
+          bookingRef: `${getConfiguredBookingRefPrefix()}-${(/* @__PURE__ */ new Date()).getFullYear()}0608-00099`
         }
       });
     }

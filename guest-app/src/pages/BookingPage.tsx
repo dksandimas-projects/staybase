@@ -51,6 +51,8 @@ import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 // Per BF-26 (booking-flow audit 2026-06-26): the previous module-level
 // constants ignored the live `breakfastConfig` (rate + on/off toggle).
 // The Step 1 card price + the Room + Breakfast option therefore
@@ -274,6 +276,10 @@ export function BookingPage() {
         (entry) => entry.type.maxCapacity >= guests && entry.availableCount > 0
       ),
     [typeAvailability, guests]
+  );
+  const maxGuestCapacity = useMemo(
+    () => Math.max(1, ...roomTypes.map((type) => Number(type.maxCapacity) || 0)),
+    [roomTypes]
   );
 
   // Per `plan/features/SETTINGS.md §Payment Methods` — the booking
@@ -503,9 +509,19 @@ export function BookingPage() {
   }
 
   function updateGuests(nextGuests: number) {
-    const safeGuests = Math.min(Math.max(nextGuests, 1), 6);
+    const safeGuests = Math.min(Math.max(nextGuests, 1), maxGuestCapacity);
     setGuests(safeGuests);
     updateDateParams(checkIn, checkOut, safeGuests);
+  }
+
+  function validateUploadFile(file: File) {
+    if (!ACCEPTED_UPLOAD_TYPES.has(file.type)) {
+      return "Please upload a JPG, PNG, or WEBP image.";
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return "Please upload an image that is 5MB or smaller.";
+    }
+    return "";
   }
 
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
@@ -609,7 +625,14 @@ export function BookingPage() {
   async function handleDiscountIdChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const validationError = validateUploadFile(file);
+      if (validationError) {
+        setSubmitError(validationError);
+        e.target.value = "";
+        return;
+      }
       setUploadingDiscountId(true);
+      setSubmitError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${compressed.file.name}`);
@@ -630,7 +653,14 @@ export function BookingPage() {
   async function handlePaymentProofChange(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      const validationError = validateUploadFile(file);
+      if (validationError) {
+        setSubmitError(validationError);
+        e.target.value = "";
+        return;
+      }
       setUploadingPaymentProof(true);
+      setSubmitError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
@@ -706,6 +736,7 @@ export function BookingPage() {
       const serverTotal = typeof result.data?.totalPrice === "number"
         ? result.data.totalPrice
         : null;
+      const confirmedGuests = Number(guestDetails.guestCount) || guests;
       const confirmParams = new URLSearchParams({
         bookingRef: result.data.bookingRef,
         roomType: result.data.roomType || selectedTypeEntry?.value || "",
@@ -713,7 +744,7 @@ export function BookingPage() {
         roomNumber: result.data.roomNumber || "",
         checkIn,
         checkOut,
-        guests: String(guests),
+        guests: String(confirmedGuests),
         paymentMethod,
         total: String(serverTotal ?? total)
       });
@@ -1078,7 +1109,7 @@ export function BookingPage() {
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPG, PNG, WEBP up to 5MB</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
                           onChange={handleDiscountIdChange}
                           className="sr-only"
                           disabled={uploadingDiscountId}
@@ -1245,7 +1276,7 @@ export function BookingPage() {
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
                         <input
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
                           onChange={handlePaymentProofChange}
                           className="sr-only"
                           disabled={uploadingPaymentProof}
@@ -1388,7 +1419,7 @@ export function BookingPage() {
             <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select your stay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
-              Choose dates, guests, and a room option. This is static wireframe data shaped for the future booking context.
+              Choose dates, guests, and a room option. We will show room types available for your stay.
             </p>
           </div>
           <div className="rounded-card bg-white p-4 text-sm shadow-sm ring-1 ring-gray-200">
@@ -1481,11 +1512,13 @@ export function BookingPage() {
                   : 0;
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
-                  numNights: nights
+                  numNights: nights,
+                  roomTotal: calculateWeekendAwareRoomTotal(type, checkIn, nights)
                 });
                 const breakfastTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
+                  roomTotal: calculateWeekendAwareRoomTotal(type, checkIn, nights),
                   numGuests: guests,
                   breakfastRate: liveBreakfastRate,
                   hasBreakfast: true
@@ -1599,6 +1632,25 @@ export function BookingPage() {
       </div>
     </>
   );
+}
+
+function calculateWeekendAwareRoomTotal(
+  type: { pricePerNight?: number; weekendRate?: number },
+  checkIn: string,
+  nights: number
+) {
+  const baseRate = Number(type.pricePerNight) || 0;
+  const weekendRate = Number(type.weekendRate) || 0;
+  let total = 0;
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  for (let i = 0; i < nights; i++) {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + i);
+    const day = date.getUTCDay();
+    const isWeekend = day === 0 || day === 6;
+    total += isWeekend && weekendRate ? weekendRate : baseRate;
+  }
+  return total;
 }
 
 function BookingHeader({ backTo }: { backTo: string }) {
