@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAdmin, Voucher, CorporateCode } from "../context/AdminContext";
+import type { SeasonalRateOverride } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
@@ -22,7 +23,7 @@ export function RatesPage() {
     addCorporateCode,
     toggleCorporateCodeActive,
     deleteCorporateCode,
-    hotelConfig,
+    seasonalRateOverrides,
     breakfastConfig,
     updateSettings,
     updateRoomType,
@@ -72,6 +73,12 @@ export function RatesPage() {
   const [dirtyRateFields, setDirtyRateFields] = useState<Set<string>>(() => new Set());
   const [roomRates, setRoomRates] = useState<Record<string, string>>({});
   const [dirtyCorporateRateTypes, setDirtyCorporateRateTypes] = useState<Set<string>>(() => new Set());
+  const [seasonalName, setSeasonalName] = useState("");
+  const [seasonalStart, setSeasonalStart] = useState("");
+  const [seasonalEnd, setSeasonalEnd] = useState("");
+  const [seasonalRate, setSeasonalRate] = useState("");
+  const [seasonalRoomTypes, setSeasonalRoomTypes] = useState<string[]>([]);
+  const [isSavingSeasonal, setIsSavingSeasonal] = useState(false);
 
   // Keep form buffers synced with Firestore-backed room types until the
   // admin edits a field. This prevents deploy-time defaults from clobbering
@@ -149,6 +156,82 @@ export function RatesPage() {
     } else {
       setApplicableRooms(prev => [...prev, typeVal]);
     }
+  };
+
+  const saveSeasonalOverrides = async (next: SeasonalRateOverride[]) => {
+    await updateSettings("hotelConfig", {
+      seasonalRateOverrides: next,
+      updatedAt: new Date()
+    });
+  };
+
+  const toggleSeasonalRoomType = (typeValue: string) => {
+    setSeasonalRoomTypes(prev =>
+      prev.includes(typeValue)
+        ? prev.filter(value => value !== typeValue)
+        : [...prev, typeValue]
+    );
+  };
+
+  const handleSeasonalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!seasonalName.trim() || !seasonalStart || !seasonalEnd || !seasonalRate) {
+      toast.warning("Missing seasonal rate details", "Add a name, date range, and nightly rate.");
+      return;
+    }
+    if (seasonalEnd < seasonalStart) {
+      toast.warning("Invalid date range", "End date must be on or after the start date.");
+      return;
+    }
+
+    const rate = Number(seasonalRate);
+    if (!Number.isFinite(rate) || rate < 0) {
+      toast.warning("Invalid nightly rate", "Enter a zero or positive amount.");
+      return;
+    }
+
+    setIsSavingSeasonal(true);
+    try {
+      const override: SeasonalRateOverride = {
+        id: `seasonal-${Date.now()}`,
+        name: seasonalName.trim(),
+        startDate: seasonalStart,
+        endDate: seasonalEnd,
+        rate,
+        roomTypeValues: seasonalRoomTypes,
+        isActive: true
+      };
+      await saveSeasonalOverrides([override, ...seasonalRateOverrides]);
+      setSeasonalName("");
+      setSeasonalStart("");
+      setSeasonalEnd("");
+      setSeasonalRate("");
+      setSeasonalRoomTypes([]);
+      toast.success("Seasonal rate added", "New bookings in that date range will use the override.");
+    } catch (err) {
+      console.error("Failed to save seasonal rate:", err);
+      toast.error("Seasonal rate not saved", err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsSavingSeasonal(false);
+    }
+  };
+
+  const toggleSeasonalActive = async (id: string) => {
+    const next = seasonalRateOverrides.map((override) =>
+      override.id === id ? { ...override, isActive: !override.isActive } : override
+    );
+    await saveSeasonalOverrides(next);
+  };
+
+  const deleteSeasonalOverride = async (id: string) => {
+    await saveSeasonalOverrides(seasonalRateOverrides.filter((override) => override.id !== id));
+  };
+
+  const formatSeasonalRoomScope = (override: SeasonalRateOverride) => {
+    if (override.roomTypeValues.length === 0) return "All room types";
+    return override.roomTypeValues
+      .map((value) => roomTypes.find((type) => type.value === value)?.shortLabel || value)
+      .join(", ");
   };
 
   const handleVoucherSubmit = async (e: React.FormEvent) => {
@@ -640,6 +723,150 @@ export function RatesPage() {
               </p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1 lg:max-w-xs">
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5">
+              <Calendar size={18} className="text-primary" />
+              Seasonal Rate Overrides
+            </h2>
+            <p className="text-[10px] text-gray-500 leading-relaxed">
+              Overrides apply to new standard and walk-in bookings for each stay night in range. Corporate negotiated rates stay unchanged.
+            </p>
+          </div>
+
+          <form onSubmit={handleSeasonalSubmit} className="grid flex-1 gap-3 lg:grid-cols-12">
+            <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 lg:col-span-3">
+              Name
+              <input
+                type="text"
+                value={seasonalName}
+                onChange={(e) => setSeasonalName(e.target.value)}
+                placeholder="Holy Week"
+                className="min-h-[44px] rounded border border-gray-200 px-3 text-xs font-medium normal-case tracking-normal text-gray-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 lg:col-span-2">
+              Start
+              <input
+                type="date"
+                value={seasonalStart}
+                onChange={(e) => setSeasonalStart(e.target.value)}
+                className="min-h-[44px] rounded border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 lg:col-span-2">
+              End
+              <input
+                type="date"
+                value={seasonalEnd}
+                onChange={(e) => setSeasonalEnd(e.target.value)}
+                className="min-h-[44px] rounded border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 lg:col-span-2">
+              Nightly Rate
+              <div className="relative flex items-center">
+                <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={seasonalRate}
+                  onChange={(e) => setSeasonalRate(e.target.value)}
+                  className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs font-medium text-gray-900"
+                />
+              </div>
+            </label>
+            <button
+              type="submit"
+              disabled={isSavingSeasonal}
+              className="mt-auto inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 lg:col-span-3"
+            >
+              <Plus size={14} />
+              {isSavingSeasonal ? "Adding…" : "Add Override"}
+            </button>
+
+            <div className="lg:col-span-12">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">Room Type Scope</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSeasonalRoomTypes([])}
+                  className={`min-h-[36px] rounded-lg px-3 text-[11px] font-semibold transition ${
+                    seasonalRoomTypes.length === 0
+                      ? "bg-primary text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  All types
+                </button>
+                {roomTypes.map((type) => (
+                  <button
+                    key={type.value}
+                    type="button"
+                    onClick={() => toggleSeasonalRoomType(type.value)}
+                    className={`min-h-[36px] rounded-lg px-3 text-[11px] font-semibold transition ${
+                      seasonalRoomTypes.includes(type.value)
+                        ? "bg-primary text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {type.shortLabel || type.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div className="mt-5 border-t border-gray-100 pt-4">
+          {seasonalRateOverrides.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-center text-xs font-semibold text-gray-500">
+              No seasonal overrides configured yet.
+            </p>
+          ) : (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {seasonalRateOverrides.map((override) => (
+                <div key={override.id} className="rounded-lg border border-gray-150 bg-gray-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-bold text-gray-900">{override.name}</p>
+                        <StatusBadge
+                          label={override.isActive ? "Active" : "Inactive"}
+                          status={override.isActive ? "confirmed" : "dirty"}
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {override.startDate} to {override.endDate} · {formatSeasonalRoomScope(override)}
+                      </p>
+                    </div>
+                    <p className="shrink-0 text-sm font-bold text-gray-950">{formatPrice(override.rate)}</p>
+                  </div>
+                  <div className="mt-3 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleSeasonalActive(override.id)}
+                      className="min-h-[36px] rounded bg-white px-3 text-[11px] font-semibold text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-gray-100"
+                    >
+                      {override.isActive ? "Deactivate" : "Activate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteSeasonalOverride(override.id)}
+                      className="inline-flex min-h-[36px] items-center gap-1 rounded bg-red-50 px-3 text-[11px] font-semibold text-red-700 hover:bg-red-100"
+                    >
+                      <Trash2 size={12} />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

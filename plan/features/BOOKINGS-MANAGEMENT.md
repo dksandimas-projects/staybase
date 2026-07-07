@@ -90,6 +90,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [x] Checkout confirmation guard — warns if staff tries to check out with balance still due
 - [x] Walk-in / manual booking button — "New Booking" CTA opens a creation modal/drawer
 - [x] Walk-in booking form — standard walk-in fields and immediate check-in option
+- [x] Calendar view — `/calendar` renders a live room × date grid for active rooms, occupying bookings, and blocked rooms. Staff can click a start/end range on one room, then block or book the selected dates. Booked ranges open a booking drawer with full-booking link, cancel action, and server-backed move/reschedule transaction. Blocked ranges open a block drawer with edit/unblock actions. Active `roomBlocks` render with strikethrough styling.
 - [ ] Pagination or infinite scroll on booking table
 - [ ] Loading skeleton on initial data fetch
 

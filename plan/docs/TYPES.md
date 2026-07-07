@@ -69,6 +69,33 @@ RoomType {
   weekendRate: number           // applied for stays including Sat/Sun nights
   corporateRate: number         // flat public rate used at /corporate/book
 }
+
+SeasonalRateOverride {
+  id: string
+  name: string
+  startDate: string             // yyyy-mm-dd, inclusive
+  endDate: string               // yyyy-mm-dd, inclusive
+  rate: number
+  roomTypeValues: string[]      // empty = all room types
+  isActive: boolean
+}
+
+RoomBlock {
+  id: string
+  roomId: string
+  roomNumber: string
+  roomType: string
+  startDate: string              // yyyy-mm-dd, inclusive
+  endDate: string                // yyyy-mm-dd, exclusive
+  reason: string
+  notes: string
+  status: "active" | "cancelled"
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  cancelledAt: string | null
+  cancelledBy: string | null
+}
 ```
 
 ---

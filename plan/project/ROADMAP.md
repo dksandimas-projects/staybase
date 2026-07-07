@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 8, 2026 (completed Phase 12: email previews, breakfast menu CRUD, dashboard intercom widget, and walk-in scrollability fix)
+> Last updated: July 8, 2026 (completed Phase 12: email previews, breakfast menu CRUD, dashboard intercom widget, walk-in scrollability fix, booking calendar, and seasonal rate overrides)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -980,8 +980,8 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ Bugfix: Walk-in Booking Modal Scrollability — fix layout issue where the Create Walk-in Booking modal is not scrollable and gets cut off on smaller screens. See `plan/bugs/walkin-booking-modal-scrollability.md`.
 - ✅ Early check-in approval workflow — persist member early check-in requests on the booking (`earlyCheckIn` map), approve/decline from the booking drawer, guest confirmation email + status in My Stays/My Rewards, arrivals-list badge. Today the request ends at a staff notification email with no record on the booking. Full spec: `plan/features/SPARK-REWARDS.md §Phase 2 — Early Check-In Approval Workflow`
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
-- ⏸ Calendar view for bookings (visual room × date grid)
-- ⏸ Seasonal rate overrides
+- ✅ Calendar view for bookings (visual room × date grid)
+- ✅ Seasonal rate overrides
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
 

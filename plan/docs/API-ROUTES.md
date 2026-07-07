@@ -77,10 +77,23 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | `/api/bookings/checkin` | POST | Staff | Flip `confirmed`/`payment-confirmed` → `checked-in` inside a transaction; validates the assigned room is not blocked or occupied by another checked-in booking, then atomically marks the room `occupied` |
 | `/api/bookings/checkout` | POST | Staff | Flip `checked-in` → `checked-out`; atomically frees the room (`status: "available"`, `housekeepingStatus: "dirty"`) and, if the booking is linked to a Spark Rewards member (or the guest email matches an existing member), awards points per `settings/rewardsConfig.earningMode` (`per-spend` or `per-booking`) and writes a `members/{uid}/pointsHistory` entry. Falls back gracefully (no points) if points are disabled. |
 | `/api/bookings/reject-discount` | POST | Staff | Reject Senior/PWD discount ID — restores `totalPrice`, sets rejection fields, triggers discount-rejected email |
+| `/api/bookings/reschedule` | POST | Staff | Move a booking to a new room/date range inside a transaction. Keeps original pricing locked, rejects terminal statuses, overlapping bookings, and active room blocks, and appends `rescheduleHistory[]`. |
 
 Booking creation MUST use a Firestore transaction to prevent double-booking. Public online and corporate bookings use `/api/bookings/create`; staff walk-in/manual bookings use `/api/bookings/create-walkin`. Both routes must perform room active/blocked checks, overlapping booking checks, and booking reference generation inside the transaction. Public online and corporate clients preallocate the Firestore booking document ID before Storage uploads and pass that ID to `/api/bookings/create`; the API creates the document at that exact ID while generating only the guest-facing booking reference inside the transaction. See `plan/features/AVAILABILITY-LOCKING.md`.
 
 Existing booking documents may still receive authenticated staff/admin operational updates directly from the admin app where Firestore rules allow it. Use booking API routes when the mutation creates a booking, appends audit/payment records, sends email, validates guest ownership, or changes money/member balances.
+
+---
+
+### Room Block Routes (`/api/room-blocks/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/room-blocks/create` | POST | Staff | Create an active calendar block for a room/date range; rejects overlap with active bookings or active room blocks |
+| `/api/room-blocks/update` | POST | Staff | Update an active room block's room/date/reason/notes with the same conflict checks |
+| `/api/room-blocks/cancel` | POST | Staff | Mark a room block cancelled so the dates become bookable again |
+
+Room block routes are the sanctioned path for calendar blocking. Do not create `roomBlocks` directly from the client.
 
 ---
 
