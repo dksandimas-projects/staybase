@@ -167,6 +167,64 @@ These are documented here for awareness. Define before starting Phase 2:
 
 ---
 
+## Phase 2 — Early Check-In Approval Workflow (specced 2026-07-08 — not building yet)
+
+> Closes the loop on the Phase 1 early check-in perk. Today the request ends at a staff notification email: nothing is persisted, there is no approve/decline action, nothing reflects on the booking, and the guest never gets an in-system answer. This spec makes the request a first-class booking attribute with a staff decision and a guest-visible outcome.
+> Roadmap entry: `plan/project/ROADMAP.md §Phase 12`.
+
+### Data model
+
+- [ ] New optional `earlyCheckIn` map on the `Booking` document (add to `plan/docs/TYPES.md` and `shared/types/index.ts` when building):
+  - `status` — `"requested" | "approved" | "declined"`
+  - `requestedTime` — guest's requested arrival time (string, e.g. "11:00")
+  - `notes` — guest note from the request form
+  - `requestedAt` — timestamp
+  - `resolvedAt` — timestamp, null while `requested`
+  - `resolvedBy` — staff display name (never log or expose staff UID to guests)
+  - `staffNote` — optional note shown to the guest (e.g. "Room ready from 12:00")
+- [ ] Absent map = no request ever made. One request per booking: re-submission while `requested` overwrites time/notes and re-notifies staff; re-submission after `declined` is allowed (resets to `requested`); blocked after `approved` (guest sees the approved state instead)
+
+### Request submission (changes to existing flow)
+
+- [ ] `/api/email/early-checkin-request` additionally persists the `earlyCheckIn` map onto the booking via Admin SDK in the same handler — guest client still never writes `bookings/` directly (per `plan/docs/GOTCHAS.md`)
+- [ ] **Tighten auth**: once the request writes to the booking doc, require a verified Firebase ID token (drop the tokenless `bookingId` + `guestEmail` fallback for this action) — the perk is member-only anyway, and a write should not be reachable via the public lookup pattern
+- [ ] Reject the request if booking status is not `confirmed` (e.g. `cancelled`, `checked-in`, `checked-out`) or if check-in date has passed
+- [ ] Staff notification email unchanged (existing `earlyCheckinRequestEmail` template)
+
+### Admin — booking drawer
+
+- [ ] "Early check-in" panel in the booking detail drawer, shown only when `booking.earlyCheckIn` exists — requested time, guest notes, requested-at, current status badge
+- [ ] Approve / Decline actions (front desk + admin roles) — Approve captures optional confirmed time + staff note; Decline captures optional reason (stored in `staffNote`)
+- [ ] Resolution goes through an authenticated staff action in the existing API catch-all (no new Vercel function — see `plan/docs/VERCEL-FUNCTION-LIMIT.md`), which updates the booking and fires the guest email server-side with a server-controlled recipient (`booking.guestEmail`)
+- [ ] Early check-in badge on the booking row / arrivals list for `approved` bookings so front desk sees it on the check-in day
+
+### Guest visibility
+
+- [ ] Guest confirmation email on resolve — approved (with confirmed time + staff note) or declined (with reason if given); new template in the email handler, staff-triggered only
+- [ ] My Stays + My Rewards show the request status on the relevant booking — "Early check-in requested" / "Early check-in approved — from {time}" / "Early check-in unavailable"; `GET /api/members/stays` includes the `earlyCheckIn` map in its guest-safe booking subset
+- [ ] Rewards portal "Request Early Check-In" modal reflects an existing request instead of allowing a duplicate submission (per the one-request-per-booking rule above)
+
+### Edge cases
+
+- [ ] Booking cancelled after request — no special handling; the drawer panel disappears with the cancelled booking flow, no email fired
+- [ ] Check-in day arrives with status still `requested` — no auto-resolution; guest UI shows "Not yet confirmed — please ask the front desk on arrival"
+- [ ] Never log PII in the request/resolve handlers (per Hard Rules)
+- [ ] Existing rate limit on the email endpoint continues to cover request submission
+
+### Out of scope
+
+- The dormant `isEarlyCheckInRequest` intercom-message flag stays dormant — intercom delivery remains deferred per `plan/features/INTERCOM-INBOX.md §Preserve early check-in request metadata`. This workflow is email + booking-document only.
+
+### Manual QA (when built)
+
+- [ ] Member requests early check-in → `earlyCheckIn` map appears on the booking, staff email received
+- [ ] Approve from drawer → guest email received, My Stays shows approved state with time
+- [ ] Decline from drawer → guest email received, portal allows re-request
+- [ ] Non-member token / tokenless request → rejected
+- [ ] Request against a cancelled or past booking → rejected
+
+---
+
 ## Edge Cases & States
 
 - [ ] **Guest books anonymously then registers with same email** — on registration, query `bookings` where `guestEmail == member.email`, update all matching bookings with `memberId`; all previous stays immediately appear in My Stays
