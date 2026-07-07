@@ -209,6 +209,7 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       // from attached access code > room.corporateRate >
       // room.pricePerNight.
       let ratePerNight = Number(roomData.pricePerNight || 0);
+      let codeUsageUpdate: { ref: any; data: any } | null = null;
       if (ratePerNightOverride !== undefined && ratePerNightOverride !== null) {
         ratePerNight = ratePerNightOverride;
       } else if (inquiryData.accessCodeId) {
@@ -229,10 +230,20 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
           // Increment in the same transaction so capped
           // codes used via the convert path also stop working
           // once their cap is hit.
-          transaction.update(codeRef, {
-            usageCount: (codeData.usageCount || 0) + 1,
-            updatedAt: new Date()
-          });
+          //
+          // Per BR-06 (booking-flow audit 2026-07-08): defer
+          // the write until after the counter read below. The
+          // Firestore Admin SDK rejects reads after queued
+          // writes, so writing here made every conversion of
+          // a code-attached inquiry fail (same class as BR-01
+          // in `handleCreateBooking`).
+          codeUsageUpdate = {
+            ref: codeRef,
+            data: {
+              usageCount: (codeData.usageCount || 0) + 1,
+              updatedAt: new Date()
+            }
+          };
         } else if (roomData.corporateRate) {
           ratePerNight = roomData.corporateRate;
         }
@@ -251,6 +262,15 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       let sequence = 1;
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
+      }
+
+      // BR-06: all transaction reads are done — apply the queued
+      // writes together (code usage, counter, then the booking +
+      // inquiry writes below).
+      if (codeUsageUpdate) {
+        transaction.update(codeUsageUpdate.ref, codeUsageUpdate.data);
+      }
+      if (counterDoc.exists) {
         transaction.update(counterRef, { count: sequence });
       } else {
         transaction.set(counterRef, { count: 1 });
