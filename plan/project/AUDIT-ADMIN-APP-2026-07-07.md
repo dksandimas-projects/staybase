@@ -33,9 +33,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 3 | **3** |
 | **SEV-2 (major)** | 0 | 6 | **6** |
-| **SEV-3 (minor)** | 12 | 0 | **12** |
+| **SEV-3 (minor)** | 0 | 12 | **12** |
 | **SEV-4 (nit / doc drift)** | 11 | 0 | **11** |
-| **Total** | **23** | **9** | **32** |
+| **Total** | **11** | **21** | **32** |
 
 > **Fix update — 2026-07-07:** The three SEV-1 findings were fixed in
 > `9627f8a` (`fix: address critical admin audit bugs`), merged to `dev`
@@ -57,6 +57,16 @@
 > payments, arrivals, departures, and recent bookings. Regression coverage
 > was added in
 > `admin-app/src/__tests__/audit-admin-sev2-2026-07-07.test.ts`.
+>
+> **Fix update — 2026-07-07:** The twelve SEV-3 findings were fixed on
+> `fix/audit-aa-sev3`: restricted route normalization, mobile sign-out,
+> hotel-local booking dates, full backup export, report print/PDF action,
+> room edit/delete safeguards, room-type delete guard, voucher/corporate
+> create integrity, `payment-confirmed` flow, rewards redemption, white-
+> label chart/PDF colors, settings snapshot merge safety, API URL fallback,
+> dashboard metric cleanup, weekend labels, identity literals, and auth-
+> gated listeners. Regression coverage was added in
+> `admin-app/src/__tests__/audit-admin-sev3-2026-07-07.test.ts`.
 
 The admin shell (auth, routing, responsive layout, focus traps, toasts,
 DataTable), the QR management page, the intercom inbox, store order
@@ -337,7 +347,7 @@ shows the fabricated "+8% from last week" trend.
 ## SEV-3 — Minor (12)
 
 ### AA-10 — Restricted-route overlay bypassed by trailing slash / casing; UI-only guard
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/components/AdminLayout.tsx:52-54`
 
 `restrictedPaths.includes(location.pathname)` is an exact string match.
@@ -350,7 +360,7 @@ the full Settings UI instead of the access-denied state. Firestore rules
 pathname (strip trailing slash, lowercase) before checking.
 
 ### AA-11 — No sign-out on mobile
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/components/AdminLayout.tsx:111-119`
 
 The mobile header's account button (`aria-label="Account and sign out"`)
@@ -361,7 +371,7 @@ sign out at all. Session persistence is `browserSessionPersistence`
 shared front-desk devices.
 
 ### AA-12 — "Today" computed in UTC, not the hotel timezone
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/BookingsPage.tsx:245` (`today`), `:116-121` (walk-in default dates)
 
 `new Date().toISOString().split("T")[0]` is the UTC date. The hotel runs
@@ -372,7 +382,7 @@ yesterday's check-in date. `DashboardPage` already has a correct
 `shared/utils/dates.ts`).
 
 ### AA-13 — Full Backup export is a 2-sheet stub of the 8-sheet spec
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/ReportsPage.tsx:347-381` (`handleExportFullBackup`)
 
 Spec (`REPORTS.md §Data Backup`) requires 8 sheets (Bookings with ~33
@@ -385,7 +395,7 @@ confirmation, no loading state. This is a client-requested feature —
 either build it out or re-scope the spec.
 
 ### AA-14 — Reports ignore the configured low-stock threshold; no PDF exports
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/ReportsPage.tsx:266-271` (hardcoded `stock <= 5`)
 
 The low-stock alert hardcodes 5 while Settings → Store persists an
@@ -396,7 +406,7 @@ Performance "Export PDF", the branded Sales Report PDF (jsPDF +
 html2canvas), and the kitchen-prep print view.
 
 ### AA-15 — Room editing far thinner than spec; no way to deactivate a room after creation
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/RoomsPage.tsx:298-390` (edit drawer)
 
 The edit drawer only edits `status` (plus the date-range block form). Per
@@ -411,7 +421,7 @@ required delete "reason for the audit log" is only interpolated into a
 toast — never persisted anywhere.
 
 ### AA-16 — Room type delete has no in-use guard
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/SettingsPage.tsx:3136-3155`, `admin-app/src/context/AdminContext.tsx:2811-2824` (`deleteRoomType`)
 
 Two-click confirm, then the type is removed even when live rooms still
@@ -421,7 +431,7 @@ for those rooms. Mirror the room-delete pattern: block deletion while
 `rooms.some(r => r.type === value)` and show the count.
 
 ### AA-17 — Voucher/corporate creation gaps: duplicate codes, hardcoded expiry, hardcoded `createdBy`
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/RatesPage.tsx:131-180`, `admin-app/src/context/AdminContext.tsx:1079-1124`
 
 (a) Voucher creation never checks for an existing code (spec: "show error
@@ -434,7 +444,7 @@ as a date string while the admin table renders it raw; cosmetic but
 inconsistent with Timestamp-based fields elsewhere.
 
 ### AA-18 — Booking status model drift: `payment-confirmed` unreachable, `pending → confirmed` skips the payment flow
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/BookingsPage.tsx:2068-2105` (transition buttons), `:1403-1415` (filter options)
 
 The drawer offers `pending|payment-uploaded → confirmed` in one jump —
@@ -447,7 +457,7 @@ room-type filters, sort controls, and table pagination (every booking
 renders on one page — degrades as history grows).
 
 ### AA-19 — Points Redemption panel unbuilt though server endpoints exist
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/BookingsPage.tsx` (drawer — no member/redemption UI); server: `guest-app/server/apiRouter.ts:688-706`
 
 `BOOKINGS-MANAGEMENT.md` specs a full "Spark Rewards — Points Redemption"
@@ -460,7 +470,7 @@ way to spend points. Same page also omits the specced staff notes editor,
 "Email receipt" action, and the RA 11862 unaccompanied-minor banner.
 
 ### AA-20 — White-label violations: hardcoded hex in every chart, brand RGB in PDFs, hardcoded city copy, hardcoded type keys
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/pages/DashboardPage.tsx:196-210`, `admin-app/src/pages/ReportsPage.tsx:694-923` (+ more), `admin-app/src/pages/BookingsPage.tsx:527,712,742,862,1013` (jsPDF `setDrawColor(241,101,34)` etc.), `admin-app/src/pages/RatesPage.tsx:279,357`
 
 Recharts fills/strokes hardcode `#EA8A1A`, `#111827`, `#3B82F6`,
@@ -475,7 +485,7 @@ for every other hotel client. (`AdminContext`'s seeded
 `facebookUrl: "https://facebook.com/spark inn"` default is the same class.)
 
 ### AA-21 — Settings snapshots replace state wholesale; room-type save fails on missing doc
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/context/AdminContext.tsx:2212-2246` (settings listener), `:2745-2755` (`saveRoomTypes`)
 
 `setHotelConfig(data as typeof hotelConfig)` (and rewards/breakfast/store
@@ -488,7 +498,7 @@ defensive `mergeWebsiteContent` treatment. And `saveRoomTypes` uses
 edits fail with only a console error.
 
 ### AA-22 — API base URL fallback inconsistent across the six server-call sites
-**Status:** Open
+**Status:** Fixed on `fix/audit-aa-sev3`
 **File:** `admin-app/src/context/AdminContext.tsx:902-904, 923-925, 967-969, 997-999, 1097-1099, 1289-1291` vs `:3046-3053` (`getApiBaseUrl`)
 
 `getApiBaseUrl()` correctly falls back to `https://www.${config.domain}`
@@ -706,12 +716,12 @@ admin-only.
 |---|---|---|---|
 | 1 (`fix/admin-critical-audit-2026-07-07`) | AA-01, AA-02, AA-03 | Real member writes, confirm-email endpoint, payment proof visibility | Fixed in `9627f8a`; merged to `dev` in `e79cc9d` |
 | 2 (`fix/audit-aa-sev2`) | AA-04, AA-05, AA-06, AA-07, AA-08, AA-09 | Storage migration for embedded images, rates form hydration, corporate code integrity, dashboard operational sections | Fixed on `fix/audit-aa-sev2` |
-| 3 (`fix/audit-aa-sev3`) | AA-10 … AA-22 | Route guard normalization, mobile sign-out, timezone, exports, room/type editing, status model, redemption panel, white-label, API base URL | Open |
+| 3 (`fix/audit-aa-sev3`) | AA-10 … AA-22 | Route guard normalization, mobile sign-out, timezone, exports, room/type editing, status model, redemption panel, white-label, API base URL | Fixed on `fix/audit-aa-sev3` |
 | 4 | AA-23 … AA-33 | Nits, doc sync, role-surface decisions | Open |
 
 **Fix-order notes:**
-- AA-02 is fixed; AA-18 still touches the same status-transition area if
-  the `payment-confirmed` intermediate state is introduced later.
+- AA-10 through AA-22 are fixed on `fix/audit-aa-sev3`; AA-18 now exposes
+  the `payment-confirmed` intermediate state instead of bypassing it.
 - AA-03 and AA-09 are fixed; the dashboard now reuses proof links for
   pending-payment verification.
 - AA-04/AA-05 are fixed; store item data-URL migration is handled by
