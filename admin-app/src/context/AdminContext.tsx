@@ -354,8 +354,8 @@ export interface AdminContextType {
 
   // Members
   members: Member[];
-  updateMemberPoints: (memberId: string, amount: number, type: PointsLog["type"], reason: string) => void;
-  toggleMemberActive: (memberId: string) => void;
+  updateMemberPoints: (memberId: string, amount: number, type: PointsLog["type"], reason: string) => Promise<{ success: boolean; error?: string }>;
+  toggleMemberActive: (memberId: string, isActive: boolean) => Promise<{ success: boolean; error?: string }>;
 
   // Intercom Inbox
   intercoms: Record<string, IntercomMessage[]>;
@@ -918,6 +918,24 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
+      } else if (status === "confirmed") {
+        const token = await auth.currentUser?.getIdToken(true);
+        const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://localhost:3000"
+          : import.meta.env.VITE_GUEST_APP_URL || "";
+
+        const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/bookings/confirm`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify({ bookingId })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || "Failed to confirm booking via server API.");
+        }
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
         const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
@@ -1365,32 +1383,81 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const updateMemberPoints = (memberId: string, amount: number, type: PointsLog["type"], reason: string) => {
-    setMembers(prev => prev.map(mem => {
-      if (mem.id === memberId) {
-        const newBalance = Math.max(0, mem.rewardsPoints + amount);
-        const newEntry: PointsLog = {
-          id: `pt-${Date.now()}`,
+  const updateMemberPoints = async (
+    memberId: string,
+    amount: number,
+    type: PointsLog["type"],
+    reason: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!currentUser) {
+      return { success: false, error: "Sign in before adjusting member points." };
+    }
+    if (!Number.isFinite(amount) || amount === 0) {
+      return { success: false, error: "Enter a non-zero points adjustment." };
+    }
+    if (!reason.trim()) {
+      return { success: false, error: "A reason is required for points adjustments." };
+    }
+
+    try {
+      const memberRef = doc(db, "members", memberId);
+      const historyRef = doc(collection(db, "members", memberId, "pointsHistory"));
+
+      await runTransaction(db, async (transaction) => {
+        const memberDoc = await transaction.get(memberRef);
+        if (!memberDoc.exists()) {
+          throw new Error("Member account was not found.");
+        }
+
+        const currentBalance = Number(memberDoc.data().rewardsPoints || 0);
+        const nextBalance = currentBalance + amount;
+        if (nextBalance < 0) {
+          throw new Error("Points adjustment cannot reduce the member balance below zero.");
+        }
+
+        transaction.update(memberRef, {
+          rewardsPoints: nextBalance,
+          updatedAt: serverTimestamp()
+        });
+        transaction.set(historyRef, {
           type,
           points: amount,
-          description: type === "manual" ? `Manual Adjust (${reason})` : "Loyalty reward",
-          reason,
+          description: type === "manual" ? `Manual adjust: ${reason.trim()}` : `Staff ${type} adjustment`,
+          reason: reason.trim(),
           bookingId: null,
-          by: currentUser?.email || "staff",
-          at: new Date().toISOString()
-        };
-        return {
-          ...mem,
-          rewardsPoints: newBalance,
-          pointsHistory: [newEntry, ...mem.pointsHistory]
-        };
-      }
-      return mem;
-    }));
+          by: currentUser.uid,
+          at: serverTimestamp()
+        });
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error updating member points:", err);
+      const message = err?.message || "Failed to update member points.";
+      return { success: false, error: message };
+    }
   };
 
-  const toggleMemberActive = (memberId: string) => {
-    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, isActive: !m.isActive } : m));
+  const toggleMemberActive = async (memberId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/set-active`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ uid: memberId, isActive })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update member account status." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error updating member account status:", err);
+      return { success: false, error: err?.message || "Failed to update member account status." };
+    }
   };
 
   // Intercom log (inbox) state — live from Firestore, keyed by room number

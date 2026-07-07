@@ -7,7 +7,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleEmailTrigger } from "./handlers/email";
@@ -433,7 +433,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleCreateWalkin(req, res);
   }
 
@@ -443,7 +443,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleAddPayment(req, res);
   }
 
@@ -706,6 +706,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
     
     return await handleUndoMemberPointsRedemption(req, res);
+  }
+
+  if (domain === "members" && action === "set-active" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-set-active:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many member account update requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
+    }
+    (req as any).staff = authResult;
+    return await handleSetMemberActive(req, res);
   }
 
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
