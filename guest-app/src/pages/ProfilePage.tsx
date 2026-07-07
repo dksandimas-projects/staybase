@@ -54,7 +54,7 @@ export function ProfilePage() {
 
     try {
       if (!memberProfile) {
-        throw new Error("Join Spark Rewards first so we can save your member profile details.");
+        throw new Error(`Join ${config.rewardsName} first so we can save your member profile details.`);
       }
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
 
@@ -88,7 +88,7 @@ export function ProfilePage() {
       setTimeout(() => setShowSuccessAlert(false), 3000);
     } catch (err) {
       console.error("Member enrollment failed:", err);
-      setProfileError(err instanceof Error ? err.message : "We could not join Spark Rewards right now. Please try again.");
+      setProfileError(err instanceof Error ? err.message : `We could not join ${config.rewardsName} right now. Please try again.`);
     } finally {
       setIsEnrolling(false);
     }
@@ -141,7 +141,7 @@ export function ProfilePage() {
       // Firebase Auth directly from the client.
       const token = await auth.currentUser?.getIdToken();
       const baseUrl = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
-        ? "http://localhost:3000"
+        ? window.location.origin
         : import.meta.env.VITE_GUEST_APP_URL || "";
       const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/members/delete-account`, {
         method: "POST",
@@ -174,7 +174,7 @@ export function ProfilePage() {
   const isEmailProvider = user?.providerData?.some((p) => p.providerId === "password");
 
   return (
-    <AccountLayout activeTab="profile" title="My Profile" subtitle="Manage your Spark Rewards account details.">
+    <AccountLayout activeTab="profile" title="My Profile" subtitle={`Manage your ${config.rewardsName} account details.`}>
       <div className="space-y-8">
         {/* Spark Rewards Card */}
         {user && !memberProfile && (
@@ -228,6 +228,24 @@ export function ProfilePage() {
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Account Details</h2>
             <p className="text-[10px] text-gray-500 mt-0.5">Update your name and contact information.</p>
+          </div>
+
+          <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-3">
+            {memberProfile?.photoUrl || user?.photoURL ? (
+              <img
+                src={memberProfile?.photoUrl || user?.photoURL || ""}
+                alt=""
+                className="h-12 w-12 rounded-full object-cover"
+              />
+            ) : (
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+                {(memberProfile?.fullName || user?.displayName || user?.email || "M").charAt(0).toUpperCase()}
+              </span>
+            )}
+            <div>
+              <p className="text-xs font-bold text-gray-900">Profile photo</p>
+              <p className="text-[10px] text-gray-500">Shown from your sign-in provider when available.</p>
+            </div>
           </div>
 
           {showSuccessAlert && (
@@ -383,7 +401,7 @@ export function ProfilePage() {
           <Modal open={showDeleteModal} onClose={() => !isDeleting && setShowDeleteModal(false)} title="Delete your account?">
             <div className="space-y-4">
               <p className="text-sm text-gray-600 leading-relaxed">
-                This will permanently delete your Spark Rewards account, including your points balance ({memberProfile?.rewardsPoints || 0} pts), points history, and your personal data (name, email, phone, profile photo).
+                This will permanently delete your {config.rewardsName} account, including your points balance ({memberProfile?.rewardsPoints || 0} pts), points history, and your personal data (name, email, phone, profile photo).
               </p>
               <p className="text-sm text-gray-600 leading-relaxed">
                 Your booking history will be anonymized: the system will keep the booking reference, dates, room type, and total for our internal accounting and RA 11862 recordkeeping, but your name, email, and phone will be removed from each booking.

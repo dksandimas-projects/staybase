@@ -82,7 +82,7 @@ export function StaysPage() {
   const cancelledStays = stays.filter((s) => s.status === "cancelled");
 
   return (
-    <AccountLayout activeTab="stays" title="My Stays" subtitle="Your booking history at spark inn.">
+    <AccountLayout activeTab="stays" title="My Stays" subtitle={`Your booking history at ${config.brandName}.`}>
       {isLoading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">
           <Loader2 size={24} className="animate-spin mr-2" />

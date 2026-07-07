@@ -177,7 +177,7 @@ export async function handleRegisterMember(req: any, res: any) {
 
   const authUser = getAuthUser(req);
   if (!authUser.uid || !authUser.email) {
-    return res.status(401).json({ success: false, error: "Sign in before joining Spark Rewards." });
+    return res.status(401).json({ success: false, error: `Sign in before joining ${config.rewardsName}.` });
   }
 
   const parsed = registerMemberSchema.safeParse(req.body || {});
@@ -254,7 +254,7 @@ export async function handleRegisterMember(req: any, res: any) {
     console.error("Member registration failed:", error);
     return res.status(500).json({
       success: false,
-      error: "We could not join Spark Rewards right now. Please try again."
+      error: `We could not join ${config.rewardsName} right now. Please try again.`
     });
   }
 }

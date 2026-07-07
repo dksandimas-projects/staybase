@@ -89,7 +89,7 @@ export function SignUpPage() {
   const handleGoogleSignIn = async () => {
     setErrorMsg("");
     if (!consent) {
-      setErrorMsg("You must agree to the Privacy Policy and Terms of Service before joining Spark Rewards with Google.");
+      setErrorMsg(`You must agree to the Privacy Policy and Terms of Service before joining ${config.rewardsName} with Google.`);
       return;
     }
     setIsGoogleLoading(true);
@@ -122,7 +122,7 @@ export function SignUpPage() {
           />
           <h1 className="font-heading text-3xl text-gray-950">Create your account</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Join Spark Rewards and earn points on every stay at {config.brandName}.
+            Join {config.rewardsName} and earn points on every stay at {config.brandName}.
           </p>
         </div>
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { Mail, Phone, MapPin, Send, MessageSquare, CheckCircle2, AlertCircle, Share2, Facebook, Instagram } from "lucide-react";
 import config from "@config";
@@ -12,6 +12,7 @@ import { useTurnstileToken } from "../hooks/useTurnstileToken";
 
 export function ContactPage() {
   const shouldReduceMotion = useReducedMotion();
+  const [searchParams] = useSearchParams();
   // Per Phase 11.8 PR 3: address / phone / email / socials are
   // admin-editable from Settings → Hotel Info. The hook value
   // wins when set; the deploy-time `hotel.config.ts` value is
@@ -23,6 +24,7 @@ export function ContactPage() {
   const facebook = contact?.facebookUrl || config.facebookUrl;
   const instagram = contact?.instagramUrl || config.instagramUrl;
   const mapQuery = encodeURIComponent(addressString);
+  const showDisabledMemberMessage = searchParams.get("member") === "disabled";
 
   // Contact Form states
   const [name, setName] = useState("");
@@ -100,6 +102,12 @@ export function ContactPage() {
             <p className="mx-auto max-w-lg text-sm text-gray-650">
               Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist.
             </p>
+            {showDisabledMemberMessage && (
+              <div className="mx-auto mt-4 flex max-w-lg items-start gap-2 rounded-lg border border-primary/20 bg-white p-3 text-left text-xs text-gray-700">
+                <AlertCircle size={14} className="mt-0.5 shrink-0 text-primary" />
+                <span>Your account has been disabled. Please contact us so our team can help.</span>
+              </div>
+            )}
           </div>
         </section>
 
@@ -319,7 +327,7 @@ export function ContactPage() {
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-8">
             <div className="text-center">
               <h2 className="font-heading text-3xl text-gray-950 lowercase">find our resort</h2>
-              <p className="text-xs text-gray-500 mt-2">Located strategically in Tagbilaran City, Bohol</p>
+              <p className="text-xs text-gray-500 mt-2">Located strategically in {config.address.city}, {config.address.region}</p>
             </div>
 
             <motion.div

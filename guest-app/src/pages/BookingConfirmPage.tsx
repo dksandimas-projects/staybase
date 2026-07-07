@@ -320,7 +320,7 @@ export function BookingConfirmPage() {
           >
             <div className="flex items-center gap-2">
               <Sparkles size={20} className="text-primary animate-pulse" />
-              <h3 className="text-lg font-bold">Join Spark Rewards</h3>
+              <h3 className="text-lg font-bold">Join {config.rewardsName}</h3>
             </div>
             <p className="mt-2 text-sm text-gray-300">
               Sign up now to earn points on this stay and unlock member-only benefits for your next visit!

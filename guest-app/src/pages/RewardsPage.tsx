@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles } from "lucide-react";
-import { collection, doc, query, getDoc, getDocs, orderBy } from "firebase/firestore";
+import { collection, doc, query, getDoc, onSnapshot, orderBy } from "firebase/firestore";
 import { getDateKeyInTimezone } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
@@ -71,15 +71,11 @@ export function RewardsPage() {
     if (!user?.uid) { setIsLoading(false); return; }
 
     let cancelled = false;
-    async function fetchRewardsData() {
+    let unsubscribeHistory: (() => void) | undefined;
+
+    async function fetchRewardsConfig() {
       try {
-        const [configSnap, historySnap] = await Promise.all([
-          getDoc(doc(db, "settings", "rewardsConfig")),
-          getDocs(query(
-            collection(db, "members", user!.uid, "pointsHistory"),
-            orderBy("createdAt", "desc")
-          ))
-        ]);
+        const configSnap = await getDoc(doc(db, "settings", "rewardsConfig"));
         if (cancelled) return;
 
         if (configSnap.exists()) {
@@ -93,8 +89,20 @@ export function RewardsPage() {
             memberDiscountPct: Number(data.memberDiscountPct ?? DEFAULT_REWARDS_CONFIG.memberDiscountPct)
           });
         }
+      } catch (err) {
+        console.error("Failed to fetch rewards config:", err);
+      }
+    }
 
-        const records: PointsTransaction[] = historySnap.docs.map((docSnap) => {
+    fetchRewardsConfig();
+    unsubscribeHistory = onSnapshot(
+      query(
+        collection(db, "members", user.uid, "pointsHistory"),
+        orderBy("createdAt", "desc")
+      ),
+      (snapshot) => {
+        if (cancelled) return;
+        const records: PointsTransaction[] = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
           return {
             id: docSnap.id,
@@ -105,14 +113,18 @@ export function RewardsPage() {
           };
         });
         setTransactions(records);
-      } catch (err) {
-        console.error("Failed to fetch points history:", err);
-      } finally {
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error("Failed to listen to points history:", err);
         if (!cancelled) setIsLoading(false);
       }
-    }
-    fetchRewardsData();
-    return () => { cancelled = true; };
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribeHistory?.();
+    };
   }, [user]);
 
   // Per W2.4 / decision #92: load the member's upcoming bookings when
@@ -198,7 +210,7 @@ export function RewardsPage() {
     : `Earn ${rewardsConfig.pointsPerHundred.toLocaleString()} points per ${formatPrice(100)} spent.`;
 
   return (
-    <AccountLayout activeTab="rewards" title="My Rewards" subtitle="Track your Spark Rewards points and member perks.">
+    <AccountLayout activeTab="rewards" title="My Rewards" subtitle={`Track your ${config.rewardsName} points and member perks.`}>
       <div className="space-y-8">
         {pointsEnabled && (
           <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 text-center">
