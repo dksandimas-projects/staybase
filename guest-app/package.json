@@ -11,7 +11,8 @@
     "build": "tsc -b && vite build && npm run build:api",
     "preview": "vercel preview",
     "typecheck": "tsc -b",
-    "test:api": "vitest run tests/api"
+    "test:api": "vitest run tests/api",
+    "test": "vitest run"
   },
   "dependencies": {
     "@spark-inn/shared": "file:../shared",

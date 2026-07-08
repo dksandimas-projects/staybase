@@ -995,21 +995,21 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 > wrong guest-facing information. Fix in the order listed.
 
 **SEV-2 (fix first):**
-- ⬜ PF-01 — Room block editing always fails with 400: client never sends `roomId` but `updateBlockSchema` requires it (`CalendarPage.tsx` / `AdminContext.tsx` / `room-blocks.ts`)
-- ⬜ PF-02 — Early check-in "Confirmed Check-In Time" picker is never sent to the server; approval email shows the guest's requested time instead (`BookingsPage.tsx` / `bookings.ts` / `email.ts`)
-- ⬜ PF-03 — Reschedule never re-prices (`totalPrice`/`ratePerNight`/breakfast stale after nights or room-type change), no `numGuests` vs capacity check, no guest notification (`handleRescheduleBooking`)
+- ✅ PF-01 — Room block editing always fails with 400: client never sends `roomId` but `updateBlockSchema` requires it (`CalendarPage.tsx` / `AdminContext.tsx` / `room-blocks.ts`)
+- ✅ PF-02 — Early check-in "Confirmed Check-In Time" picker is never sent to the server; approval email shows the guest's requested time instead (`BookingsPage.tsx` / `bookings.ts` / `email.ts`)
+- ✅ PF-03 — Reschedule never re-prices (`totalPrice`/`ratePerNight`/breakfast stale after nights or room-type change), no `numGuests` vs capacity check, no guest notification (`handleRescheduleBooking`)
 
 **SEV-3:**
-- ⬜ PF-04 — Guest availability endpoint ignores active `roomBlocks` → dead-end UX when all rooms of a type are blocked (`rooms.ts`)
-- ⬜ PF-05 — Walk-in `@example.invalid` placeholder emails hard-bounce through Resend (sender-reputation risk) — add a shared skip guard in `sendEmail`
-- ⬜ PF-06 — Early check-in `requestedCheckInTime` / `notes` / `staffNote` persisted without Zod validation (type/length)
-- ⬜ PF-07 — `guest-app/package.json` has no `test` script, so `npm test --workspaces` silently skips its 298 tests
+- ✅ PF-04 — Guest availability endpoint ignores active `roomBlocks` → dead-end UX when all rooms of a type are blocked (`rooms.ts`)
+- ✅ PF-05 — Walk-in `@example.invalid` placeholder emails hard-bounce through Resend (sender-reputation risk) — add a shared skip guard in `sendEmail`
+- ✅ PF-06 — Early check-in `requestedCheckInTime` / `notes` / `staffNote` persisted without Zod validation (type/length)
+- ✅ PF-07 — `guest-app/package.json` has no `test` script, so `npm test --workspaces` silently skips its 298 tests
 
 **SEV-4 (polish):**
-- ⬜ PF-08 — `CalendarPage` "today" uses UTC instead of `config.timezone` (window starts on yesterday before 8 AM Manila)
-- ⬜ PF-09 — Seasonal overrides saved as whole-array writes (concurrent-edit clobber); toggle/delete lack error handling (`RatesPage.tsx`)
-- ⬜ PF-10 — `earlyCheckinResolveEmail` missing from the email preview switch — the one guest email staff cannot preview
-- ⬜ PF-11 — Intercom `?room=` deep-link clears the param before `intercomThreads` loads → resolved-thread filter switch can be skipped (`IntercomInboxPage.tsx`)
+- ✅ PF-08 — `CalendarPage` "today" uses UTC instead of `config.timezone` (window starts on yesterday before 8 AM Manila)
+- ✅ PF-09 — Seasonal overrides saved as whole-array writes (concurrent-edit clobber); toggle/delete lack error handling (`RatesPage.tsx`)
+- ✅ PF-10 — `earlyCheckinResolveEmail` missing from the email preview switch — the one guest email staff cannot preview
+- ✅ PF-11 — Intercom `?room=` deep-link clears the param before `intercomThreads` loads → resolved-thread filter switch can be skipped (`IntercomInboxPage.tsx`)
 
 ---
 

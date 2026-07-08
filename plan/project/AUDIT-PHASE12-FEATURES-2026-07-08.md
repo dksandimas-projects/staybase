@@ -33,10 +33,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
-| **SEV-2 (major)** | 3 | 0 | **3** |
-| **SEV-3 (minor)** | 4 | 0 | **4** |
-| **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **11** | **0** | **11** |
+| **SEV-2 (major)** | 0 | 3 | **3** |
+| **SEV-3 (minor)** | 0 | 4 | **4** |
+| **SEV-4 (nit / polish)** | 0 | 4 | **4** |
+| **Total** | **0** | **11** | **11** |
 
 No SEV-1s: every new endpoint is staff-authenticated and rate-limited,
 all availability writes use Firestore transactions with cross-checks in
@@ -68,7 +68,7 @@ wrong money/wrong guest-facing information:
 
 ## SEV-2 — Major
 
-### PF-01 — Editing a room block always fails with 400 · `Open`
+### PF-01 — Editing a room block always fails with 400 · `Fixed`
 
 **Feature:** Booking calendar (`90607b6`)
 **Where:**
@@ -92,7 +92,7 @@ block doc first). Server-side derivation is safer — it prevents a client
 from moving a block to a different room while skipping the room's
 existence/active checks.
 
-### PF-02 — Staff "Confirmed Check-In Time" never reaches the server or the guest · `Open`
+### PF-02 — Staff "Confirmed Check-In Time" never reaches the server or the guest · `Fixed`
 
 **Feature:** Early check-in approval (`a68e045`)
 **Where:**
@@ -119,7 +119,7 @@ display in `RewardsPage.tsx`. Update
 `plan/features/SPARK-REWARDS.md §Early Check-In Approval Workflow` and
 `plan/docs/TYPES.md` (`EarlyCheckInDetails`) with the new field.
 
-### PF-03 — Reschedule never re-prices; no capacity check; no guest notification · `Open`
+### PF-03 — Reschedule never re-prices; no capacity check; no guest notification · `Fixed`
 
 **Feature:** Booking calendar (`90607b6`)
 **Where:** `guest-app/server/handlers/bookings.ts` (`handleRescheduleBooking`)
@@ -152,7 +152,7 @@ consider a `booking-rescheduled` email trigger (or reuse
 
 ## SEV-3 — Minor
 
-### PF-04 — Guest availability endpoint ignores room blocks · `Open`
+### PF-04 — Guest availability endpoint ignores room blocks · `Fixed`
 
 **Feature:** Booking calendar (`90607b6`)
 **Where:** `guest-app/server/handlers/rooms.ts:81` (`handleRoomAvailability`)
@@ -166,7 +166,7 @@ double-booking risk. **Fix:** merge active blocks into the returned
 `bookedRanges` (roomId + start + end; no PII involved). Update
 `plan/features/AVAILABILITY-LOCKING.md` when done.
 
-### PF-05 — Walk-in placeholder emails hard-bounce through Resend · `Open`
+### PF-05 — Walk-in placeholder emails hard-bounce through Resend · `Fixed`
 
 **Feature:** Booking calendar (`90607b6`) — pre-existing pattern extended
 **Where:**
@@ -184,7 +184,7 @@ sender reputation for all guest email. **Fix:** add a guard in
 `@example.invalid`. One shared guard fixes both call sites and any future
 placeholder use.
 
-### PF-06 — Early check-in inputs are unvalidated · `Open`
+### PF-06 — Early check-in inputs are unvalidated · `Fixed`
 
 **Feature:** Early check-in approval (`a68e045`)
 **Where:**
@@ -199,7 +199,7 @@ non-string payloads onto the booking doc. All values are HTML-escaped in
 emails, so this is data hygiene, not injection. **Fix:** Zod schema —
 `requestedCheckInTime` max ~20 chars, `notes`/`staffNote` `string().max(500)`.
 
-### PF-07 — `npm test --workspaces` silently skips guest-app's 298 tests · `Open`
+### PF-07 — `npm test --workspaces` silently skips guest-app's 298 tests · `Fixed`
 
 **Where:** `guest-app/package.json` (no `test` script)
 
@@ -213,7 +213,7 @@ pre-merge checklist built on `npm test --workspaces` is blind to them.
 
 ## SEV-4 — Nit / Polish
 
-### PF-08 — Calendar "today" uses UTC, not `config.timezone` · `Open`
+### PF-08 — Calendar "today" uses UTC, not `config.timezone` · `Fixed`
 
 **Where:** `admin-app/src/pages/CalendarPage.tsx:78`
 
@@ -222,7 +222,7 @@ pre-merge checklist built on `npm test --workspaces` is blind to them.
 already has a `config.timezone`-aware `toLocalDateKey` helper worth
 extracting and reusing.
 
-### PF-09 — Seasonal overrides: whole-array writes clobber concurrent edits; toggle/delete unhandled on failure · `Open`
+### PF-09 — Seasonal overrides: whole-array writes clobber concurrent edits; toggle/delete unhandled on failure · `Fixed`
 
 **Where:** `admin-app/src/pages/RatesPage.tsx:222` (`saveSeasonalOverrides`), `:280` (`toggleSeasonalActive`), `:287` (`deleteSeasonalOverride`)
 
@@ -233,7 +233,7 @@ other's changes (last write wins). `toggleSeasonalActive` and
 path has — a failed write rejects silently. Low urgency for a
 single-admin boutique hotel; note it before white-label deployments.
 
-### PF-10 — New `earlyCheckinResolveEmail` template is not previewable · `Open`
+### PF-10 — New `earlyCheckinResolveEmail` template is not previewable · `Fixed`
 
 **Where:** `guest-app/server/handlers/email.ts` (`handleEmailPreview` switch)
 
@@ -243,7 +243,7 @@ one guest email staff cannot preview from Settings. **Fix:** add an
 `early-checkin-resolve` case with mock booking + `status`/`staffNote`
 mock args, and the matching entry in the SettingsPage preview list.
 
-### PF-11 — Intercom deep-link can race the threads snapshot · `Open`
+### PF-11 — Intercom deep-link can race the threads snapshot · `Fixed`
 
 **Where:** `admin-app/src/pages/IntercomInboxPage.tsx:41`
 

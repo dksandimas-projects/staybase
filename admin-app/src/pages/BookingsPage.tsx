@@ -2422,7 +2422,8 @@ export function BookingsPage() {
                               setIsResolvingEarlyCheckIn(true);
                               try {
                                 const status = earlyCheckInAction === "approve" ? "approved" : "declined";
-                                const result = await resolveEarlyCheckin(selectedBooking.id, status, earlyCheckInStaffNote || undefined);
+                                const confirmedTime = status === "approved" ? earlyCheckInTimeOverride : undefined;
+                                const result = await resolveEarlyCheckin(selectedBooking.id, status, earlyCheckInStaffNote || undefined, confirmedTime);
                                 if (!result.success) {
                                   toast.error("Failed to resolve", result.error || "An unexpected error occurred.");
                                 } else {
@@ -2437,7 +2438,8 @@ export function BookingsPage() {
                                       status,
                                       resolvedAt: new Date().toISOString(),
                                       resolvedBy: currentUser?.email || "Staff",
-                                      staffNote: earlyCheckInStaffNote || null
+                                      staffNote: earlyCheckInStaffNote || null,
+                                      confirmedTime: confirmedTime || null
                                     }
                                   } as Partial<Booking>);
                                 }
