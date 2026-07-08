@@ -190561,7 +190561,13 @@ var resolveEarlyCheckinSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(80),
   status: external_exports.enum(["approved", "declined"]),
   staffNote: external_exports.string().trim().max(500).optional().default(""),
-  confirmedTime: external_exports.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+  // An empty string means "no override" (the admin form sends "" when the
+  // guest's requested time could not seed the dropdown) — treat it as absent
+  // so the approve path falls back to requestedTime instead of failing.
+  confirmedTime: external_exports.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? void 0 : value,
+    external_exports.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+  )
 });
 async function handleResolveEarlyCheckin(req, res) {
   if (req.method !== "POST") {
