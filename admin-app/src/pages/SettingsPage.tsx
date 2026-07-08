@@ -30,6 +30,8 @@ import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
 type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
+type SettingsSaveKey = "hotel" | "branding" | "website" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
+type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
 const VALID_TAB_IDS: TabId[] = [
   "hotel",
@@ -85,6 +87,96 @@ const storeCategories: { value: StoreCategory; label: string }[] = [
   { value: "rentals", label: "Rentals" },
   { value: "other", label: "Other" }
 ];
+
+function SaveActionButton({
+  label,
+  status
+}: {
+  label: string;
+  status: SettingsSaveStatus;
+}) {
+  const isSaving = status === "saving";
+  const isSaved = status === "saved";
+  const isError = status === "error";
+  const Icon = isSaving ? RefreshCw : isSaved ? Check : Save;
+  const text = isSaving ? "Saving..." : isSaved ? "Saved" : isError ? "Try again" : label;
+
+  return (
+    <button
+      type="submit"
+      disabled={isSaving}
+      className={`min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-80 ${
+        isSaved
+          ? "bg-emerald-600 text-white hover:bg-emerald-700"
+          : isError
+            ? "bg-red-600 text-white hover:bg-red-700"
+            : "bg-primary hover:bg-primary-dark text-white"
+      }`}
+    >
+      <Icon size={14} className={isSaving ? "animate-spin" : ""} aria-hidden="true" />
+      {text}
+    </button>
+  );
+}
+
+function SaveActionFooter({
+  label,
+  status,
+  onClick
+}: {
+  label: string;
+  status: SettingsSaveStatus;
+  onClick?: () => void;
+}) {
+  const message =
+    status === "saved"
+      ? "Saved just now."
+      : status === "error"
+        ? "Save failed. Review the message and try again."
+        : status === "saving"
+          ? "Saving changes..."
+          : "";
+
+  return (
+    <div className="pt-2 border-t border-gray-150 flex flex-col items-end gap-2 sm:flex-row sm:justify-end sm:items-center">
+      {message ? (
+        <span
+          role={status === "error" ? "alert" : "status"}
+          className={`text-[10px] font-semibold ${
+            status === "error" ? "text-red-600" : status === "saved" ? "text-emerald-700" : "text-gray-500"
+          }`}
+        >
+          {message}
+        </span>
+      ) : null}
+      {onClick ? (
+        <button
+          type="button"
+          disabled={status === "saving"}
+          onClick={onClick}
+          className={`min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-80 ${
+            status === "saved"
+              ? "bg-emerald-600 text-white hover:bg-emerald-700"
+              : status === "error"
+                ? "bg-red-600 text-white hover:bg-red-700"
+                : "bg-primary hover:bg-primary-dark text-white"
+          }`}
+        >
+          {status === "saving" ? (
+            <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+          ) : status === "saved" ? (
+            <Check size={14} aria-hidden="true" />
+          ) : (
+            <Save size={14} aria-hidden="true" />
+          )}
+          {status === "saving" ? "Saving..." : status === "saved" ? "Saved" : status === "error" ? "Try again" : label}
+        </button>
+      ) : (
+        <SaveActionButton label={label} status={status} />
+      )}
+    </div>
+  );
+}
 
 // Reusable uploader for a single branding asset (hero photo or logo).
 // `value` is the currently stored URL in `settings/websiteContent`
@@ -945,6 +1037,46 @@ export function SettingsPage() {
   } = useAdmin();
   const toast = useToast();
   const { isMobile } = useBreakpoint();
+  const [saveStatuses, setSaveStatuses] = useState<Partial<Record<SettingsSaveKey, SettingsSaveStatus>>>({});
+  const saveStatusTimersRef = useRef<Partial<Record<SettingsSaveKey, ReturnType<typeof setTimeout>>>>({});
+
+  useEffect(() => {
+    return () => {
+      Object.values(saveStatusTimersRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+    };
+  }, []);
+
+  const getSaveStatus = (key: SettingsSaveKey): SettingsSaveStatus => saveStatuses[key] ?? "idle";
+
+  const runSettingsSave = async (
+    key: SettingsSaveKey,
+    toastTitle: string,
+    action: () => Promise<boolean>
+  ) => {
+    const existingTimer = saveStatusTimersRef.current[key];
+    if (existingTimer) clearTimeout(existingTimer);
+    setSaveStatuses((prev) => ({ ...prev, [key]: "saving" }));
+
+    try {
+      const success = await action();
+      if (success) {
+        setSaveStatuses((prev) => ({ ...prev, [key]: "saved" }));
+        toast.success(toastTitle, "Changes saved and are live now.");
+        saveStatusTimersRef.current[key] = setTimeout(() => {
+          setSaveStatuses((prev) => ({ ...prev, [key]: "idle" }));
+        }, 3500);
+        return true;
+      }
+    } catch (error) {
+      console.error(`Settings save failed for ${key}:`, error);
+      toast.error("Failed to save settings", error instanceof Error ? error.message : "Please try again.");
+    }
+
+    setSaveStatuses((prev) => ({ ...prev, [key]: "error" }));
+    return false;
+  };
 
   // Active Settings Section Tab — driven by the `?tab=` query
   // param so deep links (e.g. `/settings?tab=payment` from
@@ -1259,7 +1391,7 @@ export function SettingsPage() {
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings("hotelConfig", {
+    await runSettingsSave("hotel", "Hotel profile saved", () => updateSettings("hotelConfig", {
       hotelName,
       address,
       frontDeskPhone,
@@ -1274,7 +1406,7 @@ export function SettingsPage() {
       missionStatement,
       visionStatement,
       hotelStory
-    });
+    }));
   };
 
   // The Website Content tab is a stub while the list-based content
@@ -1290,7 +1422,7 @@ export function SettingsPage() {
   // leave everything else (hero copy, etc.) intact via the spread.
   const handleSaveWebsiteContent = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings("websiteContent", {
+    await runSettingsSave("website", "Website content saved", () => updateSettings("websiteContent", {
       homepage: {
         ...(websiteContent.homepage || {}),
         amenities: homepageAmenities,
@@ -1314,7 +1446,7 @@ export function SettingsPage() {
         retreatDescription: corporateRetreatDescription,
         retreatCtaLabel: corporateRetreatCtaLabel
       }
-    });
+    }));
   };
 
   // Persist all hero copy fields to `settings/websiteContent`. Logo
@@ -1322,7 +1454,7 @@ export function SettingsPage() {
   // buttons) and do not flow through this form.
   const handleSaveBranding = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings("websiteContent", {
+    await runSettingsSave("branding", "Hero copy saved", () => updateSettings("websiteContent", {
       homepage: {
         ...(websiteContent.homepage || {}),
         heroEyebrow: homepageHeroEyebrow,
@@ -1347,12 +1479,12 @@ export function SettingsPage() {
         heroHeading: rewardsHeroHeading,
         heroSubtext: rewardsHeroSubtext
       }
-    });
+    }));
   };
 
   const handleSaveRewards = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings("rewardsConfig", {
+    await runSettingsSave("rewards", "Rewards settings saved", () => updateSettings("rewardsConfig", {
       pointsEnabled,
       earningMode,
       pointsPerBooking: parseFloat(pointsPerBooking) || 0,
@@ -1362,7 +1494,7 @@ export function SettingsPage() {
       memberDiscountPct: parseFloat(memberDiscountPct) || 0,
       rewardsName: rewardsName.trim() || "Spark Rewards",
       rewardsTagline: rewardsTagline.trim()
-    });
+    }));
   };
 
   const getApiBaseUrl = () => {
@@ -1409,36 +1541,38 @@ export function SettingsPage() {
 
   const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
-    await updateSettings("breakfastConfig", {
+    await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
       isEnabled: breakfastEnabled,
       ratePerPersonPerNight: parseFloat(breakfastRate) || 300,
       silogItems
-    });
+    }));
   };
 
-  const handleSaveStore = () => {
-    updateSettings("storeConfig", {
+  const handleSaveStore = async () => {
+    await runSettingsSave("store", "Store settings saved", () => updateSettings("storeConfig", {
       isEnabled: storeEnabled,
       lowStockThreshold: parseInt(lowStockThreshold) || 3
-    });
+    }));
   };
 
-  const handleSaveIntercom = () => {
-    updateSettings("hotelConfig", {
+  const handleSaveIntercom = async () => {
+    await runSettingsSave("intercom", "Intercom settings saved", () => updateSettings("hotelConfig", {
       intercomQuickRequests,
       notificationSoundUrl
-    });
+    }));
   };
 
-  const handleSaveLegal = () => {
-    updateSettings("websiteContent", {
+  const handleSaveLegal = async () => {
+    const saved = await runSettingsSave("legal", "Legal content saved", () => updateSettings("websiteContent", {
       ...websiteContent,
       privacyPolicyBody,
       cancellationPolicy,
       houseRules,
       privacyPolicyLastUpdated: new Date().toISOString().slice(0, 10)
-    });
-    setPrivacyPolicyLastUpdated(new Date().toISOString().slice(0, 10));
+    }));
+    if (saved) {
+      setPrivacyPolicyLastUpdated(new Date().toISOString().slice(0, 10));
+    }
   };
 
   const handleCreateStaffSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -2035,15 +2169,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-gray-150 flex justify-end">
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                >
-                  <Save size={14} />
-                  Save Hotel Profile
-                </button>
-              </div>
+              <SaveActionFooter label="Save Hotel Profile" status={getSaveStatus("hotel")} />
             </form>
           )}
 
@@ -2367,15 +2493,7 @@ export function SettingsPage() {
                 />
               </div>
 
-              <div className="pt-2 border-t border-gray-150 flex justify-end">
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                >
-                  <Save size={14} />
-                  Save Hero Copy
-                </button>
-              </div>
+              <SaveActionFooter label="Save Hero Copy" status={getSaveStatus("branding")} />
             </form>
           )}
 
@@ -2622,15 +2740,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-gray-150 flex justify-end">
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                >
-                  <Save size={14} />
-                  Save Content
-                </button>
-              </div>
+              <SaveActionFooter label="Save Content" status={getSaveStatus("website")} />
             </form>
           )}
 
@@ -2802,15 +2912,7 @@ export function SettingsPage() {
                 Earning mode is the server-side branch in <code>handleCreateBooking</code> that decides whether to award by subtotal or by flat count.
               </p>
 
-              <div className="pt-2 border-t border-gray-150 flex justify-end">
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                >
-                  <Save size={14} />
-                  Save Rewards Matrix
-                </button>
-              </div>
+              <SaveActionFooter label="Save Rewards Matrix" status={getSaveStatus("rewards")} />
             </form>
             ) : (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
@@ -2925,15 +3027,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-gray-150 flex justify-end">
-                <button
-                  type="submit"
-                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                >
-                  <Save size={14} />
-                  Save Dining Settings
-                </button>
-              </div>
+              <SaveActionFooter label="Save Dining Settings" status={getSaveStatus("breakfast")} />
             </form>
           )}
 
@@ -3155,16 +3249,11 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-gray-150 flex justify-end">
-                <button
-                  type="button"
-                  className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                  onClick={handleSaveStore}
-                >
-                  <Save size={14} />
-                  Save Store Settings
-                </button>
-              </div>
+              <SaveActionFooter
+                label="Save Store Settings"
+                status={getSaveStatus("store")}
+                onClick={() => void handleSaveStore()}
+              />
             </div>
           )}
 
@@ -4095,7 +4184,7 @@ export function SettingsPage() {
                 <p className="text-[10px] text-gray-500 mt-0.5">Quick request shortcuts and notification sound for the guest-to-staff intercom.</p>
               </div>
 
-              <form onSubmit={(e) => { e.preventDefault(); handleSaveIntercom(); }} className="space-y-6">
+              <form onSubmit={(e) => { e.preventDefault(); void handleSaveIntercom(); }} className="space-y-6">
                 <div className="space-y-4">
                   <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Quick Request Items</h4>
                   <p className="text-[10px] text-gray-500">These appear as tap-to-send shortcuts in the guest Intercom page. Guests can select one without typing.</p>
@@ -4163,15 +4252,7 @@ export function SettingsPage() {
                   )}
                 </div>
 
-                <div className="pt-2 border-t border-gray-150 flex justify-end">
-                  <button
-                    type="submit"
-                    className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                  >
-                    <Save size={14} />
-                    Save Intercom Settings
-                  </button>
-                </div>
+                <SaveActionFooter label="Save Intercom Settings" status={getSaveStatus("intercom")} />
               </form>
             </div>
           )}
@@ -4194,7 +4275,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <form onSubmit={(e) => { e.preventDefault(); handleSaveLegal(); }} className="space-y-6">
+              <form onSubmit={(e) => { e.preventDefault(); void handleSaveLegal(); }} className="space-y-6">
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Privacy Policy</h4>
@@ -4245,15 +4326,7 @@ export function SettingsPage() {
                   <p className="text-[10px] text-gray-500">Used in the guest registration PDF at check-in. If left blank, the field is omitted from the printed form.</p>
                 </div>
 
-                <div className="pt-2 border-t border-gray-150 flex justify-end">
-                  <button
-                    type="submit"
-                    className="min-h-[44px] px-6 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
-                  >
-                    <Save size={14} />
-                    Save Legal Content
-                  </button>
-                </div>
+                <SaveActionFooter label="Save Legal Content" status={getSaveStatus("legal")} />
               </form>
             </div>
           )}
