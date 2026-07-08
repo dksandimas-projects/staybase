@@ -119,6 +119,16 @@ display in `RewardsPage.tsx`. Update
 `plan/features/SPARK-REWARDS.md §Early Check-In Approval Workflow` and
 `plan/docs/TYPES.md` (`EarlyCheckInDetails`) with the new field.
 
+**Post-fix follow-up (2026-07-08, `fix/early-checkin-confirmed-time-regression`):**
+the initial fix (`8ea7d0f`) rejected `confirmedTime: ""` with 400, which the
+admin form sends whenever `requestedTime` cannot seed the dropdown (legacy
+requests with no stored time, or free-text times submitted straight to the
+API). Fixed both sides: the server schema now treats `""` as "no override"
+(falls back to `requestedTime`), and the admin form seeds only whitelisted
+dropdown values (`EARLY_CHECKIN_TIME_OPTIONS`, default `11:00 AM`).
+Regression test: `guest-app/tests/api/early-checkin-resolve-confirmed-time.test.ts`
+(4 cases: empty-string fallback, valid override, free-text 400, decline nulls).
+
 ### PF-03 — Reschedule never re-prices; no capacity check; no guest notification · `Fixed`
 
 **Feature:** Booking calendar (`90607b6`)
@@ -165,6 +175,12 @@ transaction safety net holds — this is a dead-end-UX gap, not a
 double-booking risk. **Fix:** merge active blocks into the returned
 `bookedRanges` (roomId + start + end; no PII involved). Update
 `plan/features/AVAILABILITY-LOCKING.md` when done.
+
+**Deploy note:** the fix's `roomBlocks` query (`status ==` + `startDate <`)
+needs the composite index added to `firebase/firestore.indexes.json` in
+`8ea7d0f`. Run `firebase deploy --only firestore:indexes` before the next
+production deploy or the availability endpoint fails with
+`FAILED_PRECONDITION` at runtime.
 
 ### PF-05 — Walk-in placeholder emails hard-bounce through Resend · `Fixed`
 
@@ -222,7 +238,7 @@ pre-merge checklist built on `npm test --workspaces` is blind to them.
 already has a `config.timezone`-aware `toLocalDateKey` helper worth
 extracting and reusing.
 
-### PF-09 — Seasonal overrides: whole-array writes clobber concurrent edits; toggle/delete unhandled on failure · `Fixed`
+### PF-09 — Seasonal overrides: whole-array writes clobber concurrent edits; toggle/delete unhandled on failure · `Partially fixed — clobber risk accepted`
 
 **Where:** `admin-app/src/pages/RatesPage.tsx:222` (`saveSeasonalOverrides`), `:280` (`toggleSeasonalActive`), `:287` (`deleteSeasonalOverride`)
 
@@ -232,6 +248,12 @@ other's changes (last write wins). `toggleSeasonalActive` and
 `deleteSeasonalOverride` also lack the try/catch + toast that the add
 path has — a failed write rejects silently. Low urgency for a
 single-admin boutique hotel; note it before white-label deployments.
+
+**What shipped in `8ea7d0f`:** the error-handling half only —
+try/catch + success/error toasts on toggle and delete. The whole-array
+concurrent-clobber write remains as designed; accepted for the
+single-admin deployment per the guidance above. Revisit before the
+first white-label client with multiple admins.
 
 ### PF-10 — New `earlyCheckinResolveEmail` template is not previewable · `Fixed`
 

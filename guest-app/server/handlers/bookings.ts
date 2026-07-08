@@ -2113,7 +2113,13 @@ const resolveEarlyCheckinSchema = z.object({
   bookingId: z.string().trim().min(1).max(80),
   status: z.enum(["approved", "declined"]),
   staffNote: z.string().trim().max(500).optional().default(""),
-  confirmedTime: z.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+  // An empty string means "no override" (the admin form sends "" when the
+  // guest's requested time could not seed the dropdown) — treat it as absent
+  // so the approve path falls back to requestedTime instead of failing.
+  confirmedTime: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+  )
 });
 
 export async function handleResolveEarlyCheckin(req: any, res: any) {
