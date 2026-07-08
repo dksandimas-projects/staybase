@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getManilaDateInfo, type PaymentMethodConfig } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -63,6 +63,16 @@ function hexToRgb(hex: string): [number, number, number] {
 // form must only ever submit one of these values.
 const EARLY_CHECKIN_TIME_OPTIONS = ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM"];
 const EARLY_CHECKIN_DEFAULT_TIME = "11:00 AM";
+const STORE_ONLY_ONSITE_PAYMENT_METHODS = new Set(["cod", "add-to-bill"]);
+const LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS: PaymentMethodConfig[] = [
+  { method: "cash", label: "Cash", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true },
+  { method: "card", label: "Credit Card", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true },
+  { method: "gcash", label: "GCash Transfer", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }
+];
+const LEGACY_ONSITE_PAYMENT_METHOD_LABELS = LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS.reduce<Record<string, string>>((acc, option) => {
+  acc[option.method] = option.label;
+  return acc;
+}, {});
 
 const pdfFontCache = new Map<string, string | null>();
 
@@ -130,6 +140,7 @@ export function BookingsPage() {
     websiteContent,
     rewardsConfig,
     members,
+    paymentMethods,
     currentUser
   } = useAdmin();
   const toast = useToast();
@@ -228,6 +239,31 @@ export function BookingsPage() {
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
   const [priceOverride, setPriceOverride] = useState("");
+
+  const onsitePaymentMethodOptions = useMemo(() => {
+    const configured = paymentMethods.filter((method) => {
+      const key = method.method.trim();
+      return key && !STORE_ONLY_ONSITE_PAYMENT_METHODS.has(key);
+    });
+    return configured.length > 0 ? configured : LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS;
+  }, [paymentMethods]);
+
+  const onsitePaymentMethodLabels = useMemo(() => {
+    return onsitePaymentMethodOptions.reduce<Record<string, string>>((acc, method) => {
+      acc[method.method] = method.label || method.method;
+      return acc;
+    }, { ...LEGACY_ONSITE_PAYMENT_METHOD_LABELS });
+  }, [onsitePaymentMethodOptions]);
+
+  const getOnsitePaymentMethodLabel = (method: string) => {
+    return onsitePaymentMethodLabels[method] || method;
+  };
+
+  useEffect(() => {
+    if (onsitePaymentMethodOptions.length === 0) return;
+    if (onsitePaymentMethodOptions.some((method) => method.method === paymentMethod)) return;
+    setPaymentMethod(onsitePaymentMethodOptions[0].method);
+  }, [onsitePaymentMethodOptions, paymentMethod]);
 
   const [selectedBookingPayments, setSelectedBookingPayments] = useState<OnsitePayment[]>([]);
 
@@ -1433,7 +1469,7 @@ export function BookingsPage() {
         if (result.success) {
           setPaymentAmount("");
           setPaymentNote("");
-          toast.success("Payment recorded", `${formatPrice(amount)} via ${paymentMethod.toUpperCase()}`);
+          toast.success("Payment recorded", `${formatPrice(amount)} via ${getOnsitePaymentMethodLabel(paymentMethod)}`);
         } else {
           toast.error("Failed to record payment", result.error);
         }
@@ -2242,7 +2278,7 @@ export function BookingsPage() {
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
                           <p className="font-semibold text-gray-800">{pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {pay.method.toUpperCase()}</p>
+                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}</p>
                         </div>
                         <span className="font-bold text-green-700">+{formatPrice(pay.amount)}</span>
                       </div>
@@ -2265,7 +2301,7 @@ export function BookingsPage() {
                         value={paymentAmount}
                         onChange={(e) => setPaymentAmount(e.target.value)}
                         placeholder="e.g. 500"
-                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                       />
                     </label>
                     
@@ -2274,11 +2310,13 @@ export function BookingsPage() {
                       <select
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
-                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                       >
-                        <option value="cash">Cash</option>
-                        <option value="card">Credit Card</option>
-                        <option value="gcash">GCash Transfer</option>
+                        {onsitePaymentMethodOptions.map((method) => (
+                          <option key={method.method} value={method.method}>
+                            {method.label || method.method}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
@@ -2288,13 +2326,13 @@ export function BookingsPage() {
                         value={paymentNote}
                         onChange={(e) => setPaymentNote(e.target.value)}
                         placeholder="e.g. Downpayment deposit"
-                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                       />
                     </label>
                   
                     <button
                       type="submit"
-                      className="min-h-[38px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
                     >
                       Log Payment
                     </button>
