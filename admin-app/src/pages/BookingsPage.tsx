@@ -58,6 +58,12 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
+// Mirrors the guest picker in RewardsPage and the server-side
+// confirmedTime whitelist in handleResolveEarlyCheckin — the approve
+// form must only ever submit one of these values.
+const EARLY_CHECKIN_TIME_OPTIONS = ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM"];
+const EARLY_CHECKIN_DEFAULT_TIME = "11:00 AM";
+
 const pdfFontCache = new Map<string, string | null>();
 
 async function fetchFontAsBase64(path: string) {
@@ -2352,7 +2358,11 @@ export function BookingsPage() {
                           type="button"
                           onClick={() => {
                             setEarlyCheckInAction("approve");
-                            setEarlyCheckInTimeOverride(eci.requestedTime || "");
+                            setEarlyCheckInTimeOverride(
+                              EARLY_CHECKIN_TIME_OPTIONS.includes(eci.requestedTime)
+                                ? eci.requestedTime
+                                : EARLY_CHECKIN_DEFAULT_TIME
+                            );
                             setEarlyCheckInStaffNote("");
                           }}
                           className="flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
@@ -2389,12 +2399,9 @@ export function BookingsPage() {
                               onChange={(e) => setEarlyCheckInTimeOverride(e.target.value)}
                               className="min-h-[36px] w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-900 outline-none"
                             >
-                              <option value="08:00 AM">08:00 AM</option>
-                              <option value="09:00 AM">09:00 AM</option>
-                              <option value="10:00 AM">10:00 AM</option>
-                              <option value="11:00 AM">11:00 AM</option>
-                              <option value="12:00 PM">12:00 PM</option>
-                              <option value="01:00 PM">01:00 PM</option>
+                              {EARLY_CHECKIN_TIME_OPTIONS.map((time) => (
+                                <option key={time} value={time}>{time}</option>
+                              ))}
                             </select>
                           </label>
                         )}
@@ -2422,7 +2429,7 @@ export function BookingsPage() {
                               setIsResolvingEarlyCheckIn(true);
                               try {
                                 const status = earlyCheckInAction === "approve" ? "approved" : "declined";
-                                const confirmedTime = status === "approved" ? earlyCheckInTimeOverride : undefined;
+                                const confirmedTime = status === "approved" ? (earlyCheckInTimeOverride || undefined) : undefined;
                                 const result = await resolveEarlyCheckin(selectedBooking.id, status, earlyCheckInStaffNote || undefined, confirmedTime);
                                 if (!result.success) {
                                   toast.error("Failed to resolve", result.error || "An unexpected error occurred.");
