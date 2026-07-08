@@ -13,7 +13,6 @@ const navItems = [
   { label: "Rooms", to: "/rooms" },
   { label: "About", to: "/about" },
   { label: "Corporate", to: "/corporate" },
-  { label: "Rewards", to: "/rewards" },
   { label: "Contact", to: "/contact" },
   { label: "Manage", to: "/my-booking" }
 ];
