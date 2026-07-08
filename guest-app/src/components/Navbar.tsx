@@ -37,13 +37,12 @@ export function Navbar({ overHero = false }: NavbarProps) {
   // mark stays visible — the same dark `config.logos.navbar` is near
   // invisible against a dark hero. When the navbar is on a solid
   // background (scrolled, or any non-hero page), use the regular
-  // `logoNavbar`. If only one variant has been uploaded by the admin
-  // we fall back to that one in both states (the per-user "mirror
-  // across both states" choice), then finally to the deploy-time
-  // static file from `hotel.config.ts`.
+  // `logoNavbar`. If only one variant has been uploaded by the admin,
+  // we mirror it across both states. Without runtime uploads, the
+  // deploy-time white logo is the safe default over dark heroes.
   const darkLogoSrc = resolveLogo(
     branding.logoNavbarOnDark || branding.logoNavbar,
-    config.logos.navbar
+    config.logos.white
   );
   const lightLogoSrc = resolveLogo(
     branding.logoNavbar,
