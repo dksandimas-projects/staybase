@@ -33,6 +33,15 @@ describe("Guest app audit SEV-4 fixes — 2026-07-07", () => {
     expect(profilePage).toContain("memberProfile?.photoUrl || user?.photoURL");
   });
 
+  it("keeps the transparent hero navbar on a light logo fallback", () => {
+    const navbar = read("guest-app/src/components/Navbar.tsx");
+
+    expect(navbar).toContain("const darkLogoSrc = resolveLogo");
+    expect(navbar).toContain("branding.logoNavbarOnDark || branding.logoNavbar");
+    expect(navbar).toContain("config.logos.white");
+    expect(navbar).toContain("const logoSrc = solid ? lightLogoSrc : darkLogoSrc");
+  });
+
   it("uses rewardsName and brand config for audited guest UI strings", () => {
     const app = read("guest-app/src/App.tsx");
     const homePage = read("guest-app/src/pages/HomePage.tsx");
