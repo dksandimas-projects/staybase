@@ -347,7 +347,7 @@ export interface AdminContextType {
   // Bookings
   bookings: Booking[];
   updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
-  resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string) => Promise<{ success: boolean; error?: string }>;
+  resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string }>;
   addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
@@ -1129,7 +1129,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const resolveEarlyCheckin = async (bookingId: string, status: "approved" | "declined", staffNote?: string) => {
+  const resolveEarlyCheckin = async (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/early-checkin-resolve`, {
@@ -1138,7 +1138,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           "Content-Type": "application/json",
           "Authorization": token ? `Bearer ${token}` : ""
         },
-        body: JSON.stringify({ bookingId, status, staffNote })
+        body: JSON.stringify({ bookingId, status, staffNote, confirmedTime })
       });
       const data = await res.json();
       if (!res.ok || !data.success) {

@@ -368,7 +368,7 @@ export function RewardsPage() {
                           </p>
                           {isApproved && (
                             <p className="leading-relaxed">
-                              Your request is approved! Room will be ready at <strong>{earlyCheckIn.requestedTime}</strong>.
+                              Your request is approved! Room will be ready at <strong>{earlyCheckIn.confirmedTime || earlyCheckIn.requestedTime}</strong>.
                               {earlyCheckIn.staffNote && <span className="block mt-1 italic">Note: "{earlyCheckIn.staffNote}"</span>}
                             </p>
                           )}

@@ -84,6 +84,12 @@ export async function handleRoomAvailability(req: any, res: any) {
       .where("checkIn", "<", reqEnd)
       .get();
 
+    const blocksSnapshot = await adminDb
+      .collection("roomBlocks")
+      .where("status", "==", "active")
+      .where("startDate", "<", reqEnd)
+      .get();
+
     const bookedRanges: Array<{ roomId: string; checkIn: string; checkOut: string; status: string }> = [];
 
     overlapSnapshot.forEach((docSnap: any) => {
@@ -100,6 +106,22 @@ export async function handleRoomAvailability(req: any, res: any) {
       // Overlap test: requested range intersects the booking range
       if (bStart < reqEnd && bEnd > reqStart) {
         bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status });
+      }
+    });
+
+    blocksSnapshot.forEach((docSnap: any) => {
+      const data = docSnap.data();
+      const startIso = toIsoDate(data.startDate);
+      const endIso = toIsoDate(data.endDate);
+      const roomId = data.roomId;
+      if (!startIso || !endIso || !roomId) return;
+
+      const bStart = new Date(`${startIso}T00:00:00Z`);
+      const bEnd = new Date(`${endIso}T00:00:00Z`);
+
+      // Overlap test: requested range intersects the block range
+      if (bStart < reqEnd && bEnd > reqStart) {
+        bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "blocked" });
       }
     });
 

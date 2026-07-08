@@ -2109,18 +2109,24 @@ async function enrichAndRespond(res: any, bookingData: any) {
   });
 }
 
+const resolveEarlyCheckinSchema = z.object({
+  bookingId: z.string().trim().min(1).max(80),
+  status: z.enum(["approved", "declined"]),
+  staffNote: z.string().trim().max(500).optional().default(""),
+  confirmedTime: z.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+});
+
 export async function handleResolveEarlyCheckin(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const { bookingId, status, staffNote } = req.body || {};
-  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
-    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  const parsed = resolveEarlyCheckinSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Invalid resolution request details." });
   }
-  if (!["approved", "declined"].includes(status)) {
-    return res.status(400).json({ success: false, error: "Status must be 'approved' or 'declined'." });
-  }
+
+  const { bookingId, status, staffNote, confirmedTime } = parsed.data;
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -2137,16 +2143,19 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
         throw new Error("NO_REQUEST_FOUND");
       }
       
-      bookingData = { id: bookingDoc.id, ...data };
+      const updatedEarlyCheckIn = {
+        ...data.earlyCheckIn,
+        status,
+        resolvedAt: new Date().toISOString(),
+        resolvedBy,
+        staffNote: staffNote || "",
+        confirmedTime: status === "approved" ? (confirmedTime || data.earlyCheckIn.requestedTime) : null
+      };
+
+      bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
 
       transaction.update(bookingRef, {
-        earlyCheckIn: {
-          ...data.earlyCheckIn,
-          status,
-          resolvedAt: new Date().toISOString(),
-          resolvedBy,
-          staffNote: staffNote || ""
-        },
+        earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: new Date()
       });
     });
@@ -2193,6 +2202,8 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
   try {
     let updatedBooking: any = null;
+    let fullBookingForEmail: any = null;
+
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
       const bookingDoc = await transaction.get(bookingRef);
@@ -2232,6 +2243,95 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
 
+      // Load Hotel Config
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.data() || {};
+      const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
+      if (!typeEntry) throw new Error("Room type configuration not found.");
+
+      // PF-03: Capacity check
+      if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
+        throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
+      }
+
+      // PF-03: Pricing recalculation
+      let activeRoomRate = typeEntry.pricePerNight || 0;
+      if (booking.isCorporate) {
+        let typeCorporateRate = typeEntry.corporateRate || 0;
+        activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : activeRoomRate;
+
+        if (booking.corporateCode) {
+          const corpRef = adminDb.collection("corporateCodes").doc(booking.corporateCode);
+          const corpDoc = await transaction.get(corpRef);
+          if (corpDoc.exists) {
+            const corpData = corpDoc.data() || {};
+            if (corpData.ratePerRoomType?.[room.type]) {
+              activeRoomRate = corpData.ratePerRoomType[room.type];
+            }
+          }
+        }
+      }
+
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
+      const roomTotal = booking.isCorporate
+        ? activeRoomRate * numNights
+        : calculateSeasonalAwareRoomTotal({
+            checkIn: checkInDate,
+            checkOut: checkOutDate,
+            roomType: room.type,
+            baseRate: activeRoomRate,
+            weekendRate: typeEntry.weekendRate || typeEntry.pricePerNight || 0,
+            seasonalRateOverrides
+          });
+
+      const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
+      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      const subtotal = roomTotal + breakfastTotal;
+
+      let voucherDiscount = 0;
+      if (booking.voucherCode) {
+        const voucherRef = adminDb.collection("vouchers").doc(booking.voucherCode);
+        const voucherDoc = await transaction.get(voucherRef);
+        if (voucherDoc.exists) {
+          const vData = voucherDoc.data() || {};
+          if (vData.discountType === "percent") {
+            voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
+          } else {
+            voucherDiscount = vData.discountValue || 0;
+          }
+          voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+        } else {
+          voucherDiscount = booking.voucherDiscount || 0;
+        }
+      }
+
+      let discountPct = 0;
+      if (booking.discountType === "senior" || booking.discountType === "pwd") {
+        discountPct = 20;
+      }
+
+      let appliedMemberDiscountPct = 0;
+      if (booking.memberId) {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsDoc = await transaction.get(rewardsRef);
+        if (rewardsDoc.exists) {
+          const rc = rewardsDoc.data()!;
+          if (rc.memberDiscountEnabled !== false) {
+            const pct = Number(rc.memberDiscountPct) || 0;
+            if (pct > 0) appliedMemberDiscountPct = pct;
+          }
+        }
+      }
+
+      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const afterVoucher = afterSeniorPwd - voucherDiscount;
+      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
+      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+
       const rescheduleEntry = {
         fromRoomId: booking.roomId || "",
         fromRoomNumber: booking.roomNumber || "",
@@ -2243,7 +2343,8 @@ export async function handleRescheduleBooking(req: any, res: any) {
         toCheckOut: checkOut,
         reason: typeof reason === "string" ? reason.slice(0, 500) : "",
         by: req.staff?.uid || req.staff?.email || "staff",
-        at: new Date().toISOString()
+        at: new Date().toISOString(),
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
       };
 
       updatedBooking = {
@@ -2253,12 +2354,31 @@ export async function handleRescheduleBooking(req: any, res: any) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
+        ratePerNight: activeRoomRate,
+        totalPrice: finalTotalPrice,
+        originalTotalPrice,
+        voucherDiscount,
         rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],
         updatedAt: new Date()
       };
 
+      fullBookingForEmail = {
+        ...booking,
+        ...updatedBooking,
+        id: bookingId
+      };
+
       transaction.update(bookingRef, updatedBooking);
     });
+
+    // Send email to guest
+    if (fullBookingForEmail) {
+      try {
+        await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
+      } catch (emailErr) {
+        console.error("Failed to send reschedule email:", emailErr);
+      }
+    }
 
     return res.status(200).json({ success: true, data: updatedBooking });
   } catch (error: any) {

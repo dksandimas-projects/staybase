@@ -14,7 +14,8 @@ const blockSchema = z.object({
 });
 
 const updateBlockSchema = blockSchema.extend({
-  blockId: z.string().trim().min(1).max(80)
+  blockId: z.string().trim().min(1).max(80),
+  roomId: z.string().trim().min(1).max(80).optional()
 });
 
 const cancelBlockSchema = z.object({
@@ -131,15 +132,18 @@ export async function handleUpdateRoomBlock(req: any, res: any) {
       const existing = blockDoc.data() || {};
       if (existing.status === "cancelled") throw new Error("Cancelled blocks cannot be edited.");
 
-      const roomRef = adminDb.collection("rooms").doc(parsed.data.roomId);
+      const targetRoomId = parsed.data.roomId || existing.roomId;
+      if (!targetRoomId) throw new Error("Room ID is required.");
+
+      const roomRef = adminDb.collection("rooms").doc(targetRoomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) throw new Error("Room not found.");
       const room = roomDoc.data() || {};
 
-      await assertRoomIsFreeForBlock(transaction, parsed.data.roomId, start, end, parsed.data.blockId);
+      await assertRoomIsFreeForBlock(transaction, targetRoomId, start, end, parsed.data.blockId);
 
       transaction.update(blockRef, {
-        roomId: parsed.data.roomId,
+        roomId: targetRoomId,
         roomNumber: String(room.roomNumber || ""),
         roomType: String(room.type || ""),
         startDate: Timestamp.fromDate(start),

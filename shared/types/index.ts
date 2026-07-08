@@ -111,6 +111,7 @@ export interface EarlyCheckInDetails {
   resolvedAt: string | null;
   resolvedBy: string | null;
   staffNote: string | null;
+  confirmedTime?: string | null;
 }
 
 export interface SeasonalRateOverride {

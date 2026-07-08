@@ -278,14 +278,26 @@ export function RatesPage() {
   };
 
   const toggleSeasonalActive = async (id: string) => {
-    const next = seasonalRateOverrides.map((override) =>
-      override.id === id ? { ...override, isActive: !override.isActive } : override
-    );
-    await saveSeasonalOverrides(next);
+    try {
+      const next = seasonalRateOverrides.map((override) =>
+        override.id === id ? { ...override, isActive: !override.isActive } : override
+      );
+      await saveSeasonalOverrides(next);
+      toast.success("Status updated", "Seasonal override status has been updated.");
+    } catch (err) {
+      console.error("Failed to toggle seasonal active status:", err);
+      toast.error("Failed to update status", err instanceof Error ? err.message : "An unexpected error occurred.");
+    }
   };
 
   const deleteSeasonalOverride = async (id: string) => {
-    await saveSeasonalOverrides(seasonalRateOverrides.filter((override) => override.id !== id));
+    try {
+      await saveSeasonalOverrides(seasonalRateOverrides.filter((override) => override.id !== id));
+      toast.success("Override removed", "Seasonal override has been deleted.");
+    } catch (err) {
+      console.error("Failed to delete seasonal override:", err);
+      toast.error("Failed to delete override", err instanceof Error ? err.message : "An unexpected error occurred.");
+    }
   };
 
   const formatSeasonalRoomScope = (override: SeasonalRateOverride) => {

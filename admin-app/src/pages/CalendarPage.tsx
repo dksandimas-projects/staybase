@@ -75,7 +75,22 @@ export function CalendarPage() {
     rescheduleBooking
   } = useAdmin();
   const toast = useToast();
-  const todayKey = toDateKey(new Date());
+
+  const toLocalDateKey = (date: Date) => {
+    const tz = config.timezone || "Asia/Manila";
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(date);
+    const year = parts.find(p => p.type === "year")?.value || "0000";
+    const month = parts.find(p => p.type === "month")?.value || "01";
+    const day = parts.find(p => p.type === "day")?.value || "01";
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayKey = toLocalDateKey(new Date());
   const [startDate, setStartDate] = useState(todayKey);
   const [selection, setSelection] = useState<{ roomId: string; startDate: string; endDate: string } | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);

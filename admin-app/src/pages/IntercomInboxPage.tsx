@@ -41,19 +41,26 @@ export function IntercomInboxPage() {
   useEffect(() => {
     if (roomQueryParam) {
       setSelectedRoomNumber(roomQueryParam);
-      // If the selected thread is resolved, auto-switch filter toresolved
-      // so the staff member can see it, otherwise it might stay hidden.
-      const thread = intercomThreads[roomQueryParam];
-      if (thread && thread.resolved) {
-        setThreadFilter("resolved");
-      }
       
-      // Clean up the URL search params
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.delete("room");
-      setSearchParams(nextParams, { replace: true });
+      const thread = intercomThreads[roomQueryParam];
+      const hasThreadsLoaded = Object.keys(intercomThreads).length > 0;
+      
+      if (thread) {
+        if (thread.resolved) {
+          setThreadFilter("resolved");
+        }
+        // Clean up the URL search params
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete("room");
+        setSearchParams(nextParams, { replace: true });
+      } else if (hasThreadsLoaded) {
+        // Clean up anyway if threads have loaded and this room is not in them
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete("room");
+        setSearchParams(nextParams, { replace: true });
+      }
     }
-  }, [roomQueryParam, intercomThreads]);
+  }, [roomQueryParam, intercomThreads, searchParams, setSearchParams]);
   const [threadFilter, setThreadFilter] = useState<"active" | "resolved">("active");
   const [replyText, setReplyText] = useState("");
   const [isInboxFocused, setIsInboxFocused] = useState(!document.hidden && document.hasFocus());
