@@ -421,7 +421,7 @@ export interface AdminContextType {
   // time the `websiteContent` case fires in the settings
   // `onSnapshot` listener below.
   websiteContentLoading: boolean;
-  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<void>;
+  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<boolean>;
 
   // Staff Accounts
   staff: StaffMember[];
@@ -2776,9 +2776,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       if (section === "websiteContent" || section === "hotelConfig") {
         bustPublicSiteContentCache();
       }
+      return true;
     } catch (error) {
       console.error(`Error updating ${section}:`, error);
       notify.error("Failed to save settings", error instanceof Error ? error.message : "Unknown error");
+      return false;
     }
   };
 
