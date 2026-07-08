@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 8, 2026 (Phase 12 features audit — 11 PF-* findings logged in `plan/project/AUDIT-PHASE12-FEATURES-2026-07-08.md`; rate calendar marked shipped)
+> Last updated: July 8, 2026 (guest price breakdown added to Phase 12 roadmap; detailed plan in `plan/features/BOOKING-FLOW.md`)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -983,6 +983,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ Calendar view for bookings (visual room × date grid)
 - ✅ Seasonal rate overrides
 - ✅ Rate Calendar — month-based room type × date grid for effective public rates, multi-select/unselect seasonal rate editing, and holiday labels sourced from seasonal override names. Full spec: `plan/features/RATE-CALENDAR.md`. *(Shipped in the same commit that added this line — marked done during the 2026-07-08 audit.)*
+- ⬜ Guest-facing price breakdown for mixed regular/weekend/holiday rates — show itemized rate lines in booking Step 1/3/4, persist `Booking.rateBreakdown`, and reuse it in `/my-booking`, emails, and admin receipts so guests can understand why the total is higher or lower than expected. Full plan: `plan/features/BOOKING-FLOW.md §Implementation Plan — Guest Price Breakdown`.
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
 
@@ -1034,6 +1035,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
+| 12 — Post-Launch | 12 | 8 | 1 not started (guest price breakdown) + 3 deferred |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **359** | **325** | **~134** |
