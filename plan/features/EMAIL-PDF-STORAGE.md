@@ -105,6 +105,12 @@ Used in: Bookings Management (print/download), email attachment option.
 - Guest name, room type + room number
 - Check-in / check-out dates + number of nights
 - Number of guests, rate per night, total amount
+- **Rate breakdown** — if `Booking.rateBreakdown` exists:
+  - Room lines grouped by regular, weekend, seasonal/holiday, corporate, or manual source
+  - Breakfast/add-on lines when present
+  - Discount, voucher, Spark Rewards member discount, and points redemption deductions when present
+  - Final total matching `booking.totalPrice`
+- If `Booking.rateBreakdown` is missing — fall back to the legacy summary using locked `ratePerNight`, `numNights`, discounts/vouchers, and `totalPrice`
 - Applied discount (type + %)
 - Applied voucher code + discount (if any)
 - Spark Rewards redemption — if `pointsRedeemed > 0`: "Spark Rewards: {X} pts redeemed = −₱{Y}" line item
