@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 8, 2026 (completed Phase 12: email previews, breakfast menu CRUD, dashboard intercom widget, and walk-in scrollability fix)
+> Last updated: July 8, 2026 (Phase 12 features audit — 11 PF-* findings logged in `plan/project/AUDIT-PHASE12-FEATURES-2026-07-08.md`; rate calendar marked shipped)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -980,10 +980,36 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ Bugfix: Walk-in Booking Modal Scrollability — fix layout issue where the Create Walk-in Booking modal is not scrollable and gets cut off on smaller screens. See `plan/bugs/walkin-booking-modal-scrollability.md`.
 - ✅ Early check-in approval workflow — persist member early check-in requests on the booking (`earlyCheckIn` map), approve/decline from the booking drawer, guest confirmation email + status in My Stays/My Rewards, arrivals-list badge. Today the request ends at a staff notification email with no record on the booking. Full spec: `plan/features/SPARK-REWARDS.md §Phase 2 — Early Check-In Approval Workflow`
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
-- ⏸ Calendar view for bookings (visual room × date grid)
-- ⏸ Seasonal rate overrides
+- ✅ Calendar view for bookings (visual room × date grid)
+- ✅ Seasonal rate overrides
+- ✅ Rate Calendar — month-based room type × date grid for effective public rates, multi-select/unselect seasonal rate editing, and holiday labels sourced from seasonal override names. Full spec: `plan/features/RATE-CALENDAR.md`. *(Shipped in the same commit that added this line — marked done during the 2026-07-08 audit.)*
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
+
+### Phase 12 Features Audit — fixes to close (audited 2026-07-08)
+
+> Post-ship audit of the six Phase 12 features that landed 2026-07-08.
+> Full findings, severities, and fix guidance:
+> `plan/project/AUDIT-PHASE12-FEATURES-2026-07-08.md`. No SEV-1s; the
+> three SEV-2s each make a shipped control non-functional or produce
+> wrong guest-facing information. Fix in the order listed.
+
+**SEV-2 (fix first):**
+- ✅ PF-01 — Room block editing always fails with 400: client never sends `roomId` but `updateBlockSchema` requires it (`CalendarPage.tsx` / `AdminContext.tsx` / `room-blocks.ts`)
+- ✅ PF-02 — Early check-in "Confirmed Check-In Time" picker is never sent to the server; approval email shows the guest's requested time instead (`BookingsPage.tsx` / `bookings.ts` / `email.ts`)
+- ✅ PF-03 — Reschedule never re-prices (`totalPrice`/`ratePerNight`/breakfast stale after nights or room-type change), no `numGuests` vs capacity check, no guest notification (`handleRescheduleBooking`)
+
+**SEV-3:**
+- ✅ PF-04 — Guest availability endpoint ignores active `roomBlocks` → dead-end UX when all rooms of a type are blocked (`rooms.ts`)
+- ✅ PF-05 — Walk-in `@example.invalid` placeholder emails hard-bounce through Resend (sender-reputation risk) — add a shared skip guard in `sendEmail`
+- ✅ PF-06 — Early check-in `requestedCheckInTime` / `notes` / `staffNote` persisted without Zod validation (type/length)
+- ✅ PF-07 — `guest-app/package.json` has no `test` script, so `npm test --workspaces` silently skips its 298 tests
+
+**SEV-4 (polish):**
+- ✅ PF-08 — `CalendarPage` "today" uses UTC instead of `config.timezone` (window starts on yesterday before 8 AM Manila)
+- ✅ PF-09 — Seasonal overrides saved as whole-array writes (concurrent-edit clobber); toggle/delete lack error handling (`RatesPage.tsx`)
+- ✅ PF-10 — `earlyCheckinResolveEmail` missing from the email preview switch — the one guest email staff cannot preview
+- ✅ PF-11 — Intercom `?room=` deep-link clears the param before `intercomThreads` loads → resolved-thread filter switch can be skipped (`IntercomInboxPage.tsx`)
 
 ---
 

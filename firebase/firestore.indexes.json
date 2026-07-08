@@ -40,6 +40,14 @@
         { "fieldPath": "checkIn", "order": "ASCENDING" },
         { "fieldPath": "checkOut", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "roomBlocks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "startDate", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -69,6 +69,33 @@ RoomType {
   weekendRate: number           // applied for stays including Sat/Sun nights
   corporateRate: number         // flat public rate used at /corporate/book
 }
+
+SeasonalRateOverride {
+  id: string
+  name: string
+  startDate: string             // yyyy-mm-dd, inclusive
+  endDate: string               // yyyy-mm-dd, inclusive
+  rate: number
+  roomTypeValues: string[]      // empty = all room types
+  isActive: boolean
+}
+
+RoomBlock {
+  id: string
+  roomId: string
+  roomNumber: string
+  roomType: string
+  startDate: string              // yyyy-mm-dd, inclusive
+  endDate: string                // yyyy-mm-dd, exclusive
+  reason: string
+  notes: string
+  status: "active" | "cancelled"
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  cancelledAt: string | null
+  cancelledBy: string | null
+}
 ```
 
 ---
@@ -173,6 +200,7 @@ Booking {
   // schema uses both names — keep `reminderSentAt` at the top
   // level for the cron query (DECISIONS-FEATURES.md #83) and
   // the nested form for the other two.
+  earlyCheckIn?: EarlyCheckInDetails | null
   reminderSentAt?: Date
   createdAt: Date
   updatedAt: Date
@@ -185,6 +213,17 @@ OnsitePayment {
   note: string
   recordedBy: string   // staff UID
   recordedAt: Date
+}
+
+EarlyCheckInDetails {
+  status: "requested" | "approved" | "declined"
+  requestedTime: string
+  notes: string
+  requestedAt: string
+  resolvedAt: string | null
+  resolvedBy: string | null
+  staffNote: string | null
+  confirmedTime?: string | null
 }
 ```
 

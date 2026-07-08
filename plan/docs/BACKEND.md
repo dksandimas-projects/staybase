@@ -56,6 +56,30 @@ Firestore rules: read/create/update require `isStaff()`, delete requires `isAdmi
 
 ---
 
+### `roomBlocks/{blockId}`
+
+Calendar-managed room blocks. This is the canonical multi-range blocking model for the booking calendar; legacy `rooms/{roomId}.blockedFrom/blockedTo` is still read for backwards compatibility but should not be used for new calendar blocks.
+
+| Field | Type | Notes |
+|---|---|---|
+| `roomId` | string | Ref to `rooms/{roomId}` |
+| `roomNumber` | string | Denormalized for calendar display |
+| `roomType` | string | Denormalized |
+| `startDate` | timestamp | Inclusive check-in-style date |
+| `endDate` | timestamp | Exclusive check-out-style date |
+| `reason` | string | Short reason shown in the admin calendar |
+| `notes` | string | Optional staff note |
+| `status` | string | `"active"` \| `"cancelled"` |
+| `createdBy` | string | Staff UID/email |
+| `createdAt` | timestamp | |
+| `updatedAt` | timestamp | |
+| `cancelledAt` | timestamp \| null | |
+| `cancelledBy` | string \| null | |
+
+Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping bookings and overlapping active blocks are rejected server-side. Booking creation and rescheduling also check active `roomBlocks` inside the transaction.
+
+---
+
 ### `bookings/{bookingId}`
 
 `bookingId` is the Firestore document ID. Guest and corporate booking flows preallocate this ID before payment-proof or discount-ID uploads so Firebase Storage paths can be created before the booking document exists. `/api/bookings/create` must create the booking document at this supplied ID inside the availability-locking transaction. The guest-facing `bookingRef` is generated separately inside the transaction.
@@ -197,11 +221,13 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings → Hotel Info; each falls back to the deploy-time `hotel.config.ts` value when empty in the public hook): `hotelName`, `address`, `contactEmail`, `contactPhone`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`
+Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings → Hotel Info; each falls back to the deploy-time `hotel.config.ts` value when empty in the public hook): `hotelName`, `address`, `contactEmail`, `contactPhone`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`, `seasonalRateOverrides[]`
 
 > **`paymentMethods[]`** — fully dynamic payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, `isEnabled`, `showInStore`, and `showInCorporate` flags. `isEnabled` controls the regular booking flow; `showInStore` controls the in-room store; `showInCorporate` controls corporate personal-pay. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. `cod` and `add-to-bill` are store-only entries in this same list. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
 
 > **`roomTypes[]`** — array of `RoomTypeEntry` records. Each entry owns its photos, occupancy cap, rate matrix, bed description, and amenities; rooms reference the type via the `type` field and inherit these properties. See `plan/docs/TYPES.md §RoomType` for the full shape. Photos are uploaded to Firebase Storage at `room-types/{value}/{filename}`. Maximum 10 photos per type (per `MAX_ROOM_TYPE_PHOTOS` in `shared/constants`). The full edit surface is the Settings → Room Types table; see `plan/features/SETTINGS.md §Room Types` for the add / edit / photos / delete flow.
+
+> **`seasonalRateOverrides[]`** — array of active/inactive date-range nightly rate overrides managed from Rates → Seasonal Rate Overrides. Shape: `{ id, name, startDate, endDate, rate, roomTypeValues[], isActive }`. Empty `roomTypeValues[]` means all room types. Overrides apply only to new standard and staff walk-in bookings, beat weekend rates for matching nights, and do not override negotiated or flat corporate rates. Existing bookings keep their locked `totalPrice`.
 
 ---
 

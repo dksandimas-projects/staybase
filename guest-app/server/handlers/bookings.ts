@@ -1,7 +1,15 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
-import { toDateOrNull, validateCorporateCode, getManilaDateInfo, BOOKING_REF_REGEX, generateLookupToken } from "@spark-inn/shared";
+import {
+  calculateSeasonalAwareRoomTotal,
+  normalizeSeasonalRateOverrides,
+  toDateOrNull,
+  validateCorporateCode,
+  getManilaDateInfo,
+  BOOKING_REF_REGEX,
+  generateLookupToken
+} from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 
@@ -11,6 +19,29 @@ export function getConfiguredBookingRefPrefix() {
 
 const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed"];
+
+function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+async function hasActiveRoomBlockConflict(
+  transaction: FirebaseFirestore.Transaction,
+  roomId: string,
+  checkInDate: Date,
+  checkOutDate: Date
+) {
+  const blocksQuery = adminDb.collection("roomBlocks")
+    .where("roomId", "==", roomId)
+    .where("status", "==", "active");
+  const blocksSnapshot = await transaction.get(blocksQuery);
+  return blocksSnapshot.docs.some((doc) => {
+    const data = doc.data();
+    const start = toDateOrNull(data.startDate);
+    const end = toDateOrNull(data.endDate);
+    return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
+  });
+}
 
 // Per BF-21 (booking-flow audit 2026-06-26): the public
 // self-service endpoints (`/api/bookings/lookup`,
@@ -372,6 +403,7 @@ export async function handleCreateBooking(req: any, res: any) {
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
 
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
@@ -431,6 +463,10 @@ export async function handleCreateBooking(req: any, res: any) {
           return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
         });
         if (hasConflict) {
+          continue;
+        }
+        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, candidate.id, checkInDate, checkOutDate);
+        if (hasBlockConflict) {
           continue;
         }
         assignedRoom = candidate;
@@ -577,21 +613,19 @@ export async function handleCreateBooking(req: any, res: any) {
       // No corporateCode and no flat-rate flag → activeRoomRate
       // stays as typeBaseRate, isCorporate stays false.
 
-      // 5. Calculate Nightly Rate Total (support weekend rate)
-      let roomTotal = 0;
-      const dateCursor = new Date(checkInDate);
-      for (let i = 0; i < numNights; i++) {
-        // check if weekend night (Friday or Saturday night? Or Saturday or Sunday night per shared/utils/dates.ts)
-        // Let's check: shared/utils/dates.ts checks day === 0 (Sun) or day === 6 (Sat)
-        const day = dateCursor.getUTCDay();
-        const isWeekend = day === 0 || day === 6;
-        if (isWeekend && !corporateDetails.isCorporate && typeWeekendRate) {
-          roomTotal += typeWeekendRate;
-        } else {
-          roomTotal += activeRoomRate;
-        }
-        dateCursor.setUTCDate(dateCursor.getUTCDate() + 1);
-      }
+      // 5. Calculate Nightly Rate Total. Seasonal overrides apply to
+      // standard bookings only; negotiated and flat corporate rates
+      // intentionally keep their contract pricing.
+      const roomTotal = corporateDetails.isCorporate
+        ? activeRoomRate * numNights
+        : calculateSeasonalAwareRoomTotal({
+            checkIn: checkInDate,
+            checkOut: checkOutDate,
+            roomType,
+            baseRate: activeRoomRate,
+            weekendRate: typeWeekendRate,
+            seasonalRateOverrides
+          });
 
       // 6. Calculate Breakfast Add-on
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
@@ -1095,6 +1129,7 @@ export async function handleCreateWalkin(req: any, res: any) {
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
 
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
@@ -1117,6 +1152,10 @@ export async function handleCreateWalkin(req: any, res: any) {
       if (hasConflict) {
         throw new Error("Room no longer available");
       }
+      const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
+      if (hasBlockConflict) {
+        throw new Error("Room no longer available");
+      }
 
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
@@ -1124,19 +1163,17 @@ export async function handleCreateWalkin(req: any, res: any) {
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 250 };
       const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
 
-      // 4. Calculate Nightly Rate Total (weekend rate check)
-      let roomTotal = 0;
-      const dateCursor = new Date(checkInDate);
-      for (let i = 0; i < numNights; i++) {
-        const day = dateCursor.getUTCDay();
-        const isWeekend = day === 0 || day === 6;
-        if (isWeekend && typeWeekendRate) {
-          roomTotal += typeWeekendRate;
-        } else {
-          roomTotal += typeBaseRate;
-        }
-        dateCursor.setUTCDate(dateCursor.getUTCDate() + 1);
-      }
+      // 4. Calculate Nightly Rate Total. Seasonal overrides beat
+      // weekend rates for walk-ins unless staff enters a manual
+      // total override below.
+      const roomTotal = calculateSeasonalAwareRoomTotal({
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        roomType: roomData.type,
+        baseRate: typeBaseRate,
+        weekendRate: typeWeekendRate,
+        seasonalRateOverrides
+      });
 
       // 5. Calculate Breakfast Add-on
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
@@ -2072,18 +2109,30 @@ async function enrichAndRespond(res: any, bookingData: any) {
   });
 }
 
+const resolveEarlyCheckinSchema = z.object({
+  bookingId: z.string().trim().min(1).max(80),
+  status: z.enum(["approved", "declined"]),
+  staffNote: z.string().trim().max(500).optional().default(""),
+  // An empty string means "no override" (the admin form sends "" when the
+  // guest's requested time could not seed the dropdown) — treat it as absent
+  // so the approve path falls back to requestedTime instead of failing.
+  confirmedTime: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+  )
+});
+
 export async function handleResolveEarlyCheckin(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const { bookingId, status, staffNote } = req.body || {};
-  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
-    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  const parsed = resolveEarlyCheckinSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Invalid resolution request details." });
   }
-  if (!["approved", "declined"].includes(status)) {
-    return res.status(400).json({ success: false, error: "Status must be 'approved' or 'declined'." });
-  }
+
+  const { bookingId, status, staffNote, confirmedTime } = parsed.data;
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -2100,16 +2149,19 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
         throw new Error("NO_REQUEST_FOUND");
       }
       
-      bookingData = { id: bookingDoc.id, ...data };
+      const updatedEarlyCheckIn = {
+        ...data.earlyCheckIn,
+        status,
+        resolvedAt: new Date().toISOString(),
+        resolvedBy,
+        staffNote: staffNote || "",
+        confirmedTime: status === "approved" ? (confirmedTime || data.earlyCheckIn.requestedTime) : null
+      };
+
+      bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
 
       transaction.update(bookingRef, {
-        earlyCheckIn: {
-          ...data.earlyCheckIn,
-          status,
-          resolvedAt: new Date().toISOString(),
-          resolvedBy,
-          staffNote: staffNote || ""
-        },
+        earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: new Date()
       });
     });
@@ -2131,5 +2183,211 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
     }
     console.error("Resolve early check-in handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+export async function handleRescheduleBooking(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const { bookingId, roomId, checkIn, checkOut, reason } = req.body || {};
+  if (!bookingId || !roomId || !checkIn || !checkOut) {
+    return res.status(400).json({ success: false, error: "Booking, room, check-in, and check-out are required." });
+  }
+
+  const checkInDate = new Date(`${checkIn}T00:00:00Z`);
+  const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
+  if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
+  const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
+  if (numNights < 1) {
+    return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  try {
+    let updatedBooking: any = null;
+    let fullBookingForEmail: any = null;
+
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+      const booking = bookingDoc.data() || {};
+      if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
+        throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
+      }
+
+      const roomRef = adminDb.collection("rooms").doc(String(roomId));
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) throw new Error("Room not found.");
+      const room = roomDoc.data() || {};
+      if (room.isActive === false) throw new Error("Target room is inactive.");
+      if (room.status === "blocked") {
+        const blockedFrom = toDateOrNull(room.blockedFrom);
+        const blockedTo = toDateOrNull(room.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? rangesOverlap(blockedFrom, blockedTo, checkInDate, checkOutDate)
+          : true;
+        if (windowActive) throw new Error("Target room is blocked for those dates.");
+      }
+
+      const overlapQuery = adminDb.collection("bookings")
+        .where("roomId", "==", String(roomId))
+        .where("status", "in", ROOM_OCCUPYING_STATUSES);
+      const overlapSnapshot = await transaction.get(overlapQuery);
+      const hasConflict = overlapSnapshot.docs.some((doc) => {
+        if (doc.id === String(bookingId)) return false;
+        const data = doc.data();
+        const existingCheckIn = toDateOrNull(data.checkIn);
+        const existingCheckOut = toDateOrNull(data.checkOut);
+        return Boolean(existingCheckIn && existingCheckOut && rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate));
+      });
+      if (hasConflict) throw new Error("Target room already has a booking in that date range.");
+
+      const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
+      if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
+
+      // Load Hotel Config
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.data() || {};
+      const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
+      if (!typeEntry) throw new Error("Room type configuration not found.");
+
+      // PF-03: Capacity check
+      if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
+        throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
+      }
+
+      // PF-03: Pricing recalculation
+      let activeRoomRate = typeEntry.pricePerNight || 0;
+      if (booking.isCorporate) {
+        let typeCorporateRate = typeEntry.corporateRate || 0;
+        activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : activeRoomRate;
+
+        if (booking.corporateCode) {
+          const corpRef = adminDb.collection("corporateCodes").doc(booking.corporateCode);
+          const corpDoc = await transaction.get(corpRef);
+          if (corpDoc.exists) {
+            const corpData = corpDoc.data() || {};
+            if (corpData.ratePerRoomType?.[room.type]) {
+              activeRoomRate = corpData.ratePerRoomType[room.type];
+            }
+          }
+        }
+      }
+
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
+      const roomTotal = booking.isCorporate
+        ? activeRoomRate * numNights
+        : calculateSeasonalAwareRoomTotal({
+            checkIn: checkInDate,
+            checkOut: checkOutDate,
+            roomType: room.type,
+            baseRate: activeRoomRate,
+            weekendRate: typeEntry.weekendRate || typeEntry.pricePerNight || 0,
+            seasonalRateOverrides
+          });
+
+      const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
+      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      const subtotal = roomTotal + breakfastTotal;
+
+      let voucherDiscount = 0;
+      if (booking.voucherCode) {
+        const voucherRef = adminDb.collection("vouchers").doc(booking.voucherCode);
+        const voucherDoc = await transaction.get(voucherRef);
+        if (voucherDoc.exists) {
+          const vData = voucherDoc.data() || {};
+          if (vData.discountType === "percent") {
+            voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
+          } else {
+            voucherDiscount = vData.discountValue || 0;
+          }
+          voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+        } else {
+          voucherDiscount = booking.voucherDiscount || 0;
+        }
+      }
+
+      let discountPct = 0;
+      if (booking.discountType === "senior" || booking.discountType === "pwd") {
+        discountPct = 20;
+      }
+
+      let appliedMemberDiscountPct = 0;
+      if (booking.memberId) {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsDoc = await transaction.get(rewardsRef);
+        if (rewardsDoc.exists) {
+          const rc = rewardsDoc.data()!;
+          if (rc.memberDiscountEnabled !== false) {
+            const pct = Number(rc.memberDiscountPct) || 0;
+            if (pct > 0) appliedMemberDiscountPct = pct;
+          }
+        }
+      }
+
+      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const afterVoucher = afterSeniorPwd - voucherDiscount;
+      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
+      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+
+      const rescheduleEntry = {
+        fromRoomId: booking.roomId || "",
+        fromRoomNumber: booking.roomNumber || "",
+        fromCheckIn: toDateOrNull(booking.checkIn)?.toISOString() || "",
+        fromCheckOut: toDateOrNull(booking.checkOut)?.toISOString() || "",
+        toRoomId: String(roomId),
+        toRoomNumber: String(room.roomNumber || ""),
+        toCheckIn: checkIn,
+        toCheckOut: checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        by: req.staff?.uid || req.staff?.email || "staff",
+        at: new Date().toISOString(),
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+      };
+
+      updatedBooking = {
+        roomId: String(roomId),
+        roomNumber: String(room.roomNumber || ""),
+        roomType: String(room.type || booking.roomType || ""),
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
+        numNights,
+        ratePerNight: activeRoomRate,
+        totalPrice: finalTotalPrice,
+        originalTotalPrice,
+        voucherDiscount,
+        rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],
+        updatedAt: new Date()
+      };
+
+      fullBookingForEmail = {
+        ...booking,
+        ...updatedBooking,
+        id: bookingId
+      };
+
+      transaction.update(bookingRef, updatedBooking);
+    });
+
+    // Send email to guest
+    if (fullBookingForEmail) {
+      try {
+        await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
+      } catch (emailErr) {
+        console.error("Failed to send reschedule email:", emailErr);
+      }
+    }
+
+    return res.status(200).json({ success: true, data: updatedBooking });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
   }
 }

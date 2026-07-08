@@ -16,6 +16,7 @@ The internal front desk dashboard at `admin.sparkinnbohol.com`. Staff-only — n
 | `/login` | `LoginPage.tsx` | None | `plan/features/AUTH-ROLES.md` |
 | `/` | `DashboardPage.tsx` | Front Desk+ | `plan/features/DASHBOARD-OVERVIEW.md` |
 | `/bookings` | `BookingsPage.tsx` | Front Desk+ | `plan/features/BOOKINGS-MANAGEMENT.md` |
+| `/calendar` | `CalendarPage.tsx` | Front Desk+ | `plan/features/BOOKINGS-MANAGEMENT.md` |
 | `/rooms` | `RoomsPage.tsx` | Front Desk+ | `plan/features/ROOM-MANAGEMENT.md` |
 | `/rates` | `RatesPage.tsx` | Admin only | `plan/features/RATE-MANAGEMENT.md` |
 | `/reports` | `ReportsPage.tsx` | Front Desk+ | `plan/features/REPORTS.md` |

@@ -8,6 +8,8 @@
 
 Admin-only page at `/rates` for managing all pricing and payment configuration. As of W3.6, the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) and `maxCapacity` are owned by the **room type** (not the individual room) — see `settings/hotelConfig.roomTypes[]`. As of W3.7, the same is true for `bedDefinition`, `description`, and `amenities` (see `plan/features/ROOM-MANAGEMENT.md §W3.7`). The Rates tab is one edit surface for the rate matrix; the **Settings → Room Types → Edit** modal is the other (and is more convenient for adjusting a single type's rates together with its bed / description / amenities). Rate changes take effect for new bookings — existing bookings retain their locked rate.
 
+Planned post-launch enhancement: an Airbnb-style **Rate Calendar** for month-based room type × date pricing, multi-select seasonal rate edits, and holiday labels from seasonal overrides. See `plan/features/RATE-CALENDAR.md`.
+
 ---
 
 ## UX Checklist
@@ -50,6 +52,7 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - [ ] **Weekend rate logic: applied automatically in booking flow when stay includes Saturday or Sunday nights**
 - [ ] **Discount rules: hardcoded 20% for Senior and PWD — stored in `settings/hotelConfig` for reference but not user-editable**
 - [ ] **Payment methods: stored in `settings/hotelConfig.paymentMethods[]` and edited from Settings → Payment Methods (see `plan/features/SETTINGS.md §2`). `updateDoc` (or `setDoc` with merge) on `settings/hotelConfig`. QR code images: `uploadBytes` to Firebase Storage at `assets/payment-methods/{method}/{filename}`, `getDownloadURL`, stored in payment method `qrUrl`.**
+- [x] **Seasonal rate overrides: stored on `settings/hotelConfig.seasonalRateOverrides[]`** — each override has name, inclusive date range, nightly rate, optional room-type scope, and active toggle. Overrides apply to new standard and walk-in bookings, beat weekend rates for matching nights, and do not apply to negotiated/flat corporate bookings.
 - [ ] **Rate changes do NOT retroactively update existing bookings — `ratePerNight` and `breakfastRate` both locked on booking creation**
 - [ ] **Breakfast rate saved to `settings/breakfastConfig.ratePerPersonPerNight`**
 - [ ] **Breakfast pricing model: add-on only** (per `DECISIONS-FEATURES.md #75`). Booking flow Step 1 toggles "Room Only" vs "Room + Breakfast"; the latter adds `breakfastRate × guests × nights` to the room total. No `includedInRoomRate` field on `breakfastConfig` — if a future client needs "breakfast always included" as a differentiator, add it then.
@@ -79,4 +82,5 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - Room management: `plan/features/ROOM-MANAGEMENT.md` (creates/edits/deletes rooms; type is referenced by `value`)
 - Weekend rate calculation: `plan/features/BOOKING-FLOW.md §Step 1`
 - Corporate flat rate usage: `plan/features/CORPORATE-BOOKING.md`
+- Planned rate calendar: `plan/features/RATE-CALENDAR.md`
 - Auth guard: `plan/features/AUTH-ROLES.md`

@@ -174,14 +174,15 @@ These are documented here for awareness. Define before starting Phase 2:
 
 ### Data model
 
-- [ ] New optional `earlyCheckIn` map on the `Booking` document (add to `plan/docs/TYPES.md` and `shared/types/index.ts` when building):
+- [x] New optional `earlyCheckIn` map on the `Booking` document (add to `plan/docs/TYPES.md` and `shared/types/index.ts` when building):
   - `status` — `"requested" | "approved" | "declined"`
-  - `requestedTime` — guest's requested arrival time (string, e.g. "11:00")
+  - `requestedTime` — guest's requested arrival time (string, e.g. "11:00 AM")
   - `notes` — guest note from the request form
   - `requestedAt` — timestamp
   - `resolvedAt` — timestamp, null while `requested`
   - `resolvedBy` — staff display name (never log or expose staff UID to guests)
   - `staffNote` — optional note shown to the guest (e.g. "Room ready from 12:00")
+  - `confirmedTime` — confirmed arrival time (string, e.g. "12:00 PM", optional)
 - [ ] Absent map = no request ever made. One request per booking: re-submission while `requested` overwrites time/notes and re-notifies staff; re-submission after `declined` is allowed (resets to `requested`); blocked after `approved` (guest sees the approved state instead)
 
 ### Request submission (changes to existing flow)

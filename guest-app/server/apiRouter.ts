@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth } from "./lib/firebase-admin";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount, handleResolveEarlyCheckin } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount, handleRescheduleBooking, handleResolveEarlyCheckin } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
+import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
 import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
@@ -459,6 +460,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
     
     return await handleResolveEarlyCheckin(req, res);
+  }
+
+  if (domain === "bookings" && action === "reschedule" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many reschedule requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleRescheduleBooking(req, res);
+  }
+
+  if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many room block requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    if (action === "create") return await handleCreateRoomBlock(req, res);
+    if (action === "update") return await handleUpdateRoomBlock(req, res);
+    return await handleCancelRoomBlock(req, res);
   }
 
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {

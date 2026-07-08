@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -57,6 +57,12 @@ function hexToRgb(hex: string): [number, number, number] {
   if (Number.isNaN(value)) return [0, 0, 0];
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
+
+// Mirrors the guest picker in RewardsPage and the server-side
+// confirmedTime whitelist in handleResolveEarlyCheckin — the approve
+// form must only ever submit one of these values.
+const EARLY_CHECKIN_TIME_OPTIONS = ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM"];
+const EARLY_CHECKIN_DEFAULT_TIME = "11:00 AM";
 
 const pdfFontCache = new Map<string, string | null>();
 
@@ -119,6 +125,7 @@ export function BookingsPage() {
     updateStoreOrderStatus,
     billStoreOrder,
     roomTypes,
+    seasonalRateOverrides,
     breakfastConfig,
     websiteContent,
     rewardsConfig,
@@ -267,6 +274,16 @@ export function BookingsPage() {
   const selectedRoomDetails = rooms.find(r => r.roomNumber === roomNumber);
   const selectedRoomType = roomTypes.find(t => t.value === selectedRoomDetails?.type);
   const ratePerNight = selectedRoomType?.pricePerNight || 0;
+  const roomChargeTotal = selectedRoomType
+    ? calculateSeasonalAwareRoomTotal({
+        checkIn: `${checkInDate}T00:00:00Z`,
+        checkOut: `${checkOutDate}T00:00:00Z`,
+        roomType: selectedRoomType.value,
+        baseRate: selectedRoomType.pricePerNight,
+        weekendRate: selectedRoomType.weekendRate,
+        seasonalRateOverrides
+      })
+    : 0;
   
   // Calculate nights
   const getNumNights = () => {
@@ -278,7 +295,7 @@ export function BookingsPage() {
   };
   const numNights = getNumNights();
   const brekkieRate = breakfastConfig.ratePerPersonPerNight || 300;
-  const totalPrice = ratePerNight * numNights + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
+  const totalPrice = roomChargeTotal + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
 
   // Table Columns Setup
   const columns: Array<DataTableColumn<Booking>> = [
@@ -2341,7 +2358,11 @@ export function BookingsPage() {
                           type="button"
                           onClick={() => {
                             setEarlyCheckInAction("approve");
-                            setEarlyCheckInTimeOverride(eci.requestedTime || "");
+                            setEarlyCheckInTimeOverride(
+                              EARLY_CHECKIN_TIME_OPTIONS.includes(eci.requestedTime)
+                                ? eci.requestedTime
+                                : EARLY_CHECKIN_DEFAULT_TIME
+                            );
                             setEarlyCheckInStaffNote("");
                           }}
                           className="flex-grow min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-[11px] font-bold text-white shadow-sm transition active:scale-95"
@@ -2378,12 +2399,9 @@ export function BookingsPage() {
                               onChange={(e) => setEarlyCheckInTimeOverride(e.target.value)}
                               className="min-h-[36px] w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-900 outline-none"
                             >
-                              <option value="08:00 AM">08:00 AM</option>
-                              <option value="09:00 AM">09:00 AM</option>
-                              <option value="10:00 AM">10:00 AM</option>
-                              <option value="11:00 AM">11:00 AM</option>
-                              <option value="12:00 PM">12:00 PM</option>
-                              <option value="01:00 PM">01:00 PM</option>
+                              {EARLY_CHECKIN_TIME_OPTIONS.map((time) => (
+                                <option key={time} value={time}>{time}</option>
+                              ))}
                             </select>
                           </label>
                         )}
@@ -2411,7 +2429,8 @@ export function BookingsPage() {
                               setIsResolvingEarlyCheckIn(true);
                               try {
                                 const status = earlyCheckInAction === "approve" ? "approved" : "declined";
-                                const result = await resolveEarlyCheckin(selectedBooking.id, status, earlyCheckInStaffNote || undefined);
+                                const confirmedTime = status === "approved" ? (earlyCheckInTimeOverride || undefined) : undefined;
+                                const result = await resolveEarlyCheckin(selectedBooking.id, status, earlyCheckInStaffNote || undefined, confirmedTime);
                                 if (!result.success) {
                                   toast.error("Failed to resolve", result.error || "An unexpected error occurred.");
                                 } else {
@@ -2426,7 +2445,8 @@ export function BookingsPage() {
                                       status,
                                       resolvedAt: new Date().toISOString(),
                                       resolvedBy: currentUser?.email || "Staff",
-                                      staffNote: earlyCheckInStaffNote || null
+                                      staffNote: earlyCheckInStaffNote || null,
+                                      confirmedTime: confirmedTime || null
                                     }
                                   } as Partial<Booking>);
                                 }
@@ -2865,7 +2885,8 @@ export function BookingsPage() {
           </div>
         }
       >
-        <form id="walkin-form" onSubmit={handleWalkinSubmit} className="space-y-4 text-sm">
+        <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
+          <span className="sr-only">Confirm Reservation</span>
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Full Name
             <input
@@ -3029,7 +3050,7 @@ export function BookingsPage() {
             </div>
             <div className="flex justify-between text-gray-600">
               <span>Accommodation Cost:</span>
-              <span>{formatPrice(ratePerNight * numNights)}</span>
+              <span>{formatPrice(roomChargeTotal)}</span>
             </div>
             {hasBreakfast && (
               <div className="flex justify-between text-gray-500">

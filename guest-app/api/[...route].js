@@ -182939,686 +182939,6 @@ var adminDb = lazyService(() => getFirestore(getFirebaseAdminApp()));
 var adminAuth = lazyService(() => getAuth(getFirebaseAdminApp()));
 var adminStorage = lazyService(() => getStorage(getFirebaseAdminApp()));
 
-// ../hotel.config.ts
-var config = {
-  hotelId: "spark-inn",
-  brandName: "spark inn",
-  rewardsName: "Spark Rewards",
-  legalName: "Spark Inn Hotel Corp",
-  tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
-  brandPromise: "Peaceful, consistent stays shaped by genuine, intentional hospitality.",
-  bookingRefPrefix: "SI",
-  memberNumberPrefix: "SR",
-  storeName: "Spark Essentials",
-  termsLastUpdated: "June 16, 2026",
-  colors: {
-    primary: "#EA8A1A",
-    primaryDark: "#C4720E",
-    primaryLight: "#FEF3E2",
-    sectionBg: "#FDF8F3",
-    sidebar: "#111827"
-  },
-  fonts: {
-    heading: {
-      name: "Apollo",
-      files: {
-        regular: "APOLLO.otf",
-        italic: "APOLLOItalic.otf"
-      },
-      letterSpacing: "0.06em"
-    },
-    body: {
-      name: "Inter",
-      source: "google",
-      googleFamily: "Inter:wght@400;500;600;700",
-      localFile: ""
-    }
-  },
-  logos: {
-    standard: "FINAL LOGO.png",
-    white: "FINAL LOGO-white.png",
-    navbar: "nav-bar-logo.png",
-    icon: "ICON LOGO.png",
-    wordmark: "TEXT LOGO.png"
-  },
-  favicon: "ICON LOGO.png",
-  currency: "PHP",
-  currencySymbol: "\u20B1",
-  locale: "en-PH",
-  timezone: "Asia/Manila",
-  dateFormat: "MMM DD, YYYY",
-  phoneCountryCode: "+63",
-  dpoEmail: "sparkinn.reservations@gmail.com",
-  privacyPolicyLastUpdated: "June 2, 2026",
-  applicableLaw: "Republic Act No. 10173 (Data Privacy Act of 2012)",
-  pageTitle: "spark inn",
-  metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
-  ogImage: "og-image.png",
-  address: {
-    street: "J. Borja St",
-    city: "Tagbilaran City",
-    region: "Bohol",
-    postalCode: "6300"
-  },
-  analyticsId: "",
-  whatsappNumber: "",
-  frontDeskPhone: "+63-38-000-0000",
-  domain: "sparkinnbohol.com",
-  adminDomain: "admin.sparkinnbohol.com",
-  supportEmail: "sparkinn.dev@gmail.com",
-  facebookUrl: "https://www.facebook.com/sparkinnbohol",
-  instagramUrl: "https://www.instagram.com/sparkinnbohol",
-  checkInTime: "14:00",
-  checkOutTime: "12:00"
-};
-var hotel_config_default = config;
-
-// ../node_modules/resend/dist/index.mjs
-var __defProp3 = Object.defineProperty;
-var __defProps2 = Object.defineProperties;
-var __getOwnPropDescs2 = Object.getOwnPropertyDescriptors;
-var __getOwnPropSymbols2 = Object.getOwnPropertySymbols;
-var __hasOwnProp3 = Object.prototype.hasOwnProperty;
-var __propIsEnum2 = Object.prototype.propertyIsEnumerable;
-var __defNormalProp2 = (obj, key, value) => key in obj ? __defProp3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __spreadValues2 = (a, b3) => {
-  for (var prop in b3 || (b3 = {}))
-    if (__hasOwnProp3.call(b3, prop))
-      __defNormalProp2(a, prop, b3[prop]);
-  if (__getOwnPropSymbols2)
-    for (var prop of __getOwnPropSymbols2(b3)) {
-      if (__propIsEnum2.call(b3, prop))
-        __defNormalProp2(a, prop, b3[prop]);
-    }
-  return a;
-};
-var __spreadProps2 = (a, b3) => __defProps2(a, __getOwnPropDescs2(b3));
-var __async2 = (__this, __arguments, generator) => {
-  return new Promise((resolve, reject) => {
-    var fulfilled = (value) => {
-      try {
-        step(generator.next(value));
-      } catch (e3) {
-        reject(e3);
-      }
-    };
-    var rejected = (value) => {
-      try {
-        step(generator.throw(value));
-      } catch (e3) {
-        reject(e3);
-      }
-    };
-    var step = (x4) => x4.done ? resolve(x4.value) : Promise.resolve(x4.value).then(fulfilled, rejected);
-    step((generator = generator.apply(__this, __arguments)).next());
-  });
-};
-var version5 = "4.8.0";
-var ApiKeys = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        "/api-keys",
-        payload,
-        options
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/api-keys");
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/api-keys/${id}`
-      );
-      return data;
-    });
-  }
-};
-var Audiences = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        "/audiences",
-        payload,
-        options
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/audiences");
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/audiences/${id}`
-      );
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/audiences/${id}`
-      );
-      return data;
-    });
-  }
-};
-function parseAttachments(attachments) {
-  return attachments == null ? void 0 : attachments.map((attachment) => ({
-    content: attachment.content,
-    filename: attachment.filename,
-    path: attachment.path,
-    content_type: attachment.contentType,
-    inline_content_id: attachment.inlineContentId
-  }));
-}
-function parseEmailToApiOptions(email) {
-  return {
-    attachments: parseAttachments(email.attachments),
-    bcc: email.bcc,
-    cc: email.cc,
-    from: email.from,
-    headers: email.headers,
-    html: email.html,
-    reply_to: email.replyTo,
-    scheduled_at: email.scheduledAt,
-    subject: email.subject,
-    tags: email.tags,
-    text: email.text,
-    to: email.to
-  };
-}
-var Batch = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  send(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      return this.create(payload, options);
-    });
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const emails = [];
-      for (const email of payload) {
-        if (email.react) {
-          if (!this.renderAsync) {
-            try {
-              const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
-              this.renderAsync = renderAsync2;
-            } catch (error) {
-              throw new Error(
-                "Failed to render React component. Make sure to install `@react-email/render`"
-              );
-            }
-          }
-          email.html = yield this.renderAsync(email.react);
-          email.react = void 0;
-        }
-        emails.push(parseEmailToApiOptions(email));
-      }
-      const data = yield this.resend.post(
-        "/emails/batch",
-        emails,
-        options
-      );
-      return data;
-    });
-  }
-};
-var Broadcasts = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      if (payload.react) {
-        if (!this.renderAsync) {
-          try {
-            const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
-            this.renderAsync = renderAsync2;
-          } catch (error) {
-            throw new Error(
-              "Failed to render React component. Make sure to install `@react-email/render`"
-            );
-          }
-        }
-        payload.html = yield this.renderAsync(
-          payload.react
-        );
-      }
-      const data = yield this.resend.post(
-        "/broadcasts",
-        {
-          name: payload.name,
-          audience_id: payload.audienceId,
-          preview_text: payload.previewText,
-          from: payload.from,
-          html: payload.html,
-          reply_to: payload.replyTo,
-          subject: payload.subject,
-          text: payload.text
-        },
-        options
-      );
-      return data;
-    });
-  }
-  send(id, payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.post(
-        `/broadcasts/${id}/send`,
-        { scheduled_at: payload == null ? void 0 : payload.scheduledAt }
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/broadcasts");
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/broadcasts/${id}`
-      );
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/broadcasts/${id}`
-      );
-      return data;
-    });
-  }
-  update(id, payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.patch(
-        `/broadcasts/${id}`,
-        {
-          name: payload.name,
-          audience_id: payload.audienceId,
-          from: payload.from,
-          html: payload.html,
-          text: payload.text,
-          subject: payload.subject,
-          reply_to: payload.replyTo,
-          preview_text: payload.previewText
-        }
-      );
-      return data;
-    });
-  }
-};
-var Contacts = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        `/audiences/${payload.audienceId}/contacts`,
-        {
-          unsubscribed: payload.unsubscribed,
-          email: payload.email,
-          first_name: payload.firstName,
-          last_name: payload.lastName
-        },
-        options
-      );
-      return data;
-    });
-  }
-  list(options) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/audiences/${options.audienceId}/contacts`
-      );
-      return data;
-    });
-  }
-  get(options) {
-    return __async2(this, null, function* () {
-      if (!options.id && !options.email) {
-        return {
-          data: null,
-          error: {
-            message: "Missing `id` or `email` field.",
-            name: "missing_required_field"
-          }
-        };
-      }
-      const data = yield this.resend.get(
-        `/audiences/${options.audienceId}/contacts/${(options == null ? void 0 : options.email) ? options == null ? void 0 : options.email : options == null ? void 0 : options.id}`
-      );
-      return data;
-    });
-  }
-  update(payload) {
-    return __async2(this, null, function* () {
-      if (!payload.id && !payload.email) {
-        return {
-          data: null,
-          error: {
-            message: "Missing `id` or `email` field.",
-            name: "missing_required_field"
-          }
-        };
-      }
-      const data = yield this.resend.patch(
-        `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`,
-        {
-          unsubscribed: payload.unsubscribed,
-          first_name: payload.firstName,
-          last_name: payload.lastName
-        }
-      );
-      return data;
-    });
-  }
-  remove(payload) {
-    return __async2(this, null, function* () {
-      if (!payload.id && !payload.email) {
-        return {
-          data: null,
-          error: {
-            message: "Missing `id` or `email` field.",
-            name: "missing_required_field"
-          }
-        };
-      }
-      const data = yield this.resend.delete(
-        `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`
-      );
-      return data;
-    });
-  }
-};
-function parseDomainToApiOptions(domain) {
-  return {
-    name: domain.name,
-    region: domain.region,
-    custom_return_path: domain.customReturnPath
-  };
-}
-var Domains = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      const data = yield this.resend.post(
-        "/domains",
-        parseDomainToApiOptions(payload),
-        options
-      );
-      return data;
-    });
-  }
-  list() {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get("/domains");
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/domains/${id}`
-      );
-      return data;
-    });
-  }
-  update(payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.patch(
-        `/domains/${payload.id}`,
-        {
-          click_tracking: payload.clickTracking,
-          open_tracking: payload.openTracking,
-          tls: payload.tls
-        }
-      );
-      return data;
-    });
-  }
-  remove(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.delete(
-        `/domains/${id}`
-      );
-      return data;
-    });
-  }
-  verify(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.post(
-        `/domains/${id}/verify`
-      );
-      return data;
-    });
-  }
-};
-var Emails = class {
-  constructor(resend2) {
-    this.resend = resend2;
-  }
-  send(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      return this.create(payload, options);
-    });
-  }
-  create(_0) {
-    return __async2(this, arguments, function* (payload, options = {}) {
-      if (payload.react) {
-        if (!this.renderAsync) {
-          try {
-            const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
-            this.renderAsync = renderAsync2;
-          } catch (error) {
-            throw new Error(
-              "Failed to render React component. Make sure to install `@react-email/render`"
-            );
-          }
-        }
-        payload.html = yield this.renderAsync(
-          payload.react
-        );
-      }
-      const data = yield this.resend.post(
-        "/emails",
-        parseEmailToApiOptions(payload),
-        options
-      );
-      return data;
-    });
-  }
-  get(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.get(
-        `/emails/${id}`
-      );
-      return data;
-    });
-  }
-  update(payload) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.patch(
-        `/emails/${payload.id}`,
-        {
-          scheduled_at: payload.scheduledAt
-        }
-      );
-      return data;
-    });
-  }
-  cancel(id) {
-    return __async2(this, null, function* () {
-      const data = yield this.resend.post(
-        `/emails/${id}/cancel`
-      );
-      return data;
-    });
-  }
-};
-var defaultBaseUrl = "https://api.resend.com";
-var defaultUserAgent = `resend-node:${version5}`;
-var baseUrl = typeof process !== "undefined" && process.env ? process.env.RESEND_BASE_URL || defaultBaseUrl : defaultBaseUrl;
-var userAgent = typeof process !== "undefined" && process.env ? process.env.RESEND_USER_AGENT || defaultUserAgent : defaultUserAgent;
-var Resend = class {
-  constructor(key) {
-    this.key = key;
-    this.apiKeys = new ApiKeys(this);
-    this.audiences = new Audiences(this);
-    this.batch = new Batch(this);
-    this.broadcasts = new Broadcasts(this);
-    this.contacts = new Contacts(this);
-    this.domains = new Domains(this);
-    this.emails = new Emails(this);
-    if (!key) {
-      if (typeof process !== "undefined" && process.env) {
-        this.key = process.env.RESEND_API_KEY;
-      }
-      if (!this.key) {
-        throw new Error(
-          'Missing API key. Pass it to the constructor `new Resend("re_123")`'
-        );
-      }
-    }
-    this.headers = new Headers({
-      Authorization: `Bearer ${this.key}`,
-      "User-Agent": userAgent,
-      "Content-Type": "application/json"
-    });
-  }
-  fetchRequest(_0) {
-    return __async2(this, arguments, function* (path, options = {}) {
-      try {
-        const response = yield fetch(`${baseUrl}${path}`, options);
-        if (!response.ok) {
-          try {
-            const rawError = yield response.text();
-            return { data: null, error: JSON.parse(rawError) };
-          } catch (err) {
-            if (err instanceof SyntaxError) {
-              return {
-                data: null,
-                error: {
-                  name: "application_error",
-                  message: "Internal server error. We are unable to process your request right now, please try again later."
-                }
-              };
-            }
-            const error = {
-              message: response.statusText,
-              name: "application_error"
-            };
-            if (err instanceof Error) {
-              return { data: null, error: __spreadProps2(__spreadValues2({}, error), { message: err.message }) };
-            }
-            return { data: null, error };
-          }
-        }
-        const data = yield response.json();
-        return { data, error: null };
-      } catch (error) {
-        return {
-          data: null,
-          error: {
-            name: "application_error",
-            message: "Unable to fetch data. The request could not be resolved."
-          }
-        };
-      }
-    });
-  }
-  post(_0, _1) {
-    return __async2(this, arguments, function* (path, entity, options = {}) {
-      const headers = new Headers(this.headers);
-      if (options.idempotencyKey) {
-        headers.set("Idempotency-Key", options.idempotencyKey);
-      }
-      const requestOptions = __spreadValues2({
-        method: "POST",
-        headers,
-        body: JSON.stringify(entity)
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  get(_0) {
-    return __async2(this, arguments, function* (path, options = {}) {
-      const requestOptions = __spreadValues2({
-        method: "GET",
-        headers: this.headers
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  put(_0, _1) {
-    return __async2(this, arguments, function* (path, entity, options = {}) {
-      const requestOptions = __spreadValues2({
-        method: "PUT",
-        headers: this.headers,
-        body: JSON.stringify(entity)
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  patch(_0, _1) {
-    return __async2(this, arguments, function* (path, entity, options = {}) {
-      const requestOptions = __spreadValues2({
-        method: "PATCH",
-        headers: this.headers,
-        body: JSON.stringify(entity)
-      }, options);
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-  delete(path, query) {
-    return __async2(this, null, function* () {
-      const requestOptions = {
-        method: "DELETE",
-        headers: this.headers,
-        body: JSON.stringify(query)
-      };
-      return this.fetchRequest(path, requestOptions);
-    });
-  }
-};
-
-// server/lib/resend.ts
-var resendApiKey = process.env.RESEND_API_KEY;
-if (!resendApiKey) {
-  console.warn("\u26A0\uFE0F Missing RESEND_API_KEY. Emails will fail to send.");
-}
-var resend = new Resend(resendApiKey || "re_mock_key");
-
-// ../shared/constants/index.ts
-var MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
-var PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
-
 // ../node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -187660,6 +186980,686 @@ var coerce = {
 };
 var NEVER = INVALID;
 
+// ../hotel.config.ts
+var config = {
+  hotelId: "spark-inn",
+  brandName: "spark inn",
+  rewardsName: "Spark Rewards",
+  legalName: "Spark Inn Hotel Corp",
+  tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
+  brandPromise: "Peaceful, consistent stays shaped by genuine, intentional hospitality.",
+  bookingRefPrefix: "SI",
+  memberNumberPrefix: "SR",
+  storeName: "Spark Essentials",
+  termsLastUpdated: "June 16, 2026",
+  colors: {
+    primary: "#EA8A1A",
+    primaryDark: "#C4720E",
+    primaryLight: "#FEF3E2",
+    sectionBg: "#FDF8F3",
+    sidebar: "#111827"
+  },
+  fonts: {
+    heading: {
+      name: "Apollo",
+      files: {
+        regular: "APOLLO.otf",
+        italic: "APOLLOItalic.otf"
+      },
+      letterSpacing: "0.06em"
+    },
+    body: {
+      name: "Inter",
+      source: "google",
+      googleFamily: "Inter:wght@400;500;600;700",
+      localFile: ""
+    }
+  },
+  logos: {
+    standard: "FINAL LOGO.png",
+    white: "FINAL LOGO-white.png",
+    navbar: "nav-bar-logo.png",
+    icon: "ICON LOGO.png",
+    wordmark: "TEXT LOGO.png"
+  },
+  favicon: "ICON LOGO.png",
+  currency: "PHP",
+  currencySymbol: "\u20B1",
+  locale: "en-PH",
+  timezone: "Asia/Manila",
+  dateFormat: "MMM DD, YYYY",
+  phoneCountryCode: "+63",
+  dpoEmail: "sparkinn.reservations@gmail.com",
+  privacyPolicyLastUpdated: "June 2, 2026",
+  applicableLaw: "Republic Act No. 10173 (Data Privacy Act of 2012)",
+  pageTitle: "spark inn",
+  metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
+  ogImage: "og-image.png",
+  address: {
+    street: "J. Borja St",
+    city: "Tagbilaran City",
+    region: "Bohol",
+    postalCode: "6300"
+  },
+  analyticsId: "",
+  whatsappNumber: "",
+  frontDeskPhone: "+63-38-000-0000",
+  domain: "sparkinnbohol.com",
+  adminDomain: "admin.sparkinnbohol.com",
+  supportEmail: "sparkinn.dev@gmail.com",
+  facebookUrl: "https://www.facebook.com/sparkinnbohol",
+  instagramUrl: "https://www.instagram.com/sparkinnbohol",
+  checkInTime: "14:00",
+  checkOutTime: "12:00"
+};
+var hotel_config_default = config;
+
+// ../node_modules/resend/dist/index.mjs
+var __defProp3 = Object.defineProperty;
+var __defProps2 = Object.defineProperties;
+var __getOwnPropDescs2 = Object.getOwnPropertyDescriptors;
+var __getOwnPropSymbols2 = Object.getOwnPropertySymbols;
+var __hasOwnProp3 = Object.prototype.hasOwnProperty;
+var __propIsEnum2 = Object.prototype.propertyIsEnumerable;
+var __defNormalProp2 = (obj, key, value) => key in obj ? __defProp3(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __spreadValues2 = (a, b3) => {
+  for (var prop in b3 || (b3 = {}))
+    if (__hasOwnProp3.call(b3, prop))
+      __defNormalProp2(a, prop, b3[prop]);
+  if (__getOwnPropSymbols2)
+    for (var prop of __getOwnPropSymbols2(b3)) {
+      if (__propIsEnum2.call(b3, prop))
+        __defNormalProp2(a, prop, b3[prop]);
+    }
+  return a;
+};
+var __spreadProps2 = (a, b3) => __defProps2(a, __getOwnPropDescs2(b3));
+var __async2 = (__this, __arguments, generator) => {
+  return new Promise((resolve, reject) => {
+    var fulfilled = (value) => {
+      try {
+        step(generator.next(value));
+      } catch (e3) {
+        reject(e3);
+      }
+    };
+    var rejected = (value) => {
+      try {
+        step(generator.throw(value));
+      } catch (e3) {
+        reject(e3);
+      }
+    };
+    var step = (x4) => x4.done ? resolve(x4.value) : Promise.resolve(x4.value).then(fulfilled, rejected);
+    step((generator = generator.apply(__this, __arguments)).next());
+  });
+};
+var version5 = "4.8.0";
+var ApiKeys = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      const data = yield this.resend.post(
+        "/api-keys",
+        payload,
+        options
+      );
+      return data;
+    });
+  }
+  list() {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get("/api-keys");
+      return data;
+    });
+  }
+  remove(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.delete(
+        `/api-keys/${id}`
+      );
+      return data;
+    });
+  }
+};
+var Audiences = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      const data = yield this.resend.post(
+        "/audiences",
+        payload,
+        options
+      );
+      return data;
+    });
+  }
+  list() {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get("/audiences");
+      return data;
+    });
+  }
+  get(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get(
+        `/audiences/${id}`
+      );
+      return data;
+    });
+  }
+  remove(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.delete(
+        `/audiences/${id}`
+      );
+      return data;
+    });
+  }
+};
+function parseAttachments(attachments) {
+  return attachments == null ? void 0 : attachments.map((attachment) => ({
+    content: attachment.content,
+    filename: attachment.filename,
+    path: attachment.path,
+    content_type: attachment.contentType,
+    inline_content_id: attachment.inlineContentId
+  }));
+}
+function parseEmailToApiOptions(email) {
+  return {
+    attachments: parseAttachments(email.attachments),
+    bcc: email.bcc,
+    cc: email.cc,
+    from: email.from,
+    headers: email.headers,
+    html: email.html,
+    reply_to: email.replyTo,
+    scheduled_at: email.scheduledAt,
+    subject: email.subject,
+    tags: email.tags,
+    text: email.text,
+    to: email.to
+  };
+}
+var Batch = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  send(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      return this.create(payload, options);
+    });
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      const emails = [];
+      for (const email of payload) {
+        if (email.react) {
+          if (!this.renderAsync) {
+            try {
+              const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
+              this.renderAsync = renderAsync2;
+            } catch (error) {
+              throw new Error(
+                "Failed to render React component. Make sure to install `@react-email/render`"
+              );
+            }
+          }
+          email.html = yield this.renderAsync(email.react);
+          email.react = void 0;
+        }
+        emails.push(parseEmailToApiOptions(email));
+      }
+      const data = yield this.resend.post(
+        "/emails/batch",
+        emails,
+        options
+      );
+      return data;
+    });
+  }
+};
+var Broadcasts = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      if (payload.react) {
+        if (!this.renderAsync) {
+          try {
+            const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
+            this.renderAsync = renderAsync2;
+          } catch (error) {
+            throw new Error(
+              "Failed to render React component. Make sure to install `@react-email/render`"
+            );
+          }
+        }
+        payload.html = yield this.renderAsync(
+          payload.react
+        );
+      }
+      const data = yield this.resend.post(
+        "/broadcasts",
+        {
+          name: payload.name,
+          audience_id: payload.audienceId,
+          preview_text: payload.previewText,
+          from: payload.from,
+          html: payload.html,
+          reply_to: payload.replyTo,
+          subject: payload.subject,
+          text: payload.text
+        },
+        options
+      );
+      return data;
+    });
+  }
+  send(id, payload) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.post(
+        `/broadcasts/${id}/send`,
+        { scheduled_at: payload == null ? void 0 : payload.scheduledAt }
+      );
+      return data;
+    });
+  }
+  list() {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get("/broadcasts");
+      return data;
+    });
+  }
+  get(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get(
+        `/broadcasts/${id}`
+      );
+      return data;
+    });
+  }
+  remove(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.delete(
+        `/broadcasts/${id}`
+      );
+      return data;
+    });
+  }
+  update(id, payload) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.patch(
+        `/broadcasts/${id}`,
+        {
+          name: payload.name,
+          audience_id: payload.audienceId,
+          from: payload.from,
+          html: payload.html,
+          text: payload.text,
+          subject: payload.subject,
+          reply_to: payload.replyTo,
+          preview_text: payload.previewText
+        }
+      );
+      return data;
+    });
+  }
+};
+var Contacts = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      const data = yield this.resend.post(
+        `/audiences/${payload.audienceId}/contacts`,
+        {
+          unsubscribed: payload.unsubscribed,
+          email: payload.email,
+          first_name: payload.firstName,
+          last_name: payload.lastName
+        },
+        options
+      );
+      return data;
+    });
+  }
+  list(options) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get(
+        `/audiences/${options.audienceId}/contacts`
+      );
+      return data;
+    });
+  }
+  get(options) {
+    return __async2(this, null, function* () {
+      if (!options.id && !options.email) {
+        return {
+          data: null,
+          error: {
+            message: "Missing `id` or `email` field.",
+            name: "missing_required_field"
+          }
+        };
+      }
+      const data = yield this.resend.get(
+        `/audiences/${options.audienceId}/contacts/${(options == null ? void 0 : options.email) ? options == null ? void 0 : options.email : options == null ? void 0 : options.id}`
+      );
+      return data;
+    });
+  }
+  update(payload) {
+    return __async2(this, null, function* () {
+      if (!payload.id && !payload.email) {
+        return {
+          data: null,
+          error: {
+            message: "Missing `id` or `email` field.",
+            name: "missing_required_field"
+          }
+        };
+      }
+      const data = yield this.resend.patch(
+        `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`,
+        {
+          unsubscribed: payload.unsubscribed,
+          first_name: payload.firstName,
+          last_name: payload.lastName
+        }
+      );
+      return data;
+    });
+  }
+  remove(payload) {
+    return __async2(this, null, function* () {
+      if (!payload.id && !payload.email) {
+        return {
+          data: null,
+          error: {
+            message: "Missing `id` or `email` field.",
+            name: "missing_required_field"
+          }
+        };
+      }
+      const data = yield this.resend.delete(
+        `/audiences/${payload.audienceId}/contacts/${(payload == null ? void 0 : payload.email) ? payload == null ? void 0 : payload.email : payload == null ? void 0 : payload.id}`
+      );
+      return data;
+    });
+  }
+};
+function parseDomainToApiOptions(domain) {
+  return {
+    name: domain.name,
+    region: domain.region,
+    custom_return_path: domain.customReturnPath
+  };
+}
+var Domains = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      const data = yield this.resend.post(
+        "/domains",
+        parseDomainToApiOptions(payload),
+        options
+      );
+      return data;
+    });
+  }
+  list() {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get("/domains");
+      return data;
+    });
+  }
+  get(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get(
+        `/domains/${id}`
+      );
+      return data;
+    });
+  }
+  update(payload) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.patch(
+        `/domains/${payload.id}`,
+        {
+          click_tracking: payload.clickTracking,
+          open_tracking: payload.openTracking,
+          tls: payload.tls
+        }
+      );
+      return data;
+    });
+  }
+  remove(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.delete(
+        `/domains/${id}`
+      );
+      return data;
+    });
+  }
+  verify(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.post(
+        `/domains/${id}/verify`
+      );
+      return data;
+    });
+  }
+};
+var Emails = class {
+  constructor(resend2) {
+    this.resend = resend2;
+  }
+  send(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      return this.create(payload, options);
+    });
+  }
+  create(_0) {
+    return __async2(this, arguments, function* (payload, options = {}) {
+      if (payload.react) {
+        if (!this.renderAsync) {
+          try {
+            const { renderAsync: renderAsync2 } = yield Promise.resolve().then(() => (init_node2(), node_exports));
+            this.renderAsync = renderAsync2;
+          } catch (error) {
+            throw new Error(
+              "Failed to render React component. Make sure to install `@react-email/render`"
+            );
+          }
+        }
+        payload.html = yield this.renderAsync(
+          payload.react
+        );
+      }
+      const data = yield this.resend.post(
+        "/emails",
+        parseEmailToApiOptions(payload),
+        options
+      );
+      return data;
+    });
+  }
+  get(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.get(
+        `/emails/${id}`
+      );
+      return data;
+    });
+  }
+  update(payload) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.patch(
+        `/emails/${payload.id}`,
+        {
+          scheduled_at: payload.scheduledAt
+        }
+      );
+      return data;
+    });
+  }
+  cancel(id) {
+    return __async2(this, null, function* () {
+      const data = yield this.resend.post(
+        `/emails/${id}/cancel`
+      );
+      return data;
+    });
+  }
+};
+var defaultBaseUrl = "https://api.resend.com";
+var defaultUserAgent = `resend-node:${version5}`;
+var baseUrl = typeof process !== "undefined" && process.env ? process.env.RESEND_BASE_URL || defaultBaseUrl : defaultBaseUrl;
+var userAgent = typeof process !== "undefined" && process.env ? process.env.RESEND_USER_AGENT || defaultUserAgent : defaultUserAgent;
+var Resend = class {
+  constructor(key) {
+    this.key = key;
+    this.apiKeys = new ApiKeys(this);
+    this.audiences = new Audiences(this);
+    this.batch = new Batch(this);
+    this.broadcasts = new Broadcasts(this);
+    this.contacts = new Contacts(this);
+    this.domains = new Domains(this);
+    this.emails = new Emails(this);
+    if (!key) {
+      if (typeof process !== "undefined" && process.env) {
+        this.key = process.env.RESEND_API_KEY;
+      }
+      if (!this.key) {
+        throw new Error(
+          'Missing API key. Pass it to the constructor `new Resend("re_123")`'
+        );
+      }
+    }
+    this.headers = new Headers({
+      Authorization: `Bearer ${this.key}`,
+      "User-Agent": userAgent,
+      "Content-Type": "application/json"
+    });
+  }
+  fetchRequest(_0) {
+    return __async2(this, arguments, function* (path, options = {}) {
+      try {
+        const response = yield fetch(`${baseUrl}${path}`, options);
+        if (!response.ok) {
+          try {
+            const rawError = yield response.text();
+            return { data: null, error: JSON.parse(rawError) };
+          } catch (err) {
+            if (err instanceof SyntaxError) {
+              return {
+                data: null,
+                error: {
+                  name: "application_error",
+                  message: "Internal server error. We are unable to process your request right now, please try again later."
+                }
+              };
+            }
+            const error = {
+              message: response.statusText,
+              name: "application_error"
+            };
+            if (err instanceof Error) {
+              return { data: null, error: __spreadProps2(__spreadValues2({}, error), { message: err.message }) };
+            }
+            return { data: null, error };
+          }
+        }
+        const data = yield response.json();
+        return { data, error: null };
+      } catch (error) {
+        return {
+          data: null,
+          error: {
+            name: "application_error",
+            message: "Unable to fetch data. The request could not be resolved."
+          }
+        };
+      }
+    });
+  }
+  post(_0, _1) {
+    return __async2(this, arguments, function* (path, entity, options = {}) {
+      const headers = new Headers(this.headers);
+      if (options.idempotencyKey) {
+        headers.set("Idempotency-Key", options.idempotencyKey);
+      }
+      const requestOptions = __spreadValues2({
+        method: "POST",
+        headers,
+        body: JSON.stringify(entity)
+      }, options);
+      return this.fetchRequest(path, requestOptions);
+    });
+  }
+  get(_0) {
+    return __async2(this, arguments, function* (path, options = {}) {
+      const requestOptions = __spreadValues2({
+        method: "GET",
+        headers: this.headers
+      }, options);
+      return this.fetchRequest(path, requestOptions);
+    });
+  }
+  put(_0, _1) {
+    return __async2(this, arguments, function* (path, entity, options = {}) {
+      const requestOptions = __spreadValues2({
+        method: "PUT",
+        headers: this.headers,
+        body: JSON.stringify(entity)
+      }, options);
+      return this.fetchRequest(path, requestOptions);
+    });
+  }
+  patch(_0, _1) {
+    return __async2(this, arguments, function* (path, entity, options = {}) {
+      const requestOptions = __spreadValues2({
+        method: "PATCH",
+        headers: this.headers,
+        body: JSON.stringify(entity)
+      }, options);
+      return this.fetchRequest(path, requestOptions);
+    });
+  }
+  delete(path, query) {
+    return __async2(this, null, function* () {
+      const requestOptions = {
+        method: "DELETE",
+        headers: this.headers,
+        body: JSON.stringify(query)
+      };
+      return this.fetchRequest(path, requestOptions);
+    });
+  }
+};
+
+// server/lib/resend.ts
+var resendApiKey = process.env.RESEND_API_KEY;
+if (!resendApiKey) {
+  console.warn("\u26A0\uFE0F Missing RESEND_API_KEY. Emails will fail to send.");
+}
+var resend = new Resend(resendApiKey || "re_mock_key");
+
+// ../shared/constants/index.ts
+var MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
+var PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
+
 // ../shared/schemas/booking.ts
 var BookingDatesSchema = external_exports.object({
   checkIn: external_exports.string().min(1, "Choose a check-in date"),
@@ -187877,6 +187877,33 @@ function getManilaDateInfo(timezone = "Asia/Manila") {
   };
 }
 
+// ../shared/utils/dates.ts
+function toDate(value) {
+  return value instanceof Date ? new Date(value) : new Date(value);
+}
+function startOfDayUtc(value) {
+  const date = toDate(value);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+function getNumNights(checkIn, checkOut) {
+  const start = startOfDayUtc(checkIn).getTime();
+  const end = startOfDayUtc(checkOut).getTime();
+  return Math.max(Math.round((end - start) / 864e5), 0);
+}
+function eachStayNight(checkIn, checkOut) {
+  const nights = getNumNights(checkIn, checkOut);
+  const cursor = startOfDayUtc(checkIn);
+  return Array.from({ length: nights }, (_2, index) => {
+    const date = new Date(cursor);
+    date.setUTCDate(cursor.getUTCDate() + index);
+    return date;
+  });
+}
+function isWeekendNight(value) {
+  const day = startOfDayUtc(value).getUTCDay();
+  return day === 0 || day === 6;
+}
+
 // ../shared/utils/points.ts
 function calculatePointsRedemptionValue(points, pointsRedemptionRate) {
   return Math.max(points / 100 * pointsRedemptionRate, 0);
@@ -187927,6 +187954,61 @@ function generateLookupToken(randomBytes = defaultRandomBytes) {
 function defaultRandomBytes(n2) {
   const { randomBytes } = require("node:crypto");
   return new Uint8Array(randomBytes(n2));
+}
+
+// ../shared/utils/seasonalRates.ts
+function dateKey(value) {
+  return startOfDayUtc(value).toISOString().slice(0, 10);
+}
+function appliesToRoomType(override, roomType) {
+  return override.roomTypeValues.length === 0 || override.roomTypeValues.includes(roomType);
+}
+function normalizeSeasonalRateOverride(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw;
+  const id = String(entry.id ?? "").trim();
+  const name2 = String(entry.name ?? "").trim();
+  const startDate = String(entry.startDate ?? "").trim();
+  const endDate = String(entry.endDate ?? "").trim();
+  const rate = Number(entry.rate);
+  if (!id || !name2 || !startDate || !endDate || !Number.isFinite(rate) || rate < 0) return null;
+  return {
+    id,
+    name: name2,
+    startDate,
+    endDate,
+    rate,
+    roomTypeValues: Array.isArray(entry.roomTypeValues) ? entry.roomTypeValues.filter((value) => typeof value === "string" && value.trim().length > 0) : [],
+    isActive: entry.isActive !== false
+  };
+}
+function normalizeSeasonalRateOverrides(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeSeasonalRateOverride).filter((entry) => Boolean(entry));
+}
+function getSeasonalRateForNight(night, roomType, overrides) {
+  const key = dateKey(night);
+  const matches = overrides.filter(
+    (override) => override.isActive && key >= override.startDate && key <= override.endDate && appliesToRoomType(override, roomType)
+  );
+  if (matches.length === 0) return null;
+  return matches.sort((a, b3) => {
+    const specificity = Number(b3.roomTypeValues.length > 0) - Number(a.roomTypeValues.length > 0);
+    if (specificity !== 0) return specificity;
+    if (a.startDate !== b3.startDate) return b3.startDate.localeCompare(a.startDate);
+    return b3.id.localeCompare(a.id);
+  })[0];
+}
+function calculateSeasonalAwareRoomTotal(input) {
+  const baseRate = Math.max(0, Number(input.baseRate) || 0);
+  const weekendRate = Math.max(0, Number(input.weekendRate) || 0);
+  const overrides = input.seasonalRateOverrides ?? [];
+  return eachStayNight(input.checkIn, input.checkOut).reduce((total, night) => {
+    const seasonal = getSeasonalRateForNight(night, input.roomType, overrides);
+    if (seasonal) return total + seasonal.rate;
+    if (isWeekendNight(night) && weekendRate) return total + weekendRate;
+    return total + baseRate;
+  }, 0);
 }
 
 // ../shared/utils/storageJanitor.ts
@@ -188102,7 +188184,7 @@ function addressLine() {
 function brandLogoUrl() {
   return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.navbar)}`);
 }
-function toDate(value) {
+function toDate2(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
   if (typeof value.toDate === "function") return value.toDate();
@@ -188110,7 +188192,7 @@ function toDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 function formatDate(value) {
-  const date = toDate(value);
+  const date = toDate2(value);
   if (!date) return "Not set";
   return new Intl.DateTimeFormat(hotel_config_default.locale, {
     month: "short",
@@ -188245,6 +188327,10 @@ function emailLayout(options) {
 </html>`;
 }
 async function sendEmail(to3, subject, html) {
+  if (typeof to3 === "string" && to3.trim().toLowerCase().endsWith("@example.invalid")) {
+    console.log(`Skipping email send to placeholder address: ${to3}`);
+    return;
+  }
   await resend.emails.send({
     from: FROM_EMAIL,
     to: to3,
@@ -188330,6 +188416,20 @@ function bookingConfirmedEmail(booking) {
     body: `
       ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking)
+  });
+}
+function bookingRescheduledEmail(booking) {
+  return emailLayout({
+    preheader: `Your reservation ${booking.bookingRef} has been updated.`,
+    eyebrow: "Reservation updated",
+    title: "Your booking dates or room have changed",
+    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> has been updated by the front desk.`,
+    body: `
+      ${callout("green", "Rescheduled details", `Your dates or room have been updated. The details below reflect your active booking.`)}
+      ${card("Updated reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Review booking details",
     ctaUrl: lookupUrl(booking)
@@ -188480,7 +188580,7 @@ function earlyCheckinResolveEmail(booking, status, staffNote) {
   const eyebrow = isApproved ? "Early check-in approved" : "Early check-in unavailable";
   const title = isApproved ? "Your early check-in request is approved" : "Early check-in request status";
   const intro = isApproved ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.` : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
-  const timeVal = booking.earlyCheckIn?.requestedTime || "Requested time";
+  const timeVal = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime || "Requested time";
   return emailLayout({
     preheader: isApproved ? `Your early check-in request for booking ${booking.bookingRef} is approved.` : `Status update regarding your early check-in request for booking ${booking.bookingRef}.`,
     eyebrow,
@@ -188820,6 +188920,10 @@ async function sendBookingTrigger(action, booking) {
     "discount-rejected": {
       subject: `[${hotel_config_default.brandName}] Discount verification update: ${booking.bookingRef}`,
       html: discountRejectedEmail(booking)
+    },
+    "booking-rescheduled": {
+      subject: `[${hotel_config_default.brandName}] Booking updated: ${booking.bookingRef}`,
+      html: bookingRescheduledEmail(booking)
     }
   };
   const template = templates[action];
@@ -188848,7 +188952,7 @@ async function handleEmailTrigger(req, res, action) {
       if (booking2.status !== "confirmed") {
         return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking2.status}'.` });
       }
-      const checkInDateObj = toDate(booking2.checkIn);
+      const checkInDateObj = toDate2(booking2.checkIn);
       if (!checkInDateObj) {
         return res.status(400).json({ success: false, error: "Invalid check-in date." });
       }
@@ -188863,10 +188967,16 @@ async function handleEmailTrigger(req, res, action) {
       if (booking2.earlyCheckIn?.status === "approved") {
         return res.status(400).json({ success: false, error: "Early check-in has already been approved for this booking." });
       }
-      const request = req.body?.request || {
-        requestedCheckInTime: req.body?.requestedCheckInTime || "12:00 PM",
-        notes: req.body?.notes || ""
-      };
+      const earlyCheckinRequestSchema = external_exports.object({
+        requestedCheckInTime: external_exports.string().trim().min(1).max(20).optional().default("12:00 PM"),
+        notes: external_exports.string().trim().max(500).optional().default("")
+      });
+      const bodyData = req.body?.request || req.body || {};
+      const parsed = earlyCheckinRequestSchema.safeParse(bodyData);
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: "Please provide a valid requested check-in time (max 20 characters) and notes (max 500 characters)." });
+      }
+      const request = parsed.data;
       const earlyCheckIn = {
         status: "requested",
         requestedTime: request.requestedCheckInTime,
@@ -189022,6 +189132,21 @@ async function handleEmailPreview(req, res) {
       case "early-checkin-request":
         html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
         break;
+      case "early-checkin-resolve":
+        const bookingForResolve = {
+          ...mockBooking,
+          earlyCheckIn: {
+            status: "approved",
+            requestedTime: "10:30 AM",
+            confirmedTime: "11:00 AM",
+            notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+          }
+        };
+        html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
+        break;
+      case "booking-rescheduled":
+        html = bookingRescheduledEmail(mockBooking);
+        break;
       case "voucher-issued":
         html = voucherIssuedEmail(mockVoucher);
         break;
@@ -189064,6 +189189,20 @@ function getConfiguredBookingRefPrefix() {
 }
 var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed"];
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate) {
+  const blocksQuery = adminDb.collection("roomBlocks").where("roomId", "==", roomId).where("status", "==", "active");
+  const blocksSnapshot = await transaction.get(blocksQuery);
+  return blocksSnapshot.docs.some((doc) => {
+    const data = doc.data();
+    const start = toDateOrNull(data.startDate);
+    const end = toDateOrNull(data.endDate);
+    return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
+  });
+}
 var lookupSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
   guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
@@ -189231,6 +189370,7 @@ async function handleCreateBooking(req, res) {
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
@@ -189265,6 +189405,10 @@ async function handleCreateBooking(req, res) {
           return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
         });
         if (hasConflict) {
+          continue;
+        }
+        const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, candidate.id, checkInDate, checkOutDate);
+        if (hasBlockConflict) {
           continue;
         }
         assignedRoom = candidate;
@@ -189338,18 +189482,14 @@ async function handleCreateBooking(req, res) {
         corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
         activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
       }
-      let roomTotal = 0;
-      const dateCursor = new Date(checkInDate);
-      for (let i2 = 0; i2 < numNights; i2++) {
-        const day = dateCursor.getUTCDay();
-        const isWeekend = day === 0 || day === 6;
-        if (isWeekend && !corporateDetails.isCorporate && typeWeekendRate) {
-          roomTotal += typeWeekendRate;
-        } else {
-          roomTotal += activeRoomRate;
-        }
-        dateCursor.setUTCDate(dateCursor.getUTCDate() + 1);
-      }
+      const roomTotal = corporateDetails.isCorporate ? activeRoomRate * numNights : calculateSeasonalAwareRoomTotal({
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        roomType,
+        baseRate: activeRoomRate,
+        weekendRate: typeWeekendRate,
+        seasonalRateOverrides
+      });
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
@@ -189709,6 +189849,7 @@ async function handleCreateWalkin(req, res) {
       const typeMaxCapacity = Number(typeEntry.maxCapacity) || 0;
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeWeekendRate = Number(typeEntry.weekendRate) || 0;
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
@@ -189724,22 +189865,22 @@ async function handleCreateWalkin(req, res) {
       if (hasConflict) {
         throw new Error("Room no longer available");
       }
+      const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
+      if (hasBlockConflict) {
+        throw new Error("Room no longer available");
+      }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 250 };
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
-      let roomTotal = 0;
-      const dateCursor = new Date(checkInDate);
-      for (let i2 = 0; i2 < numNights; i2++) {
-        const day = dateCursor.getUTCDay();
-        const isWeekend = day === 0 || day === 6;
-        if (isWeekend && typeWeekendRate) {
-          roomTotal += typeWeekendRate;
-        } else {
-          roomTotal += typeBaseRate;
-        }
-        dateCursor.setUTCDate(dateCursor.getUTCDate() + 1);
-      }
+      const roomTotal = calculateSeasonalAwareRoomTotal({
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        roomType: roomData.type,
+        baseRate: typeBaseRate,
+        weekendRate: typeWeekendRate,
+        seasonalRateOverrides
+      });
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
@@ -190416,17 +190557,27 @@ async function enrichAndRespond(res, bookingData) {
     }
   });
 }
+var resolveEarlyCheckinSchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(1).max(80),
+  status: external_exports.enum(["approved", "declined"]),
+  staffNote: external_exports.string().trim().max(500).optional().default(""),
+  // An empty string means "no override" (the admin form sends "" when the
+  // guest's requested time could not seed the dropdown) — treat it as absent
+  // so the approve path falls back to requestedTime instead of failing.
+  confirmedTime: external_exports.preprocess(
+    (value) => typeof value === "string" && value.trim() === "" ? void 0 : value,
+    external_exports.string().trim().regex(/^(0[1-9]|1[0-2]):[0-5][0-9]\s(AM|PM)$/).optional()
+  )
+});
 async function handleResolveEarlyCheckin(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const { bookingId, status, staffNote } = req.body || {};
-  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
-    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  const parsed = resolveEarlyCheckinSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Invalid resolution request details." });
   }
-  if (!["approved", "declined"].includes(status)) {
-    return res.status(400).json({ success: false, error: "Status must be 'approved' or 'declined'." });
-  }
+  const { bookingId, status, staffNote, confirmedTime } = parsed.data;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
@@ -190440,15 +190591,17 @@ async function handleResolveEarlyCheckin(req, res) {
       if (!data.earlyCheckIn) {
         throw new Error("NO_REQUEST_FOUND");
       }
-      bookingData = { id: bookingDoc.id, ...data };
+      const updatedEarlyCheckIn = {
+        ...data.earlyCheckIn,
+        status,
+        resolvedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        resolvedBy,
+        staffNote: staffNote || "",
+        confirmedTime: status === "approved" ? confirmedTime || data.earlyCheckIn.requestedTime : null
+      };
+      bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
       transaction.update(bookingRef, {
-        earlyCheckIn: {
-          ...data.earlyCheckIn,
-          status,
-          resolvedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          resolvedBy,
-          staffNote: staffNote || ""
-        },
+        earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: /* @__PURE__ */ new Date()
       });
     });
@@ -190467,6 +190620,178 @@ async function handleResolveEarlyCheckin(req, res) {
     }
     console.error("Resolve early check-in handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+async function handleRescheduleBooking(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const { bookingId, roomId, checkIn, checkOut, reason } = req.body || {};
+  if (!bookingId || !roomId || !checkIn || !checkOut) {
+    return res.status(400).json({ success: false, error: "Booking, room, check-in, and check-out are required." });
+  }
+  const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
+  const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
+  const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 864e5), 0);
+  if (numNights < 1) {
+    return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+  try {
+    let updatedBooking = null;
+    let fullBookingForEmail = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+      const booking = bookingDoc.data() || {};
+      if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
+        throw new Error(`Booking cannot be moved while status is ${booking.status}.`);
+      }
+      const roomRef = adminDb.collection("rooms").doc(String(roomId));
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) throw new Error("Room not found.");
+      const room = roomDoc.data() || {};
+      if (room.isActive === false) throw new Error("Target room is inactive.");
+      if (room.status === "blocked") {
+        const blockedFrom = toDateOrNull(room.blockedFrom);
+        const blockedTo = toDateOrNull(room.blockedTo);
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
+        if (windowActive) throw new Error("Target room is blocked for those dates.");
+      }
+      const overlapQuery = adminDb.collection("bookings").where("roomId", "==", String(roomId)).where("status", "in", ROOM_OCCUPYING_STATUSES);
+      const overlapSnapshot = await transaction.get(overlapQuery);
+      const hasConflict = overlapSnapshot.docs.some((doc) => {
+        if (doc.id === String(bookingId)) return false;
+        const data = doc.data();
+        const existingCheckIn = toDateOrNull(data.checkIn);
+        const existingCheckOut = toDateOrNull(data.checkOut);
+        return Boolean(existingCheckIn && existingCheckOut && rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate));
+      });
+      if (hasConflict) throw new Error("Target room already has a booking in that date range.");
+      const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
+      if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.data() || {};
+      const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
+      if (!typeEntry) throw new Error("Room type configuration not found.");
+      if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
+        throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
+      }
+      let activeRoomRate = typeEntry.pricePerNight || 0;
+      if (booking.isCorporate) {
+        let typeCorporateRate = typeEntry.corporateRate || 0;
+        activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : activeRoomRate;
+        if (booking.corporateCode) {
+          const corpRef = adminDb.collection("corporateCodes").doc(booking.corporateCode);
+          const corpDoc = await transaction.get(corpRef);
+          if (corpDoc.exists) {
+            const corpData = corpDoc.data() || {};
+            if (corpData.ratePerRoomType?.[room.type]) {
+              activeRoomRate = corpData.ratePerRoomType[room.type];
+            }
+          }
+        }
+      }
+      const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
+      const roomTotal = booking.isCorporate ? activeRoomRate * numNights : calculateSeasonalAwareRoomTotal({
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        roomType: room.type,
+        baseRate: activeRoomRate,
+        weekendRate: typeEntry.weekendRate || typeEntry.pricePerNight || 0,
+        seasonalRateOverrides
+      });
+      const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
+      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      const subtotal = roomTotal + breakfastTotal;
+      let voucherDiscount = 0;
+      if (booking.voucherCode) {
+        const voucherRef = adminDb.collection("vouchers").doc(booking.voucherCode);
+        const voucherDoc = await transaction.get(voucherRef);
+        if (voucherDoc.exists) {
+          const vData = voucherDoc.data() || {};
+          if (vData.discountType === "percent") {
+            voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
+          } else {
+            voucherDiscount = vData.discountValue || 0;
+          }
+          voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+        } else {
+          voucherDiscount = booking.voucherDiscount || 0;
+        }
+      }
+      let discountPct = 0;
+      if (booking.discountType === "senior" || booking.discountType === "pwd") {
+        discountPct = 20;
+      }
+      let appliedMemberDiscountPct = 0;
+      if (booking.memberId) {
+        const rewardsRef = adminDb.doc("settings/rewardsConfig");
+        const rewardsDoc = await transaction.get(rewardsRef);
+        if (rewardsDoc.exists) {
+          const rc = rewardsDoc.data();
+          if (rc.memberDiscountEnabled !== false) {
+            const pct = Number(rc.memberDiscountPct) || 0;
+            if (pct > 0) appliedMemberDiscountPct = pct;
+          }
+        }
+      }
+      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const afterSeniorPwd = subtotal - seniorPwdDiscount;
+      const afterVoucher = afterSeniorPwd - voucherDiscount;
+      const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
+      const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
+      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const rescheduleEntry = {
+        fromRoomId: booking.roomId || "",
+        fromRoomNumber: booking.roomNumber || "",
+        fromCheckIn: toDateOrNull(booking.checkIn)?.toISOString() || "",
+        fromCheckOut: toDateOrNull(booking.checkOut)?.toISOString() || "",
+        toRoomId: String(roomId),
+        toRoomNumber: String(room.roomNumber || ""),
+        toCheckIn: checkIn,
+        toCheckOut: checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        by: req.staff?.uid || req.staff?.email || "staff",
+        at: (/* @__PURE__ */ new Date()).toISOString(),
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+      };
+      updatedBooking = {
+        roomId: String(roomId),
+        roomNumber: String(room.roomNumber || ""),
+        roomType: String(room.type || booking.roomType || ""),
+        checkIn: Timestamp.fromDate(checkInDate),
+        checkOut: Timestamp.fromDate(checkOutDate),
+        numNights,
+        ratePerNight: activeRoomRate,
+        totalPrice: finalTotalPrice,
+        originalTotalPrice,
+        voucherDiscount,
+        rescheduleHistory: [...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [], rescheduleEntry],
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      fullBookingForEmail = {
+        ...booking,
+        ...updatedBooking,
+        id: bookingId
+      };
+      transaction.update(bookingRef, updatedBooking);
+    });
+    if (fullBookingForEmail) {
+      try {
+        await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
+      } catch (emailErr) {
+        console.error("Failed to send reschedule email:", emailErr);
+      }
+    }
+    return res.status(200).json({ success: true, data: updatedBooking });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
   }
 }
 
@@ -190510,6 +190835,7 @@ async function handleRoomAvailability(req, res) {
   }
   try {
     const overlapSnapshot = await adminDb.collection("bookings").where("status", "in", ACTIVE_STATUSES).where("checkIn", "<", reqEnd).get();
+    const blocksSnapshot = await adminDb.collection("roomBlocks").where("status", "==", "active").where("startDate", "<", reqEnd).get();
     const bookedRanges = [];
     overlapSnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -190524,6 +190850,18 @@ async function handleRoomAvailability(req, res) {
         bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status });
       }
     });
+    blocksSnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      const startIso = toIsoDate(data.startDate);
+      const endIso = toIsoDate(data.endDate);
+      const roomId = data.roomId;
+      if (!startIso || !endIso || !roomId) return;
+      const bStart = /* @__PURE__ */ new Date(`${startIso}T00:00:00Z`);
+      const bEnd = /* @__PURE__ */ new Date(`${endIso}T00:00:00Z`);
+      if (bStart < reqEnd && bEnd > reqStart) {
+        bookedRanges.push({ roomId, checkIn: startIso, checkOut: endIso, status: "blocked" });
+      }
+    });
     return res.status(200).json({
       success: true,
       data: { bookedRanges }
@@ -190534,6 +190872,151 @@ async function handleRoomAvailability(req, res) {
       success: false,
       error: "An error occurred while fetching room availability."
     });
+  }
+}
+
+// server/handlers/room-blocks.ts
+var ROOM_OCCUPYING_STATUSES2 = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+var blockSchema = external_exports.object({
+  roomId: external_exports.string().trim().min(1).max(80),
+  startDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: external_exports.string().trim().min(1).max(120),
+  notes: external_exports.string().trim().max(500).optional().default("")
+});
+var updateBlockSchema = blockSchema.extend({
+  blockId: external_exports.string().trim().min(1).max(80),
+  roomId: external_exports.string().trim().min(1).max(80).optional()
+});
+var cancelBlockSchema = external_exports.object({
+  blockId: external_exports.string().trim().min(1).max(80)
+});
+function parseStayRange(startDate, endDate) {
+  const start = /* @__PURE__ */ new Date(`${startDate}T00:00:00Z`);
+  const end = /* @__PURE__ */ new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    throw new Error("End date must be after start date.");
+  }
+  return { start, end };
+}
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+async function assertRoomIsFreeForBlock(transaction, roomId, start, end, excludeBlockId) {
+  const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "in", ROOM_OCCUPYING_STATUSES2);
+  const bookingsSnapshot = await transaction.get(bookingsQuery);
+  const bookingConflict = bookingsSnapshot.docs.some((doc) => {
+    const data = doc.data();
+    const checkIn = toDateOrNull(data.checkIn);
+    const checkOut = toDateOrNull(data.checkOut);
+    return Boolean(checkIn && checkOut && overlaps(checkIn, checkOut, start, end));
+  });
+  if (bookingConflict) {
+    throw new Error("Cannot block dates that overlap an active booking.");
+  }
+  const blocksQuery = adminDb.collection("roomBlocks").where("roomId", "==", roomId).where("status", "==", "active");
+  const blocksSnapshot = await transaction.get(blocksQuery);
+  const blockConflict = blocksSnapshot.docs.some((doc) => {
+    if (excludeBlockId && doc.id === excludeBlockId) return false;
+    const data = doc.data();
+    const blockStart = toDateOrNull(data.startDate);
+    const blockEnd = toDateOrNull(data.endDate);
+    return Boolean(blockStart && blockEnd && overlaps(blockStart, blockEnd, start, end));
+  });
+  if (blockConflict) {
+    throw new Error("These dates already overlap another active block.");
+  }
+}
+async function handleCreateRoomBlock(req, res) {
+  const parsed = blockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Please choose a room, valid dates, and a reason." });
+  }
+  try {
+    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
+    let blockId = "";
+    await adminDb.runTransaction(async (transaction) => {
+      const roomRef = adminDb.collection("rooms").doc(parsed.data.roomId);
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) throw new Error("Room not found.");
+      const room = roomDoc.data() || {};
+      if (room.isActive === false) throw new Error("Cannot block an inactive room.");
+      await assertRoomIsFreeForBlock(transaction, parsed.data.roomId, start, end);
+      const blockRef = adminDb.collection("roomBlocks").doc();
+      blockId = blockRef.id;
+      transaction.set(blockRef, {
+        roomId: parsed.data.roomId,
+        roomNumber: String(room.roomNumber || ""),
+        roomType: String(room.type || ""),
+        startDate: Timestamp.fromDate(start),
+        endDate: Timestamp.fromDate(end),
+        reason: parsed.data.reason,
+        notes: parsed.data.notes || "",
+        status: "active",
+        createdBy: req.staff?.uid || req.staff?.email || "staff",
+        createdAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date(),
+        cancelledAt: null,
+        cancelledBy: null
+      });
+    });
+    return res.status(200).json({ success: true, blockId });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message || "Failed to block dates." });
+  }
+}
+async function handleUpdateRoomBlock(req, res) {
+  const parsed = updateBlockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Please provide valid block details." });
+  }
+  try {
+    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
+    await adminDb.runTransaction(async (transaction) => {
+      const blockRef = adminDb.collection("roomBlocks").doc(parsed.data.blockId);
+      const blockDoc = await transaction.get(blockRef);
+      if (!blockDoc.exists) throw new Error("Block not found.");
+      const existing = blockDoc.data() || {};
+      if (existing.status === "cancelled") throw new Error("Cancelled blocks cannot be edited.");
+      const targetRoomId = parsed.data.roomId || existing.roomId;
+      if (!targetRoomId) throw new Error("Room ID is required.");
+      const roomRef = adminDb.collection("rooms").doc(targetRoomId);
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) throw new Error("Room not found.");
+      const room = roomDoc.data() || {};
+      await assertRoomIsFreeForBlock(transaction, targetRoomId, start, end, parsed.data.blockId);
+      transaction.update(blockRef, {
+        roomId: targetRoomId,
+        roomNumber: String(room.roomNumber || ""),
+        roomType: String(room.type || ""),
+        startDate: Timestamp.fromDate(start),
+        endDate: Timestamp.fromDate(end),
+        reason: parsed.data.reason,
+        notes: parsed.data.notes || "",
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+    });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message || "Failed to update block." });
+  }
+}
+async function handleCancelRoomBlock(req, res) {
+  const parsed = cancelBlockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: "Block ID is required." });
+  }
+  try {
+    const blockRef = adminDb.collection("roomBlocks").doc(parsed.data.blockId);
+    await blockRef.update({
+      status: "cancelled",
+      cancelledAt: /* @__PURE__ */ new Date(),
+      cancelledBy: req.staff?.uid || req.staff?.email || "staff",
+      updatedAt: /* @__PURE__ */ new Date()
+    });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message || "Failed to unblock dates." });
   }
 }
 
@@ -192881,6 +193364,30 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleResolveEarlyCheckin(req, res);
+  }
+  if (domain === "bookings" && action === "reschedule" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many reschedule requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleRescheduleBooking(req, res);
+  }
+  if (domain === "room-blocks" && ["create", "update", "cancel"].includes(action) && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`room-blocks-${action}:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many room block requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    if (action === "create") return await handleCreateRoomBlock(req, res);
+    if (action === "update") return await handleUpdateRoomBlock(req, res);
+    return await handleCancelRoomBlock(req, res);
   }
   if (domain === "bookings" && action === "checkout" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-checkout:${ip}`, 30, 6e4)) {

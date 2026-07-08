@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { z } from "zod";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
@@ -20,6 +21,7 @@ type EmailAction =
   | "corporate-inquiry"
   | "discount-rejected"
   | "early-checkin-request"
+  | "booking-rescheduled"
   // Per W4.4 / decision #104 / audit-email-extensions: 8 new
   // server-triggered templates. Voucher-issued is admin-driven;
   // store-order-* are guest status updates; staff-* notify the
@@ -239,6 +241,10 @@ function emailLayout(options: {
 }
 
 async function sendEmail(to: string, subject: string, html: string) {
+  if (typeof to === "string" && to.trim().toLowerCase().endsWith("@example.invalid")) {
+    console.log(`Skipping email send to placeholder address: ${to}`);
+    return;
+  }
   await resend.emails.send({
     from: FROM_EMAIL,
     to,
@@ -341,6 +347,21 @@ function bookingConfirmedEmail(booking: any) {
     body: `
       ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking)
+  });
+}
+
+function bookingRescheduledEmail(booking: any) {
+  return emailLayout({
+    preheader: `Your reservation ${booking.bookingRef} has been updated.`,
+    eyebrow: "Reservation updated",
+    title: "Your booking dates or room have changed",
+    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(config.brandName)}</strong> has been updated by the front desk.`,
+    body: `
+      ${callout("green", "Rescheduled details", `Your dates or room have been updated. The details below reflect your active booking.`)}
+      ${card("Updated reservation", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "Review booking details",
     ctaUrl: lookupUrl(booking)
@@ -505,7 +526,7 @@ function earlyCheckinResolveEmail(booking: any, status: "approved" | "declined",
     ? `Great news! We have approved your early check-in request for booking ${booking.bookingRef}. Your room will be ready for your early arrival.`
     : `We received your early check-in request for booking ${booking.bookingRef}. Unfortunately, we cannot accommodate an early check-in at this time due to room availability.`;
 
-  const timeVal = booking.earlyCheckIn?.requestedTime || "Requested time";
+  const timeVal = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime || "Requested time";
 
   return emailLayout({
     preheader: isApproved 
@@ -903,6 +924,10 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     "discount-rejected": {
       subject: `[${config.brandName}] Discount verification update: ${booking.bookingRef}`,
       html: discountRejectedEmail(booking)
+    },
+    "booking-rescheduled": {
+      subject: `[${config.brandName}] Booking updated: ${booking.bookingRef}`,
+      html: bookingRescheduledEmail(booking)
     }
   };
 
@@ -960,10 +985,17 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
         return res.status(400).json({ success: false, error: "Early check-in has already been approved for this booking." });
       }
 
-      const request = req.body?.request || {
-        requestedCheckInTime: req.body?.requestedCheckInTime || "12:00 PM",
-        notes: req.body?.notes || ""
-      };
+      const earlyCheckinRequestSchema = z.object({
+        requestedCheckInTime: z.string().trim().min(1).max(20).optional().default("12:00 PM"),
+        notes: z.string().trim().max(500).optional().default("")
+      });
+
+      const bodyData = req.body?.request || req.body || {};
+      const parsed = earlyCheckinRequestSchema.safeParse(bodyData);
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: "Please provide a valid requested check-in time (max 20 characters) and notes (max 500 characters)." });
+      }
+      const request = parsed.data;
 
       const earlyCheckIn = {
         status: "requested",
@@ -1139,6 +1171,21 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         break;
       case "early-checkin-request":
         html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
+        break;
+      case "early-checkin-resolve":
+        const bookingForResolve = {
+          ...mockBooking,
+          earlyCheckIn: {
+            status: "approved",
+            requestedTime: "10:30 AM",
+            confirmedTime: "11:00 AM",
+            notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+          }
+        };
+        html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
+        break;
+      case "booking-rescheduled":
+        html = bookingRescheduledEmail(mockBooking);
         break;
       case "voucher-issued":
         html = voucherIssuedEmail(mockVoucher);

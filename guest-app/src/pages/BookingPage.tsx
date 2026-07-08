@@ -28,6 +28,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
+  calculateSeasonalAwareRoomTotal,
   getDateKeyInTimezone,
   getNumNights,
   staggerChild,
@@ -105,7 +106,7 @@ export function BookingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading: roomsLoading } = useRooms();
-  const { roomTypes } = useRoomTypes();
+  const { roomTypes, seasonalRateOverrides } = useRoomTypes();
   const { memberProfile } = useGuestAuth();
   const currentStepKey = searchParams.get("step") ?? "select-room";
   const isGuestDetailsStep = currentStepKey === "guest-details";
@@ -320,21 +321,15 @@ export function BookingPage() {
   // Calculate room total client-side, incorporating weekend rates (Saturdays and Sundays)
   const roomTotal = useMemo(() => {
     if (!selectedTypeEntry || !selectedRoomRates) return 0;
-    let totalRate = 0;
-    const start = new Date(`${checkIn}T00:00:00Z`);
-    for (let i = 0; i < nights; i++) {
-      const date = new Date(start);
-      date.setUTCDate(start.getUTCDate() + i);
-      const day = date.getUTCDay(); // 0 = Sun, 6 = Sat
-      const isWeekend = day === 0 || day === 6;
-      if (isWeekend && selectedRoomRates.weekendRate) {
-        totalRate += selectedRoomRates.weekendRate;
-      } else {
-        totalRate += selectedRoomRates.pricePerNight;
-      }
-    }
-    return totalRate;
-  }, [selectedTypeEntry, selectedRoomRates, checkIn, nights]);
+    return calculateSeasonalAwareRoomTotal({
+      checkIn: `${checkIn}T00:00:00Z`,
+      checkOut: `${checkOut}T00:00:00Z`,
+      roomType: selectedTypeEntry.value,
+      baseRate: selectedRoomRates.pricePerNight,
+      weekendRate: selectedRoomRates.weekendRate,
+      seasonalRateOverrides
+    });
+  }, [selectedTypeEntry, selectedRoomRates, checkIn, checkOut, seasonalRateOverrides]);
 
   const discountPct = discountType === "none" ? 0 : 20;
   const breakfastTotal = hasBreakfast ? breakfastRate * guests * nights : 0;
@@ -936,11 +931,13 @@ export function BookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             typeLabel={selectedTypeEntry?.label ?? ""}
+            typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
             total={total}
             breakfastRate={breakfastRate}
+            seasonalRateOverrides={seasonalRateOverrides}
             discountPct={discountPct}
             discountType={discountType}
             voucherDiscount={voucherDiscount}
@@ -1357,6 +1354,7 @@ export function BookingPage() {
             hasBreakfast={hasBreakfast}
             nights={nights}
             typeLabel={selectedTypeEntry?.label ?? ""}
+            typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
@@ -1365,7 +1363,9 @@ export function BookingPage() {
             voucherDiscount={voucherDiscount}
             discountType={discountType}
             voucherApplied={voucherApplied}
+            breakfastRate={breakfastRate}
             memberDiscountPct={memberDiscountPct}
+            seasonalRateOverrides={seasonalRateOverrides}
             isMember={!!memberProfile}
           />
         </section>
@@ -1511,12 +1511,12 @@ export function BookingPage() {
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
-                  roomTotal: calculateWeekendAwareRoomTotal(type, checkIn, nights)
+                  roomTotal: calculateTypeRoomTotal(type, checkIn, checkOut, seasonalRateOverrides)
                 });
                 const breakfastTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
-                  roomTotal: calculateWeekendAwareRoomTotal(type, checkIn, nights),
+                  roomTotal: calculateTypeRoomTotal(type, checkIn, checkOut, seasonalRateOverrides),
                   numGuests: guests,
                   breakfastRate: liveBreakfastRate,
                   hasBreakfast: true
@@ -1632,23 +1632,20 @@ export function BookingPage() {
   );
 }
 
-function calculateWeekendAwareRoomTotal(
-  type: { pricePerNight?: number; weekendRate?: number },
+function calculateTypeRoomTotal(
+  type: { value: string; pricePerNight?: number; weekendRate?: number },
   checkIn: string,
-  nights: number
+  checkOut: string,
+  seasonalRateOverrides: ReturnType<typeof useRoomTypes>["seasonalRateOverrides"]
 ) {
-  const baseRate = Number(type.pricePerNight) || 0;
-  const weekendRate = Number(type.weekendRate) || 0;
-  let total = 0;
-  const start = new Date(`${checkIn}T00:00:00Z`);
-  for (let i = 0; i < nights; i++) {
-    const date = new Date(start);
-    date.setUTCDate(start.getUTCDate() + i);
-    const day = date.getUTCDay();
-    const isWeekend = day === 0 || day === 6;
-    total += isWeekend && weekendRate ? weekendRate : baseRate;
-  }
-  return total;
+  return calculateSeasonalAwareRoomTotal({
+    checkIn: `${checkIn}T00:00:00Z`,
+    checkOut: `${checkOut}T00:00:00Z`,
+    roomType: type.value,
+    baseRate: Number(type.pricePerNight) || 0,
+    weekendRate: Number(type.weekendRate) || 0,
+    seasonalRateOverrides
+  });
 }
 
 function BookingHeader({ backTo }: { backTo: string }) {
@@ -1717,6 +1714,7 @@ interface BookingReviewAsideProps {
   // type label + (once assigned by the server) the physical room
   // number. Pre-assignment, `assignedRoomNumber` is empty.
   typeLabel: string;
+  typeValue: string;
   assignedRoomNumber?: string;
   typeImageUrls?: string[];
   // Per W3.6 — pricing lives on the type.
@@ -1730,6 +1728,7 @@ interface BookingReviewAsideProps {
   voucherApplied?: boolean;
   breakfastRate?: number;
   memberDiscountPct?: number;
+  seasonalRateOverrides?: ReturnType<typeof useRoomTypes>["seasonalRateOverrides"];
   isMember?: boolean;
 }
 
@@ -1740,6 +1739,7 @@ function BookingReviewAside({
   hasBreakfast,
   nights,
   typeLabel,
+  typeValue,
   assignedRoomNumber = "",
   typeImageUrls = [],
   typeRates,
@@ -1751,27 +1751,22 @@ function BookingReviewAside({
   voucherApplied = false,
   breakfastRate,
   memberDiscountPct = 0,
+  seasonalRateOverrides = [],
   isMember = false
 }: BookingReviewAsideProps) {
   if (!typeLabel) return null;
 
   const roomTotal = useMemo(() => {
-    if (!typeRates) return 0;
-    let totalRate = 0;
-    const start = new Date(`${checkIn}T00:00:00Z`);
-    for (let i = 0; i < nights; i++) {
-      const date = new Date(start);
-      date.setUTCDate(start.getUTCDate() + i);
-      const day = date.getUTCDay(); // 0 = Sun, 6 = Sat
-      const isWeekend = day === 0 || day === 6;
-      if (isWeekend && typeRates.weekendRate) {
-        totalRate += typeRates.weekendRate;
-      } else {
-        totalRate += typeRates.pricePerNight;
-      }
-    }
-    return totalRate;
-  }, [typeRates, checkIn, nights]);
+    if (!typeRates || !typeValue) return 0;
+    return calculateSeasonalAwareRoomTotal({
+      checkIn: `${checkIn}T00:00:00Z`,
+      checkOut: `${checkOut}T00:00:00Z`,
+      roomType: typeValue,
+      baseRate: typeRates.pricePerNight,
+      weekendRate: typeRates.weekendRate,
+      seasonalRateOverrides
+    });
+  }, [typeRates, typeValue, checkIn, checkOut, seasonalRateOverrides]);
 
   const activeBreakfastRate = breakfastRate ?? 350;
   const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;

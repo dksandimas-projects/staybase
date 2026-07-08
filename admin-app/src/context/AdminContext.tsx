@@ -21,8 +21,11 @@ import {
   StoreConfig,
   bustPublicSiteContentCache,
   compressImageFile,
+  normalizeSeasonalRateOverrides,
   type ProtectedPaymentMethod,
-  type RoomTypeEntry
+  type RoomBlock,
+  type RoomTypeEntry,
+  type SeasonalRateOverride
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -163,6 +166,8 @@ export interface Booking {
     staffNote: string | null;
   } | null;
 }
+
+export type { RoomBlock };
 
 export interface PointsLog {
   id: string;
@@ -342,9 +347,14 @@ export interface AdminContextType {
   // Bookings
   bookings: Booking[];
   updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
-  resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string) => Promise<{ success: boolean; error?: string }>;
+  resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
+  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string }>;
   addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
+  roomBlocks: RoomBlock[];
+  createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
+  updateRoomBlock: (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string }>;
+  cancelRoomBlock: (blockId: string) => Promise<{ success: boolean; error?: string }>;
 
   // Vouchers & Corporate Rates
   vouchers: Voucher[];
@@ -397,6 +407,7 @@ export interface AdminContextType {
 
   // Configurations
   hotelConfig: any;
+  seasonalRateOverrides: SeasonalRateOverride[];
   websiteContent: any;
   rewardsConfig: any;
   breakfastConfig: any;
@@ -1063,7 +1074,62 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, [currentUser]);
 
-  const resolveEarlyCheckin = async (bookingId: string, status: "approved" | "declined", staffNote?: string) => {
+  const [roomBlocks, setRoomBlocks] = useState<RoomBlock[]>([]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setRoomBlocks([]);
+      return;
+    }
+
+    const parseDateString = (val: any) => {
+      if (!val) return "";
+      if (typeof val.toDate === "function") return val.toDate().toISOString().split("T")[0];
+      if (val instanceof Date) return val.toISOString().split("T")[0];
+      if (typeof val === "string") return val.split("T")[0];
+      return "";
+    };
+    const parseDateTimeString = (val: any) => {
+      if (!val) return "";
+      if (typeof val.toDate === "function") return val.toDate().toISOString();
+      if (val instanceof Date) return val.toISOString();
+      if (typeof val === "string") return val;
+      return "";
+    };
+
+    const unsubscribe = onSnapshot(
+      collection(db, "roomBlocks"),
+      (snapshot) => {
+        const blocks = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            roomId: data.roomId || "",
+            roomNumber: data.roomNumber || "",
+            roomType: data.roomType || "",
+            startDate: parseDateString(data.startDate),
+            endDate: parseDateString(data.endDate),
+            reason: data.reason || "",
+            notes: data.notes || "",
+            status: data.status === "cancelled" ? "cancelled" : "active",
+            createdBy: data.createdBy || "",
+            createdAt: parseDateTimeString(data.createdAt),
+            updatedAt: parseDateTimeString(data.updatedAt),
+            cancelledAt: data.cancelledAt ? parseDateTimeString(data.cancelledAt) : null,
+            cancelledBy: data.cancelledBy || null
+          } satisfies RoomBlock;
+        });
+        setRoomBlocks(blocks);
+      },
+      (error) => {
+        console.error("Error listening to roomBlocks collection:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, [currentUser]);
+
+  const resolveEarlyCheckin = async (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/early-checkin-resolve`, {
@@ -1072,7 +1138,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           "Content-Type": "application/json",
           "Authorization": token ? `Bearer ${token}` : ""
         },
-        body: JSON.stringify({ bookingId, status, staffNote })
+        body: JSON.stringify({ bookingId, status, staffNote, confirmedTime })
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -1081,6 +1147,94 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       return { success: true };
     } catch (err: any) {
       console.error("resolveEarlyCheckin failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const rescheduleBooking = async (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/reschedule`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify(input)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to move booking." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("rescheduleBooking failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const createRoomBlock = async (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/room-blocks/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify(input)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to block dates." };
+      }
+      return { success: true, blockId: data.blockId as string | undefined };
+    } catch (err: any) {
+      console.error("createRoomBlock failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const updateRoomBlock = async (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/room-blocks/update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify(input)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to update block." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("updateRoomBlock failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  const cancelRoomBlock = async (blockId: string) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/room-blocks/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ blockId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to unblock dates." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("cancelRoomBlock failed:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -2306,7 +2460,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     hotelStory: "A hospitality story built on consistency...",
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
-    roomTypes: [...DEFAULT_ROOM_TYPES]
+    roomTypes: [...DEFAULT_ROOM_TYPES],
+    seasonalRateOverrides: []
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -3519,6 +3674,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
+
   return (
     <AdminContext.Provider
       value={{
@@ -3541,8 +3698,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         bookings,
         updateBookingStatus,
         resolveEarlyCheckin,
+        rescheduleBooking,
         addOnsitePayment,
         addWalkinBooking,
+        roomBlocks,
+        createRoomBlock,
+        updateRoomBlock,
+        cancelRoomBlock,
         vouchers,
         addVoucher,
         toggleVoucherActive,
@@ -3574,6 +3736,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         updateStoreItem,
         deleteStoreItem,
         hotelConfig,
+        seasonalRateOverrides,
         websiteContent,
         websiteContentLoading,
         rewardsConfig,

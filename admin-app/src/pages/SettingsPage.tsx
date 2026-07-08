@@ -4054,7 +4054,9 @@ export function SettingsPage() {
                     { label: "Booking Cancelled", description: "Guest receives cancellation confirmation", status: "active", action: "booking-cancelled" },
                     { label: "Discount Rejected", description: "Guest notified when their Senior/PWD ID cannot be verified", status: "active", action: "discount-rejected" },
                     { label: "Corporate Inquiry", description: "Staff notification when a new corporate inquiry is submitted", status: "active", action: "corporate-inquiry" },
-                    { label: "Early Check-in Request", description: "Staff notification when a member requests early check-in via Intercom", status: "planned", action: "early-checkin-request" }
+                    { label: "Early Check-in Request", description: "Staff notification when a member requests early check-in via Intercom", status: "active", action: "early-checkin-request" },
+                    { label: "Early Check-in Resolve", description: "Guest notified when their early check-in request is approved or declined", status: "active", action: "early-checkin-resolve" },
+                    { label: "Booking Rescheduled", description: "Guest notified when their booking dates or room are updated", status: "active", action: "booking-rescheduled" }
                   ].map(trigger => (
                     <div key={trigger.label} className="rounded-lg border border-gray-150 bg-white p-3 space-y-1 flex flex-col justify-between">
                       <div>

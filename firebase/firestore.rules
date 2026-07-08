@@ -28,6 +28,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /roomBlocks/{blockId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
     match /roomDeletionAudit/{auditId} {
       allow read: if isStaff();
       allow create: if isAdmin();
