@@ -181,6 +181,11 @@ needs the composite index added to `firebase/firestore.indexes.json` in
 `8ea7d0f`. Run `firebase deploy --only firestore:indexes` before the next
 production deploy or the availability endpoint fails with
 `FAILED_PRECONDITION` at runtime.
+**Deployed 2026-07-08:** index verified live via the Firestore Admin API —
+`roomBlocks (status ASC, startDate ASC)` state `READY` on
+`spark-inn-stg-7a7ad`; deployed security rules confirmed to include the
+`roomBlocks` staff-read / no-client-write block. No operational steps
+remain from this audit.
 
 ### PF-05 — Walk-in placeholder emails hard-bounce through Resend · `Fixed`
 
