@@ -61,6 +61,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [x] Guest registry fields: nationality, address, DOB, gender, ID type + number, emergency contact, vehicle plate
   - [x] Physical registration signature status toggle
   - [x] Registration PDF preview action placeholder
+  - [ ] Check-in action is disabled until required guest registration fields are saved and a guest ID photo is uploaded
 - [x] Breakfast selections panel — shown in drawer only if `booking.hasBreakfast: true`
   - [x] Grid of dates (one column per night) × guests (one row per guest)
   - [x] Each cell: dropdown of active silog items from `settings/breakfastConfig.silogItems`
@@ -105,6 +106,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - `checked-in` → `checked-out`
   - `checked-out` → no further transitions
   - `cancelled` → no further transitions
+- [ ] Check-in gate: `/api/bookings/checkin` must reject check-in unless the booking is in `confirmed` or `payment-confirmed` status, has `guestIdPhotoUrl`, and has saved required `guestRegistration` fields. The admin drawer should mirror the same rule client-side with a disabled CTA and plain-language missing-items checklist.
 - [ ] Status update: direct staff `updateDoc` on `bookings/{bookingId}` for ordinary operational transitions, updating `status` + `updatedAt` + `handledBy`
 - [ ] `confirmed` and `payment-confirmed` status changes trigger corresponding emails via email API route after the staff update succeeds
 - [ ] Cancellation: POST to `/api/bookings/cancel` so owner/staff authorization, status validation, `cancellationReason`, and cancellation email stay server-side
@@ -148,6 +150,44 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Record onsite cash payment for a walk-in booking — appears in payments list, outstanding balance updates
 - [ ] Record GCash payment after discount rejection — outstanding balance drops to ₱0, "Fully Settled" badge shown
 - [ ] Overpayment scenario — "Overpaid by ₱X" shown in amber
+
+## Implementation Plan — Check-In Gate
+
+### Goal
+
+Prevent staff from checking in a guest until payment/booking status is eligible and the front desk has captured the minimum registration packet: guest ID photo plus required registration fields.
+
+### Required State
+
+- Booking status must be `confirmed` or `payment-confirmed`.
+- `guestIdPhotoUrl` must be present.
+- `guestRegistration` must include at minimum:
+  - Nationality
+  - Residential address
+  - Date of birth
+  - Gender
+  - ID type
+  - ID number
+  - Emergency contact
+  - Signature status marked `signed`
+- Vehicle plate remains optional.
+
+### Implementation Steps
+
+1. Add a shared helper for check-in readiness so the drawer UI and server validation use the same required-field list.
+2. Update the booking drawer to show a compact "Ready for check-in" checklist beside the check-in action.
+3. Disable **Verify Guest ID & Check In** until all required items pass, and show the exact missing items in plain language.
+4. Update `/api/bookings/checkin` to enforce the same rule server-side before changing the booking or room status.
+5. Fix the current `payment-confirmed → confirmed` mismatch by allowing `/api/bookings/confirm` to accept `payment-confirmed`, or simplify the operational flow so check-in from `payment-confirmed` is the documented path.
+6. Add tests for blocked check-in without guest ID, blocked check-in with incomplete registration, successful check-in from `confirmed`, successful check-in from `payment-confirmed`, and rejected check-in from terminal statuses.
+
+### Acceptance Criteria
+
+- Staff cannot check in a booking without a guest ID photo.
+- Staff cannot check in a booking without the required guest registration fields.
+- The UI explains what is missing instead of letting the server fail silently.
+- The server rejects direct/API check-in attempts that bypass the UI.
+- Existing room occupancy checks still run inside the transaction before the room is marked occupied.
 
 ## References
 
