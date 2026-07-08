@@ -45,6 +45,17 @@ describe("Phase 12 — calendar grid and seasonal rate overrides", () => {
   it("rates page persists seasonalRateOverrides under hotelConfig", () => {
     expect(contextSrc).toMatch(/seasonalRateOverrides:\s*\[\]/);
     expect(contextSrc).toMatch(/normalizeSeasonalRateOverrides\(hotelConfig\.seasonalRateOverrides\)/);
+    expect(ratesSrc).toMatch(/Pricing priority/);
+    expect(ratesSrc).toMatch(/1\. Corporate/);
+    expect(ratesSrc).toMatch(/2\. Seasonal/);
+    expect(ratesSrc).toMatch(/3\. Regular/);
+    expect(ratesSrc).toMatch(/Rate Calendar/);
+    expect(ratesSrc).toMatch(/getSeasonalRateForNight/);
+    expect(ratesSrc).toMatch(/isWeekendNight/);
+    expect(ratesSrc).toMatch(/handleRateCellClick/);
+    expect(ratesSrc).toMatch(/isRateCellSelected/);
+    expect(ratesSrc).toMatch(/openSeasonalOverrideEditor/);
+    expect(ratesSrc).toMatch(/Holiday \/ Seasonal Label/);
     expect(ratesSrc).toMatch(/Seasonal Rate Overrides/);
     expect(ratesSrc).toMatch(/updateSettings\("hotelConfig",\s*\{[\s\S]*seasonalRateOverrides:\s*next/);
   });

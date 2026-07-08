@@ -8,6 +8,8 @@
 
 Admin-only page at `/rates` for managing all pricing and payment configuration. As of W3.6, the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) and `maxCapacity` are owned by the **room type** (not the individual room) — see `settings/hotelConfig.roomTypes[]`. As of W3.7, the same is true for `bedDefinition`, `description`, and `amenities` (see `plan/features/ROOM-MANAGEMENT.md §W3.7`). The Rates tab is one edit surface for the rate matrix; the **Settings → Room Types → Edit** modal is the other (and is more convenient for adjusting a single type's rates together with its bed / description / amenities). Rate changes take effect for new bookings — existing bookings retain their locked rate.
 
+Planned post-launch enhancement: an Airbnb-style **Rate Calendar** for month-based room type × date pricing, multi-select seasonal rate edits, and holiday labels from seasonal overrides. See `plan/features/RATE-CALENDAR.md`.
+
 ---
 
 ## UX Checklist
@@ -80,4 +82,5 @@ Admin-only page at `/rates` for managing all pricing and payment configuration. 
 - Room management: `plan/features/ROOM-MANAGEMENT.md` (creates/edits/deletes rooms; type is referenced by `value`)
 - Weekend rate calculation: `plan/features/BOOKING-FLOW.md §Step 1`
 - Corporate flat rate usage: `plan/features/CORPORATE-BOOKING.md`
+- Planned rate calendar: `plan/features/RATE-CALENDAR.md`
 - Auth guard: `plan/features/AUTH-ROLES.md`

@@ -982,6 +982,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
 - ✅ Calendar view for bookings (visual room × date grid)
 - ✅ Seasonal rate overrides
+- ⬜ Rate Calendar — month-based room type × date grid for effective public rates, multi-select/unselect seasonal rate editing, and holiday labels sourced from seasonal override names. Full spec: `plan/features/RATE-CALENDAR.md`.
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
 

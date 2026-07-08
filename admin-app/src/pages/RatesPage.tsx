@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAdmin, Voucher, CorporateCode } from "../context/AdminContext";
+import { getSeasonalRateForNight, isWeekendNight } from "@spark-inn/shared";
 import type { SeasonalRateOverride } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
@@ -10,9 +11,53 @@ import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   Plus, Tag, Gift, Trash2, Calendar, ShieldCheck,
-  Landmark, Save, ShieldAlert, CreditCard
+  Landmark, Save, ShieldAlert, CreditCard, Info, ChevronLeft, ChevronRight, X
 } from "lucide-react";
 import config from "@config";
+
+function startOfMonthUtc(value: Date) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+}
+
+function addMonthsUtc(value: Date, months: number) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + months, 1));
+}
+
+function addDaysUtc(value: Date, days: number) {
+  const next = new Date(value);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function toDateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function parseDateKey(value: string) {
+  return new Date(`${value}T00:00:00Z`);
+}
+
+function getMonthDates(value: Date) {
+  const start = startOfMonthUtc(value);
+  const nextMonth = addMonthsUtc(start, 1);
+  const dates: Date[] = [];
+  for (let cursor = start; cursor < nextMonth; cursor = addDaysUtc(cursor, 1)) {
+    dates.push(cursor);
+  }
+  return dates;
+}
+
+function formatMonth(value: Date) {
+  return new Intl.DateTimeFormat(config.locale, { month: "long", year: "numeric" }).format(value);
+}
+
+function formatRateDay(value: Date) {
+  return new Intl.DateTimeFormat(config.locale, { weekday: "short", day: "numeric" }).format(value);
+}
+
+function isDateInInclusiveRange(dateKey: string, startDate: string, endDate: string) {
+  return dateKey >= startDate && dateKey <= endDate;
+}
 
 export function RatesPage() {
   const {
@@ -79,6 +124,22 @@ export function RatesPage() {
   const [seasonalRate, setSeasonalRate] = useState("");
   const [seasonalRoomTypes, setSeasonalRoomTypes] = useState<string[]>([]);
   const [isSavingSeasonal, setIsSavingSeasonal] = useState(false);
+  const [rateCalendarMonth, setRateCalendarMonth] = useState(() => startOfMonthUtc(new Date()));
+  const [rateSelection, setRateSelection] = useState<{
+    startDate: string;
+    endDate: string;
+    roomTypeValues: string[];
+  } | null>(null);
+  const [calendarOverrideName, setCalendarOverrideName] = useState("");
+  const [calendarOverrideRate, setCalendarOverrideRate] = useState("");
+  const [isSavingCalendarOverride, setIsSavingCalendarOverride] = useState(false);
+  const [editingSeasonalOverride, setEditingSeasonalOverride] = useState<SeasonalRateOverride | null>(null);
+  const [editSeasonalName, setEditSeasonalName] = useState("");
+  const [editSeasonalStart, setEditSeasonalStart] = useState("");
+  const [editSeasonalEnd, setEditSeasonalEnd] = useState("");
+  const [editSeasonalRate, setEditSeasonalRate] = useState("");
+  const [editSeasonalRoomTypes, setEditSeasonalRoomTypes] = useState<string[]>([]);
+  const [editSeasonalActive, setEditSeasonalActive] = useState(true);
 
   // Keep form buffers synced with Firestore-backed room types until the
   // admin edits a field. This prevents deploy-time defaults from clobbering
@@ -232,6 +293,210 @@ export function RatesPage() {
     return override.roomTypeValues
       .map((value) => roomTypes.find((type) => type.value === value)?.shortLabel || value)
       .join(", ");
+  };
+
+  const rateCalendarDates = getMonthDates(rateCalendarMonth);
+  const activeRoomTypeValues = roomTypes.map((type) => type.value);
+  const selectionRoomTypes = rateSelection?.roomTypeValues || [];
+  const selectedCalendarRoomLabels = selectionRoomTypes
+    .map((value) => roomTypes.find((type) => type.value === value)?.shortLabel || value)
+    .join(", ");
+  const selectionDateCount = rateSelection
+    ? Math.floor((parseDateKey(rateSelection.endDate).getTime() - parseDateKey(rateSelection.startDate).getTime()) / 86_400_000) + 1
+    : 0;
+
+  const getRateCalendarCell = (roomType: typeof roomTypes[number], date: Date) => {
+    const seasonal = getSeasonalRateForNight(date, roomType.value, seasonalRateOverrides);
+    if (seasonal) {
+      return {
+        rate: seasonal.rate,
+        source: "seasonal",
+        label: seasonal.name,
+        override: seasonal
+      };
+    }
+
+    if (isWeekendNight(date) && roomType.weekendRate) {
+      return {
+        rate: roomType.weekendRate,
+        source: "weekend",
+        label: "Weekend",
+        override: null
+      };
+    }
+
+    return {
+      rate: roomType.pricePerNight,
+      source: "regular",
+      label: "Regular",
+      override: null
+    };
+  };
+
+  const isRateCellSelected = (roomTypeValue: string, dateKey: string) => {
+    return Boolean(
+      rateSelection &&
+      rateSelection.roomTypeValues.includes(roomTypeValue) &&
+      isDateInInclusiveRange(dateKey, rateSelection.startDate, rateSelection.endDate)
+    );
+  };
+
+  const handleRateCellClick = (roomTypeValue: string, dateKey: string) => {
+    if (!rateSelection) {
+      setRateSelection({ startDate: dateKey, endDate: dateKey, roomTypeValues: [roomTypeValue] });
+      return;
+    }
+
+    if (isRateCellSelected(roomTypeValue, dateKey)) {
+      setRateSelection(null);
+      return;
+    }
+
+    const nextRoomTypeValues = rateSelection.roomTypeValues.includes(roomTypeValue)
+      ? rateSelection.roomTypeValues
+      : [...rateSelection.roomTypeValues, roomTypeValue];
+    const nextStart = dateKey < rateSelection.startDate ? dateKey : rateSelection.startDate;
+    const nextEnd = dateKey > rateSelection.endDate ? dateKey : rateSelection.endDate;
+    setRateSelection({
+      startDate: nextStart,
+      endDate: nextEnd,
+      roomTypeValues: nextRoomTypeValues
+    });
+  };
+
+  const toggleEditSeasonalRoomType = (typeValue: string) => {
+    setEditSeasonalRoomTypes(prev =>
+      prev.includes(typeValue)
+        ? prev.filter(value => value !== typeValue)
+        : [...prev, typeValue]
+    );
+  };
+
+  const findOverlappingSeasonalOverrides = (
+    startDate: string,
+    endDate: string,
+    roomTypeValues: string[],
+    exceptId?: string
+  ) => {
+    const selectedTypes = roomTypeValues.length > 0 ? roomTypeValues : activeRoomTypeValues;
+    return seasonalRateOverrides.filter((override) => {
+      if (override.id === exceptId || !override.isActive) return false;
+      if (endDate < override.startDate || startDate > override.endDate) return false;
+      const overrideTypes = override.roomTypeValues.length > 0 ? override.roomTypeValues : activeRoomTypeValues;
+      return selectedTypes.some((value) => overrideTypes.includes(value));
+    });
+  };
+
+  const handleSaveCalendarOverride = async () => {
+    if (!rateSelection || !calendarOverrideName.trim() || !calendarOverrideRate) {
+      toast.warning("Missing rate details", "Select dates, add a label, and enter a nightly rate.");
+      return;
+    }
+
+    const rate = Number(calendarOverrideRate);
+    if (!Number.isFinite(rate) || rate < 0) {
+      toast.warning("Invalid nightly rate", "Enter a zero or positive amount.");
+      return;
+    }
+
+    const roomTypeValues = rateSelection.roomTypeValues.length === activeRoomTypeValues.length ? [] : rateSelection.roomTypeValues;
+    const overlaps = findOverlappingSeasonalOverrides(rateSelection.startDate, rateSelection.endDate, roomTypeValues);
+    setIsSavingCalendarOverride(true);
+    try {
+      const override: SeasonalRateOverride = {
+        id: `seasonal-${Date.now()}`,
+        name: calendarOverrideName.trim(),
+        startDate: rateSelection.startDate,
+        endDate: rateSelection.endDate,
+        rate,
+        roomTypeValues,
+        isActive: true
+      };
+      await saveSeasonalOverrides([override, ...seasonalRateOverrides]);
+      toast.success(
+        "Rate calendar updated",
+        overlaps.length > 0 ? `Saved. Review ${overlaps.length} overlapping override${overlaps.length === 1 ? "" : "s"}.` : "Seasonal rate saved."
+      );
+      setRateSelection(null);
+      setCalendarOverrideName("");
+      setCalendarOverrideRate("");
+    } catch (err) {
+      console.error("Failed to save calendar rate:", err);
+      toast.error("Rate not saved", err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsSavingCalendarOverride(false);
+    }
+  };
+
+  const openSeasonalOverrideEditor = (override: SeasonalRateOverride) => {
+    setEditingSeasonalOverride(override);
+    setEditSeasonalName(override.name);
+    setEditSeasonalStart(override.startDate);
+    setEditSeasonalEnd(override.endDate);
+    setEditSeasonalRate(String(override.rate));
+    setEditSeasonalRoomTypes(override.roomTypeValues);
+    setEditSeasonalActive(override.isActive);
+  };
+
+  const closeSeasonalOverrideEditor = () => {
+    setEditingSeasonalOverride(null);
+    setEditSeasonalName("");
+    setEditSeasonalStart("");
+    setEditSeasonalEnd("");
+    setEditSeasonalRate("");
+    setEditSeasonalRoomTypes([]);
+    setEditSeasonalActive(true);
+  };
+
+  const handleUpdateSeasonalOverride = async () => {
+    if (!editingSeasonalOverride || !editSeasonalName.trim() || !editSeasonalStart || !editSeasonalEnd || !editSeasonalRate) {
+      toast.warning("Missing override details", "Add a name, date range, and nightly rate.");
+      return;
+    }
+    if (editSeasonalEnd < editSeasonalStart) {
+      toast.warning("Invalid date range", "End date must be on or after the start date.");
+      return;
+    }
+
+    const rate = Number(editSeasonalRate);
+    if (!Number.isFinite(rate) || rate < 0) {
+      toast.warning("Invalid nightly rate", "Enter a zero or positive amount.");
+      return;
+    }
+
+    const overlaps = findOverlappingSeasonalOverrides(
+      editSeasonalStart,
+      editSeasonalEnd,
+      editSeasonalRoomTypes,
+      editingSeasonalOverride.id
+    );
+
+    const next = seasonalRateOverrides.map((override) =>
+      override.id === editingSeasonalOverride.id
+        ? {
+            ...override,
+            name: editSeasonalName.trim(),
+            startDate: editSeasonalStart,
+            endDate: editSeasonalEnd,
+            rate,
+            roomTypeValues: editSeasonalRoomTypes,
+            isActive: editSeasonalActive
+          }
+        : override
+    );
+    await saveSeasonalOverrides(next);
+    toast.success(
+      "Seasonal override updated",
+      overlaps.length > 0 ? `Review ${overlaps.length} overlapping override${overlaps.length === 1 ? "" : "s"}.` : "Rate calendar cells refreshed."
+    );
+    closeSeasonalOverrideEditor();
+  };
+
+  const handleDeleteEditingSeasonalOverride = async () => {
+    if (!editingSeasonalOverride) return;
+    await deleteSeasonalOverride(editingSeasonalOverride.id);
+    toast.success("Seasonal override deleted", "The rate calendar has been updated.");
+    closeSeasonalOverrideEditor();
   };
 
   const handleVoucherSubmit = async (e: React.FormEvent) => {
@@ -538,6 +803,36 @@ export function RatesPage() {
             Tariff Rates Configurator
           </h2>
 
+          <section className="rounded-lg border border-blue-100 bg-blue-50/70 p-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-blue-700 shadow-sm ring-1 ring-blue-100">
+                <Info size={16} />
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-blue-950">Pricing priority</h3>
+                  <p className="mt-1 text-[11px] leading-relaxed text-blue-900">
+                    Nightly room pricing is selected in this order before breakfast, vouchers, points, or mandated discounts are applied.
+                  </p>
+                </div>
+                <div className="grid gap-2 text-[11px] leading-relaxed text-blue-950 sm:grid-cols-3">
+                  <div className="rounded-md bg-white/80 p-3 ring-1 ring-blue-100">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500">1. Corporate</span>
+                    <p className="mt-1 font-semibold">Valid corporate codes use their negotiated room rate first.</p>
+                  </div>
+                  <div className="rounded-md bg-white/80 p-3 ring-1 ring-blue-100">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500">2. Seasonal</span>
+                    <p className="mt-1 font-semibold">Seasonal overrides apply when no corporate rate is used.</p>
+                  </div>
+                  <div className="rounded-md bg-white/80 p-3 ring-1 ring-blue-100">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500">3. Regular</span>
+                    <p className="mt-1 font-semibold">Base or weekend rates are the fallback for normal bookings.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <form onSubmit={handleSaveRates} className="space-y-5">
             {isMobile ? (
               <div className="space-y-3">
@@ -725,6 +1020,215 @@ export function RatesPage() {
           </div>
         </div>
       </div>
+
+      <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight flex items-center gap-1.5">
+              <Calendar size={18} className="text-primary" />
+              Rate Calendar
+            </h2>
+            <p className="mt-1 max-w-2xl text-[10px] leading-relaxed text-gray-500">
+              Month view for effective public nightly rates. Click cells to multi-select dates and room types, then save a seasonal or holiday override.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setRateCalendarMonth(addMonthsUtc(rateCalendarMonth, -1))}
+              className="inline-flex min-h-[38px] items-center gap-1 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-200"
+            >
+              <ChevronLeft size={14} />
+              Prev
+            </button>
+            <button
+              type="button"
+              onClick={() => setRateCalendarMonth(startOfMonthUtc(new Date()))}
+              className="min-h-[38px] rounded-lg bg-white px-3 text-xs font-semibold text-gray-700 shadow-sm ring-1 ring-gray-200 transition hover:bg-gray-50"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setRateCalendarMonth(addMonthsUtc(rateCalendarMonth, 1))}
+              className="inline-flex min-h-[38px] items-center gap-1 rounded-lg bg-gray-100 px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-200"
+            >
+              Next
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-4 xl:flex-row">
+          <div className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-gray-150">
+            <div
+              className="grid min-w-max text-xs"
+              style={{ gridTemplateColumns: `150px repeat(${rateCalendarDates.length}, minmax(92px, 1fr))` }}
+            >
+              <div className="sticky left-0 z-20 flex min-h-[58px] items-center border-b border-r border-gray-150 bg-gray-50 px-3">
+                <div>
+                  <p className="text-sm font-bold text-gray-950">{formatMonth(rateCalendarMonth)}</p>
+                  <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Room type</p>
+                </div>
+              </div>
+              {rateCalendarDates.map((day) => {
+                const weekend = isWeekendNight(day);
+                return (
+                  <div key={toDateKey(day)} className={`flex min-h-[58px] flex-col justify-center border-b border-r border-gray-100 px-2 text-center ${weekend ? "bg-amber-50/70" : "bg-gray-50"}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{formatRateDay(day).split(" ")[0]}</span>
+                    <span className="text-sm font-bold text-gray-900">{day.getUTCDate()}</span>
+                  </div>
+                );
+              })}
+
+              {roomTypes.map((type) => (
+                <div key={type.value} className="contents">
+                  <div key={`${type.value}-label`} className="sticky left-0 z-10 flex min-h-[88px] items-center border-r border-t border-gray-150 bg-white px-3">
+                    <div>
+                      <p className="text-sm font-bold text-gray-900">{type.shortLabel || type.label}</p>
+                      <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{type.value}</p>
+                    </div>
+                  </div>
+                  {rateCalendarDates.map((day) => {
+                    const dateKey = toDateKey(day);
+                    const cell = getRateCalendarCell(type, day);
+                    const selected = isRateCellSelected(type.value, dateKey);
+                    const sourceClass = cell.source === "seasonal"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : cell.source === "weekend"
+                        ? "border-amber-200 bg-amber-50/70"
+                        : "border-gray-100 bg-white";
+                    return (
+                      <button
+                        key={`${type.value}-${dateKey}`}
+                        type="button"
+                        onClick={() => handleRateCellClick(type.value, dateKey)}
+                        className={`relative flex min-h-[88px] flex-col items-center justify-center border-r border-t px-2 py-2 text-center transition hover:bg-primary/5 ${sourceClass} ${selected ? "ring-2 ring-inset ring-primary" : ""}`}
+                      >
+                        {selected && (
+                          <span className="absolute right-1.5 top-1.5 rounded-full bg-primary px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+                            selected
+                          </span>
+                        )}
+                        <span className="text-sm font-bold text-gray-950">{formatPrice(cell.rate)}</span>
+                        <span className={`mt-1 max-w-[76px] truncate rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                          cell.source === "seasonal"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : cell.source === "weekend"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-gray-100 text-gray-500"
+                        }`}>
+                          {cell.label}
+                        </span>
+                        {cell.override && (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openSeasonalOverrideEditor(cell.override);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                openSeasonalOverrideEditor(cell.override);
+                              }
+                            }}
+                            className="mt-1 rounded bg-white/90 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-700 shadow-sm ring-1 ring-emerald-100"
+                          >
+                            Edit
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <aside className="rounded-lg border border-gray-150 bg-gray-50 p-4 xl:w-80">
+            {rateSelection ? (
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Selected range</p>
+                    <p className="mt-1 text-sm font-bold text-gray-950">{rateSelection.startDate} to {rateSelection.endDate}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {selectionDateCount} date{selectionDateCount === 1 ? "" : "s"} · {selectedCalendarRoomLabels}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRateSelection(null)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-gray-500 shadow-sm ring-1 ring-gray-200 hover:text-gray-900"
+                    aria-label="Clear selected rate calendar cells"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Holiday / Seasonal Label
+                  <input
+                    type="text"
+                    value={calendarOverrideName}
+                    onChange={(e) => setCalendarOverrideName(e.target.value)}
+                    placeholder="Christmas Peak"
+                    className="min-h-[44px] rounded border border-gray-200 px-3 text-xs font-medium normal-case tracking-normal text-gray-900"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Nightly Rate
+                  <div className="relative flex items-center">
+                    <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={calendarOverrideRate}
+                      onChange={(e) => setCalendarOverrideRate(e.target.value)}
+                      className="min-h-[44px] w-full rounded border border-gray-200 pl-6 pr-2.5 text-xs font-medium text-gray-900"
+                    />
+                  </div>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleSaveCalendarOverride}
+                  disabled={isSavingCalendarOverride}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Save size={14} />
+                  {isSavingCalendarOverride ? "Saving…" : "Set seasonal rate"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Bulk edit</p>
+                <p className="text-xs leading-relaxed text-gray-500">
+                  Click a rate cell to start a selection. Click another date or room type to expand it. Click selected cells to unselect.
+                </p>
+                <div className="space-y-2 rounded-lg bg-white p-3 ring-1 ring-gray-150">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-gray-500">Seasonal</span>
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-700">Holiday label</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-gray-500">Weekend</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 font-bold text-amber-700">Sat/Sun</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-gray-500">Regular</span>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 font-bold text-gray-500">Base</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      </section>
 
       <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1150,6 +1654,126 @@ export function RatesPage() {
             </PrimaryButton>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        title="Edit Seasonal Rate"
+        open={Boolean(editingSeasonalOverride)}
+        onClose={closeSeasonalOverrideEditor}
+      >
+        <div className="space-y-4 text-xs font-body">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Holiday / Seasonal Label
+              <input
+                type="text"
+                value={editSeasonalName}
+                onChange={(e) => setEditSeasonalName(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Nightly Rate
+              <div className="relative flex items-center">
+                <span className="absolute left-2.5 text-gray-400 font-semibold">{config.currencySymbol}</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={editSeasonalRate}
+                  onChange={(e) => setEditSeasonalRate(e.target.value)}
+                  className="min-h-[44px] w-full rounded border border-gray-250 pl-6 pr-3 text-sm font-medium"
+                />
+              </div>
+            </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              Start Date
+              <input
+                type="date"
+                value={editSeasonalStart}
+                onChange={(e) => setEditSeasonalStart(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
+              End Date
+              <input
+                type="date"
+                value={editSeasonalEnd}
+                onChange={(e) => setEditSeasonalEnd(e.target.value)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+              />
+            </label>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Room Type Scope</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setEditSeasonalRoomTypes([])}
+                className={`min-h-[36px] rounded-lg px-3 text-[11px] font-semibold transition ${
+                  editSeasonalRoomTypes.length === 0
+                    ? "bg-primary text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                All types
+              </button>
+              {roomTypes.map((type) => (
+                <button
+                  key={type.value}
+                  type="button"
+                  onClick={() => toggleEditSeasonalRoomType(type.value)}
+                  className={`min-h-[36px] rounded-lg px-3 text-[11px] font-semibold transition ${
+                    editSeasonalRoomTypes.includes(type.value)
+                      ? "bg-primary text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {type.shortLabel || type.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex min-h-[44px] items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-700">
+            Active override
+            <input
+              type="checkbox"
+              checked={editSeasonalActive}
+              onChange={(e) => setEditSeasonalActive(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+            />
+          </label>
+
+          <div className="flex flex-col-reverse gap-3 pt-4 sm:flex-row sm:justify-between">
+            <button
+              type="button"
+              onClick={handleDeleteEditingSeasonalOverride}
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-red-50 px-4 text-xs font-semibold text-red-700 transition hover:bg-red-100"
+            >
+              <Trash2 size={14} />
+              Delete Override
+            </button>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={closeSeasonalOverrideEditor}
+                className="min-h-[44px] px-5 rounded-lg border border-gray-255 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <PrimaryButton type="button" onClick={handleUpdateSeasonalOverride} className="min-w-[150px]">
+                Save Changes
+              </PrimaryButton>
+            </div>
+          </div>
+        </div>
       </Modal>
     </div>
   );
