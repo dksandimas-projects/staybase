@@ -368,6 +368,7 @@ export function ReportsPage() {
   };
 
   const handlePrintReport = () => {
+    toast.info("Opening print dialog", "Choose Save as PDF in your browser print settings to export this report.");
     window.print();
   };
 
@@ -666,7 +667,7 @@ export function ReportsPage() {
             className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-250 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 shadow-sm transition active:scale-95"
           >
             <Download size={14} />
-            Print / Save PDF
+            Print Report
           </button>
 
           {activeTab === "sales" && (

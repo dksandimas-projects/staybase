@@ -124,11 +124,10 @@ Used in: Bookings Management (print/download), email attachment option.
 - Footer: "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property."
 
 **PDF checklist:**
-- [ ] Apollo and Inter fonts embedded as base64 — see `plan/docs/GOTCHAS.md §jsPDF`
+- [x] PDF font handling is stable in browsers: use jsPDF built-in fonts unless known-good base64 TTF assets are added and verified. Do not reference missing font files or embed OTF files that jsPDF cannot encode reliably.
 - [ ] spark inn logo embedded as base64 image
 - [ ] PDF generated client-side in `admin-app` — no server round-trip needed
-- [ ] Print from browser option (opens print dialog)
-- [ ] Download as PDF option (`jsPDF.save()`)
+- [x] PDF actions open a tab synchronously when previewing generated PDFs and fall back to `jsPDF.save()` if popups are blocked.
 - [ ] Email receipt: send PDF as attachment via `/api/email/booking-confirmed`
 
 ### Guest Registration Form (PDF)
@@ -149,13 +148,13 @@ Used at check-in by front desk. Generated from booking data.
 **Checklist:**
 - [x] Wireframe data capture exists in admin booking drawer for guest registry fields, ID photo preview, and breakfast choices
 - [ ] PDF pre-filled from booking data where available (name, room, dates, guest registration fields)
-- [ ] Guest ID photo fetched from `booking.guestIdPhotoUrl` and embedded as base64 image in PDF — fetch via `XMLHttpRequest` or `fetch` before PDF generation, convert to base64, pass to `jsPDF.addImage()`
+- [x] Guest ID photo fetched from `booking.guestIdPhotoUrl` and embedded as base64 image in PDF — fetch before PDF generation, convert to base64, detect MIME type, pass to `jsPDF.addImage()`
 - [ ] If `guestIdPhotoUrl` is null/empty — render blank "Attach ID here" placeholder box instead
 - [ ] ID image constrained to max width of half the page, aspect ratio preserved — never overflow page margins
 - [ ] Breakfast section rendered dynamically based on `hasBreakfast` and number of nights × guests
 - [ ] Silog items listed as checkboxes or options per cell — guest circles/checks their choice
 - [ ] Printable — front desk prints and guest fills/signs physical copy
-- [ ] Same font embedding requirements as receipt
+- [x] Same stable jsPDF font fallback requirements as receipt
 
 ---
 
