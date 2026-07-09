@@ -26,11 +26,13 @@ service firebase.storage {
 
     match /bookings/{bookingId}/payment-proof/{fileName} {
       allow read: if isStaff();
+      allow get: if true;
       allow write: if true;
     }
 
     match /bookings/{bookingId}/discount-id/{fileName} {
       allow read: if isStaff();
+      allow get: if true;
       allow write: if true;
     }
 
@@ -87,6 +89,7 @@ service firebase.storage {
     // guest-app/src/pages/IntercomPage.tsx).
     match /store-orders/{roomNumber}/payment-proof/{fileName} {
       allow read: if isStaff();
+      allow get: if true;
       allow write: if true;
     }
   }
