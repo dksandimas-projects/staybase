@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 9, 2026 (Fix 4 PDF generation repair completed; remaining Phase 12 fixes stay prioritized by effort)
+> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph opened — spec at `plan/features/SEO-OPENGRAPH.md`; Fix 4 PDF generation repair completed; remaining Phase 12 fixes stay prioritized by effort)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -968,6 +968,31 @@ Tests: `admin-app/src/__tests__/phase-11.8-tier-1-hotel-contacts.test.ts` (new �
 | **Total** | **~M (4 days)** | **~10** | **~100** |
 
 Most of the ~100 new fields are simple `string` mirrors of the existing list-editor pattern. The implementation cost is in the per-page `usePublicSiteContent` reads and the corresponding `pickString` chain, not in the editor UI.
+
+---
+
+## Phase 11.9 — SEO & Open Graph *(P0 — opened 2026-07-09)*
+> Goal: Guest app is discoverable in Google/Bing/Yahoo and every public URL renders a rich link-preview card in Facebook/Messenger/WhatsApp/Viber/X.
+> Full spec: `plan/features/SEO-OPENGRAPH.md`
+
+**Context (audit 2026-07-09):** Base client-side meta already exists — static tags in `guest-app/index.html`, a build-time config transform in `vite.config.ts`, and per-route `PageMeta.tsx` (title/description/canonical/robots/OG/Twitter). **Gap:** `PageMeta` sets tags via JS `useEffect`, which non-JS social/Bing crawlers never see — so every shared link shows the same generic homepage card, and Bing/Yahoo can't read per-route meta. Plus the OG image, robots, and sitemap are missing entirely.
+
+### Open questions (close with owner before build)
+- 🔴 **Q1.** Approve Option A (build-time prerender, recommended, no extra Vercel function) vs Option B (edge middleware, per-record cards but function-budget risk)? See `SEO-OPENGRAPH.md §Approach`.
+- 🔴 **Q2.** Approve the 1200×630 OG card design (logo + tagline on brand orange).
+- 🟡 **Q3.** X/Twitter handle for `twitter:site` (none in `hotel.config.ts` today).
+- 🟡 **Q4.** `priceRange` value for the Hotel JSON-LD.
+
+### Checklist
+- ⬜ **G3** — `guest-app/public/robots.txt` (`Allow: /` + `Sitemap:` pointer, templated off `config.domain`); `admin-app/public/robots.txt` → `Disallow: /`
+- ⬜ **G4** — `sitemap.xml` of indexable public routes (exclude `noIndex` routes), generated from the same route list as prerender so it can't drift
+- ⬜ **G2** — real 1200×630 `guest-app/public/og-image.png` (currently `config.ogImage` → 404); add to `WHITE-LABEL.md` asset checklist
+- ⬜ **G1** — per-route meta in the **served** HTML (prerender or edge injection) so non-JS crawlers see correct title/desc/OG per URL; keep `PageMeta.tsx` for SPA nav
+- ⬜ **G5** — `schema.org/Hotel` JSON-LD on homepage, all values from `hotel.config.ts` (`address`, `telephone`, `sameAs`, check-in/out times)
+- ⬜ **G6** — OG polish: `og:image:width`/`height`/`alt`, `og:locale` (from `config.locale`), `twitter:site`
+- ⬜ **Admin** — confirm `admin-app/index.html` carries `noindex, nofollow`
+- ⬜ **Verify** — Facebook Sharing Debugger + WhatsApp + Viber render distinct correct cards for ≥3 URLs; X Card Validator; Google Rich Results Test on JSON-LD
+- ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools
 
 ---
 
