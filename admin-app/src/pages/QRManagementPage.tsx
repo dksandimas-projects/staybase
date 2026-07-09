@@ -15,8 +15,9 @@ function getRoomQrValue(room: Room) {
   return room.qrToken || room.id;
 }
 
-function getIntercomUrl(room: Room) {
-  return `https://${config.domain}/intercom/${encodeURIComponent(getRoomQrValue(room))}`;
+function getIntercomUrl(room: Room, destination: "chat" | "shop" = "chat") {
+  const base = `https://${config.domain}/intercom/${encodeURIComponent(getRoomQrValue(room))}`;
+  return destination === "shop" ? `${base}?tab=shop` : base;
 }
 
 function getLogoUrl() {
@@ -66,10 +67,11 @@ async function renderQrPngDataUrl(value: string, size = 512) {
   }
 }
 
-function getPrintableCard(room: Room, compact = false) {
-  const scanLink = getIntercomUrl(room);
+function getPrintableCard(room: Room, compact = false, destination: "chat" | "shop" = "chat") {
+  const scanLink = getIntercomUrl(room, destination);
   const qrMarkup = getQrMarkup(scanLink, compact ? 118 : 144);
   const logoUrl = getLogoUrl();
+  const label = destination === "shop" ? "Scan to order from Spark Essentials" : "Scan to chat with the front desk";
 
   return `
     <article class="qr-card">
@@ -79,7 +81,7 @@ function getPrintableCard(room: Room, compact = false) {
         <h2>${room.name || `Room ${room.roomNumber}`}</h2>
       </header>
       <div class="qr-box">${qrMarkup}</div>
-      <p class="instruction">Scan to chat with the front desk</p>
+      <p class="instruction">${label}</p>
       <p class="url">${scanLink}</p>
     </article>
   `;
@@ -188,6 +190,7 @@ export function QRManagementPage() {
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [regeneratingRoom, setRegeneratingRoom] = useState<Room | null>(null);
+  const [qrDestination, setQrDestination] = useState<"chat" | "shop">("chat");
   const [qrError, setQrError] = useState("");
   const [qrSuccess, setQrSuccess] = useState("");
 
@@ -222,7 +225,7 @@ export function QRManagementPage() {
   const handlePrintRoom = (room: Room) => {
     openPrintWindow(
       `Room ${room.roomNumber} QR - ${config.brandName}`,
-      getPrintableCard(room),
+      getPrintableCard(room, false, qrDestination),
       false,
       () => toast.error("Print blocked", "Please allow popups for this page, then try again.")
     );
@@ -236,19 +239,19 @@ export function QRManagementPage() {
 
     openPrintWindow(
       `QR Room Cards - ${config.brandName}`,
-      selectedRooms.map(room => getPrintableCard(room, true)).join(""),
+      selectedRooms.map(room => getPrintableCard(room, true, qrDestination)).join(""),
       true,
       () => toast.error("Print blocked", "Please allow popups for this page, then try again.")
     );
   };
 
   const handleDownloadPng = async (room: Room) => {
-    const scanLink = getIntercomUrl(room);
+    const scanLink = getIntercomUrl(room, qrDestination);
     try {
       setQrError("");
       const pngUrl = await renderQrPngDataUrl(scanLink, 512);
       const link = document.createElement("a");
-      link.download = `${config.brandName.replace(/\s+/g, "-")}-room-${room.roomNumber}-qr.png`;
+      link.download = `${config.brandName.replace(/\s+/g, "-")}-room-${room.roomNumber}-${qrDestination === "shop" ? "store" : "intercom"}-qr.png`;
       link.href = pngUrl;
       link.click();
     } catch {
@@ -285,6 +288,17 @@ export function QRManagementPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-700">QR Target:</span>
+            <select
+              value={qrDestination}
+              onChange={(e) => setQrDestination(e.target.value as "chat" | "shop")}
+              className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="chat">Front Desk Intercom (Chat)</option>
+              <option value="shop">Spark Essentials (Store)</option>
+            </select>
+          </div>
           <button
             onClick={selectAll}
             className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
@@ -319,7 +333,7 @@ export function QRManagementPage() {
         <div className="grid gap-3 text-xs text-gray-600 md:grid-cols-3">
           <div>
             <span className="font-bold text-gray-900">QR destination</span>
-            <p className="mt-1 font-mono text-[11px] text-gray-500">https://{config.domain}/intercom/[room]</p>
+            <p className="mt-1 font-mono text-[11px] text-gray-500">https://{config.domain}/intercom/[room]{qrDestination === "shop" ? "?tab=shop" : ""}</p>
           </div>
           <div>
             <span className="font-bold text-gray-900">Rooms loaded</span>
@@ -341,7 +355,7 @@ export function QRManagementPage() {
       ) : (
         <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {sortedRooms.map(room => {
-            const scanLink = getIntercomUrl(room);
+            const scanLink = getIntercomUrl(room, qrDestination);
             const isSelected = selectedRoomIds.includes(room.id);
             return (
               <article key={room.id} className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">

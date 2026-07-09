@@ -140,14 +140,16 @@ service cloud.firestore {
             "isQuickRequest",
             "isStoreOrder",
             "orderRef",
-            "isEarlyCheckInRequest"
+            "isEarlyCheckInRequest",
+            "currentStayId"
           ])
           && request.resource.data.text is string
           && request.resource.data.text.size() <= 1000
           && request.resource.data.sender in ["guest", "front-desk"]
           && request.resource.data.guestName is string
           && request.resource.data.guestName.size() <= 120
-          && request.resource.data.timestamp == request.time;
+          && request.resource.data.timestamp == request.time
+          && (!("currentStayId" in request.resource.data.keys()) || request.resource.data.currentStayId == null || request.resource.data.currentStayId is string);
         allow update: if isStaff()
           || request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
         allow delete: if isStaff();
