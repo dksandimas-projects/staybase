@@ -74,52 +74,33 @@ const LEGACY_ONSITE_PAYMENT_METHOD_LABELS = LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS
   return acc;
 }, {});
 
-const pdfFontCache = new Map<string, string | null>();
-
-async function fetchFontAsBase64(path: string) {
-  if (pdfFontCache.has(path)) return pdfFontCache.get(path);
-  try {
-    const response = await fetch(path);
-    if (!response.ok) throw new Error(`Unable to load font ${path}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    let binary = "";
-    bytes.forEach((byte) => {
-      binary += String.fromCharCode(byte);
-    });
-    const base64 = btoa(binary);
-    pdfFontCache.set(path, base64);
-    return base64;
-  } catch (error) {
-    console.warn("PDF font unavailable:", error);
-    pdfFontCache.set(path, null);
-    return null;
-  }
-}
-
 async function registerBrandPdfFonts(pdf: jsPDF) {
-  const apolloBase64 = await fetchFontAsBase64("/brand/fonts/APOLLO.otf");
-  const interBase64 = await fetchFontAsBase64("/brand/fonts/Inter-Regular.ttf");
-
-  try {
-    if (apolloBase64) {
-      pdf.addFileToVFS("APOLLO.otf", apolloBase64);
-      pdf.addFont("APOLLO.otf", "Apollo", "normal");
-    }
-    if (interBase64) {
-      pdf.addFileToVFS("Inter-Regular.ttf", interBase64);
-      pdf.addFont("Inter-Regular.ttf", "Inter", "normal");
-    }
-  } catch (error) {
-    console.warn("PDF font registration failed; using jsPDF fallback fonts.", error);
-  }
+  pdf.setFont("helvetica", "normal");
+  await Promise.resolve();
 }
 
 function setPdfFont(pdf: jsPDF, family: "Apollo" | "Inter" | "helvetica") {
-  try {
-    pdf.setFont(family, "normal");
-  } catch {
-    pdf.setFont("helvetica", "normal");
+  pdf.setFont(family === "helvetica" ? "helvetica" : "helvetica", "normal");
+}
+
+function getJsPdfImageFormat(dataUrl: string, blobType = "") {
+  const mimeType = dataUrl.match(/^data:([^;]+);/)?.[1] || blobType;
+  if (mimeType.includes("png")) return "PNG";
+  if (mimeType.includes("webp")) return "WEBP";
+  return "JPEG";
+}
+
+function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | null) {
+  const blob = pdf.output("blob");
+  const url = URL.createObjectURL(blob);
+  if (pdfWindow) {
+    pdfWindow.location.href = url;
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return "opened";
   }
+  pdf.save(fileName);
+  URL.revokeObjectURL(url);
+  return "downloaded";
 }
 
 export function BookingsPage() {
@@ -736,10 +717,13 @@ export function BookingsPage() {
     if (!selectedBooking) return;
     const b = selectedBooking;
     const reg = b.guestRegistration;
+    const pdfWindow = window.open("", "_blank");
+    pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing registration PDF...</p>");
 
-    const pdf = new jsPDF({ unit: "mm", format: "a4" });
-    await registerBrandPdfFonts(pdf);
-    setPdfFont(pdf, "Inter");
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      await registerBrandPdfFonts(pdf);
+      setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -862,7 +846,7 @@ export function BookingsPage() {
         pdf.setDrawColor(200, 200, 200);
         pdf.setLineWidth(0.3);
         pdf.rect(20, y, drawW + 2, drawH + 2);
-        pdf.addImage(base64, "JPEG", 21, y + 1, drawW, drawH);
+        pdf.addImage(base64, getJsPdfImageFormat(base64, blob.type), 21, y + 1, drawW, drawH);
         y += drawH + 4;
       } catch {
         // Failed to fetch image — show placeholder
@@ -1066,18 +1050,27 @@ export function BookingsPage() {
     );
     pdf.text(`Booking Ref: ${b.bookingRef} | Room ${b.roomNumber}`, pageW / 2, footerY + 10, { align: "center" });
 
-    const blob = pdf.output("blob");
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
+      toast.success(
+        "Registration PDF ready",
+        result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
+      );
+    } catch (error) {
+      pdfWindow?.close();
+      toast.error("Registration PDF failed", error instanceof Error ? error.message : "Please try again.");
+    }
   };
 
   const printBookingReceiptPDF = async () => {
     if (!selectedBooking) return;
     const b = selectedBooking;
+    const pdfWindow = window.open("", "_blank");
+    pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing booking receipt PDF...</p>");
 
-    const pdf = new jsPDF({ unit: "mm", format: "a4" });
-    await registerBrandPdfFonts(pdf);
-    setPdfFont(pdf, "Inter");
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      await registerBrandPdfFonts(pdf);
+      setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -1373,9 +1366,15 @@ export function BookingsPage() {
       { align: "center" }
     );
 
-    const blob = pdf.output("blob");
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-receipt.pdf`, pdfWindow);
+      toast.success(
+        "Receipt PDF ready",
+        result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
+      );
+    } catch (error) {
+      pdfWindow?.close();
+      toast.error("Receipt PDF failed", error instanceof Error ? error.message : "Please try again.");
+    }
   };
 
   const getBookingPaymentsTotal = (booking: Booking) => {

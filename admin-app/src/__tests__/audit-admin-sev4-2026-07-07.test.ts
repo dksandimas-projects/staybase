@@ -47,10 +47,11 @@ describe("Admin audit SEV-4 fixes — 2026-07-07", () => {
     expect(adminContext).toMatch(/if \(!currentUser\) \{\s*setIncomingCall\(null\)/);
   });
 
-  it("AA-30 embeds/loads brand PDF fonts and derives receipt discounts from stored totals", () => {
-    expect(bookingsPage).toMatch(/fetchFontAsBase64/);
-    expect(bookingsPage).toMatch(/addFileToVFS\("APOLLO\.otf"/);
-    expect(bookingsPage).toMatch(/Inter-Regular\.ttf/);
+  it("AA-30 uses reliable jsPDF fallback fonts and derives receipt discounts from stored totals", () => {
+    expect(bookingsPage).toMatch(/registerBrandPdfFonts/);
+    expect(bookingsPage).toMatch(/pdf\.setFont\("helvetica", "normal"\)/);
+    expect(bookingsPage).not.toMatch(/addFileToVFS\("APOLLO\.otf"/);
+    expect(bookingsPage).not.toMatch(/Inter-Regular\.ttf/);
     expect(bookingsPage).toMatch(/storedDiscountBase - b\.totalPrice - \(b\.voucherDiscount \|\| 0\) - \(b\.pointsRedeemedValue \|\| 0\)/);
     expect(bookingsPage).not.toMatch(/subtotal \* \(b\.discountPct \/ 100\)/);
   });

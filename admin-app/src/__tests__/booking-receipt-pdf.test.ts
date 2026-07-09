@@ -124,13 +124,15 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       );
     });
 
-    it("opens the PDF in a new tab (no server round-trip — client-side only)", () => {
+    it("opens the PDF synchronously and falls back to download when needed", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/pdf\.output\(\s*["']blob["']\s*\)/);
-      expect(funcBody).toMatch(/URL\.createObjectURL\(/);
-      expect(funcBody).toMatch(/window\.open\(/);
+      expect(funcBody).toMatch(/window\.open\("", "_blank"\)/);
+      expect(funcBody).toMatch(/openPdfOrDownload\(pdf,/);
+      expect(bookingsPageSrc).toMatch(/pdf\.output\(\s*["']blob["']\s*\)/);
+      expect(bookingsPageSrc).toMatch(/URL\.createObjectURL\(/);
+      expect(bookingsPageSrc).toMatch(/pdf\.save\(fileName\)/);
     });
   });
 
