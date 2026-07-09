@@ -21,7 +21,7 @@ import {
   Banknote
 } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
@@ -100,6 +100,19 @@ function formatStayDate(value: string) {
     day: "numeric",
     year: "numeric"
   }).format(new Date(`${value}T00:00:00`));
+}
+
+function sanitizeUploadFileName(fileName: string) {
+  const extension = fileName.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
+  const baseName = fileName
+    .replace(/\.[^.]+$/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+
+  return `${Date.now()}-${baseName || "upload"}${extension}`;
 }
 
 export function BookingPage() {
@@ -190,6 +203,8 @@ export function BookingPage() {
   // payment proof.
   const [discountIdUpload, setDiscountIdUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
+  const [discountIdUploadError, setDiscountIdUploadError] = useState("");
+  const discountIdInputRef = useRef<HTMLInputElement | null>(null);
 
   // The payment method list is dynamic — managed from Settings →
   // Payment Methods in the admin app (per `plan/features/SETTINGS.md
@@ -515,6 +530,12 @@ export function BookingPage() {
     return "";
   }
 
+  function resetDiscountIdInput() {
+    if (discountIdInputRef.current) {
+      discountIdInputRef.current.value = "";
+    }
+  }
+
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
     setSelectedRoomType(typeValue);
     setRateChoice(nextRateChoice);
@@ -608,8 +629,10 @@ export function BookingPage() {
 
   function handleDiscountChange(type: "none" | "senior" | "pwd") {
     setDiscountType(type);
-    if (type === "none") {
+    setDiscountIdUploadError("");
+    if (type === "none" || type !== discountType) {
       setDiscountIdUpload(null);
+      resetDiscountIdInput();
     }
   }
 
@@ -619,23 +642,27 @@ export function BookingPage() {
       const file = e.target.files[0];
       const validationError = validateUploadFile(file);
       if (validationError) {
-        setSubmitError(validationError);
+        setDiscountIdUploadError(validationError);
         e.target.value = "";
         return;
       }
       setUploadingDiscountId(true);
+      setDiscountIdUploadError("");
       setSubmitError("");
       try {
         const compressed = await compressImageFile(file);
-        const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${compressed.file.name}`);
+        const safeFileName = sanitizeUploadFileName(compressed.file.name);
+        const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${safeFileName}`);
         await uploadBytes(storageRef, compressed.file);
         const url = await getDownloadURL(storageRef);
         // Per BF-30: single state record so the name + url
         // are always written together (no desync race).
         setDiscountIdUpload({ name: file.name, url });
+        e.target.value = "";
       } catch (err) {
         console.error("Discount ID upload failed:", err);
-        alert("Image upload failed. Please try again.");
+        setDiscountIdUploadError("ID upload failed. Please check your connection and try again.");
+        e.target.value = "";
       } finally {
         setUploadingDiscountId(false);
       }
@@ -1089,6 +1116,8 @@ export function BookingPage() {
                           type="button"
                           onClick={() => {
                             setDiscountIdUpload(null);
+                            setDiscountIdUploadError("");
+                            resetDiscountIdInput();
                           }}
                           className="text-xs font-semibold text-red-600 hover:underline"
                         >
@@ -1103,6 +1132,7 @@ export function BookingPage() {
                         </span>
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPG, PNG, WEBP up to 5MB</span>
                         <input
+                          ref={discountIdInputRef}
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
                           onChange={handleDiscountIdChange}
@@ -1111,9 +1141,14 @@ export function BookingPage() {
                         />
                       </label>
                     )}
+                    {discountIdUploadError ? (
+                      <p className="mt-2 text-sm font-medium text-red-600" role="alert">
+                        {discountIdUploadError}
+                      </p>
+                    ) : null}
                   </div>
-                </div>
-              )}
+                  </div>
+                )}
             </div>
 
             {/* Payment Method Section — dynamic, per
