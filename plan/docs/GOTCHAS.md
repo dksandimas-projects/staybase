@@ -53,7 +53,7 @@ Things agents must never do. Check this file before implementing any feature.
 
 ## jsPDF (Receipts & PDFs)
 
-- **Apollo and Inter fonts must be embedded as base64** — jsPDF cannot access system fonts. Failure to embed fonts results in garbled or missing text in generated PDFs.
+- **Use stable jsPDF fonts unless custom TTFs are verified** — jsPDF cannot access system fonts, and unverified OTF/missing TTF assets can break generation. Use built-in fonts for reliability unless known-good base64 TTF assets are added and visually tested.
 - **Test PDF output on multiple browsers** — rendering differences between Chrome, Firefox, and Safari can cause layout shifts in generated PDFs.
 
 ---

@@ -187877,6 +187877,43 @@ function getManilaDateInfo(timezone = "Asia/Manila") {
   };
 }
 
+// ../shared/utils/checkin.ts
+var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
+var REQUIRED_REGISTRATION_FIELDS = [
+  { key: "nationality", label: "Nationality" },
+  { key: "address", label: "Residential address" },
+  { key: "dateOfBirth", label: "Date of birth" },
+  { key: "gender", label: "Gender" },
+  { key: "idType", label: "ID type" },
+  { key: "idNumber", label: "ID number" },
+  { key: "emergencyContact", label: "Emergency contact" }
+];
+function hasValue(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function getCheckInReadiness(input) {
+  const missingItems = [];
+  if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status)) {
+    missingItems.push("Booking status must be confirmed or payment-confirmed");
+  }
+  if (!hasValue(input.guestIdPhotoUrl)) {
+    missingItems.push("Guest ID photo");
+  }
+  const registration = input.guestRegistration || {};
+  for (const field of REQUIRED_REGISTRATION_FIELDS) {
+    if (!hasValue(registration[field.key])) {
+      missingItems.push(field.label);
+    }
+  }
+  if (registration.signatureStatus !== "signed") {
+    missingItems.push("Guest signature marked signed");
+  }
+  return {
+    ready: missingItems.length === 0,
+    missingItems
+  };
+}
+
 // ../shared/utils/dates.ts
 function toDate(value) {
   return value instanceof Date ? new Date(value) : new Date(value);
@@ -187999,16 +188036,36 @@ function getSeasonalRateForNight(night, roomType, overrides) {
     return b3.id.localeCompare(a.id);
   })[0];
 }
-function calculateSeasonalAwareRoomTotal(input) {
+function calculateSeasonalAwareRoomBreakdown(input) {
   const baseRate = Math.max(0, Number(input.baseRate) || 0);
   const weekendRate = Math.max(0, Number(input.weekendRate) || 0);
   const overrides = input.seasonalRateOverrides ?? [];
-  return eachStayNight(input.checkIn, input.checkOut).reduce((total, night) => {
+  const lines = [];
+  for (const night of eachStayNight(input.checkIn, input.checkOut)) {
+    const date = dateKey(night);
     const seasonal = getSeasonalRateForNight(night, input.roomType, overrides);
-    if (seasonal) return total + seasonal.rate;
-    if (isWeekendNight(night) && weekendRate) return total + weekendRate;
-    return total + baseRate;
-  }, 0);
+    const line = seasonal ? { source: "seasonal", label: seasonal.name, nightlyRate: seasonal.rate } : isWeekendNight(night) && weekendRate ? { source: "weekend", label: "Weekend nights", nightlyRate: weekendRate } : { source: "regular", label: "Regular nights", nightlyRate: baseRate };
+    const previous = lines[lines.length - 1];
+    if (previous && previous.source === line.source && previous.label === line.label && previous.nightlyRate === line.nightlyRate) {
+      previous.endDate = date;
+      previous.nights += 1;
+      previous.subtotal += line.nightlyRate;
+    } else {
+      lines.push({
+        source: line.source,
+        label: line.label,
+        startDate: date,
+        endDate: date,
+        nights: 1,
+        nightlyRate: line.nightlyRate,
+        subtotal: line.nightlyRate
+      });
+    }
+  }
+  return {
+    roomSubtotal: lines.reduce((total, line) => total + line.subtotal, 0),
+    roomLines: lines
+  };
 }
 
 // ../shared/utils/storageJanitor.ts
@@ -188145,6 +188202,10 @@ function validateVoucher(voucher, roomType, now = /* @__PURE__ */ new Date()) {
   }
   return { valid: true, error: "" };
 }
+function calculateVoucherDiscount(voucher, subtotal) {
+  const discount = voucher.discountType === "percent" ? subtotal * (voucher.discountValue / 100) : voucher.discountValue;
+  return Math.min(Math.max(discount, 0), subtotal);
+}
 
 // ../shared/utils/corporate-codes.ts
 function validateCorporateCode(code, now = /* @__PURE__ */ new Date()) {
@@ -188217,6 +188278,23 @@ function row(label, value) {
     </tr>
   `;
 }
+function rateBreakdownRows(booking) {
+  const breakdown = booking.rateBreakdown;
+  if (!breakdown || !Array.isArray(breakdown.roomLines) || breakdown.roomLines.length === 0) return "";
+  const roomRows = breakdown.roomLines.map(
+    (line) => row(
+      line.label || "Room rate",
+      `${Number(line.nights || 0)} night(s) x ${formatMoney(line.nightlyRate)} = ${formatMoney(line.subtotal)}`
+    )
+  ).join("");
+  const addOnRows = Array.isArray(breakdown.addOns) ? breakdown.addOns.map((line) => row(line.label || "Add-on", formatMoney(line.amount))).join("") : "";
+  const deductionRows = Array.isArray(breakdown.deductions) ? breakdown.deductions.map((line) => row(line.label || "Discount", `-${formatMoney(line.amount)}`)).join("") : "";
+  return `
+    ${roomRows}
+    ${addOnRows}
+    ${deductionRows}
+  `;
+}
 function bookingRows(booking) {
   const roomLabel = [
     booking.roomNumber ? `Room ${booking.roomNumber}` : "",
@@ -188229,6 +188307,7 @@ function bookingRows(booking) {
     ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
     ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
+    ${rateBreakdownRows(booking)}
     ${row("Total", formatMoney(booking.totalPrice))}
   `;
 }
@@ -189203,6 +189282,31 @@ async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, chec
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
 }
+function buildRateBreakdown(input) {
+  const addOns = input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [];
+  const subtotal = input.roomSubtotal + input.breakfastTotal;
+  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
+  const afterSeniorPwd = subtotal - seniorPwdDiscount;
+  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
+  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
+  const pointsRedeemedValue = Math.max(0, Number(input.pointsRedeemedValue) || 0);
+  const deductions = [
+    ...seniorPwdDiscount > 0 ? [{
+      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
+      amount: seniorPwdDiscount
+    }] : [],
+    ...input.voucherDiscount > 0 ? [{ label: "Voucher discount", amount: input.voucherDiscount }] : [],
+    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }] : [],
+    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
+  ];
+  return {
+    roomSubtotal: input.roomSubtotal,
+    roomLines: input.roomLines,
+    addOns,
+    deductions,
+    finalTotal: input.finalTotal
+  };
+}
 var lookupSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
   guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
@@ -189302,6 +189406,7 @@ async function handleCreateBooking(req, res) {
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
+    let finalRateBreakdown = null;
     let computedData = {};
     let alreadyExistingBookingResponse = null;
     let assignedRoomId = "";
@@ -189342,6 +189447,7 @@ async function handleCreateBooking(req, res) {
         const existing = existingBooking.data() || {};
         finalBookingRef = String(existing.bookingRef || "");
         finalTotalPrice = Number(existing.totalPrice || 0);
+        finalRateBreakdown = existing.rateBreakdown || null;
         assignedRoomId = String(existing.roomId || "");
         assignedRoomNumber = String(existing.roomNumber || "");
         alreadyExistingBookingResponse = {
@@ -189351,6 +189457,7 @@ async function handleCreateBooking(req, res) {
           roomId: assignedRoomId,
           roomNumber: assignedRoomNumber,
           roomType: String(existing.roomType || roomType),
+          rateBreakdown: finalRateBreakdown,
           alreadyExists: true
         };
         return;
@@ -189482,7 +189589,18 @@ async function handleCreateBooking(req, res) {
         corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
         activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
       }
-      const roomTotal = corporateDetails.isCorporate ? activeRoomRate * numNights : calculateSeasonalAwareRoomTotal({
+      const roomBreakdown = corporateDetails.isCorporate ? {
+        roomSubtotal: activeRoomRate * numNights,
+        roomLines: [{
+          source: "corporate",
+          label: corporateDetails.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+          startDate: checkIn,
+          endDate: checkOut,
+          nights: numNights,
+          nightlyRate: activeRoomRate,
+          subtotal: activeRoomRate * numNights
+        }]
+      } : calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
         roomType,
@@ -189490,9 +189608,17 @@ async function handleCreateBooking(req, res) {
         weekendRate: typeWeekendRate,
         seasonalRateOverrides
       });
+      const roomTotal = roomBreakdown.roomSubtotal;
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
+      let discountPct = 0;
+      if (discountType === "senior" || discountType === "pwd") {
+        discountPct = 20;
+        if (!discountIdPhotoUrl) {
+          throw new Error("Government-mandated discount requires verification ID photo.");
+        }
+      }
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
       let voucherUsageUpdate = null;
@@ -189520,12 +189646,12 @@ async function handleCreateBooking(req, res) {
           ((vData.applicableRoomTypes?.length ?? 0) === 0 || vData.applicableRoomTypes.includes(roomData.type)) && assignedTypeMatchesChosen;
           if (isValid2) {
             appliedVoucherCode = formattedCode;
-            if (vData.discountType === "percent") {
-              voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
-            } else {
-              voucherDiscount = vData.discountValue;
-            }
-            voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+            const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
+            const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+            voucherDiscount = Math.round(calculateVoucherDiscount({
+              discountType: vData.discountType === "percent" ? "percent" : "flat",
+              discountValue: Number(vData.discountValue) || 0
+            }, voucherBase));
             voucherUsageUpdate = {
               ref: voucherRef,
               data: {
@@ -189538,13 +189664,6 @@ async function handleCreateBooking(req, res) {
           }
         } else {
           throw new Error("Voucher no longer valid");
-        }
-      }
-      let discountPct = 0;
-      if (discountType === "senior" || discountType === "pwd") {
-        discountPct = 20;
-        if (!discountIdPhotoUrl) {
-          throw new Error("Government-mandated discount requires verification ID photo.");
         }
       }
       let appliedMemberDiscountPct = 0;
@@ -189565,6 +189684,16 @@ async function handleCreateBooking(req, res) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: roomBreakdown.roomLines,
+        roomSubtotal: roomTotal,
+        breakfastTotal,
+        discountType,
+        discountPct,
+        voucherDiscount,
+        memberDiscountPct: appliedMemberDiscountPct,
+        finalTotal: totalPrice
+      });
       const { todayStr, todayCompact } = getManilaDateInfo();
       const counterRef = adminDb.collection("counters").doc(`bookings-${todayStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -189575,6 +189704,7 @@ async function handleCreateBooking(req, res) {
       const bookingRef = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
+      finalRateBreakdown = rateBreakdown;
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
       }
@@ -189606,6 +189736,7 @@ async function handleCreateBooking(req, res) {
         // without leaking the raw `guestEmail` in URLs.
         lookupToken: generateLookupToken(),
         totalPrice,
+        rateBreakdown,
         originalTotalPrice,
         discountType: discountType || "",
         discountPct,
@@ -189689,6 +189820,7 @@ async function handleCreateBooking(req, res) {
         checkOut,
         numNights,
         totalPrice,
+        rateBreakdown,
         source: corporateDetails.isCorporate ? "corporate" : "online"
       };
     });
@@ -189738,6 +189870,7 @@ async function handleCreateBooking(req, res) {
         // `calculateBookingTotal` (which still carries the
         // weekend-rate override but is otherwise prone to drift).
         totalPrice: finalTotalPrice,
+        rateBreakdown: finalRateBreakdown,
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
         roomType
@@ -189873,7 +190006,7 @@ async function handleCreateWalkin(req, res) {
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 250 };
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
-      const roomTotal = calculateSeasonalAwareRoomTotal({
+      const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
         roomType: roomData.type,
@@ -189881,6 +190014,7 @@ async function handleCreateWalkin(req, res) {
         weekendRate: typeWeekendRate,
         seasonalRateOverrides
       });
+      const roomTotal = roomBreakdown.roomSubtotal;
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
@@ -189889,6 +190023,24 @@ async function handleCreateWalkin(req, res) {
       } else {
         finalTotalPrice = subtotal;
       }
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: totalPriceOverride !== void 0 && totalPriceOverride !== null ? [{
+          source: "manual",
+          label: "Manual front-desk rate",
+          startDate: checkIn,
+          endDate: checkOut,
+          nights: numNights,
+          nightlyRate: numNights > 0 ? Math.round(finalTotalPrice / numNights) : finalTotalPrice,
+          subtotal: finalTotalPrice
+        }] : roomBreakdown.roomLines,
+        roomSubtotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? finalTotalPrice : roomTotal,
+        breakfastTotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? 0 : breakfastTotal,
+        discountType: "",
+        discountPct: 0,
+        voucherDiscount: 0,
+        memberDiscountPct: 0,
+        finalTotal: finalTotalPrice
+      });
       const { todayStr, todayCompact } = getManilaDateInfo();
       const counterRef = adminDb.collection("counters").doc(`bookings-${todayStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -189913,6 +190065,7 @@ async function handleCreateWalkin(req, res) {
         numNights,
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
+        rateBreakdown,
         originalTotalPrice: subtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
@@ -189982,7 +190135,9 @@ async function handleCreateWalkin(req, res) {
       success: true,
       data: {
         bookingId,
-        bookingRef: finalBookingRef
+        bookingRef: finalBookingRef,
+        totalPrice: finalTotalPrice,
+        rateBreakdown: newBooking?.rateBreakdown ?? null
       }
     });
   } catch (error) {
@@ -190318,8 +190473,13 @@ async function handleCheckinBooking(req, res) {
         throw new Error("Booking not found.");
       }
       const bookingData = bookingDoc.data() || {};
-      if (!["confirmed", "payment-confirmed"].includes(bookingData.status)) {
-        throw new Error(`Booking can only be checked in from confirmed or payment-confirmed status (current: ${bookingData.status}).`);
+      const readiness = getCheckInReadiness({
+        status: bookingData.status,
+        guestIdPhotoUrl: bookingData.guestIdPhotoUrl,
+        guestRegistration: bookingData.guestRegistration
+      });
+      if (!readiness.ready) {
+        throw new Error(`Booking is not ready for check-in. Missing: ${readiness.missingItems.join(", ")}.`);
       }
       if (!bookingData.roomId) {
         throw new Error("Booking has no assigned room.");
@@ -190352,6 +190512,9 @@ async function handleCheckinBooking(req, res) {
     });
     return res.status(200).json({ success: true, data: { status: "checked-in" } });
   } catch (error) {
+    if (error?.message?.startsWith("Booking is not ready for check-in.") || error?.message?.startsWith("Assigned room") || error?.message === "Booking not found." || error?.message === "Booking has no assigned room.") {
+      return res.status(400).json({ success: false, error: error.message });
+    }
     console.error("Check-in booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
@@ -190550,6 +190713,7 @@ async function enrichAndRespond(res, bookingData) {
       numGuests: bookingData.numGuests,
       ratePerNight: bookingData.ratePerNight,
       totalPrice: bookingData.totalPrice,
+      rateBreakdown: bookingData.rateBreakdown || null,
       paymentMethod: bookingData.paymentMethod,
       status: bookingData.status,
       hasBreakfast: bookingData.hasBreakfast,
@@ -190697,7 +190861,18 @@ async function handleRescheduleBooking(req, res) {
         }
       }
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const roomTotal = booking.isCorporate ? activeRoomRate * numNights : calculateSeasonalAwareRoomTotal({
+      const roomBreakdown = booking.isCorporate ? {
+        roomSubtotal: activeRoomRate * numNights,
+        roomLines: [{
+          source: "corporate",
+          label: booking.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+          startDate: checkIn,
+          endDate: checkOut,
+          nights: numNights,
+          nightlyRate: activeRoomRate,
+          subtotal: activeRoomRate * numNights
+        }]
+      } : calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
         roomType: room.type,
@@ -190705,28 +190880,29 @@ async function handleRescheduleBooking(req, res) {
         weekendRate: typeEntry.weekendRate || typeEntry.pricePerNight || 0,
         seasonalRateOverrides
       });
+      const roomTotal = roomBreakdown.roomSubtotal;
       const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
       const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
+      let discountPct = 0;
+      if (booking.discountType === "senior" || booking.discountType === "pwd") {
+        discountPct = 20;
+      }
       let voucherDiscount = 0;
       if (booking.voucherCode) {
         const voucherRef = adminDb.collection("vouchers").doc(booking.voucherCode);
         const voucherDoc = await transaction.get(voucherRef);
         if (voucherDoc.exists) {
           const vData = voucherDoc.data() || {};
-          if (vData.discountType === "percent") {
-            voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
-          } else {
-            voucherDiscount = vData.discountValue || 0;
-          }
-          voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+          const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
+          const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+          voucherDiscount = Math.round(calculateVoucherDiscount({
+            discountType: vData.discountType === "percent" ? "percent" : "flat",
+            discountValue: Number(vData.discountValue) || 0
+          }, voucherBase));
         } else {
           voucherDiscount = booking.voucherDiscount || 0;
         }
-      }
-      let discountPct = 0;
-      if (booking.discountType === "senior" || booking.discountType === "pwd") {
-        discountPct = 20;
       }
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
@@ -190747,6 +190923,17 @@ async function handleRescheduleBooking(req, res) {
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
       const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: roomBreakdown.roomLines,
+        roomSubtotal: roomTotal,
+        breakfastTotal,
+        discountType: booking.discountType || "",
+        discountPct,
+        voucherDiscount,
+        memberDiscountPct: appliedMemberDiscountPct,
+        pointsRedeemedValue: booking.pointsRedeemedValue || 0,
+        finalTotal: finalTotalPrice
+      });
       const rescheduleEntry = {
         fromRoomId: booking.roomId || "",
         fromRoomNumber: booking.roomNumber || "",
@@ -190770,6 +190957,7 @@ async function handleRescheduleBooking(req, res) {
         numNights,
         ratePerNight: activeRoomRate,
         totalPrice: finalTotalPrice,
+        rateBreakdown,
         originalTotalPrice,
         voucherDiscount,
         rescheduleHistory: [...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [], rescheduleEntry],

@@ -121,12 +121,13 @@ Booking {
   roomType: RoomType
   guestName: string
   guestEmail: string
-   guestPhone: string
-   numGuests: number
-   checkIn: Timestamp        // Firestore Timestamp — see `DECISIONS-FEATURES.md #84`
-   checkOut: Timestamp       // (always stored as `Timestamp.fromDate(jsDate)`, never raw Date or ISO string)
+  guestPhone: string
+  numGuests: number
+  checkIn: Timestamp        // Firestore Timestamp — see `DECISIONS-FEATURES.md #84`
+  checkOut: Timestamp       // (always stored as `Timestamp.fromDate(jsDate)`, never raw Date or ISO string)
   numNights: number
   ratePerNight: number
+  rateBreakdown: BookingRateBreakdown | null
   totalPrice: number
   originalTotalPrice: number | null   // pre-discount total; set when discount applied; used to restore on rejection
   discountType: DiscountType
@@ -226,6 +227,21 @@ EarlyCheckInDetails {
   confirmedTime?: string | null
 }
 ```
+
+### BookingRateBreakdown
+
+Locked, guest-safe explanation of booking price at creation time. Used by booking review, confirmation, lookup, emails, and admin receipts. Existing bookings may omit it and must render with the legacy `ratePerNight × numNights` fallback.
+
+Required shape:
+
+- `currencySymbol`, `currency`, and `locale` from config at booking time.
+- `roomLines[]` grouped by rate source: regular, weekend, seasonal, corporate, or manual. Each line carries label, source, start/end dates, night count, nightly rate, subtotal, and optional seasonal override label.
+- `addOnLines[]` for breakfast and future guest-safe add-ons.
+- `deductionLines[]` for Senior/PWD discount, voucher, member discount, and points redemption.
+- `roomSubtotal`, `addOnsSubtotal`, `deductionsSubtotal`, and `finalTotal`.
+- `generatedAt` timestamp for audit/debug context.
+
+Public guest responses may include `BookingRateBreakdown` because it contains no payment proof URLs, admin notes, or unrelated booking PII.
 
 ---
 

@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getManilaDateInfo } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -63,53 +63,74 @@ function hexToRgb(hex: string): [number, number, number] {
 // form must only ever submit one of these values.
 const EARLY_CHECKIN_TIME_OPTIONS = ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM"];
 const EARLY_CHECKIN_DEFAULT_TIME = "11:00 AM";
-
-const pdfFontCache = new Map<string, string | null>();
-
-async function fetchFontAsBase64(path: string) {
-  if (pdfFontCache.has(path)) return pdfFontCache.get(path);
-  try {
-    const response = await fetch(path);
-    if (!response.ok) throw new Error(`Unable to load font ${path}`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    let binary = "";
-    bytes.forEach((byte) => {
-      binary += String.fromCharCode(byte);
-    });
-    const base64 = btoa(binary);
-    pdfFontCache.set(path, base64);
-    return base64;
-  } catch (error) {
-    console.warn("PDF font unavailable:", error);
-    pdfFontCache.set(path, null);
-    return null;
-  }
-}
+const STORE_ONLY_ONSITE_PAYMENT_METHODS = new Set(["cod", "add-to-bill"]);
+const LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS: PaymentMethodConfig[] = [
+  { method: "cash", label: "Cash", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true },
+  { method: "card", label: "Credit Card", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true },
+  { method: "gcash", label: "GCash Transfer", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }
+];
+const LEGACY_ONSITE_PAYMENT_METHOD_LABELS = LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS.reduce<Record<string, string>>((acc, option) => {
+  acc[option.method] = option.label;
+  return acc;
+}, {});
 
 async function registerBrandPdfFonts(pdf: jsPDF) {
-  const apolloBase64 = await fetchFontAsBase64("/brand/fonts/APOLLO.otf");
-  const interBase64 = await fetchFontAsBase64("/brand/fonts/Inter-Regular.ttf");
-
-  try {
-    if (apolloBase64) {
-      pdf.addFileToVFS("APOLLO.otf", apolloBase64);
-      pdf.addFont("APOLLO.otf", "Apollo", "normal");
-    }
-    if (interBase64) {
-      pdf.addFileToVFS("Inter-Regular.ttf", interBase64);
-      pdf.addFont("Inter-Regular.ttf", "Inter", "normal");
-    }
-  } catch (error) {
-    console.warn("PDF font registration failed; using jsPDF fallback fonts.", error);
-  }
+  pdf.setFont("helvetica", "normal");
+  await Promise.resolve();
 }
 
 function setPdfFont(pdf: jsPDF, family: "Apollo" | "Inter" | "helvetica") {
-  try {
-    pdf.setFont(family, "normal");
-  } catch {
-    pdf.setFont("helvetica", "normal");
+  pdf.setFont(family === "helvetica" ? "helvetica" : "helvetica", "normal");
+}
+
+function getJsPdfImageFormat(dataUrl: string, blobType = "") {
+  const mimeType = dataUrl.match(/^data:([^;]+);/)?.[1] || blobType;
+  if (mimeType.includes("png")) return "PNG";
+  if (mimeType.includes("webp")) return "WEBP";
+  return "JPEG";
+}
+
+function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | null) {
+  const blob = pdf.output("blob");
+  const url = URL.createObjectURL(blob);
+  if (pdfWindow) {
+    pdfWindow.location.href = url;
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return "opened";
   }
+  pdf.save(fileName);
+  URL.revokeObjectURL(url);
+  return "downloaded";
+}
+
+function AdminPriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBreakdown | null; total: number }) {
+  if (!breakdown?.roomLines?.length) return null;
+  return (
+    <div className="space-y-2">
+      {breakdown.roomLines.map((line, index) => (
+        <div key={`${line.source}-${line.startDate}-${index}`} className="flex justify-between text-gray-600">
+          <span>{line.label} ({line.nights} x {formatPrice(line.nightlyRate)})</span>
+          <span>{formatPrice(line.subtotal)}</span>
+        </div>
+      ))}
+      {breakdown.addOns.map((line, index) => (
+        <div key={`add-on-${index}`} className="flex justify-between text-gray-500">
+          <span>{line.label}</span>
+          <span>{formatPrice(line.amount)}</span>
+        </div>
+      ))}
+      {breakdown.deductions.map((line, index) => (
+        <div key={`deduction-${index}`} className="flex justify-between text-status-red-text">
+          <span>{line.label}</span>
+          <span>-{formatPrice(line.amount)}</span>
+        </div>
+      ))}
+      <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
+        <span>Total Bill Amount:</span>
+        <span className="text-primary-dark">{formatPrice(breakdown.finalTotal || total)}</span>
+      </div>
+    </div>
+  );
 }
 
 export function BookingsPage() {
@@ -130,6 +151,7 @@ export function BookingsPage() {
     websiteContent,
     rewardsConfig,
     members,
+    paymentMethods,
     currentUser
   } = useAdmin();
   const toast = useToast();
@@ -228,6 +250,31 @@ export function BookingsPage() {
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
   const [priceOverride, setPriceOverride] = useState("");
+
+  const onsitePaymentMethodOptions = useMemo(() => {
+    const configured = paymentMethods.filter((method) => {
+      const key = method.method.trim();
+      return key && !STORE_ONLY_ONSITE_PAYMENT_METHODS.has(key);
+    });
+    return configured.length > 0 ? configured : LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS;
+  }, [paymentMethods]);
+
+  const onsitePaymentMethodLabels = useMemo(() => {
+    return onsitePaymentMethodOptions.reduce<Record<string, string>>((acc, method) => {
+      acc[method.method] = method.label || method.method;
+      return acc;
+    }, { ...LEGACY_ONSITE_PAYMENT_METHOD_LABELS });
+  }, [onsitePaymentMethodOptions]);
+
+  const getOnsitePaymentMethodLabel = (method: string) => {
+    return onsitePaymentMethodLabels[method] || method;
+  };
+
+  useEffect(() => {
+    if (onsitePaymentMethodOptions.length === 0) return;
+    if (onsitePaymentMethodOptions.some((method) => method.method === paymentMethod)) return;
+    setPaymentMethod(onsitePaymentMethodOptions[0].method);
+  }, [onsitePaymentMethodOptions, paymentMethod]);
 
   const [selectedBookingPayments, setSelectedBookingPayments] = useState<OnsitePayment[]>([]);
 
@@ -700,10 +747,13 @@ export function BookingsPage() {
     if (!selectedBooking) return;
     const b = selectedBooking;
     const reg = b.guestRegistration;
+    const pdfWindow = window.open("", "_blank");
+    pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing registration PDF...</p>");
 
-    const pdf = new jsPDF({ unit: "mm", format: "a4" });
-    await registerBrandPdfFonts(pdf);
-    setPdfFont(pdf, "Inter");
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      await registerBrandPdfFonts(pdf);
+      setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -826,7 +876,7 @@ export function BookingsPage() {
         pdf.setDrawColor(200, 200, 200);
         pdf.setLineWidth(0.3);
         pdf.rect(20, y, drawW + 2, drawH + 2);
-        pdf.addImage(base64, "JPEG", 21, y + 1, drawW, drawH);
+        pdf.addImage(base64, getJsPdfImageFormat(base64, blob.type), 21, y + 1, drawW, drawH);
         y += drawH + 4;
       } catch {
         // Failed to fetch image — show placeholder
@@ -1030,18 +1080,27 @@ export function BookingsPage() {
     );
     pdf.text(`Booking Ref: ${b.bookingRef} | Room ${b.roomNumber}`, pageW / 2, footerY + 10, { align: "center" });
 
-    const blob = pdf.output("blob");
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
+      toast.success(
+        "Registration PDF ready",
+        result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
+      );
+    } catch (error) {
+      pdfWindow?.close();
+      toast.error("Registration PDF failed", error instanceof Error ? error.message : "Please try again.");
+    }
   };
 
   const printBookingReceiptPDF = async () => {
     if (!selectedBooking) return;
     const b = selectedBooking;
+    const pdfWindow = window.open("", "_blank");
+    pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing booking receipt PDF...</p>");
 
-    const pdf = new jsPDF({ unit: "mm", format: "a4" });
-    await registerBrandPdfFonts(pdf);
-    setPdfFont(pdf, "Inter");
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      await registerBrandPdfFonts(pdf);
+      setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -1137,51 +1196,60 @@ export function BookingsPage() {
     pdf.text("Pricing Breakdown", marginL, y);
     y += 6;
 
-    const subtotal = b.ratePerNight * b.numNights;
     pdf.setFontSize(10);
     pdf.setTextColor(50, 50, 50);
-    pdf.text(`Subtotal (${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)})`, labelColX, y);
-    pdf.text(formatAmount(subtotal), marginR, y, { align: "right" });
-    y += 5.5;
-
-    // Senior / PWD discount
-    if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
-      const discountLabel = b.discountType === "senior"
-        ? "Senior Citizen Discount"
-        : b.discountType === "pwd"
-          ? "PWD Discount"
-          : "Discount";
-      const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-      const discountAmount = Math.max(
-        0,
-        Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
-      );
-      pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
-      pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
+    if (b.rateBreakdown?.roomLines?.length) {
+      b.rateBreakdown.roomLines.forEach((line) => {
+        checkNewPage(6);
+        pdf.text(`${line.label} (${line.nights} x ${formatAmount(line.nightlyRate)})`, labelColX, y);
+        pdf.text(formatAmount(line.subtotal), marginR, y, { align: "right" });
+        y += 5.5;
+      });
+      b.rateBreakdown.addOns.forEach((line) => {
+        checkNewPage(6);
+        pdf.text(line.label, labelColX, y);
+        pdf.text(formatAmount(line.amount), marginR, y, { align: "right" });
+        y += 5.5;
+      });
+      b.rateBreakdown.deductions.forEach((line) => {
+        checkNewPage(6);
+        pdf.text(line.label, labelColX, y);
+        pdf.text(`-${formatAmount(line.amount)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      });
+    } else {
+      const subtotal = b.ratePerNight * b.numNights;
+      pdf.text(`Subtotal (${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)})`, labelColX, y);
+      pdf.text(formatAmount(subtotal), marginR, y, { align: "right" });
       y += 5.5;
-    }
 
-    // Voucher
-    if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
-      pdf.text(`Voucher (${b.voucherCode})`, labelColX, y);
-      pdf.text(`-${formatAmount(b.voucherDiscount)}`, marginR, y, { align: "right" });
-      y += 5.5;
-    }
+      if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
+        const discountLabel = b.discountType === "senior"
+          ? "Senior Citizen Discount"
+          : b.discountType === "pwd"
+            ? "PWD Discount"
+            : "Discount";
+        const storedDiscountBase = b.originalTotalPrice ?? subtotal;
+        const discountAmount = Math.max(
+          0,
+          Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
+        );
+        pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
+        pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      }
 
-    // Points redemption
-    if (b.pointsRedeemed && b.pointsRedeemed > 0) {
-      pdf.text(
-        `Spark Rewards: ${b.pointsRedeemed} pts redeemed`,
-        labelColX,
-        y
-      );
-      pdf.text(
-        `-${formatAmount(b.pointsRedeemedValue || 0)}`,
-        marginR,
-        y,
-        { align: "right" }
-      );
-      y += 5.5;
+      if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
+        pdf.text(`Voucher (${b.voucherCode})`, labelColX, y);
+        pdf.text(`-${formatAmount(b.voucherDiscount)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      }
+
+      if (b.pointsRedeemed && b.pointsRedeemed > 0) {
+        pdf.text(`Spark Rewards: ${b.pointsRedeemed} pts redeemed`, labelColX, y);
+        pdf.text(`-${formatAmount(b.pointsRedeemedValue || 0)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      }
     }
 
     // Total
@@ -1337,9 +1405,15 @@ export function BookingsPage() {
       { align: "center" }
     );
 
-    const blob = pdf.output("blob");
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-receipt.pdf`, pdfWindow);
+      toast.success(
+        "Receipt PDF ready",
+        result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
+      );
+    } catch (error) {
+      pdfWindow?.close();
+      toast.error("Receipt PDF failed", error instanceof Error ? error.message : "Please try again.");
+    }
   };
 
   const getBookingPaymentsTotal = (booking: Booking) => {
@@ -1372,6 +1446,14 @@ export function BookingsPage() {
       balance: grandTotal - paymentsTotal
     };
   };
+
+  const selectedBookingCheckInReadiness = selectedBooking
+    ? getCheckInReadiness({
+        status: selectedBooking.status,
+        guestIdPhotoUrl: selectedBooking.guestIdPhotoUrl,
+        guestRegistration: selectedBooking.guestRegistration
+      })
+    : null;
 
   const syncSelectedBooking = (updates: Partial<Booking>) => {
     if (!selectedBooking) return;
@@ -1433,7 +1515,7 @@ export function BookingsPage() {
         if (result.success) {
           setPaymentAmount("");
           setPaymentNote("");
-          toast.success("Payment recorded", `${formatPrice(amount)} via ${paymentMethod.toUpperCase()}`);
+          toast.success("Payment recorded", `${formatPrice(amount)} via ${getOnsitePaymentMethodLabel(paymentMethod)}`);
         } else {
           toast.error("Failed to record payment", result.error);
         }
@@ -1967,20 +2049,26 @@ export function BookingsPage() {
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Financial Breakdown</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span>Room Charge ({selectedBooking.numNights} nights)</span>
-                  <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
-                </div>
-                {selectedBooking.hasBreakfast && (
-                  <div className="flex justify-between text-gray-500">
-                    <span>Breakfast Service charge</span>
-                    <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
-                  </div>
+                {selectedBooking.rateBreakdown ? (
+                  <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span>Room Charge ({selectedBooking.numNights} nights)</span>
+                      <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
+                    </div>
+                    {selectedBooking.hasBreakfast && (
+                      <div className="flex justify-between text-gray-500">
+                        <span>Breakfast Service charge</span>
+                        <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
+                      <span>Total Bill Amount:</span>
+                      <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
+                    </div>
+                  </>
                 )}
-                <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
-                  <span>Total Bill Amount:</span>
-                  <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
-                </div>
               </div>
             </div>
 
@@ -2242,7 +2330,7 @@ export function BookingsPage() {
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
                           <p className="font-semibold text-gray-800">{pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {pay.method.toUpperCase()}</p>
+                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}</p>
                         </div>
                         <span className="font-bold text-green-700">+{formatPrice(pay.amount)}</span>
                       </div>
@@ -2265,7 +2353,7 @@ export function BookingsPage() {
                         value={paymentAmount}
                         onChange={(e) => setPaymentAmount(e.target.value)}
                         placeholder="e.g. 500"
-                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                       />
                     </label>
                     
@@ -2274,11 +2362,13 @@ export function BookingsPage() {
                       <select
                         value={paymentMethod}
                         onChange={(e) => setPaymentMethod(e.target.value)}
-                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                       >
-                        <option value="cash">Cash</option>
-                        <option value="card">Credit Card</option>
-                        <option value="gcash">GCash Transfer</option>
+                        {onsitePaymentMethodOptions.map((method) => (
+                          <option key={method.method} value={method.method}>
+                            {method.label || method.method}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
@@ -2288,13 +2378,13 @@ export function BookingsPage() {
                         value={paymentNote}
                         onChange={(e) => setPaymentNote(e.target.value)}
                         placeholder="e.g. Downpayment deposit"
-                        className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
                       />
                     </label>
                   
                     <button
                       type="submit"
-                      className="min-h-[38px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
                     >
                       Log Payment
                     </button>
@@ -2585,13 +2675,41 @@ export function BookingsPage() {
                 </button>
               )}
 
-              {(selectedBooking.status === "confirmed" || selectedBooking.status === "payment-confirmed") && (
-                <button
-                  onClick={() => handleStatusTransition("checked-in")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
-                >
-                  Verify Guest ID & Check In
-                </button>
+              {(selectedBooking.status === "confirmed" || selectedBooking.status === "payment-confirmed") && selectedBookingCheckInReadiness && (
+                <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-gray-900">Ready for check-in</p>
+                      <p className="mt-0.5 text-[11px] text-gray-600">
+                        Guest ID, registration details, and signature must be saved first.
+                      </p>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                      selectedBookingCheckInReadiness.ready
+                        ? "bg-status-green-bg text-status-green-text"
+                        : "bg-amber-50 text-amber-700"
+                    }`}>
+                      {selectedBookingCheckInReadiness.ready ? "Ready" : "Missing items"}
+                    </span>
+                  </div>
+                  {!selectedBookingCheckInReadiness.ready ? (
+                    <ul className="mt-3 grid gap-1 text-[11px] font-medium text-amber-800 sm:grid-cols-2">
+                      {selectedBookingCheckInReadiness.missingItems.map((item) => (
+                        <li key={item} className="flex items-center gap-1.5">
+                          <XCircle size={12} className="shrink-0" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <button
+                    onClick={() => handleStatusTransition("checked-in")}
+                    disabled={!selectedBookingCheckInReadiness.ready}
+                    className="mt-3 min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
+                  >
+                    Verify Guest ID & Check In
+                  </button>
+                </div>
               )}
 
               {selectedBooking.status === "checked-in" && (

@@ -1,4 +1,4 @@
-import type { SeasonalRateOverride } from "../types";
+import type { BookingRateLine, SeasonalRateOverride } from "../types";
 import { eachStayNight, isWeekendNight, startOfDayUtc, type DateInput } from "./dates";
 
 function dateKey(value: DateInput) {
@@ -69,14 +69,50 @@ export function calculateSeasonalAwareRoomTotal(input: {
   weekendRate?: number;
   seasonalRateOverrides?: SeasonalRateOverride[];
 }) {
+  return calculateSeasonalAwareRoomBreakdown(input).roomSubtotal;
+}
+
+export function calculateSeasonalAwareRoomBreakdown(input: {
+  checkIn: DateInput;
+  checkOut: DateInput;
+  roomType: string;
+  baseRate: number;
+  weekendRate?: number;
+  seasonalRateOverrides?: SeasonalRateOverride[];
+}): { roomSubtotal: number; roomLines: BookingRateLine[] } {
   const baseRate = Math.max(0, Number(input.baseRate) || 0);
   const weekendRate = Math.max(0, Number(input.weekendRate) || 0);
   const overrides = input.seasonalRateOverrides ?? [];
+  const lines: BookingRateLine[] = [];
 
-  return eachStayNight(input.checkIn, input.checkOut).reduce((total, night) => {
+  for (const night of eachStayNight(input.checkIn, input.checkOut)) {
+    const date = dateKey(night);
     const seasonal = getSeasonalRateForNight(night, input.roomType, overrides);
-    if (seasonal) return total + seasonal.rate;
-    if (isWeekendNight(night) && weekendRate) return total + weekendRate;
-    return total + baseRate;
-  }, 0);
+    const line = seasonal
+      ? { source: "seasonal" as const, label: seasonal.name, nightlyRate: seasonal.rate }
+      : isWeekendNight(night) && weekendRate
+        ? { source: "weekend" as const, label: "Weekend nights", nightlyRate: weekendRate }
+        : { source: "regular" as const, label: "Regular nights", nightlyRate: baseRate };
+    const previous = lines[lines.length - 1];
+    if (previous && previous.source === line.source && previous.label === line.label && previous.nightlyRate === line.nightlyRate) {
+      previous.endDate = date;
+      previous.nights += 1;
+      previous.subtotal += line.nightlyRate;
+    } else {
+      lines.push({
+        source: line.source,
+        label: line.label,
+        startDate: date,
+        endDate: date,
+        nights: 1,
+        nightlyRate: line.nightlyRate,
+        subtotal: line.nightlyRate
+      });
+    }
+  }
+
+  return {
+    roomSubtotal: lines.reduce((total, line) => total + line.subtotal, 0),
+    roomLines: lines
+  };
 }

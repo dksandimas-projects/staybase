@@ -22,6 +22,7 @@ import {
   bustPublicSiteContentCache,
   compressImageFile,
   normalizeSeasonalRateOverrides,
+  type BookingRateBreakdown,
   type ProtectedPaymentMethod,
   type RoomBlock,
   type RoomTypeEntry,
@@ -105,6 +106,7 @@ export interface Booking {
   numNights: number;
   ratePerNight: number;
   totalPrice: number;
+  rateBreakdown?: BookingRateBreakdown | null;
   originalTotalPrice: number | null;
   discountType: string;
   discountPct: number;

@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
+import type { BookingRateBreakdown } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Navbar } from "../components/Navbar";
+import { PriceBreakdown } from "../components/PriceBreakdown";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { useRoomTypes } from "../hooks/useRoomTypes";
@@ -21,6 +23,15 @@ function formatStayDate(value: string) {
     day: "numeric",
     year: "numeric"
   }).format(new Date(`${value}T00:00:00`));
+}
+
+function parseRateBreakdown(value: string | null): BookingRateBreakdown | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(decodeURIComponent(value)) as BookingRateBreakdown;
+  } catch {
+    return null;
+  }
 }
 
 export function BookingConfirmPage() {
@@ -99,6 +110,7 @@ export function BookingConfirmPage() {
   const roomDisplayLabel = roomTypeEntry?.label ?? roomTypeParam;
   const rawPaymentMethod = searchParams.get("paymentMethod") ?? "gcash";
   const total = Number(searchParams.get("total") ?? 0);
+  const rateBreakdown = parseRateBreakdown(searchParams.get("rateBreakdown"));
   const hasAllParams = !!(bookingRef && checkIn && checkOut && guests > 0);
 
   const paymentMethodLabel = resolvedPaymentMethodLabel;
@@ -267,6 +279,9 @@ export function BookingConfirmPage() {
               <span className="font-semibold text-gray-900">Total Price</span>
               <span className="text-2xl font-bold text-primary">{formatPrice(total)}</span>
             </div>
+            {rateBreakdown ? (
+              <PriceBreakdown breakdown={rateBreakdown} total={total} />
+            ) : null}
           </div>
         </motion.div>
 

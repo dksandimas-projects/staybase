@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 8, 2026 (Phase 12 features audit — 11 PF-* findings logged in `plan/project/AUDIT-PHASE12-FEATURES-2026-07-08.md`; rate calendar marked shipped)
+> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved (Option A prerender; support X/Twitter via `twitterHandle`; `priceRange` band `₱₱`), Q2 OG-card design still open; spec at `plan/features/SEO-OPENGRAPH.md`; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 triaged — QA-01 through QA-08 queued)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -971,6 +971,32 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 
 ---
 
+## Phase 11.9 — SEO & Open Graph *(P0 — opened 2026-07-09)*
+> Goal: Guest app is discoverable in Google/Bing/Yahoo and every public URL renders a rich link-preview card in Facebook/Messenger/WhatsApp/Viber/X.
+> Full spec: `plan/features/SEO-OPENGRAPH.md`
+
+**Context (audit 2026-07-09):** Base client-side meta already exists — static tags in `guest-app/index.html`, a build-time config transform in `vite.config.ts`, and per-route `PageMeta.tsx` (title/description/canonical/robots/OG/Twitter). **Gap:** `PageMeta` sets tags via JS `useEffect`, which non-JS social/Bing crawlers never see — so every shared link shows the same generic homepage card, and Bing/Yahoo can't read per-route meta. Plus the OG image, robots, and sitemap are missing entirely.
+
+### Open questions (close with owner before build)
+- ✅ **Q1.** ~~Option A vs Option B?~~ **Resolved 2026-07-09 — Option A (build-time prerender):** no extra Vercel function, no UA sniffing, robust for all crawlers. Option B (per-record cards) deferred post-launch.
+- 🔴 **Q2.** Approve the 1200×630 OG card design (logo + tagline on brand orange).
+- ✅ **Q3.** ~~X/Twitter handle for `twitter:site`?~~ **Resolved 2026-07-09 — support X/Twitter:** add `twitterHandle` to `hotel.config.ts`, emit `twitter:site` when set (Spark Inn's handle value TBD by owner; tag omitted until then).
+- ✅ **Q4.** ~~`priceRange` value?~~ **Resolved 2026-07-09 — relative band `₱₱`** via new `config.priceRange`; chosen over an explicit range because build-time JSON-LD would drift from live rates.
+
+### Checklist
+- ⬜ **G3** — `guest-app/public/robots.txt` (`Allow: /` + `Sitemap:` pointer, templated off `config.domain`); `admin-app/public/robots.txt` → `Disallow: /`
+- ⬜ **G4** — `sitemap.xml` of indexable public routes (exclude `noIndex` routes), generated from the same route list as prerender so it can't drift
+- ⬜ **G2** — real 1200×630 `guest-app/public/og-image.png` (currently `config.ogImage` → 404); add to `WHITE-LABEL.md` asset checklist
+- ⬜ **G1** — per-route meta in the **served** HTML (prerender or edge injection) so non-JS crawlers see correct title/desc/OG per URL; keep `PageMeta.tsx` for SPA nav
+- ⬜ **G5** — `schema.org/Hotel` JSON-LD on homepage, all values from `hotel.config.ts` (`address`, `telephone`, `sameAs`, check-in/out times, `priceRange` = new `config.priceRange` band `₱₱` per Q4)
+- ⬜ **G6** — OG polish: `og:image:width`/`height`/`alt`, `og:locale` (from `config.locale`), `twitter:site` from new `config.twitterHandle` (per Q3, rendered only when set)
+- ⬜ **Config** — add `twitterHandle` + `priceRange` fields to `hotel.config.ts` (both new, feeding G5/G6)
+- ⬜ **Admin** — confirm `admin-app/index.html` carries `noindex, nofollow`
+- ⬜ **Verify** — Facebook Sharing Debugger + WhatsApp + Viber render distinct correct cards for ≥3 URLs; X Card Validator; Google Rich Results Test on JSON-LD
+- ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools
+
+---
+
 ## Phase 12 — Post-Launch (Phase 2, Deferred)
 > Goal: Enhancements after stable v1.0.0.
 
@@ -983,6 +1009,11 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ Calendar view for bookings (visual room × date grid)
 - ✅ Seasonal rate overrides
 - ✅ Rate Calendar — month-based room type × date grid for effective public rates, multi-select/unselect seasonal rate editing, and holiday labels sourced from seasonal override names. Full spec: `plan/features/RATE-CALENDAR.md`. *(Shipped in the same commit that added this line — marked done during the 2026-07-08 audit.)*
+- ✅ **P1 / Small effort — Senior/PWD discount ID upload repair** — fixed Step 3 OSCA/PWD image upload in the guest booking flow by adding field-level upload error/retry feedback, sanitized Firebase Storage filenames under `bookings/{bookingId}/discount-id/{filename}`, hidden file-input reset after success/delete/failure, stale-upload clearing when the discount type changes, and regression coverage for the upload safeguards. Storage rules already allowed public write and staff-only read, so no rule change was needed.
+- ✅ **P2 / Medium effort — Voucher application repair** — fixed voucher application in the guest booking page by blocking Apply until Turnstile is ready, preserving the canonical voucher code returned by validation, clearing stale applied voucher state when the code changes, and aligning client/server percent-voucher math so vouchers apply after Senior/PWD discount. Added regressions for the guest Apply safeguards and Senior/PWD plus percent-voucher booking creation; `usageCount` still increments only after successful booking creation.
+- ✅ **P3 / Medium effort — Check-in gate repair** — completed shared check-in readiness enforcement for admin drawer and `/api/bookings/checkin`. Staff now see a missing-items checklist and cannot check in until booking status is `confirmed` or `payment-confirmed`, a guest ID photo is saved, required registration fields are complete, and signature status is `signed`. Server rejects direct/API bypass attempts with the same missing-items list; direct check-in from `payment-confirmed` remains supported.
+- ✅ **P4 / Large effort — PDF generation repair** — repaired admin PDF reliability by opening booking PDF tabs synchronously, falling back to `pdf.save()` when popups are blocked, using reliable jsPDF built-in fonts instead of missing/unsafe embedded font paths, detecting uploaded ID image MIME type before `addImage`, wrapping registration/receipt builders in visible success/error toasts, and relabeling Reports to browser **Print Report** with Save-as-PDF guidance.
+- ✅ **P5 / Large effort — Guest-facing price breakdown for mixed regular/weekend/holiday rates** — completed itemized rate lines for guest Step 1 mixed-rate previews, Step 3 review, Step 4 confirmation, `/my-booking`, guest/staff emails, admin drawer, and admin receipt PDFs. Bookings now persist locked `Booking.rateBreakdown` snapshots from the server for regular, weekend, seasonal/holiday, corporate, walk-in, and rescheduled pricing, with legacy fallbacks for older bookings.
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
 
@@ -1011,6 +1042,24 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ PF-10 — `earlyCheckinResolveEmail` missing from the email preview switch — the one guest email staff cannot preview
 - ✅ PF-11 — Intercom `?room=` deep-link clears the param before `intercomThreads` loads → resolved-thread filter switch can be skipped (`IntercomInboxPage.tsx`)
 
+### Manual QA Audit — 2026-07-09 (fixes to close)
+
+> Source: `0709 Spark-Inn-Manual-Test-Cases.xlsx` manual QA pass (Guest App Tests, Admin App Tests, Other Bugs Found tabs). 6 rows marked "Fail" in Guest App Tests + 6 "Bug" entries in Other Bugs Found were triaged against `dev`. 3 were already fixed before the test ran (H-03b homepage date defaults per `cb13846d`, B-07 voucher lookup per `3501633`/P2, B-10c Senior/PWD ID upload per `a2fa020`/P1 — verified in code, not just re-tested). The items below are confirmed still open or unverified.
+
+**Confirmed still broken (root cause identified in code):**
+- ⬜ **QA-01 (H-04)** — Past-date selection isn't reliably blocked. `DateRangePicker.tsx` relies only on the native `<input type="date" min=...>` HTML attribute; there's no `onChange` guard rejecting an out-of-range value (some mobile browsers allow typing/scrolling past `min`), and `handleCreateBooking`/`handleCreateWalkin` in `guest-app/server/handlers/bookings.ts` never re-validates that `checkIn` is not in the past server-side either. Fix: add a client-side check that clamps/rejects a past `checkIn`, and add a server-side date guard as defense in depth.
+- ⬜ **QA-02 (H-06)** — Featured Room cards on the homepage aren't clickable. `HomePage.tsx` renders `<RoomCard>` in the "Stay with us" section without an `onDetails` handler, and `RoomCard.tsx` has no card-level `onClick`/`<Link>` wrapper — only the "Book" button (and "Details" button, when passed) are interactive. Fix: wrap the card body in a link to the room/rooms page, or pass `onDetails` on the homepage the way `RoomsPage` presumably does.
+- ⬜ **QA-03 (Other Bugs #15)** — Admin voucher modal only accepts one character at a time in text inputs. Root cause: `Modal.tsx`'s `DesktopModalPanel`/`MobileModalPanel` call `useFocusTrap(true, onClose)`, and `RatesPage.tsx` passes `onClose={() => setIsVchModalOpen(false)}` as an inline arrow function. Every keystroke updates `vchCode` state → `RatesPage` re-renders → a new `onClose` reference is created → `useFocusTrap`'s effect (dependency `[active, onEscape]`) re-fires → it re-queries focusable elements and calls `.focus()` on the first one in DOM order, which is the modal's close (X) button, not the field being typed in — stealing focus after every character. Fix: memoize the `onClose` callback passed to `Modal` (e.g. `useCallback`) wherever a modal wraps a controlled text input, or have `useFocusTrap` only set initial focus once (e.g. track with a ref) instead of on every effect re-run. Likely affects other admin modals with local input state, not just vouchers — worth a sweep.
+
+**Needs QA verification (code inspection was inconclusive):**
+- ⬜ **QA-04 (B-10)** — Payment/receipt screenshot upload reportedly hangs on "Uploading" on mobile with no error shown; desktop shows "Failed to upload"; non-image files can't be selected on either. `handlePaymentProofChange` in `BookingPage.tsx` has proper try/catch/finally (so a hang shouldn't be possible from this code path alone), and the `accept="image/jpeg,image/png,image/webp"` attribute is what blocks non-image file selection (by design, not obviously a bug, though it produces a silent block instead of the expected inline message). The mobile hang could be a `compressImageFile`/`createImageBitmap` (`shared/utils/images.ts`) issue specific to a device/browser. Needs an on-device retest before further code changes.
+- ⬜ **QA-05 (Other Bugs #2, #3)** — "Book Your Stay" hero button overlaps the check-in/availability search card (High on desktop, slight on mobile). `HomePage.tsx`'s hero section is `min-h-screen` with vertically centered content and `pb-32` under the CTA buttons; the search card section directly below pulls up with `-mt-20`. On short viewports (e.g. laptop with browser chrome) this combination could plausibly collide, but it wasn't confirmed by static inspection. Needs a rendered check across common desktop/laptop heights.
+- ⬜ **QA-06 (Other Bugs #9)** — Booking Step 2 → Step 1 back button reportedly doesn't work. `getBackToPath()` in `BookingPage.tsx` builds a step-aware URL (`continueParams` preserves room/dates/guests) and looks correct by inspection — no defect found. Needs a live retest; may have been a one-off.
+- ⬜ **QA-07 (Other Bugs #10)** — Booking Step 2 guest logo reportedly misaligned (desktop). `BookingHeader` is shared across all booking steps, so a defect specific to "Step 2" is unclear from JSX alone — needs a visual check.
+- ⬜ **QA-08 (Other Bugs #13)** — Guest didn't receive a booking confirmation email. `handleCreateBooking` correctly calls `sendBookingTrigger("booking-submitted", ...)` with try/catch around the Resend call (errors are logged, not swallowed silently pre-log). Code path looks correctly wired — this is more likely a deliverability issue (Resend domain verification, spam filtering) than an application bug, but can't be ruled out without checking Resend send logs for that booking.
+
+**Already fixed, sheet was right:** Other Bugs Found row #12 (price breakdown for mixed weekday/weekend/holiday rates) is marked `Fixed? = Y` in the test sheet. At the start of this audit this roadmap still showed P5 as not started, but P5 ("Guest-facing price breakdown for mixed regular/weekend/holiday rates") was completed and marked ✅ above during this same session — no action needed, confirmed consistent.
+
 ---
 
 ## Progress Summary
@@ -1034,9 +1083,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
+| 12 — Post-Launch | 16 | 13 | 3 deferred |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **359** | **325** | **~134** |
+| **Total** | **363** | **330** | **~133** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 

@@ -9,6 +9,7 @@ export * from "./types";
 export * from "./utils/bookingDates";
 export * from "./utils/cache";
 export * from "./utils/calendar";
+export * from "./utils/checkin";
 export * from "./utils/dates";
 export * from "./utils/images";
 export * from "./utils/points";
