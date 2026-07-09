@@ -1,5 +1,5 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { Lock, LogOut, User, Shield, Menu } from "lucide-react";
+import { Lock, LogOut, User, Shield, Menu, Volume2, VolumeX } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { BottomTabBar } from "./BottomTabBar";
 import { ToastProvider } from "./Toast";
@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import config from "@config";
 
 export function AdminLayout() {
-  const { authLoading, currentUser, signOut, intercoms } = useAdmin();
+  const { authLoading, currentUser, signOut, intercoms, soundsEnabled, setSoundsEnabled } = useAdmin();
   const location = useLocation();
   const { isMobile } = useBreakpoint();
 
@@ -109,6 +109,16 @@ export function AdminLayout() {
 
           {/* Right zone */}
           <div className="flex items-center gap-2 sm:gap-4">
+            <button
+              type="button"
+              onClick={() => setSoundsEnabled(!soundsEnabled)}
+              aria-label={soundsEnabled ? "Mute notifications" : "Unmute notifications"}
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
+              title={soundsEnabled ? "Mute Sounds" : "Unmute Sounds"}
+            >
+              {soundsEnabled ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true")}
+            </button>
+
             {isMobile ? (
               <button
                 type="button"

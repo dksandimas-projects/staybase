@@ -10,7 +10,7 @@ import { formatPrice } from "../utils/format";
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount } = useAdmin();
 
   const toLocalDateKey = (date: Date) => {
     const tz = config.timezone || "Asia/Manila";
@@ -161,11 +161,17 @@ export function DashboardPage() {
       </header>
 
       {/* Stats Cards Row */}
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} />
         <StatsCard label="Total Bookings" value={String(monthlyBookingsCount)} />
         <StatsCard label="Revenue" value={formatPrice(monthlyRevenue)} />
         <StatsCard label="Pending Payments" value={String(pendingPayments.length)} />
+        <StatsCard
+          label="Unread Messages"
+          value={String(unreadIntercomCount)}
+          onClick={() => navigate("/intercom")}
+          icon={<MessageSquare size={18} />}
+        />
       </div>
 
       {/* Operational workflow sections */}
