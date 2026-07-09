@@ -1,4 +1,5 @@
 import { Users } from "lucide-react";
+import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import type { Room } from "@spark-inn/shared";
 import { staggerChild, DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
@@ -57,50 +58,54 @@ export function RoomCard({
       variants={staggerChild}
       whileHover={shouldReduceMotion ? undefined : { y: -4 }}
     >
-      <div className="aspect-[4/3] overflow-hidden bg-section-bg">
-        {heroImage ? (
-          <motion.img
-            src={heroImage}
-            alt={room.name}
-            className="h-full w-full object-cover"
-            transition={{ duration: 0.4, ease: "easeOut" }}
-            whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
-          />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400"
-            aria-label={`No photo for ${room.name}`}
-          >
-            Photo coming soon
-          </div>
-        )}
-      </div>
-      <div className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">{typeLabel}</span>
-            <h3 className="mt-3 text-lg font-semibold text-gray-950">{room.name}</h3>
-          </div>
-          {showStatusBadge ? (
-            <StatusBadge label={room.status === "available" ? "Available" : "Unavailable"} status={room.status} />
-          ) : null}
+      <Link to={`/rooms?type=${room.type}`} className="block group cursor-pointer">
+        <div className="aspect-[4/3] overflow-hidden bg-section-bg">
+          {heroImage ? (
+            <motion.img
+              src={heroImage}
+              alt={room.name}
+              className="h-full w-full object-cover"
+              transition={{ duration: 0.4, ease: "easeOut" }}
+              whileHover={shouldReduceMotion ? undefined : { scale: 1.03 }}
+            />
+          ) : (
+            <div
+              className="flex h-full w-full items-center justify-center text-xs uppercase tracking-wider text-gray-400"
+              aria-label={`No photo for ${room.name}`}
+            >
+              Photo coming soon
+            </div>
+          )}
         </div>
-        <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{description}</p>
-        <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
-          <span className="flex items-center gap-2">
-            <Users size={16} className="text-primary" />
-            Up to {maxCapacity}
-          </span>
-          <span className="truncate">{bedDefinition}</span>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {amenities.slice(0, 4).map((amenity) => (
-            <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
-              {amenity}
+        <div className="p-5 pb-0">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">{typeLabel}</span>
+              <h3 className="mt-3 text-lg font-semibold text-gray-950 group-hover:text-primary transition-colors">{room.name}</h3>
+            </div>
+            {showStatusBadge ? (
+              <StatusBadge label={room.status === "available" ? "Available" : "Unavailable"} status={room.status} />
+            ) : null}
+          </div>
+          <p className="mt-3 line-clamp-2 text-sm leading-6 text-gray-600">{description}</p>
+          <div className="mt-4 grid gap-2 text-sm text-gray-600 sm:grid-cols-2">
+            <span className="flex items-center gap-2">
+              <Users size={16} className="text-primary" />
+              Up to {maxCapacity}
             </span>
-          ))}
+            <span className="truncate">{bedDefinition}</span>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {amenities.slice(0, 4).map((amenity) => (
+              <span key={amenity} className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
+                {amenity}
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="mt-5 flex items-end justify-between gap-3">
+      </Link>
+      <div className="p-5 pt-4">
+        <div className="flex items-end justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-wide text-gray-500">From</p>
             <p className="text-xl font-semibold text-gray-950">{formatPrice(pricePerNight)}</p>

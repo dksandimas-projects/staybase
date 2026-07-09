@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { fadeUp, staggerContainer } from "@spark-inn/shared";
 import { Footer } from "../components/Footer";
 import { Modal } from "../components/Modal";
@@ -22,8 +23,20 @@ import { formatPrice } from "../utils/format";
 export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
   const { roomTypes, loading } = useRoomTypes();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedTypeValue, setSelectedTypeValue] = useState<string | null>(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+
+  const typeParam = searchParams.get("type");
+
+  useEffect(() => {
+    if (typeParam && roomTypes.length > 0) {
+      const match = roomTypes.find((t) => t.value === typeParam);
+      if (match) {
+        setSelectedTypeValue(match.value);
+      }
+    }
+  }, [typeParam, roomTypes]);
 
   const selectedTypeEntry = selectedTypeValue
     ? roomTypes.find((t) => t.value === selectedTypeValue) ?? null
@@ -34,6 +47,15 @@ export function RoomsPage() {
   useEffect(() => {
     setSelectedPhotoIndex(0);
   }, [selectedTypeValue]);
+
+  const handleCloseModal = () => {
+    setSelectedTypeValue(null);
+    if (searchParams.has("type")) {
+      const newParams = new URLSearchParams(searchParams);
+      newParams.delete("type");
+      setSearchParams(newParams);
+    }
+  };
 
   const entranceProps = shouldReduceMotion
     ? {}
@@ -111,7 +133,7 @@ export function RoomsPage() {
       <Modal
         title={selectedTypeEntry?.label ?? "Room type details"}
         open={Boolean(selectedTypeEntry)}
-        onClose={() => setSelectedTypeValue(null)}
+        onClose={handleCloseModal}
       >
         {selectedTypeEntry ? (
           <div className="space-y-6">

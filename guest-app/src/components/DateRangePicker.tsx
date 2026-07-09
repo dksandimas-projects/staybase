@@ -48,7 +48,17 @@ export function DateRangePicker({
           min={todayIso()}
           type="date"
           value={checkIn}
-          onChange={(event) => onCheckInChange(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            if (val.length === 10) {
+              const minVal = todayIso();
+              if (val < minVal) {
+                onCheckInChange(minVal);
+                return;
+              }
+            }
+            onCheckInChange(val);
+          }}
         />
       </label>
       <label className="grid gap-2 text-sm font-medium text-gray-700">
@@ -58,7 +68,16 @@ export function DateRangePicker({
           min={minCheckOut}
           type="date"
           value={checkOut}
-          onChange={(event) => onCheckOutChange(event.target.value)}
+          onChange={(event) => {
+            const val = event.target.value;
+            if (val.length === 10) {
+              if (val < minCheckOut) {
+                onCheckOutChange(minCheckOut);
+                return;
+              }
+            }
+            onCheckOutChange(val);
+          }}
         />
       </label>
     </div>
