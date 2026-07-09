@@ -33,7 +33,10 @@
     ];
     var section;
     for (var i = 0; i < routeHeroMap.length; i++) {
-      if (path.indexOf(routeHeroMap[i].prefix) === 0) {
+      var isMatch = routeHeroMap[i].prefix === "/" 
+        ? path === "/" 
+        : path.indexOf(routeHeroMap[i].prefix) === 0;
+      if (isMatch) {
         section = routeHeroMap[i].section;
         break;
       }
