@@ -910,6 +910,9 @@ export function BookingPage() {
                 placeholder="Maria"
                 required
                 value={guestDetails.firstName}
+                id="firstName"
+                name="firstName"
+                autoComplete="given-name"
               />
               <TextField
                 error={touchedFields.lastName ? guestErrors.lastName : ""}
@@ -920,6 +923,9 @@ export function BookingPage() {
                 placeholder="Santos"
                 required
                 value={guestDetails.lastName}
+                id="lastName"
+                name="lastName"
+                autoComplete="family-name"
               />
             </motion.div>
 
@@ -934,6 +940,9 @@ export function BookingPage() {
                 required
                 type="email"
                 value={guestDetails.email}
+                id="email"
+                name="email"
+                autoComplete="email"
               />
               <TextField
                 error={touchedFields.phone ? guestErrors.phone : ""}
@@ -945,6 +954,9 @@ export function BookingPage() {
                 required
                 type="tel"
                 value={guestDetails.phone}
+                id="phone"
+                name="phone"
+                autoComplete="tel"
               />
             </motion.div>
 
@@ -959,12 +971,16 @@ export function BookingPage() {
                 required
                 type="number"
                 value={guestDetails.guestCount}
+                id="guestCount"
+                name="guestCount"
               />
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
                 Special requests
                 <span className="relative">
                   <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
                   <textarea
+                    id="requests"
+                    name="requests"
                     className="min-h-28 w-full rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
                     onChange={(event) => updateGuestDetail("requests", event.target.value)}
                     placeholder="Late check-in, dietary notes, room preferences..."
@@ -975,8 +991,10 @@ export function BookingPage() {
             </motion.div>
 
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>
-              <label className="flex items-start gap-3 text-sm leading-6 text-gray-700">
+              <label htmlFor="consentStep2" className="flex items-start gap-3 text-sm leading-6 text-gray-700 cursor-pointer">
                 <input
+                  id="consentStep2"
+                  name="consentStep2"
                   checked={guestDetails.consent}
                   className="mt-1 h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                   onChange={(event) => updateGuestDetail("consent", event.target.checked)}
@@ -1084,6 +1102,8 @@ export function BookingPage() {
               
               <form onSubmit={handleApplyVoucher} className="mt-4 flex gap-3">
                 <input
+                  id="voucherCode"
+                  name="voucherCode"
                   type="text"
                   placeholder="Enter code"
                   value={voucherCode}
@@ -1186,6 +1206,8 @@ export function BookingPage() {
                         </span>
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPG, PNG, WEBP up to 5MB</span>
                         <input
+                          id="discountIdFile"
+                          name="discountIdFile"
                           ref={discountIdInputRef}
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
@@ -1359,6 +1381,8 @@ export function BookingPage() {
                         </span>
                         <span className="mt-0.5 text-xs text-gray-500">Supports JPEG, PNG, WEBP up to 5MB</span>
                         <input
+                          id="paymentProofFile"
+                          name="paymentProofFile"
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
                           onChange={handlePaymentProofChange}
@@ -1401,8 +1425,10 @@ export function BookingPage() {
 
             {/* Terms and conditions */}
             <div className="mt-6">
-              <label className="flex items-start gap-3 cursor-pointer text-sm leading-6 text-gray-700">
+              <label htmlFor="termsConsent" className="flex items-start gap-3 cursor-pointer text-sm leading-6 text-gray-700">
                 <input
+                  id="termsConsent"
+                  name="termsConsent"
                   type="checkbox"
                   checked={termsConsent}
                   onChange={(e) => setTermsConsent(e.target.checked)}
@@ -1826,16 +1852,22 @@ interface TextFieldProps {
   required?: boolean;
   type?: string;
   value: string;
+  id?: string;
+  name?: string;
+  autoComplete?: string;
 }
 
-function TextField({ error, icon, label, onBlur, onChange, placeholder, required, type = "text", value }: TextFieldProps) {
+function TextField({ error, icon, label, onBlur, onChange, placeholder, required, type = "text", value, id, name, autoComplete }: TextFieldProps) {
   return (
-    <label className="grid gap-2 text-sm font-medium text-gray-700">
+    <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
       <span className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
+          id={id}
+          name={name}
+          autoComplete={autoComplete}
           className={cn(
             "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
             error ? "border-red-300" : "border-gray-200"
