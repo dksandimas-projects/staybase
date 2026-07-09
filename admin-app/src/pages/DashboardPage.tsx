@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
+import { Modal } from "../components/Modal";
 import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
@@ -11,6 +12,7 @@ import { formatPrice } from "../utils/format";
 export function DashboardPage() {
   const navigate = useNavigate();
   const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount } = useAdmin();
+  const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
 
   const toLocalDateKey = (date: Date) => {
     const tz = config.timezone || "Asia/Manila";
@@ -238,19 +240,23 @@ export function DashboardPage() {
             <div className="space-y-3">
               {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
                 <div key={booking.id} className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[72px_1fr_auto] sm:items-center">
-                  <a
-                    href={booking.paymentProofUrl || undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white sm:w-16"
-                    aria-label={`Open payment proof for ${booking.bookingRef}`}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (booking.paymentProofUrl) {
+                        setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl });
+                      }
+                    }}
+                    disabled={!booking.paymentProofUrl}
+                    className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white disabled:cursor-not-allowed sm:w-16"
+                    aria-label={booking.paymentProofUrl ? `Preview payment proof for ${booking.bookingRef}` : `No payment proof for ${booking.bookingRef}`}
                   >
                     {booking.paymentProofUrl ? (
-                      <img src={booking.paymentProofUrl} alt="" className="h-full w-full object-cover" />
+                      <img src={booking.paymentProofUrl} alt={`Payment proof for ${booking.bookingRef}`} className="h-full w-full object-cover" />
                     ) : (
                       <CreditCard size={18} className="text-gray-400" />
                     )}
-                  </a>
+                  </button>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-bold text-gray-900">{booking.bookingRef}</p>
@@ -261,15 +267,14 @@ export function DashboardPage() {
                   </div>
                   <div className="flex flex-col gap-2 sm:w-36">
                     {booking.paymentProofUrl && (
-                      <a
-                        href={booking.paymentProofUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl ?? "" })}
                         className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
                       >
                         <Eye size={12} />
                         View Proof
-                      </a>
+                      </button>
                     )}
                     <button
                       type="button"
@@ -635,6 +640,20 @@ export function DashboardPage() {
           )}
         </div>
       </section>
+      <Modal
+        title={imagePreview?.title ?? "Image preview"}
+        open={!!imagePreview}
+        onClose={() => setImagePreview(null)}
+        className="max-w-4xl"
+      >
+        {imagePreview ? (
+          <img
+            src={imagePreview.url}
+            alt={imagePreview.title}
+            className="max-h-[72vh] w-full rounded-lg object-contain"
+          />
+        ) : null}
+      </Modal>
     </div>
   );
 }
