@@ -189,6 +189,37 @@ Prevent staff from checking in a guest until payment/booking status is eligible 
 - The server rejects direct/API check-in attempts that bypass the UI.
 - Existing room occupancy checks still run inside the transaction before the room is marked occupied.
 
+## Implementation Plan — Room Transfer & Upgrade
+
+### Current State (confirmed in code, 2026-07-09)
+
+A staff-initiated room move/upgrade mechanism already exists and is more capable than the one-line Calendar mention above suggests:
+
+- `POST /api/bookings/reschedule` (`handleRescheduleBooking`, `guest-app/server/handlers/bookings.ts`) accepts `{ bookingId, roomId, checkIn, checkOut, reason }` inside a Firestore transaction. `roomId` can point to a room of a **different type**, so this already covers both a same-type room swap and a type upgrade/downgrade, not just a date change.
+- ✅ Capacity check — rejects the move if `booking.numGuests` exceeds the target room type's `maxCapacity`.
+- ✅ Conflict checks — target room can't have an overlapping booking or an active `roomBlocks` window for the new dates.
+- ✅ Full re-pricing — recomputes `roomBreakdown`/`rateBreakdown` against the target room type's base/weekend/seasonal/corporate rate, then re-applies Senior/PWD discount, voucher, and Spark Rewards member discount in the same order as booking creation. Points redemption value is re-subtracted.
+- ✅ `deltaTotalPrice` (new total − old total) is computed and stored in a `rescheduleHistory` entry on the booking, so an upgrade's price difference is on record.
+- ✅ Guest notification — fires the `booking-rescheduled` email with the new room/dates after a successful move.
+- ✅ Staff entry point exists today at `/calendar` — the booking drawer's "Move booking" form lists every room across every type (labelled with type), so staff can already pick an upgrade/downgrade target, not just a same-type room.
+
+### Confirmed Gaps
+
+- ⬜ **No entry point from the main `/bookings` table/drawer** — "Move booking" only exists in the Calendar page drawer. Front desk's primary daily tool (the Bookings table) has no room-transfer/upgrade action at all.
+- ⬜ **Room `status` isn't synced on transfer** — `handleRescheduleBooking` never touches `rooms/{roomId}.status`. Check-in (`handleCheckin`) and checkout explicitly set `status: "occupied"` / `status: "available"` on the room doc, but a mid-stay room move does neither: the vacated room stays marked `occupied` and the new room isn't marked `occupied`. The Dashboard Overview room grid (which reads room status directly) would show stale occupancy until someone manually corrects it. Checkin's own guard is partially protected by also querying for other `checked-in` bookings on the target room, but the **display** still relies on the stale `status` field.
+- ⬜ **No guest-initiated entry point** — a guest who wants to move rooms or ask about an upgrade has no way to signal that from the guest app today. The Intercom quick-request chips (`plan/features/INTERCOM-GUEST.md`) don't include a "Request room change" option; this would need to land in front desk's Intercom Inbox (ties into `QA-15` in `ROADMAP.md`, which already proposes showing booking context in that view) so staff know the request came from Room X while looking at Room X's thread.
+- ⬜ **No explicit "collect the price difference" step** — `deltaTotalPrice` is recorded on the reschedule history entry, but nothing surfaces it as an action item; staff would need to notice the new `totalPrice` and manually use the existing "Record Payment" panel (§UI Checklist above) to collect an upgrade's balance, or manually refund/adjust for a downgrade. No confirmation prompt walks staff through "guest now owes ₱X more" or "guest is owed ₱X back" at the moment of the move.
+- ⬜ **No guardrail for checked-in guests specifically** — the reschedule endpoint's `RESCHEDULABLE_STATUSES` gate isn't itself a gap (it's presumably intentional), but there's no distinct in-house-guest flow (e.g. prompting for a housekeeping/turnover note on the vacated room, or checkout-folio carryover) — an upgrade mid-stay is treated identically to rescheduling a future, not-yet-arrived booking.
+
+### Target Workflow (not yet built)
+
+1. Guest requests a room change/upgrade via Intercom (new quick-request chip) or in person.
+2. Front desk sees the request with full booking context in the Intercom thread (depends on `QA-15`).
+3. Front desk opens **either** the Bookings drawer **or** the Calendar drawer (parity between the two, closing the `/bookings`-entry-point gap) and uses "Move / Upgrade Room," picking a target room of any type.
+4. System re-prices (already built), shows the price delta explicitly before confirming ("Guest will owe an additional ₱X" / "Guest is due a ₱X refund"), and offers a direct link into the Additional Payments panel to collect/refund it.
+5. On confirm: booking updates (already built) **and** both rooms' `status` fields sync correctly for in-house guests (new gap to close).
+6. Guest gets the existing `booking-rescheduled` email (already built) with new room details.
+
 ## References
 
 - Booking schema and status flow: `plan/docs/BACKEND.md §bookings`
