@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph opened — spec at `plan/features/SEO-OPENGRAPH.md`; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 triaged — QA-01 through QA-08 queued)
+> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1 resolved to Option A build-time prerender; spec at `plan/features/SEO-OPENGRAPH.md`; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 triaged — QA-01 through QA-08 queued)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -978,7 +978,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 **Context (audit 2026-07-09):** Base client-side meta already exists — static tags in `guest-app/index.html`, a build-time config transform in `vite.config.ts`, and per-route `PageMeta.tsx` (title/description/canonical/robots/OG/Twitter). **Gap:** `PageMeta` sets tags via JS `useEffect`, which non-JS social/Bing crawlers never see — so every shared link shows the same generic homepage card, and Bing/Yahoo can't read per-route meta. Plus the OG image, robots, and sitemap are missing entirely.
 
 ### Open questions (close with owner before build)
-- 🔴 **Q1.** Approve Option A (build-time prerender, recommended, no extra Vercel function) vs Option B (edge middleware, per-record cards but function-budget risk)? See `SEO-OPENGRAPH.md §Approach`.
+- ✅ **Q1.** ~~Option A vs Option B?~~ **Resolved 2026-07-09 — Option A (build-time prerender):** no extra Vercel function, no UA sniffing, robust for all crawlers. Option B (per-record cards) deferred post-launch.
 - 🔴 **Q2.** Approve the 1200×630 OG card design (logo + tagline on brand orange).
 - 🟡 **Q3.** X/Twitter handle for `twitter:site` (none in `hotel.config.ts` today).
 - 🟡 **Q4.** `priceRange` value for the Hotel JSON-LD.
