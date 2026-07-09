@@ -439,6 +439,8 @@ HotelConfig {
 // HotelConfig additions (in hotel.config.ts)
 // memberNumberPrefix: string  — e.g. "SR" → "SR-00042"
 // storeName: string           — e.g. "Spark Essentials"
+// priceRange: string          — schema.org relative price band, e.g. "₱₱"
+// twitterHandle: string       — X/Twitter handle for twitter:site; blank omits the tag
 
 RewardsEarningMode = "per-booking" | "per-spend"
 

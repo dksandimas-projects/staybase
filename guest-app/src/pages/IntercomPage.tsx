@@ -1014,8 +1014,8 @@ export function IntercomPage() {
 
   if (isRoomLoading) {
     return (
-      <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
-        <div className="w-full max-w-md bg-white shadow-2xl flex flex-col border-x border-gray-200">
+      <main className="h-[100dvh] bg-gray-100 flex justify-center items-stretch font-body">
+        <div className="h-full w-full max-w-md bg-white shadow-2xl flex flex-col border-x border-gray-200">
           <div className="bg-gray-950 p-4 space-y-3">
             <div className="h-9 w-44 rounded bg-white/10 animate-pulse" />
             <div className="h-4 w-64 rounded bg-white/10 animate-pulse" />
@@ -1032,7 +1032,7 @@ export function IntercomPage() {
 
   if (!isValidRoom) {
     return (
-      <main className="min-h-screen bg-gray-100 flex justify-center items-center font-body p-6">
+      <main className="h-[100dvh] bg-gray-100 flex justify-center items-center font-body p-6">
         <div className="w-full max-w-md rounded-card-lg bg-white p-6 text-center shadow-xl ring-1 ring-gray-200">
           <div className="mx-auto h-12 w-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center">
             <AlertCircle size={24} />
@@ -1053,13 +1053,19 @@ export function IntercomPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
+    <main className="h-[100dvh] bg-gray-100 flex justify-center items-stretch font-body">
       {/* Mobile viewport container */}
-      <div className="w-full max-w-md bg-white shadow-2xl flex flex-col justify-between relative overflow-hidden border-x border-gray-200">
+      <div className="h-full w-full max-w-md bg-white shadow-2xl flex flex-col justify-between relative overflow-hidden border-x border-gray-200">
         
         {/* Call Banner / Overlay */}
         {callState !== "idle" && (
-          <div className="absolute inset-0 bg-gray-950/95 backdrop-blur-md z-45 flex flex-col justify-between p-8 text-white text-center">
+          <div
+            className="absolute inset-0 bg-gray-950/95 backdrop-blur-md z-45 flex flex-col justify-between px-8 py-6 text-white text-center"
+            style={{
+              paddingTop: "max(1.5rem, env(safe-area-inset-top))",
+              paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))"
+            }}
+          >
             {/* Top row */}
             <div className="pt-8">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 text-xs font-semibold uppercase tracking-wider text-primary">
@@ -1105,7 +1111,7 @@ export function IntercomPage() {
             </div>
 
             {/* Bottom Controls */}
-            <div className="pb-8 space-y-4">
+            <div className="space-y-4">
               <div className="flex justify-center gap-6">
                 {callState === "connected" && (
                   <button

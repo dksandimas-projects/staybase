@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   ArchiveRestore,
   CheckCheck,
@@ -47,6 +47,10 @@ export function IntercomChatPanel({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const { isMobile } = useBreakpoint();
   const inDrawer = variant === "drawer";
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, roomNumber]);
 
   return (
     <div
