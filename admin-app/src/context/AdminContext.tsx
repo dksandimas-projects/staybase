@@ -359,6 +359,7 @@ export interface AdminContextType {
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string }>;
   addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
+  resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
   updateRoomBlock: (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string }>;
@@ -1467,6 +1468,28 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       return { success: true };
     } catch (err: any) {
       console.error("Error creating walkin booking:", err);
+      return { success: false, error: err.message };
+    }
+  };
+
+  const resendBookingEmail = async (bookingId: string, action: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/${action}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || `Failed to resend email trigger ${action}.` };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error(`Error resending email trigger ${action}:`, err);
       return { success: false, error: err.message };
     }
   };
@@ -4091,6 +4114,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         rescheduleBooking,
         addOnsitePayment,
         addWalkinBooking,
+        resendBookingEmail,
         roomBlocks,
         createRoomBlock,
         updateRoomBlock,
