@@ -1926,6 +1926,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const audioContextRef = useRef<AudioContext | null>(null);
 
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      if (audioContextRef.current.state === "suspended") {
+        void audioContextRef.current.resume();
+      }
+    };
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    };
+  }, []);
+
   const playSynthNotification = useCallback((type: "booking" | "payment" | "message" | "arrival" | "departure") => {
     if (!soundsEnabledRef.current) return;
     try {
@@ -2200,6 +2217,92 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Call Signaling state — live from Firestore calls/{roomId}
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const ringtoneIntervalIdRef = useRef<any>(null);
+
+  const stopCallRingtone = useCallback(() => {
+    if (ringtoneIntervalIdRef.current) {
+      clearInterval(ringtoneIntervalIdRef.current);
+      ringtoneIntervalIdRef.current = null;
+    }
+  }, []);
+
+  const playCallRingtone = useCallback(() => {
+    if (!soundsEnabledRef.current) return;
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+      const frequencies = [853, 960];
+
+      const playBurst = (startTime: number, duration: number) => {
+        const gainNode = ctx.createGain();
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(0.25, startTime + 0.02);
+        gainNode.gain.setValueAtTime(0.25, startTime + duration - 0.05);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+        const oscs = frequencies.map((freq) => {
+          const osc = ctx.createOscillator();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, startTime);
+
+          const lfo = ctx.createOscillator();
+          const lfoGain = ctx.createGain();
+          lfo.type = "sine";
+          lfo.frequency.value = 14;
+          lfoGain.gain.value = 40;
+
+          lfo.connect(lfoGain);
+          lfoGain.connect(osc.frequency);
+
+          osc.connect(gainNode);
+
+          lfo.start(startTime);
+          lfo.stop(startTime + duration);
+
+          return { osc, lfo };
+        });
+
+        gainNode.connect(ctx.destination);
+
+        oscs.forEach(({ osc }) => {
+          osc.start(startTime);
+          osc.stop(startTime + duration);
+        });
+      };
+
+      // Cadence: double electronic trill (ring 0.4s, pause 0.2s, ring 0.4s)
+      playBurst(now, 0.4);
+      playBurst(now + 0.6, 0.4);
+    } catch (e) {
+      console.warn("Failed to play ringtone audio:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    const isRinging = incomingCall?.status === "ringing";
+    if (isRinging && soundsEnabled) {
+      if (!ringtoneIntervalIdRef.current) {
+        playCallRingtone();
+        ringtoneIntervalIdRef.current = setInterval(() => {
+          playCallRingtone();
+        }, 3000);
+      }
+    } else {
+      stopCallRingtone();
+    }
+
+    return () => {
+      stopCallRingtone();
+    };
+  }, [incomingCall?.status, soundsEnabled, playCallRingtone, stopCallRingtone]);
+
   const adminPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const adminMediaStreamRef = useRef<MediaStream | null>(null);
   const adminRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
