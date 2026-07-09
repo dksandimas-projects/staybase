@@ -1084,11 +1084,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               const prevStatus = prevStatusMap.get(b.id);
               if (!prevIds.has(b.id)) {
                 hasNewBooking = true;
-                if (b.status === "payment-pending") {
+                if (b.status === "pending") {
                   hasPaymentPending = true;
                 }
               } else if (prevStatus !== b.status) {
-                if (b.status === "payment-pending") {
+                if (b.status === "pending") {
                   hasPaymentPending = true;
                 }
                 if (b.status === "checked-in") {

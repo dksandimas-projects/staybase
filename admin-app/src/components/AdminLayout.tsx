@@ -116,7 +116,7 @@ export function AdminLayout() {
               className="flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
               title={soundsEnabled ? "Mute Sounds" : "Unmute Sounds"}
             >
-              {soundsEnabled ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true")}
+              {soundsEnabled ? <Volume2 size={18} aria-hidden="true" /> : <VolumeX size={18} aria-hidden="true" />}
             </button>
 
             {isMobile ? (
