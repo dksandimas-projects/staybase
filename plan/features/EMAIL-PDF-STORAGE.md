@@ -36,6 +36,7 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 ### Email Content Checklist
 
 - [ ] All emails include: spark inn logo, hotel name, address, contact
+- [ ] **Bugfix — wrong logo variant on the dark email header** (owner request 2026-07-09): `guest-app/server/handlers/email.ts`'s `brandLogoUrl()` (~line 76-78) returns `config.logos.navbar`, and it's rendered inside the email layout's hero block (~line 230) whose background is `config.colors.sidebar` — a dark color. Per `CLAUDE.md` Hard Rules ("Footer and dark backgrounds always use `config.logos.white`"), this should be using `config.logos.white`, not the navbar logo — the navbar variant is meant for a light/transparent background, not the dark hero. Fix: change `brandLogoUrl()` to resolve `config.logos.white` instead of `config.logos.navbar`.
 - [ ] Booking submitted: acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under review and a final confirmation email will follow after manual verification; includes booking ref, room, dates, payment instructions, link to `/my-booking`
 - [ ] Payment confirmed: receipt of payment, full booking summary
 - [ ] Booking confirmed: final confirmation, check-in time, check-in instructions
