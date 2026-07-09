@@ -60,6 +60,7 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 - [ ] **Label** (text) — display name shown to guests (e.g. "GCash", "Bank Transfer", "Pay at Hotel").
 - [ ] **Account name** (text) — recipient name shown beside the QR. Leave empty for "Pay at Hotel" or methods that don't need it.
 - [ ] **Account number** (text) — for PayPal, use the PayPal email address.
+- [ ] **Require reference number** (toggle, owner request 2026-07-09) — `requireReferenceNumber?: boolean`, **defaults to `true`** when missing (so existing methods behave as "required" without needing a migration, matching the surface-pill default pattern above). When on, the guest booking flow (`/book` Step 3) shows a required "Reference Number" text field alongside the payment proof screenshot upload for that method; when off, the field is hidden and not required. Intended for methods like Pay at Hotel/COD where a transaction reference doesn't exist — admin can flip it off per method rather than it being hardcoded to only the online methods.
 - [ ] **Enable toggle** — `isEnabled: boolean`; hidden methods are not shown to guests. Per #111, this is now the **regular-booking** surface switch (the leftmost of the three inline pills in the row).
 - [ ] **Per-method surface pills** (per #111) — three inline pill toggles in each row control which surfaces the method is offered on:
   - **Booking** (leftmost, the existing `isEnabled` toggle) — visibility on `/book` Step 3.

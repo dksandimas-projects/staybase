@@ -99,6 +99,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Payment method selector — Pay at Hotel / GCash / PayPal / other enabled methods (from `settings/hotelConfig`)
 - [ ] Payment screenshot upload — shown only for non-pay-at-hotel methods
 - [ ] Screenshot upload: accepts image files only, max 5MB
+- [ ] **Reference number field** (owner request 2026-07-09) — shown alongside the screenshot upload only when the selected payment method's `requireReferenceNumber` is `true` (default; see `plan/features/SETTINGS.md §2 Payment Methods`). Required text field when shown; Confirm button follows the same "disabled until required fields complete" pattern as the discount ID upload above. Hidden entirely for methods with `requireReferenceNumber: false` (e.g. an admin who wants Pay at Hotel/COD-style methods to skip it).
 - [ ] Payment method QR code or account info displayed based on selection
 - [ ] Cancellation policy — collapsible section showing `settings/websiteContent.cancellationPolicy`
 - [ ] Terms & conditions checkbox (required)
@@ -115,6 +116,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Booking flow preallocates a Firestore booking document ID before Step 3 uploads; `/api/bookings/create` must create the booking document at that same ID
 - [ ] Payment screenshot uploaded to Firebase Storage before booking creation using the preallocated booking ID path
 - [ ] `paymentProofUrl` stored in booking document
+- [ ] `paymentReferenceNumber` stored on booking document when collected; server-side, `/api/bookings/create` re-checks the selected method's `requireReferenceNumber` (never trusts a client-side-only skip) and rejects creation if required but missing — mirrors the existing discount ID server-side re-check pattern. `requireReferenceNumber` only gates whether the **guest** is asked/required to provide it at booking time — it does not limit staff. Staff can always view, add, or edit `paymentReferenceNumber` from the admin booking drawer regardless of that setting (see `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`), since front desk may need to add one manually when confirming a payment even for a method the guest wasn't asked to supply it for.
 - [ ] Pay at Hotel: no upload required, `paymentMethod = "pay-at-hotel"`
 - [ ] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) using the preallocated booking ID path; `discountIdPhotoUrl` stored on booking document
 - [ ] Discount ID upload is required client-side but also validated server-side — if `discountType != ""` and `discountIdPhotoUrl` is null, booking creation is rejected

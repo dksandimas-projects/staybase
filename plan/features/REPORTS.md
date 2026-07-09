@@ -8,6 +8,24 @@
 
 The `/reports` page gives staff visibility into hotel performance and sales over time. Organized into two tabs: **Performance** (occupancy, bookings by source) and **Sales** (all revenue streams consolidated). Both tabs are exportable as PDF and XLSX. Accessible to both Front Desk and Admin roles.
 
+### Export CSV Button (page header, both tabs)
+
+- [ ] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
+- [ ] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
+
+### Custom Date Range (owner request 2026-07-09)
+
+**Current state:** the page-header date selector (`dateRange` state, `ReportsPage.tsx` ~line 77, 644-655) is a single `<select>` with only three fixed options — Last 7 Days / Last 30 Days / Last Quarter. `periodStart` is always computed as "today minus N days" and `periodEnd` is always "today, end of day" (~lines 99-110) — there is no way to pick an arbitrary start and end date, or a range not ending today (e.g. "last month" or a specific week in the past). This affects every report and export on the page, since `periodStart`/`periodEnd` gate all the filtered data.
+
+**Target behavior — keep the dropdown, add a custom option alongside it:**
+
+- ⬜ Add a fourth option to the existing `<select>`: **"Custom Range"**. The three existing options (7/30/90 days) are unchanged and remain the default.
+- ⬜ When "Custom Range" is selected, reveal two date inputs (start date, end date) next to the dropdown — reuse `DateRangePicker`-style native `<input type="date">` fields already used elsewhere in the app, not a new custom calendar component.
+- ⬜ `periodStart`/`periodEnd` derive from the two picked dates when in custom mode, instead of the "N days back from today" calculation — end date is no longer forced to be today.
+- ⬜ Validation: end date must be on or after start date; a sensible max range (e.g. disable/warn past 1 year) to keep exports from becoming unreasonably large.
+- ⬜ The selected custom range is reflected in export filenames/labels the same way the preset ranges already are (e.g. `sparkinn_bookings_{start}_to_{end}.csv`, the Sales XLSX "Date Range" summary row) — no separate code path needed there since those already read from `periodStart`/`periodEnd`.
+- ⬜ Switching back from "Custom Range" to a preset option reverts to the normal "N days back from today" behavior.
+
 ---
 
 ## UX Checklist
@@ -72,7 +90,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 
 #### Sales Detail Table
 - [ ] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders**
-- [ ] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Status
+- [ ] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
 - [ ] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
 - [ ] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
 - [ ] All sub-tables are paginated (20 rows default), searchable by ref or name
@@ -264,6 +282,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 | Total Collected Onsite | sum of `payments[]` subcollection |
 | Outstanding Balance | `totalPrice − totalCollected` |
 | Payment Method | `paymentMethod` |
+| Reference Number | `paymentReferenceNumber` (owner request 2026-07-09; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`) |
 | Source | `source` |
 | Status | `status` |
 | Is Corporate | `isCorporate` |
