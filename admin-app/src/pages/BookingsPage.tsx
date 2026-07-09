@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getManilaDateInfo, type PaymentMethodConfig } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type PaymentMethodConfig } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -1409,6 +1409,14 @@ export function BookingsPage() {
     };
   };
 
+  const selectedBookingCheckInReadiness = selectedBooking
+    ? getCheckInReadiness({
+        status: selectedBooking.status,
+        guestIdPhotoUrl: selectedBooking.guestIdPhotoUrl,
+        guestRegistration: selectedBooking.guestRegistration
+      })
+    : null;
+
   const syncSelectedBooking = (updates: Partial<Booking>) => {
     if (!selectedBooking) return;
     updateBookingStatus(selectedBooking.id, selectedBooking.status, updates);
@@ -2623,13 +2631,41 @@ export function BookingsPage() {
                 </button>
               )}
 
-              {(selectedBooking.status === "confirmed" || selectedBooking.status === "payment-confirmed") && (
-                <button
-                  onClick={() => handleStatusTransition("checked-in")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
-                >
-                  Verify Guest ID & Check In
-                </button>
+              {(selectedBooking.status === "confirmed" || selectedBooking.status === "payment-confirmed") && selectedBookingCheckInReadiness && (
+                <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-gray-900">Ready for check-in</p>
+                      <p className="mt-0.5 text-[11px] text-gray-600">
+                        Guest ID, registration details, and signature must be saved first.
+                      </p>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                      selectedBookingCheckInReadiness.ready
+                        ? "bg-status-green-bg text-status-green-text"
+                        : "bg-amber-50 text-amber-700"
+                    }`}>
+                      {selectedBookingCheckInReadiness.ready ? "Ready" : "Missing items"}
+                    </span>
+                  </div>
+                  {!selectedBookingCheckInReadiness.ready ? (
+                    <ul className="mt-3 grid gap-1 text-[11px] font-medium text-amber-800 sm:grid-cols-2">
+                      {selectedBookingCheckInReadiness.missingItems.map((item) => (
+                        <li key={item} className="flex items-center gap-1.5">
+                          <XCircle size={12} className="shrink-0" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <button
+                    onClick={() => handleStatusTransition("checked-in")}
+                    disabled={!selectedBookingCheckInReadiness.ready}
+                    className="mt-3 min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
+                  >
+                    Verify Guest ID & Check In
+                  </button>
+                </div>
               )}
 
               {selectedBooking.status === "checked-in" && (

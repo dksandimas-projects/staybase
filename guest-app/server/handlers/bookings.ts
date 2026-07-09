@@ -4,6 +4,7 @@ import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrig
 import {
   calculateSeasonalAwareRoomTotal,
   calculateVoucherDiscount,
+  getCheckInReadiness,
   normalizeSeasonalRateOverrides,
   toDateOrNull,
   validateCorporateCode,
@@ -1788,8 +1789,13 @@ export async function handleCheckinBooking(req: any, res: any) {
         throw new Error("Booking not found.");
       }
       const bookingData = bookingDoc.data() || {};
-      if (!["confirmed", "payment-confirmed"].includes(bookingData.status)) {
-        throw new Error(`Booking can only be checked in from confirmed or payment-confirmed status (current: ${bookingData.status}).`);
+      const readiness = getCheckInReadiness({
+        status: bookingData.status,
+        guestIdPhotoUrl: bookingData.guestIdPhotoUrl,
+        guestRegistration: bookingData.guestRegistration
+      });
+      if (!readiness.ready) {
+        throw new Error(`Booking is not ready for check-in. Missing: ${readiness.missingItems.join(", ")}.`);
       }
       if (!bookingData.roomId) {
         throw new Error("Booking has no assigned room.");
@@ -1829,6 +1835,14 @@ export async function handleCheckinBooking(req: any, res: any) {
 
     return res.status(200).json({ success: true, data: { status: "checked-in" } });
   } catch (error: any) {
+    if (
+      error?.message?.startsWith("Booking is not ready for check-in.") ||
+      error?.message?.startsWith("Assigned room") ||
+      error?.message === "Booking not found." ||
+      error?.message === "Booking has no assigned room."
+    ) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
     console.error("Check-in booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }

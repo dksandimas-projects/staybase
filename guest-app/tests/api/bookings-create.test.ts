@@ -344,6 +344,16 @@ const FUTURE_CHECK_IN_2 = isoDate(32);
 const FUTURE_CHECK_OUT_2 = isoDate(34);
 const FUTURE_CHECK_IN_3 = isoDate(36);
 const FUTURE_CHECK_OUT_3 = isoDate(39);
+const completeGuestRegistration = {
+  nationality: "Filipino",
+  address: "Tagbilaran City",
+  dateOfBirth: "1980-01-01",
+  gender: "Female",
+  idType: "Passport",
+  idNumber: "P1234567",
+  emergencyContact: "Juan Dela Cruz / 09171234567",
+  signatureStatus: "signed"
+};
 
 describe("/api/bookings/create", () => {
   beforeEach(() => {
@@ -1116,6 +1126,120 @@ describe("/api/bookings/create", () => {
       // Per BF-15 (booking-flow audit 2026-06-26): `recordedBy` is
       // the staff UID, not the email (PII + audit-log concern).
       expect(loggedPayment.recordedBy).toBe("mock_staff_uid");
+    });
+
+    test("POST /api/bookings/checkin: blocks missing guest ID photo", async () => {
+      mockBookings.push({
+        id: "booking_checkin_no_id",
+        roomId: "room_101",
+        status: "confirmed",
+        guestIdPhotoUrl: null,
+        guestRegistration: completeGuestRegistration
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_no_id" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.stringContaining("Guest ID photo")
+      }));
+      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_no_id")).toBeUndefined();
+    });
+
+    test("POST /api/bookings/checkin: blocks incomplete guest registration", async () => {
+      mockBookings.push({
+        id: "booking_checkin_incomplete",
+        roomId: "room_101",
+        status: "confirmed",
+        guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
+        guestRegistration: {
+          ...completeGuestRegistration,
+          emergencyContact: "",
+          signatureStatus: "pending"
+        }
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_incomplete" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.stringContaining("Emergency contact")
+      }));
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        error: expect.stringContaining("Guest signature marked signed")
+      }));
+      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_incomplete")).toBeUndefined();
+    });
+
+    test("POST /api/bookings/checkin: succeeds from confirmed when registration packet is complete", async () => {
+      mockBookings.push({
+        id: "booking_checkin_confirmed",
+        roomId: "room_101",
+        status: "confirmed",
+        guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
+        guestRegistration: completeGuestRegistration
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_confirmed" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_confirmed",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
+      expect(updateCalls).toContainEqual({
+        path: "rooms/room_101",
+        data: expect.objectContaining({ status: "occupied" })
+      });
+    });
+
+    test("POST /api/bookings/checkin: succeeds directly from payment-confirmed", async () => {
+      mockBookings.push({
+        id: "booking_checkin_paid",
+        roomId: "room_101",
+        status: "payment-confirmed",
+        guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
+        guestRegistration: completeGuestRegistration
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_paid" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_paid",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
+    });
+
+    test("POST /api/bookings/checkin: rejects terminal statuses", async () => {
+      mockBookings.push({
+        id: "booking_checkin_cancelled",
+        roomId: "room_101",
+        status: "cancelled",
+        guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
+        guestRegistration: completeGuestRegistration
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_cancelled" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.stringContaining("Booking status must be confirmed or payment-confirmed")
+      }));
+      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_cancelled")).toBeUndefined();
     });
 
     test("POST /api/bookings/reject-discount: rejects government discount and restores full price", async () => {

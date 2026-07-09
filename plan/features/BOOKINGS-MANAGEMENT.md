@@ -61,7 +61,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [x] Guest registry fields: nationality, address, DOB, gender, ID type + number, emergency contact, vehicle plate
   - [x] Physical registration signature status toggle
   - [x] Registration PDF preview action placeholder
-  - [ ] Check-in action is disabled until required guest registration fields are saved and a guest ID photo is uploaded
+  - [x] Check-in action is disabled until required guest registration fields are saved and a guest ID photo is uploaded
 - [x] Breakfast selections panel — shown in drawer only if `booking.hasBreakfast: true`
   - [x] Grid of dates (one column per night) × guests (one row per guest)
   - [x] Each cell: dropdown of active silog items from `settings/breakfastConfig.silogItems`
@@ -106,7 +106,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - `checked-in` → `checked-out`
   - `checked-out` → no further transitions
   - `cancelled` → no further transitions
-- [ ] Check-in gate: `/api/bookings/checkin` must reject check-in unless the booking is in `confirmed` or `payment-confirmed` status, has `guestIdPhotoUrl`, and has saved required `guestRegistration` fields. The admin drawer should mirror the same rule client-side with a disabled CTA and plain-language missing-items checklist.
+- [x] Check-in gate: `/api/bookings/checkin` rejects check-in unless the booking is in `confirmed` or `payment-confirmed` status, has `guestIdPhotoUrl`, and has saved required `guestRegistration` fields. The admin drawer mirrors the same rule client-side with a disabled CTA and plain-language missing-items checklist.
 - [ ] Status update: direct staff `updateDoc` on `bookings/{bookingId}` for ordinary operational transitions, updating `status` + `updatedAt` + `handledBy`
 - [ ] `confirmed` and `payment-confirmed` status changes trigger corresponding emails via email API route after the staff update succeeds
 - [ ] Cancellation: POST to `/api/bookings/cancel` so owner/staff authorization, status validation, `cancellationReason`, and cancellation email stay server-side
@@ -174,12 +174,12 @@ Prevent staff from checking in a guest until payment/booking status is eligible 
 
 ### Implementation Steps
 
-1. Add a shared helper for check-in readiness so the drawer UI and server validation use the same required-field list.
-2. Update the booking drawer to show a compact "Ready for check-in" checklist beside the check-in action.
-3. Disable **Verify Guest ID & Check In** until all required items pass, and show the exact missing items in plain language.
-4. Update `/api/bookings/checkin` to enforce the same rule server-side before changing the booking or room status.
-5. Fix the current `payment-confirmed → confirmed` mismatch by allowing `/api/bookings/confirm` to accept `payment-confirmed`, or simplify the operational flow so check-in from `payment-confirmed` is the documented path.
-6. Add tests for blocked check-in without guest ID, blocked check-in with incomplete registration, successful check-in from `confirmed`, successful check-in from `payment-confirmed`, and rejected check-in from terminal statuses.
+1. ✅ Add a shared helper for check-in readiness so the drawer UI and server validation use the same required-field list.
+2. ✅ Update the booking drawer to show a compact "Ready for check-in" checklist beside the check-in action.
+3. ✅ Disable **Verify Guest ID & Check In** until all required items pass, and show the exact missing items in plain language.
+4. ✅ Update `/api/bookings/checkin` to enforce the same rule server-side before changing the booking or room status.
+5. ✅ Resolve the `payment-confirmed → confirmed` mismatch by keeping direct check-in from `payment-confirmed` as a documented supported path.
+6. ✅ Add tests for blocked check-in without guest ID, blocked check-in with incomplete registration, successful check-in from `confirmed`, successful check-in from `payment-confirmed`, and rejected check-in from terminal statuses.
 
 ### Acceptance Criteria
 
