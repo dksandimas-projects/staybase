@@ -175,6 +175,8 @@ export function CorporateBookingPage() {
   const [proofUpload, setProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
+  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
+  const [paymentProofError, setPaymentProofError] = useState("");
   const [termsConsent, setTermsConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -200,6 +202,7 @@ export function CorporateBookingPage() {
       qrUrl: string;
       isEnabled: boolean;
       showInCorporate?: boolean;
+      requireReferenceNumber?: boolean;
     }>
   >([]);
   useEffect(() => {
@@ -567,17 +570,17 @@ export function CorporateBookingPage() {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (!ACCEPTED_UPLOAD_TYPES.has(file.type)) {
-        setSubmitError("Please upload a JPG, PNG, or WEBP image.");
+        setPaymentProofError("Please upload a JPG, PNG, or WEBP image.");
         e.target.value = "";
         return;
       }
       if (file.size > MAX_UPLOAD_BYTES) {
-        setSubmitError("Please upload an image that is 5MB or smaller.");
+        setPaymentProofError("Please upload an image that is 5MB or smaller.");
         e.target.value = "";
         return;
       }
       setUploadingProof(true);
-      setSubmitError("");
+      setPaymentProofError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
@@ -586,7 +589,7 @@ export function CorporateBookingPage() {
         setProofUpload({ name: file.name, url });
       } catch (err) {
         console.error("Corporate payment proof upload failed:", err);
-        alert("Receipt upload failed. Please try again.");
+        setPaymentProofError("Receipt upload failed. Please try again.");
       } finally {
         setUploadingProof(false);
       }
@@ -640,8 +643,19 @@ export function CorporateBookingPage() {
     setIsSubmitting(true);
     setSubmitError("");
 
+    // Validate payment reference number if required
+    const isPersonalPay = guestDetails.billingArrangement === "personal";
+    if (isPersonalPay) {
+      const pmConfig = corporatePaymentMethods.find((p) => p.method === paymentMethod);
+      const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+      if (isRefRequired && !paymentReferenceNumber.trim()) {
+        setSubmitError("Please enter your payment reference number.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     try {
-      const isPersonalPay = guestDetails.billingArrangement === "personal";
       const body = {
         bookingId,
         roomType: selectedTypeEntry?.value ?? "",
@@ -671,6 +685,7 @@ export function CorporateBookingPage() {
         // via LOU per decision #99).
         paymentMethod: isPersonalPay ? paymentMethod : "pay-at-hotel",
         paymentProofUrl: isPersonalPay ? proofUpload?.url ?? null : null,
+        paymentReferenceNumber: isPersonalPay && paymentReferenceNumber.trim() ? paymentReferenceNumber.trim() : null,
         // Per W1.3 / decision #79 / audit S1.5: the server
         // derives `isCorporate` from the validated `corporateCode`
         // lookup. The client no longer sets it. The booking body's
@@ -1249,7 +1264,7 @@ export function CorporateBookingPage() {
               {/* Company Name */}
               <label htmlFor="companyName" className="grid gap-2 text-sm font-medium text-gray-700">
                 Company Name
-                <span className="relative">
+                <span className="relative block">
                   <Building size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
                   <input
                     id="companyName"
@@ -1322,7 +1337,7 @@ export function CorporateBookingPage() {
               {/* Company Address */}
               <label htmlFor="companyAddress" className="grid gap-2 text-sm font-medium text-gray-700">
                 Company Address
-                <span className="relative">
+                <span className="relative block">
                   <Building size={17} className="absolute left-3 top-4 text-primary" />
                   <textarea
                     id="companyAddress"
@@ -1365,7 +1380,7 @@ export function CorporateBookingPage() {
               />
               <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
                 Special requests
-                <span className="relative">
+                <span className="relative block">
                   <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
                   <textarea
                     id="requests"
@@ -1451,12 +1466,14 @@ export function CorporateBookingPage() {
     // Per BI-05: personal pay requires the uploaded receipt before
     // Confirm unlocks. Per BI-01: Confirm also waits for the
     // Turnstile token — submitting without one is a guaranteed 400.
+    const currentPm = corporatePaymentMethods.find((p) => p.method === paymentMethod);
+    const isRefRequired = currentPm?.requireReferenceNumber !== false;
     const canConfirm =
       termsConsent &&
       Boolean(selectedTypeEntry) &&
       Boolean(reviewTurnstile.token) &&
       !uploadingProof &&
-      (!isPersonalPay || Boolean(proofUpload));
+      (!isPersonalPay || (Boolean(proofUpload) && (!isRefRequired || Boolean(paymentReferenceNumber.trim()))));
 
     return bookingShell(
       <>
@@ -1592,6 +1609,28 @@ export function CorporateBookingPage() {
                       </label>
                     )}
                   </div>
+                  {paymentProofError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
+                  )}
+
+                  {/* Reference Number Input */}
+                  {currentPm?.requireReferenceNumber !== false && (
+                    <div className="mt-4">
+                      <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
+                        <span>
+                          Payment Reference Number <span className="text-red-500">*</span>
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          value={paymentReferenceNumber}
+                          onChange={(e) => setPaymentReferenceNumber(e.target.value)}
+                          placeholder="Enter transaction reference or trace number"
+                          className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light text-sm"
+                        />
+                      </label>
+                    </div>
+                  )}
                 </div>
               ) : (
                 /* Company Charge Back (no LOU upload per W2.11 / decision #99) */
@@ -1810,7 +1849,7 @@ function TextField({ error, icon, label, onBlur, onChange, placeholder, required
     <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative">
+      <span className="relative block">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}

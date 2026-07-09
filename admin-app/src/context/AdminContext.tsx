@@ -134,12 +134,15 @@ export interface Booking {
   source: "online" | "walk-in" | "phone" | "facebook" | "corporate";
   notes: string;
   memberId: string | null;
+  memberDiscountPct?: number;
   pointsRedeemed: number;
   pointsRedeemedValue: number;
   pointsRedeemedBy: string | null;
   pointsRedeemedAt: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  paymentReferenceNumber?: string | null;
+  rescheduleHistory?: any[];
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;
@@ -158,6 +161,7 @@ export interface Booking {
     signatureStatus: "pending" | "signed";
   };
   breakfastSelections?: Record<string, string>;
+  breakfastServed?: Record<string, boolean>;
   earlyCheckIn?: {
     status: "requested" | "approved" | "declined";
     requestedTime: string;
@@ -263,6 +267,7 @@ export interface IntercomMessage {
   isStoreOrder: boolean;
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
+  currentStayId?: string;
 }
 
 export interface IntercomThread {
@@ -271,6 +276,7 @@ export interface IntercomThread {
   guestName: string;
   resolved: boolean;
   updatedAt: string;
+  currentStayId?: string;
 }
 
 export interface IncomingCall {
@@ -1290,7 +1296,18 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const updateBookingStatus = async (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => {
     try {
+      const currentBooking = bookings.find((b) => b.id === bookingId);
+      const isStatusChanging = currentBooking ? currentBooking.status !== status : true;
       const bookingDocRef = doc(db, "bookings", bookingId);
+
+      if (!isStatusChanging) {
+        await updateDoc(bookingDocRef, {
+          ...details,
+          updatedAt: serverTimestamp(),
+          handledBy: currentUser?.uid || currentUser?.email || "staff"
+        });
+        return;
+      }
 
       if (status === "cancelled") {
         const token = await auth.currentUser?.getIdToken(true);
@@ -1957,27 +1974,20 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const now = ctx.currentTime;
 
       if (type === "message") {
-        const osc1 = ctx.createOscillator();
-        const gain1 = ctx.createGain();
-        osc1.type = "sine";
-        osc1.frequency.setValueAtTime(1567.98, now);
-        gain1.gain.setValueAtTime(0.05, now);
-        gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-        osc1.connect(gain1);
-        gain1.connect(ctx.destination);
-        osc1.start(now);
-        osc1.stop(now + 0.08);
-
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.type = "sine";
-        osc2.frequency.setValueAtTime(2093.00, now + 0.08);
-        gain2.gain.setValueAtTime(0.05, now + 0.08);
-        gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-        osc2.connect(gain2);
-        gain2.connect(ctx.destination);
-        osc2.start(now + 0.08);
-        osc2.stop(now + 0.18);
+        const notes = [1567.98, 2093.00, 1567.98, 2093.00];
+        notes.forEach((freq, index) => {
+          const start = now + index * 0.14;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, start);
+          gain.gain.setValueAtTime(0.09, start);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.12);
+        });
       } else if (type === "booking") {
         const notes = [261.63, 329.63, 392.00, 523.25];
         notes.forEach((freq, index) => {
@@ -2079,7 +2089,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             roomNumber,
             guestName: data.guestName || "",
             resolved: !!data.resolved,
-            updatedAt: formatIntercomTimestamp(data.updatedAt)
+            updatedAt: formatIntercomTimestamp(data.updatedAt),
+            currentStayId: data.currentStayId || undefined
           };
         });
         setIntercomThreads(threads);
@@ -2124,7 +2135,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               isQuickRequest: !!data.isQuickRequest,
               isStoreOrder: !!data.isStoreOrder,
               orderRef: data.orderRef || undefined,
-              isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
+              isEarlyCheckInRequest: !!data.isEarlyCheckInRequest,
+              currentStayId: data.currentStayId || undefined
             };
           });
 
@@ -2163,6 +2175,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       await setDoc(doc(db, "intercoms", roomId), {
         roomId,
         roomNumber: roomId,
+        currentStayId: intercomThreads[roomId]?.currentStayId || null,
         resolved: false,
         updatedAt: serverTimestamp()
       }, { merge: true });
@@ -2175,7 +2188,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         isRead: sender === "front-desk",
         isQuickRequest: false,
         isStoreOrder: false,
-        isEarlyCheckInRequest: false
+        isEarlyCheckInRequest: false,
+        currentStayId: intercomThreads[roomId]?.currentStayId || null
       });
     } catch (error) {
       console.error("Error sending intercom message:", error);
@@ -2803,10 +2817,39 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           { title: "Member-only stay offers", description: "", icon: "tag", isEnabled: true },
           { title: "Request early check-in", description: "", icon: "clock", isEnabled: true }
         ]
+      },
+      sectionHeaders: {
+        roomsEyebrow: "",
+        roomsHeading: "",
+        roomsSubtext: "",
+        amenitiesEyebrow: "",
+        amenitiesHeading: "",
+        amenitiesSubtext: "",
+        servicesEyebrow: "",
+        servicesHeading: "",
+        servicesSubtext: ""
       }
     },
     about: {
       heroHeading: "about us",
+      heroPhotoUrl: ""
+    },
+    roomsCatalog: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
+    },
+    contact: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
+    },
+    notFound: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
       heroPhotoUrl: ""
     },
     corporate: {
@@ -2876,10 +2919,39 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             { title: "Member-only stay offers", description: "", icon: "tag", isEnabled: true },
             { title: "Request early check-in", description: "", icon: "clock", isEnabled: true }
           ]
+        },
+        sectionHeaders: {
+          roomsEyebrow: "",
+          roomsHeading: "",
+          roomsSubtext: "",
+          amenitiesEyebrow: "",
+          amenitiesHeading: "",
+          amenitiesSubtext: "",
+          servicesEyebrow: "",
+          servicesHeading: "",
+          servicesSubtext: ""
         }
       },
       about: {
         heroHeading: "about us",
+        heroPhotoUrl: ""
+      },
+      roomsCatalog: {
+        heroEyebrow: "",
+        heroHeading: "",
+        heroSubtext: "",
+        heroPhotoUrl: ""
+      },
+      contact: {
+        heroEyebrow: "",
+        heroHeading: "",
+        heroSubtext: "",
+        heroPhotoUrl: ""
+      },
+      notFound: {
+        heroEyebrow: "",
+        heroHeading: "",
+        heroSubtext: "",
         heroPhotoUrl: ""
       },
     corporate: {
@@ -2968,6 +3040,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           }
           return seed.homepage.featuredTypeValues;
         })(),
+        sectionHeaders: {
+          ...seed.homepage.sectionHeaders,
+          ...((homepageRaw.sectionHeaders as Record<string, unknown>) || {})
+        },
         sparkRewards: {
           ...seed.homepage.sparkRewards,
           ...(sparkRewardsRaw || {}),
@@ -2977,6 +3053,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         }
       },
       about: { ...seed.about, ...(r.about || {}) },
+      roomsCatalog: { ...seed.roomsCatalog, ...(r.roomsCatalog || {}) },
+      contact: { ...seed.contact, ...(r.contact || {}) },
+      notFound: { ...seed.notFound, ...(r.notFound || {}) },
       corporate: {
         ...seed.corporate,
         ...(r.corporate || {}),
@@ -3219,7 +3298,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         ? entry.showInCorporate
         : method === "pay-at-hotel" || method === "cod" || method === "add-to-bill"
           ? false
-          : undefined
+          : undefined,
+      requireReferenceNumber: typeof entry?.requireReferenceNumber === "boolean"
+        ? entry.requireReferenceNumber
+        : true
     };
   };
 
@@ -3346,6 +3428,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       };
       if (typeof method.showInStore === "boolean") clean.showInStore = method.showInStore;
       if (typeof method.showInCorporate === "boolean") clean.showInCorporate = method.showInCorporate;
+      if (typeof method.requireReferenceNumber === "boolean") clean.requireReferenceNumber = method.requireReferenceNumber;
       return clean;
     });
     setPaymentMethods(sanitized);
@@ -3366,7 +3449,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       qrUrl: config.qrUrl,
       isEnabled: config.isEnabled,
       showInStore: config.showInStore,
-      showInCorporate: config.showInCorporate
+      showInCorporate: config.showInCorporate,
+      requireReferenceNumber: config.requireReferenceNumber
     };
     if (!normalized.method) {
       notify.error("Cannot add payment method", "Method key is required.");

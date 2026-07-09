@@ -187035,6 +187035,7 @@ var config = {
   pageTitle: "spark inn",
   metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
   ogImage: "og-image.png",
+  priceRange: "\u20B1\u20B1",
   address: {
     street: "J. Borja St",
     city: "Tagbilaran City",
@@ -187049,6 +187050,7 @@ var config = {
   supportEmail: "sparkinn.dev@gmail.com",
   facebookUrl: "https://www.facebook.com/sparkinnbohol",
   instagramUrl: "https://www.instagram.com/sparkinnbohol",
+  twitterHandle: "",
   checkInTime: "14:00",
   checkOutTime: "12:00"
 };
@@ -187703,7 +187705,8 @@ var PaymentMethodConfigSchema = external_exports.object({
   // Optional on the schema for the same reason: pre-#111
   // entries do not have these fields.
   showInStore: external_exports.boolean().optional(),
-  showInCorporate: external_exports.boolean().optional()
+  showInCorporate: external_exports.boolean().optional(),
+  requireReferenceNumber: external_exports.boolean().optional()
 });
 var PaymentMethodsArraySchema = external_exports.array(PaymentMethodConfigSchema).max(20, "Too many payment methods (max 20)");
 var LegacyPaymentMethodConfigSchema = external_exports.object({
@@ -187738,6 +187741,17 @@ var PublicHeroSchema = external_exports.object({
   heroPhotoUrl: external_exports.string().default("")
 });
 var HomepageContentSchema = PublicHeroSchema.extend({
+  sectionHeaders: external_exports.object({
+    roomsEyebrow: external_exports.string().default(""),
+    roomsHeading: external_exports.string().default(""),
+    roomsSubtext: external_exports.string().default(""),
+    amenitiesEyebrow: external_exports.string().default(""),
+    amenitiesHeading: external_exports.string().default(""),
+    amenitiesSubtext: external_exports.string().default(""),
+    servicesEyebrow: external_exports.string().default(""),
+    servicesHeading: external_exports.string().default(""),
+    servicesSubtext: external_exports.string().default("")
+  }).optional(),
   amenities: external_exports.array(
     external_exports.object({
       title: external_exports.string(),
@@ -187823,6 +187837,9 @@ var WebsiteContentSchema = external_exports.object({
   corporate: CorporateContentSchema,
   rewards: RewardsContentSchema,
   branding: BrandingConfigSchema,
+  roomsCatalog: PublicHeroSchema.optional(),
+  contact: PublicHeroSchema.optional(),
+  notFound: PublicHeroSchema.optional(),
   privacyPolicyBody: external_exports.string().optional(),
   cancellationPolicy: external_exports.string().optional(),
   houseRules: external_exports.string().optional(),
@@ -188243,7 +188260,7 @@ function addressLine() {
   return `${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}, ${hotel_config_default.address.postalCode}`;
 }
 function brandLogoUrl() {
-  return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.navbar)}`);
+  return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.white)}`);
 }
 function toDate2(value) {
   if (!value) return null;
@@ -189268,7 +189285,7 @@ function getConfiguredBookingRefPrefix() {
 }
 var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
-var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed"];
+var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
@@ -189364,6 +189381,7 @@ async function handleCreateBooking(req, res) {
     voucherCode,
     paymentMethod,
     paymentProofUrl,
+    paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
     linkedInquiryId
@@ -189468,6 +189486,14 @@ async function handleCreateBooking(req, res) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data();
+      if (paymentMethod !== "pay-at-hotel") {
+        const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p) => p && p.method === paymentMethod);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && (!paymentReferenceNumber || !String(paymentReferenceNumber).trim())) {
+          throw new Error("Payment reference number is required.");
+        }
+      }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
       if (!typeEntry) {
@@ -189759,6 +189785,7 @@ async function handleCreateBooking(req, res) {
         // `|| null` coalesces both `""` and `undefined` to
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
+        paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
@@ -189920,6 +189947,7 @@ async function handleCreateWalkin(req, res) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
+    paymentReferenceNumber,
     status,
     totalPriceOverride,
     linkedInquiryId
@@ -190095,6 +190123,7 @@ async function handleCreateWalkin(req, res) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
+        paymentReferenceNumber: paymentReferenceNumber || null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",
@@ -190968,6 +190997,11 @@ async function handleRescheduleBooking(req, res) {
         ...updatedBooking,
         id: bookingId
       };
+      if (booking.status === "checked-in") {
+        const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
+        transaction.update(oldRoomRef, { status: "available" });
+        transaction.update(roomRef, { status: "occupied" });
+      }
       transaction.update(bookingRef, updatedBooking);
     });
     if (fullBookingForEmail) {
@@ -193015,6 +193049,86 @@ async function handleGetStoreOrderStatus(req, res) {
   }
 }
 
+// server/handlers/intercom.ts
+var MAX_ROOM_NUMBER_LENGTH2 = 12;
+var MAX_LAST_NAME_LENGTH = 80;
+var MAX_BOOKING_ID_LENGTH = 128;
+function normalizeName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ");
+}
+function getBookingLastName(data) {
+  const guestDetails = data.guestDetails && typeof data.guestDetails === "object" ? data.guestDetails : {};
+  const explicitLastName = guestDetails.lastName || data.guestLastName || data.lastName;
+  if (explicitLastName) return normalizeName(explicitLastName);
+  const nameParts = String(data.guestName || "").trim().split(/\s+/).filter(Boolean);
+  return normalizeName(nameParts.length > 1 ? nameParts.slice(1).join(" ") : nameParts[0] || "");
+}
+function getPublicBookingSummary(docSnap) {
+  const data = docSnap.data();
+  return {
+    bookingId: docSnap.id,
+    bookingRef: String(data.bookingRef || ""),
+    guestName: String(data.guestName || ""),
+    checkIn: String(data.checkIn || ""),
+    checkOut: String(data.checkOut || "")
+  };
+}
+async function getCurrentStay(roomNumber) {
+  const snapshot = await adminDb.collection("bookings").where("roomNumber", "==", roomNumber).where("status", "==", "checked-in").limit(1).get();
+  return snapshot.empty ? null : snapshot.docs[0];
+}
+async function handleVerifyIntercomGuest(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const body = req.body || {};
+  const roomNumber = String(body.roomNumber || "").trim();
+  const lastName = String(body.lastName || "").trim();
+  const bookingId = String(body.bookingId || "").trim();
+  if (!roomNumber || roomNumber.length > MAX_ROOM_NUMBER_LENGTH2) {
+    return res.status(400).json({ success: false, error: "Invalid room number." });
+  }
+  if (lastName.length > MAX_LAST_NAME_LENGTH || bookingId.length > MAX_BOOKING_ID_LENGTH) {
+    return res.status(400).json({ success: false, error: "Invalid verification details." });
+  }
+  if (!lastName && !bookingId) {
+    return res.status(400).json({ success: false, error: "Last name is required." });
+  }
+  try {
+    const currentStay = await getCurrentStay(roomNumber);
+    if (!currentStay) {
+      return res.status(403).json({ success: false, error: "This intercom is available only for checked-in guests." });
+    }
+    if (bookingId) {
+      if (currentStay.id !== bookingId) {
+        return res.status(403).json({ success: false, error: "Please verify this stay again." });
+      }
+      await adminDb.collection("intercoms").doc(roomNumber).set({
+        roomId: roomNumber,
+        roomNumber,
+        currentStayId: currentStay.id,
+        updatedAt: /* @__PURE__ */ new Date()
+      }, { merge: true });
+      return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+    }
+    const expectedLastName = getBookingLastName(currentStay.data());
+    if (!expectedLastName || normalizeName(lastName) !== expectedLastName) {
+      return res.status(403).json({ success: false, error: "We could not verify that last name for this room." });
+    }
+    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
+    await intercomRef.set({
+      roomId: roomNumber,
+      roomNumber,
+      currentStayId: currentStay.id,
+      updatedAt: /* @__PURE__ */ new Date()
+    }, { merge: true });
+    return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+  } catch (error) {
+    console.error("Intercom guest verification failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to verify this intercom session." });
+  }
+}
+
 // server/handlers/janitor.ts
 function getDefaultBucket() {
   return process.env.FIREBASE_STORAGE_BUCKET;
@@ -193840,6 +193954,12 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many store status requests. Please try again in a minute." });
     }
     return await handleGetStoreOrderStatus(req, res);
+  }
+  if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-verify:${ip}`, 20, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many verification attempts. Please try again in a minute." });
+    }
+    return await handleVerifyIntercomGuest(req, res);
   }
   if (domain === "email" && action === "preview" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`email-preview:${ip}`, 30, 6e4)) {

@@ -45,6 +45,7 @@ import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
+import { Modal } from "../components/Modal";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
 import { StepIndicator } from "../components/StepIndicator";
@@ -227,6 +228,9 @@ export function BookingPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
   const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
+  const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
+  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
+  const [paymentProofError, setPaymentProofError] = useState("");
 
   const [termsConsent, setTermsConsent] = useState(false);
   // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
@@ -719,12 +723,12 @@ export function BookingPage() {
       const file = e.target.files[0];
       const validationError = validateUploadFile(file);
       if (validationError) {
-        setSubmitError(validationError);
+        setPaymentProofError(validationError);
         e.target.value = "";
         return;
       }
       setUploadingPaymentProof(true);
-      setSubmitError("");
+      setPaymentProofError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
@@ -734,7 +738,7 @@ export function BookingPage() {
         setPaymentProofUpload({ name: file.name, url });
       } catch (err) {
         console.error("Payment proof upload failed:", err);
-        alert("Receipt upload failed. Please try again.");
+        setPaymentProofError("Receipt upload failed. Please check your connection and try again.");
       } finally {
         setUploadingPaymentProof(false);
       }
@@ -746,6 +750,17 @@ export function BookingPage() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError("");
+
+    // Validate payment reference number if required
+    if (paymentMethod !== "pay-at-hotel") {
+      const pmConfig = hotelConfig.paymentMethods?.find((p: any) => p.method === paymentMethod);
+      const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+      if (isRefRequired && !paymentReferenceNumber.trim()) {
+        setSubmitError("Please enter your payment reference number.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     try {
       const response = await fetch("/api/bookings/create", {
@@ -777,6 +792,7 @@ export function BookingPage() {
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
           paymentProofUrl: paymentProofUpload?.url ?? null,
+          paymentReferenceNumber: paymentReferenceNumber.trim() || null,
           // Per W1.3 / decision #79 / audit S1.5: the standard
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
@@ -861,6 +877,20 @@ export function BookingPage() {
     <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
       <BookingHeader backTo={getBackToPath()} />
       {content}
+      <Modal
+        title={imagePreview?.title ?? "Image preview"}
+        open={!!imagePreview}
+        onClose={() => setImagePreview(null)}
+        className="max-w-3xl"
+      >
+        {imagePreview ? (
+          <img
+            src={imagePreview.url}
+            alt={imagePreview.title}
+            className="max-h-[72vh] w-full rounded-lg object-contain"
+          />
+        ) : null}
+      </Modal>
     </main>
   );
 
@@ -976,7 +1006,7 @@ export function BookingPage() {
               />
               <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
                 Special requests
-                <span className="relative">
+                <span className="relative block">
                   <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
                   <textarea
                     id="requests"
@@ -1186,17 +1216,26 @@ export function BookingPage() {
                           <CheckCircle2 size={18} className="text-status-green-text" />
                           <span className="text-sm font-medium text-gray-800">{discountIdUpload.name}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDiscountIdUpload(null);
-                            setDiscountIdUploadError("");
-                            resetDiscountIdInput();
-                          }}
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                        >
-                          Delete
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setImagePreview({ title: discountIdUpload.name, url: discountIdUpload.url })}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDiscountIdUpload(null);
+                              setDiscountIdUploadError("");
+                              resetDiscountIdInput();
+                            }}
+                            className="text-xs font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
@@ -1363,15 +1402,24 @@ export function BookingPage() {
                           <CheckCircle2 size={18} className="text-status-green-text" />
                           <span className="text-sm font-medium text-gray-800">{paymentProofUpload.name}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPaymentProofUpload(null);
-                          }}
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                        >
-                          Delete
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setImagePreview({ title: paymentProofUpload.name, url: paymentProofUpload.url })}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPaymentProofUpload(null);
+                            }}
+                            className="text-xs font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
@@ -1392,8 +1440,30 @@ export function BookingPage() {
                       </label>
                     )}
                   </div>
+                  {paymentProofError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
+                  )}
                 </div>
               )}
+
+            {/* Reference Number Input */}
+            {paymentMethod !== "pay-at-hotel" && currentPaymentMethod?.requireReferenceNumber !== false && (
+              <div className="mt-4">
+                <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
+                  <span>
+                    Payment Reference Number <span className="text-red-500">*</span>
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={paymentReferenceNumber}
+                    onChange={(e) => setPaymentReferenceNumber(e.target.value)}
+                    placeholder="Enter transaction reference or trace number"
+                    className="min-h-11 rounded-lg border border-gray-250 bg-white px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light text-sm"
+                  />
+                </label>
+              </div>
+            )}
 
             {/* Honeypot field (hidden from user) */}
             <input
@@ -1862,7 +1932,7 @@ function TextField({ error, icon, label, onBlur, onChange, placeholder, required
     <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative">
+      <span className="relative block">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}

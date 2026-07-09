@@ -46,6 +46,7 @@ export interface PaymentMethodConfig {
   isEnabled: boolean;
   showInStore?: boolean;
   showInCorporate?: boolean;
+  requireReferenceNumber?: boolean;
 }
 
 // Legacy per-method configuration for the in-room store. These
@@ -206,6 +207,8 @@ export interface Booking {
   // `paymentProofUrl === null` checks without a string
   // comparison.
   paymentProofUrl: string | null;
+  paymentReferenceNumber?: string | null;
+  rescheduleHistory?: any[];
   // Per H2 (hardening batch 2026-06-26): 32-char hex
   // random token generated at booking-create time. The
   // email magic link carries `?ref={bookingRef}&token={
@@ -225,6 +228,8 @@ export interface Booking {
   pointsRedeemedAt: Date | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  breakfastSelections?: Record<string, string>;
+  breakfastServed?: Record<string, boolean>;
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;

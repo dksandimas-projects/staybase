@@ -98,6 +98,9 @@ export function IntercomPage() {
   const [guestName, setGuestName] = useState<string>("");
   const [showNamePrompt, setShowNamePrompt] = useState<boolean>(true);
   const [nameInput, setNameInput] = useState<string>("");
+  const [currentStayId, setCurrentStayId] = useState<string>("");
+  const [isVerifyingGuest, setIsVerifyingGuest] = useState<boolean>(false);
+  const [verificationError, setVerificationError] = useState<string>("");
 
   // Navigation Tab State
   const [activeTab, setActiveTab] = useState<"chat" | "shop">("chat");
@@ -113,6 +116,7 @@ export function IntercomPage() {
   const [typedMessage, setTypedMessage] = useState<string>("");
   const [isRoomLoading, setIsRoomLoading] = useState<boolean>(true);
   const [isValidRoom, setIsValidRoom] = useState<boolean>(false);
+  const [roomAccessError, setRoomAccessError] = useState<"invalid" | "vacant" | "">("");
   const [roomNumber, setRoomNumber] = useState<string>(roomId || "");
   const [quickRequests, setQuickRequests] = useState<string[]>([]);
   const [isStoreEnabled, setIsStoreEnabled] = useState<boolean>(true);
@@ -228,6 +232,9 @@ export function IntercomPage() {
   useEffect(() => {
     setGuestName("");
     setNameInput("");
+    setCurrentStayId("");
+    setVerificationError("");
+    setRoomAccessError("");
     setShowNamePrompt(true);
   }, [roomId]);
 
@@ -249,37 +256,56 @@ export function IntercomPage() {
       if (!roomId) {
         setIsRoomLoading(false);
         setIsValidRoom(false);
+        setRoomAccessError("invalid");
         return;
       }
 
       setIsRoomLoading(true);
       try {
         let resolvedRoomNumber = roomId;
+        let resolvedRoomStatus = "";
         const directRoom = await getDoc(doc(db, "rooms", roomId));
         if (directRoom.exists()) {
-          resolvedRoomNumber = directRoom.data().roomNumber || roomId;
+          const roomData = directRoom.data();
+          resolvedRoomNumber = roomData.roomNumber || roomId;
+          resolvedRoomStatus = roomData.status || "";
         } else {
           const roomsQuery = query(collection(db, "rooms"), where("roomNumber", "==", roomId), limit(1));
           const roomsSnapshot = await getDocs(roomsQuery);
           if (!roomsSnapshot.empty) {
-            resolvedRoomNumber = roomsSnapshot.docs[0].data().roomNumber || roomId;
+            const roomData = roomsSnapshot.docs[0].data();
+            resolvedRoomNumber = roomData.roomNumber || roomId;
+            resolvedRoomStatus = roomData.status || "";
           } else {
             const tokenQuery = query(collection(db, "rooms"), where("qrToken", "==", roomId), limit(1));
             const tokenSnapshot = await getDocs(tokenQuery);
             if (tokenSnapshot.empty) {
               if (!isMounted) return;
               setIsValidRoom(false);
+              setRoomAccessError("invalid");
               setIsRoomLoading(false);
               return;
             }
-            resolvedRoomNumber = tokenSnapshot.docs[0].data().roomNumber || roomId;
+            const roomData = tokenSnapshot.docs[0].data();
+            resolvedRoomNumber = roomData.roomNumber || roomId;
+            resolvedRoomStatus = roomData.status || "";
           }
           if (!resolvedRoomNumber) {
             if (!isMounted) return;
             setIsValidRoom(false);
+            setRoomAccessError("invalid");
             setIsRoomLoading(false);
             return;
           }
+        }
+
+        if (resolvedRoomStatus !== "occupied") {
+          if (!isMounted) return;
+          setRoomNumber(resolvedRoomNumber);
+          setIsValidRoom(false);
+          setRoomAccessError("vacant");
+          setIsRoomLoading(false);
+          return;
         }
 
         const [hotelConfigDoc, storeConfigDoc] = await Promise.all([
@@ -290,6 +316,7 @@ export function IntercomPage() {
         if (!isMounted) return;
         setRoomNumber(resolvedRoomNumber);
         setIsValidRoom(true);
+        setRoomAccessError("");
         setQuickRequests(
           hotelConfigDoc.exists() && Array.isArray(hotelConfigDoc.data().intercomQuickRequests)
             ? hotelConfigDoc.data().intercomQuickRequests.filter(Boolean)
@@ -308,10 +335,33 @@ export function IntercomPage() {
         } else {
           setPaymentMethod("");
         }
+
+        const cachedVerification = localStorage.getItem(`intercomVerified:${resolvedRoomNumber}`);
+        if (cachedVerification) {
+          try {
+            const parsed = JSON.parse(cachedVerification) as { bookingId?: string; guestName?: string };
+            if (parsed.bookingId) {
+              const response = await fetch("/api/intercom/verify-guest", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ roomNumber: resolvedRoomNumber, bookingId: parsed.bookingId })
+              });
+              const result = await response.json();
+              if (response.ok && result.success && result.data?.bookingId && isMounted) {
+                setCurrentStayId(result.data.bookingId);
+                setGuestName(parsed.guestName || "Guest");
+                setShowNamePrompt(false);
+              }
+            }
+          } catch {
+            localStorage.removeItem(`intercomVerified:${resolvedRoomNumber}`);
+          }
+        }
       } catch (error) {
         console.error("Failed to load intercom room settings:", error);
         if (isMounted) {
           setIsValidRoom(false);
+          setRoomAccessError("invalid");
         }
       } finally {
         if (isMounted) {
@@ -327,7 +377,7 @@ export function IntercomPage() {
   }, [roomId]);
 
   useEffect(() => {
-    if (!isValidRoom || !roomNumber) return;
+    if (!isValidRoom || !roomNumber || !currentStayId || showNamePrompt) return;
 
     const messagesQuery = query(
       collection(db, "intercoms", roomNumber, "messages"),
@@ -338,10 +388,11 @@ export function IntercomPage() {
     const unsubscribe = onSnapshot(
       messagesQuery,
       (snapshot) => {
-        const liveMessages = snapshot.docs.map((docSnap) => {
+        const liveMessages = snapshot.docs.flatMap((docSnap) => {
           const data = docSnap.data();
+          if (data.currentStayId !== currentStayId) return [];
           const messageDate = data.timestamp?.toDate ? data.timestamp.toDate() : null;
-          return {
+          return [{
             id: docSnap.id,
             sender: data.sender || "guest",
             text: data.text || "",
@@ -353,7 +404,7 @@ export function IntercomPage() {
             isStoreOrder: !!data.isStoreOrder,
             orderRef: data.orderRef || undefined,
             isEarlyCheckInRequest: !!data.isEarlyCheckInRequest
-          } satisfies Message;
+          } satisfies Message];
         });
 
         setAllMessagesLoaded(snapshot.docs.length < messageLimit);
@@ -383,18 +434,18 @@ export function IntercomPage() {
     );
 
     return unsubscribe;
-  }, [isValidRoom, roomNumber, messageLimit, activeTab]);
+  }, [isValidRoom, roomNumber, currentStayId, showNamePrompt, messageLimit, activeTab]);
 
   // Mark unread FD messages as read when guest switches to Chat tab
   useEffect(() => {
-    if (activeTab !== "chat" || !roomNumber || !isValidRoom) return;
+    if (activeTab !== "chat" || !roomNumber || !isValidRoom || !currentStayId) return;
     const unreadOnChat = messages.filter((m) => m.sender === "front-desk" && !m.isRead);
     if (unreadOnChat.length === 0) return;
     unreadOnChat.forEach((message) => {
       void updateDoc(doc(db, "intercoms", roomNumber, "messages", message.id), { isRead: true });
     });
     setUnreadFromFrontDesk(0);
-  }, [activeTab, messages, roomNumber, isValidRoom]);
+  }, [activeTab, messages, roomNumber, isValidRoom, currentStayId]);
 
   const handleLoadMore = () => {
     setMessageLimit((prev) => prev + LOAD_MORE_STEP);
@@ -560,18 +611,42 @@ export function IntercomPage() {
   };
 
   // Name Prompt Submission
-  const handleNameSubmit = (e: React.FormEvent) => {
+  const handleNameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nameInput.trim()) return;
+    const lastName = nameInput.trim();
+    if (!lastName || !roomNumber) return;
 
-    const formattedName = nameInput.trim();
-    setGuestName(formattedName);
-    setShowNamePrompt(false);
+    setIsVerifyingGuest(true);
+    setVerificationError("");
+    try {
+      const response = await fetch("/api/intercom/verify-guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomNumber, lastName })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data?.bookingId) {
+        throw new Error(result.error || "We could not verify this room.");
+      }
+
+      const verifiedGuestName = result.data.guestName || lastName;
+      setCurrentStayId(result.data.bookingId);
+      setGuestName(verifiedGuestName);
+      localStorage.setItem(`intercomVerified:${roomNumber}`, JSON.stringify({
+        bookingId: result.data.bookingId,
+        guestName: verifiedGuestName
+      }));
+      setShowNamePrompt(false);
+    } catch (error: any) {
+      setVerificationError(error?.message || "We could not verify this room.");
+    } finally {
+      setIsVerifyingGuest(false);
+    }
   };
 
   // Text message sending
   const sendGuestMessage = async (text: string, options?: { isQuickRequest?: boolean; isStoreOrder?: boolean; orderRef?: string; isEarlyCheckInRequest?: boolean; isCancelledOrder?: boolean }) => {
-    if (!roomNumber || !guestName.trim()) return;
+    if (!roomNumber || !guestName.trim() || !currentStayId) return;
     setMessageError("");
     if (!canSendGuestMessage()) {
       setMessageError("Too many messages sent from this room. Please wait a few minutes or call the front desk.");
@@ -583,6 +658,7 @@ export function IntercomPage() {
         roomId: roomNumber,
         roomNumber,
         guestName,
+        currentStayId,
         resolved: false,
         updatedAt: serverTimestamp()
       }, { merge: true });
@@ -596,7 +672,8 @@ export function IntercomPage() {
         isQuickRequest: !!options?.isQuickRequest,
         isStoreOrder: !!options?.isStoreOrder,
         orderRef: options?.orderRef || "",
-        isEarlyCheckInRequest: !!options?.isEarlyCheckInRequest
+        isEarlyCheckInRequest: !!options?.isEarlyCheckInRequest,
+        currentStayId
       });
     } catch (error) {
       console.error("Failed to send intercom message:", error);
@@ -620,7 +697,7 @@ export function IntercomPage() {
 
   // Voice Call Signaling Actions
   const handleStartCall = async () => {
-    if (!roomNumber || callState !== "idle") return;
+    if (!roomNumber || !currentStayId || callState !== "idle") return;
 
     setCallError("");
     setCallState("requesting");
@@ -1014,8 +1091,8 @@ export function IntercomPage() {
 
   if (isRoomLoading) {
     return (
-      <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
-        <div className="w-full max-w-md bg-white shadow-2xl flex flex-col border-x border-gray-200">
+      <main className="h-[100dvh] bg-gray-100 flex justify-center items-stretch font-body">
+        <div className="h-full w-full max-w-md bg-white shadow-2xl flex flex-col border-x border-gray-200">
           <div className="bg-gray-950 p-4 space-y-3">
             <div className="h-9 w-44 rounded bg-white/10 animate-pulse" />
             <div className="h-4 w-64 rounded bg-white/10 animate-pulse" />
@@ -1031,15 +1108,20 @@ export function IntercomPage() {
   }
 
   if (!isValidRoom) {
+    const isVacantRoom = roomAccessError === "vacant";
     return (
-      <main className="min-h-screen bg-gray-100 flex justify-center items-center font-body p-6">
+      <main className="h-[100dvh] bg-gray-100 flex justify-center items-center font-body p-6">
         <div className="w-full max-w-md rounded-card-lg bg-white p-6 text-center shadow-xl ring-1 ring-gray-200">
           <div className="mx-auto h-12 w-12 rounded-full bg-red-50 text-red-600 flex items-center justify-center">
             <AlertCircle size={24} />
           </div>
-          <h1 className="mt-4 font-heading text-2xl lowercase text-gray-950">Invalid room QR code</h1>
+          <h1 className="mt-4 font-heading text-2xl lowercase text-gray-950">
+            {isVacantRoom ? "Intercom not active yet" : "Invalid room QR code"}
+          </h1>
           <p className="mt-2 text-sm leading-relaxed text-gray-600">
-            This intercom link does not match an active room. Please call or visit the front desk so we can help you.
+            {isVacantRoom
+              ? "This room intercom opens after check-in. Please call or visit the front desk so we can help you."
+              : "This intercom link does not match an active room. Please call or visit the front desk so we can help you."}
           </p>
           <a
             href={`tel:${config.frontDeskPhone}`}
@@ -1053,13 +1135,19 @@ export function IntercomPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-100 flex justify-center items-stretch font-body">
+    <main className="h-[100dvh] bg-gray-100 flex justify-center items-stretch font-body">
       {/* Mobile viewport container */}
-      <div className="w-full max-w-md bg-white shadow-2xl flex flex-col justify-between relative overflow-hidden border-x border-gray-200">
+      <div className="h-full w-full max-w-md bg-white shadow-2xl flex flex-col justify-between relative overflow-hidden border-x border-gray-200">
         
         {/* Call Banner / Overlay */}
         {callState !== "idle" && (
-          <div className="absolute inset-0 bg-gray-950/95 backdrop-blur-md z-45 flex flex-col justify-between p-8 text-white text-center">
+          <div
+            className="absolute inset-0 bg-gray-950/95 backdrop-blur-md z-45 flex flex-col justify-between px-8 py-6 text-white text-center"
+            style={{
+              paddingTop: "max(1.5rem, env(safe-area-inset-top))",
+              paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))"
+            }}
+          >
             {/* Top row */}
             <div className="pt-8">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 text-xs font-semibold uppercase tracking-wider text-primary">
@@ -1105,7 +1193,7 @@ export function IntercomPage() {
             </div>
 
             {/* Bottom Controls */}
-            <div className="pb-8 space-y-4">
+            <div className="space-y-4">
               <div className="flex justify-center gap-6">
                 {callState === "connected" && (
                   <button
@@ -1135,8 +1223,8 @@ export function IntercomPage() {
         <header className="bg-gray-950 text-white p-4 shadow-sm z-30 flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-primary font-bold">
-                {roomId || "G"}
+              <div className="h-9 w-9 shrink-0 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-xs text-primary font-bold overflow-hidden">
+                {roomNumber || "G"}
               </div>
               <div>
                 <h1 className="font-bold text-sm leading-tight text-white">Room {roomNumber || roomId || "Guest"}</h1>
@@ -1177,16 +1265,16 @@ export function IntercomPage() {
           )}
 
           {/* Navigation Tabs */}
-          <div className="flex border-t border-white/10 pt-2.5 mt-1">
+          <div className="flex gap-2 border-t border-white/10 pt-3 mt-1">
             <button
               onClick={() => setActiveTab("chat")}
-              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 relative ${
+              className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 relative ${
                 activeTab === "chat" 
-                  ? "border-primary text-primary" 
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-primary text-white shadow-sm"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
               }`}
             >
-              <MessageSquare size={14} />
+              <MessageSquare size={18} />
               Chat Support
               {unreadFromFrontDesk > 0 && activeTab !== "chat" && (
                 <span className="absolute -top-1 right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-pulse">
@@ -1197,13 +1285,13 @@ export function IntercomPage() {
             {isStoreEnabled && (
               <button
                 onClick={() => setActiveTab("shop")}
-                className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
+                className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 ${
                   activeTab === "shop"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-gray-400 hover:text-gray-200"
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
                 }`}
               >
-                <ShoppingBag size={14} />
+                <ShoppingBag size={18} />
                 {config.storeName}
               </button>
             )}
@@ -1553,7 +1641,7 @@ export function IntercomPage() {
           </div>
         )}
 
-        {/* Name Registration Modal Prompt */}
+        {/* Stay Verification Modal Prompt */}
         {showNamePrompt && (
           <div className="absolute inset-0 bg-gray-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
             <div className="w-full bg-white rounded-card-lg p-6 shadow-2xl border border-gray-150 space-y-6">
@@ -1565,25 +1653,39 @@ export function IntercomPage() {
                   Welcome to {config.brandName}
                 </h2>
                 <p className="text-xs text-gray-600">
-                  Please introduce yourself to start your chat session with the front desk.
+                  Enter the booking last name for Room {roomNumber || roomId || "guest"} to start your front desk session.
                 </p>
               </div>
 
               <form onSubmit={handleNameSubmit} className="space-y-4">
                 <label className="grid gap-2 text-xs font-semibold text-gray-700">
-                  What is your name?
+                  Booking last name
                   <input
                     type="text"
                     required
-                    placeholder="e.g. Maria Santos"
+                    placeholder="e.g. Santos"
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
+                    disabled={isVerifyingGuest}
                     className="min-h-[44px] w-full rounded-lg border border-gray-200 bg-gray-50/50 py-2 px-3 text-sm font-medium text-gray-900 outline-none transition focus:border-primary focus:bg-white"
                   />
                 </label>
 
-                <PrimaryButton type="submit" className="w-full text-sm font-semibold">
-                  Start Chatting
+                {verificationError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                    {verificationError}
+                  </div>
+                )}
+
+                <PrimaryButton type="submit" disabled={isVerifyingGuest} className="w-full text-sm font-semibold">
+                  {isVerifyingGuest ? (
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 size={16} className="animate-spin" />
+                      Verifying
+                    </span>
+                  ) : (
+                    "Start Chatting"
+                  )}
                 </PrimaryButton>
               </form>
             </div>

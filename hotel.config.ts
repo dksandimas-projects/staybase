@@ -52,6 +52,7 @@ export const config = {
   pageTitle: "spark inn",
   metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
   ogImage: "og-image.png",
+  priceRange: "₱₱",
   address: {
     street: "J. Borja St",
     city: "Tagbilaran City",
@@ -66,6 +67,7 @@ export const config = {
   supportEmail: "sparkinn.dev@gmail.com",
   facebookUrl: "https://www.facebook.com/sparkinnbohol",
   instagramUrl: "https://www.instagram.com/sparkinnbohol",
+  twitterHandle: "",
   checkInTime: "14:00",
   checkOutTime: "12:00"
 } as const;

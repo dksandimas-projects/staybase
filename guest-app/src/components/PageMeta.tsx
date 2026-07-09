@@ -40,11 +40,21 @@ export function PageMeta({
     setMeta("property", "og:description", description);
     setMeta("property", "og:url", canonicalUrl);
     setMeta("property", "og:image", absoluteImage);
+    setMeta("property", "og:image:width", "1200");
+    setMeta("property", "og:image:height", "630");
+    setMeta("property", "og:image:alt", config.brandName);
+    setMeta("property", "og:locale", config.locale);
 
     setMeta("name", "twitter:card", "summary_large_image");
     setMeta("name", "twitter:title", fullTitle);
     setMeta("name", "twitter:description", description);
     setMeta("name", "twitter:image", absoluteImage);
+    if (config.twitterHandle.trim()) {
+      const handle = config.twitterHandle.startsWith("@") ? config.twitterHandle : `@${config.twitterHandle}`;
+      setMeta("name", "twitter:site", handle);
+    } else {
+      removeMeta("name", "twitter:site");
+    }
   }, [absoluteImage, canonicalUrl, description, fullTitle, noIndex, type]);
 
   return null;

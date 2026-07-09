@@ -74,7 +74,7 @@ function addressLine() {
 }
 
 function brandLogoUrl() {
-  return siteUrl(`/brand/${encodeURIComponent(config.logos.navbar)}`);
+  return siteUrl(`/brand/${encodeURIComponent(config.logos.white)}`);
 }
 
 function toDate(value: any): Date | null {

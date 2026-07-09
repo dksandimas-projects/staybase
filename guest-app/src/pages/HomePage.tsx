@@ -230,9 +230,9 @@ export function HomePage() {
 
       <section className="px-4 pb-16 pt-28 sm:px-6 lg:px-8">
         {sectionTitle(
-          "Stay with us",
-          "Unassuming comfort, carefully kept",
-          "Rooms are intentionally simple: good rest, easy amenities, and the calm you want after exploring Bohol."
+          homepage.sectionHeaders?.roomsEyebrow || "Stay with us",
+          homepage.sectionHeaders?.roomsHeading || "Unassuming comfort, carefully kept",
+          homepage.sectionHeaders?.roomsSubtext || "Rooms are intentionally simple: good rest, easy amenities, and the calm you want after exploring Bohol."
         )}
         {loading ? (
           <div className="mx-auto mt-12 grid max-w-7xl gap-6 lg:grid-cols-3">
@@ -280,9 +280,9 @@ export function HomePage() {
 
       <section className="bg-section-bg px-4 py-16 sm:px-6 lg:px-8">
         {sectionTitle(
-          "Amenities",
-          "Everything important, nothing fussy",
-          "A boutique hotel should make the basics feel graceful. These are the details we keep steady."
+          homepage.sectionHeaders?.amenitiesEyebrow || "Amenities",
+          homepage.sectionHeaders?.amenitiesHeading || "Everything important, nothing fussy",
+          homepage.sectionHeaders?.amenitiesSubtext || "A boutique hotel should make the basics feel graceful. These are the details we keep steady."
         )}
         <motion.div
           className="mx-auto mt-12 grid max-w-6xl gap-4 sm:grid-cols-2 lg:grid-cols-4"
@@ -312,9 +312,9 @@ export function HomePage() {
       {visibleServices.length > 0 && (
         <section className="px-4 py-16 sm:px-6 lg:px-8">
           {sectionTitle(
-            "Services",
-            "Plans made easier",
-            "For tours and transportation, our team can help coordinate the next step. No pressure, no hidden urgency."
+            homepage.sectionHeaders?.servicesEyebrow || "Services",
+            homepage.sectionHeaders?.servicesHeading || "Plans made easier",
+            homepage.sectionHeaders?.servicesSubtext || "For tours and transportation, our team can help coordinate the next step. No pressure, no hidden urgency."
           )}
           <motion.div
             className="mx-auto mt-12 grid max-w-5xl gap-6 md:grid-cols-2"

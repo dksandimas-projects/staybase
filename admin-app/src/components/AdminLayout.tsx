@@ -1,5 +1,5 @@
-import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { Lock, LogOut, User, Shield, Menu, Volume2, VolumeX } from "lucide-react";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Check, Lock, LogOut, MessageSquareText, PhoneCall, PhoneOff, Shield, User, Menu, Volume2, VolumeX, X } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { BottomTabBar } from "./BottomTabBar";
 import { ToastProvider } from "./Toast";
@@ -8,12 +8,32 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 import { useEffect, useMemo, useState } from "react";
 import config from "@config";
 
+type LatestUnreadIntercomMessage = {
+  roomNumber: string;
+  id: string;
+  text: string;
+  guestName: string;
+};
+
 export function AdminLayout() {
-  const { authLoading, currentUser, signOut, intercoms, soundsEnabled, setSoundsEnabled } = useAdmin();
+  const {
+    authLoading,
+    currentUser,
+    signOut,
+    intercoms,
+    soundsEnabled,
+    setSoundsEnabled,
+    incomingCall,
+    acceptCall,
+    declineCall,
+    markChatAsRead
+  } = useAdmin();
   const location = useLocation();
+  const navigate = useNavigate();
   const { isMobile } = useBreakpoint();
 
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [dismissedMessageId, setDismissedMessageId] = useState("");
 
   const unreadAlertCount = useMemo(
     () => Object.values(intercoms)
@@ -24,6 +44,25 @@ export function AdminLayout() {
   );
 
   const bottomTabVariant = location.pathname === "/settings" ? "settings" : "bookings";
+  const normalizedPath = location.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  const isIntercomRoute = normalizedPath === "/intercom";
+  const latestUnreadMessage = useMemo<LatestUnreadIntercomMessage | null>(() => {
+    let latest: LatestUnreadIntercomMessage | null = null;
+    Object.entries(intercoms).forEach(([roomNumber, messages]) => {
+      messages.forEach((message) => {
+        if (message.sender !== "guest" || message.isRead) return;
+        latest = {
+          roomNumber,
+          id: message.id,
+          text: message.text,
+          guestName: message.guestName || "Guest"
+        };
+      });
+    });
+    return latest;
+  }, [intercoms]);
+  const shouldShowMessagePopup = !!latestUnreadMessage && latestUnreadMessage.id !== dismissedMessageId && !isIntercomRoute;
+  const shouldShowCallPopup = !!incomingCall && !isIntercomRoute;
 
   useEffect(() => {
     if (!isMobile && isMobileSidebarOpen) {
@@ -50,7 +89,6 @@ export function AdminLayout() {
 
   // Define restricted paths
   const restrictedPaths = ["/rates", "/members", "/settings"];
-  const normalizedPath = location.pathname.toLowerCase().replace(/\/+$/, "") || "/";
   const isPathRestricted = restrictedPaths.includes(normalizedPath);
   const isUserRestricted = currentUser.role !== "admin";
 
@@ -166,13 +204,98 @@ export function AdminLayout() {
             so we add that much padding so the last row of content is not
             hidden under the bar. */}
         <main
-          className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8"
+          className="relative min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8"
           style={{
             paddingBottom: isMobile
               ? "max(5rem, calc(56px + env(safe-area-inset-bottom) + 1rem))"
               : undefined
           }}
         >
+          {(shouldShowCallPopup || shouldShowMessagePopup) && (
+            <div className="pointer-events-none fixed right-4 top-[5rem] z-40 flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-3 sm:right-6">
+              {shouldShowCallPopup && incomingCall && (
+                <div className="pointer-events-auto rounded-card border border-green-200 bg-white p-4 shadow-xl ring-4 ring-green-100">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-green-600 text-white">
+                      <PhoneCall size={18} aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-green-700">
+                        {incomingCall.status === "ringing" ? "Incoming call" : "Active call"}
+                      </p>
+                      <h2 className="mt-0.5 truncate text-sm font-bold text-gray-950">
+                        Room {incomingCall.roomId} · {incomingCall.guestName || "Guest"}
+                      </h2>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {incomingCall.status === "ringing" && (
+                          <button
+                            type="button"
+                            onClick={() => void acceptCall()}
+                            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-green-600 px-3 text-xs font-bold text-white hover:bg-green-700"
+                          >
+                            <Check size={14} aria-hidden="true" />
+                            Accept
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void declineCall()}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-600 hover:bg-red-50"
+                        >
+                          <PhoneOff size={14} aria-hidden="true" />
+                          {incomingCall.status === "ringing" ? "Decline" : "End"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {shouldShowMessagePopup && latestUnreadMessage && (
+                <div className="pointer-events-auto rounded-card border border-primary/20 bg-white p-4 shadow-xl ring-4 ring-primary/10">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-white">
+                      <MessageSquareText size={18} aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-primary-dark">New guest message</p>
+                      <h2 className="mt-0.5 truncate text-sm font-bold text-gray-950">
+                        Room {latestUnreadMessage.roomNumber} · {latestUnreadMessage.guestName}
+                      </h2>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">{latestUnreadMessage.text}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/intercom?room=${encodeURIComponent(latestUnreadMessage.roomNumber)}`)}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-bold text-white hover:bg-primary-dark"
+                        >
+                          <MessageSquareText size={14} aria-hidden="true" />
+                          Open
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void markChatAsRead(latestUnreadMessage.roomNumber)}
+                          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                        >
+                          <Check size={14} aria-hidden="true" />
+                          Read
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDismissedMessageId(latestUnreadMessage.id)}
+                          aria-label="Dismiss message alert"
+                          className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-50"
+                        >
+                          <X size={14} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {isPathRestricted && isUserRestricted ? (
             /* Restricted Route Access Denied Overlay */
             <div className="flex h-full items-center justify-center">
