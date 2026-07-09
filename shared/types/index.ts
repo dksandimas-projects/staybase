@@ -225,6 +225,8 @@ export interface Booking {
   pointsRedeemedAt: Date | null;
   hasBreakfast: boolean;
   breakfastRate: number;
+  breakfastSelections?: Record<string, string>;
+  breakfastServed?: Record<string, boolean>;
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
   handledBy: string;
