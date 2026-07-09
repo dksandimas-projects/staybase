@@ -55,6 +55,12 @@ import { formatPrice } from "../utils/format";
 const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const DISCOUNT_ID_COMPRESSION_OPTIONS = {
+  maxWidth: 2200,
+  maxHeight: 2200,
+  quality: 0.94,
+  mimeType: "image/jpeg" as const
+};
 // Per BF-26 (booking-flow audit 2026-06-26): the previous module-level
 // constants ignored the live `breakfastConfig` (rate + on/off toggle).
 // The Step 1 card price + the Room + Breakfast option therefore
@@ -650,7 +656,7 @@ export function BookingPage() {
       setDiscountIdUploadError("");
       setSubmitError("");
       try {
-        const compressed = await compressImageFile(file);
+        const compressed = await compressImageFile(file, DISCOUNT_ID_COMPRESSION_OPTIONS);
         const safeFileName = sanitizeUploadFileName(compressed.file.name);
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${safeFileName}`);
         await uploadBytes(storageRef, compressed.file);

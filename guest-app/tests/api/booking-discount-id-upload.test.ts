@@ -14,6 +14,14 @@ describe("BookingPage.tsx — Senior/PWD discount ID upload", () => {
     expect(src).toMatch(/`bookings\/\$\{bookingId\}\/discount-id\/\$\{safeFileName\}`/);
   });
 
+  it("uses high-quality compression settings so ID card text stays readable", () => {
+    expect(src).toMatch(/const\s+DISCOUNT_ID_COMPRESSION_OPTIONS\s*=/);
+    expect(src).toMatch(/maxWidth:\s*2200/);
+    expect(src).toMatch(/maxHeight:\s*2200/);
+    expect(src).toMatch(/quality:\s*0\.94/);
+    expect(src).toMatch(/compressImageFile\(file,\s*DISCOUNT_ID_COMPRESSION_OPTIONS\)/);
+  });
+
   it("shows discount ID upload failures inline instead of using alert", () => {
     const discountUploadHandler = src.match(
       /async function handleDiscountIdChange[\s\S]+?async function handlePaymentProofChange/
