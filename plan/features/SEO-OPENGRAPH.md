@@ -58,7 +58,7 @@ Detect known crawler user-agents at the edge and stream an `index.html` variant 
 - **Pros:** truly per-URL, supports dynamic records.
 - **Cons:** UA sniffing is brittle; **counts against the 12-function Hobby cap** — must confirm middleware does *not* count as a function, or budget for it (`plan/docs/VERCEL-FUNCTION-LIMIT.md`).
 
-> Recommendation: **Option A** for launch; revisit Option B only if per-record share cards become a real requirement.
+> **Decision (2026-07-09): Option A — build-time prerender.** Chosen for launch: no extra Vercel function against the Hobby 12-function cap, no user-agent sniffing, and robust for all crawlers. Per-record share cards (Option B) are explicitly deferred — revisit only if sharing a specific room/booking with its own photo becomes a real requirement post-launch.
 
 ---
 
@@ -124,7 +124,7 @@ Detect known crawler user-agents at the edge and stream an `index.html` variant 
 
 ## Open questions (close with owner before build)
 
-- **Q1.** Approve **Option A (build-time prerender)** vs Option B (edge middleware)? Affects Vercel function budget.
+- ~~**Q1.** Approve Option A (build-time prerender) vs Option B (edge middleware)?~~ ✅ **Resolved 2026-07-09 — Option A (build-time prerender).** See `§Approach — Option A`.
 - **Q2.** Provide/approve the 1200×630 OG card design (logo + tagline on brand orange)?
 - **Q3.** Is there an X/Twitter handle for `twitter:site`? (none in config today)
 - **Q4.** `priceRange` value for JSON-LD (e.g. `₱₱`) — owner to confirm.
