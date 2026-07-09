@@ -26,3 +26,14 @@
 body {
   margin: 0;
 }
+
+@media (max-width: 767px) {
+  input[class],
+  select[class],
+  textarea[class],
+  input:not([class]),
+  select:not([class]),
+  textarea:not([class]) {
+    font-size: 16px;
+  }
+}

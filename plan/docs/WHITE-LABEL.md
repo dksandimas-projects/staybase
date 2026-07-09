@@ -121,6 +121,7 @@ HotelConfig {
   pageTitle: string         // browser tab prefix e.g. "spark inn"
   metaDescription: string   // default SEO description
   ogImage: string           // Open Graph image filename in public/brand/ (1200×630px)
+  priceRange: string        // schema.org relative price band e.g. "₱₱"
 
   // Structured address — used in LodgingBusiness JSON-LD schema
   address: {
@@ -138,6 +139,7 @@ HotelConfig {
 
   // Contact extras
   frontDeskPhone: string    // used as tel: fallback in WebRTC intercom call
+  twitterHandle: string     // X/Twitter handle for twitter:site; empty string omits the tag
 
   // Domains
   domain: string            // e.g. "sparkinnbohol.com"
@@ -209,6 +211,7 @@ applicableLaw: "Republic Act No. 10173 (Data Privacy Act of 2012)"
 pageTitle: "spark inn"
 metaDescription: "Book your stay at spark inn — a boutique hotel in Bohol, Philippines."
 ogImage: "og-image.png"
+priceRange: "₱₱"
 
 address:
   street: "J. Borja St"
@@ -220,6 +223,7 @@ frontDeskPhone: "+63-38-000-0000"   // update with real number before launch
 
 analyticsId: ""
 whatsappNumber: ""
+twitterHandle: ""
 
 domain: "sparkinnbohol.com"
 adminDomain: "admin.sparkinnbohol.com"
@@ -311,7 +315,7 @@ New Vercel project. Connect repo. Set all env vars. Configure custom domains.
 Update all fields for the client. Define their default starting room types in `roomTypes[]` (further updates can be managed directly in the Admin App Settings UI).
 
 ### Step 5 — Drop brand assets in `public/brand/`
-Fonts, logos, favicon, OG image. Filenames must match paths in `hotel.config.ts`.
+Fonts, logos, favicon, and the 1200×630 OG image. Filenames must match paths in `hotel.config.ts`.
 
 ### Step 6 — Seed Firestore
 Create `settings/hotelConfig`, `settings/websiteContent` (with privacy policy, cancellation policy, house rules). Create room documents using the `value` keys from `config.roomTypes`. Create first admin account.

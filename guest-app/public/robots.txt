@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sparkinnbohol.com/sitemap.xml

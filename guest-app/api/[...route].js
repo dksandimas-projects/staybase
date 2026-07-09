@@ -187035,6 +187035,7 @@ var config = {
   pageTitle: "spark inn",
   metaDescription: "Book your stay at spark inn, a boutique hotel in Bohol, Philippines.",
   ogImage: "og-image.png",
+  priceRange: "\u20B1\u20B1",
   address: {
     street: "J. Borja St",
     city: "Tagbilaran City",
@@ -187049,6 +187050,7 @@ var config = {
   supportEmail: "sparkinn.dev@gmail.com",
   facebookUrl: "https://www.facebook.com/sparkinnbohol",
   instagramUrl: "https://www.instagram.com/sparkinnbohol",
+  twitterHandle: "",
   checkInTime: "14:00",
   checkOutTime: "12:00"
 };
@@ -188243,7 +188245,7 @@ function addressLine() {
   return `${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}, ${hotel_config_default.address.postalCode}`;
 }
 function brandLogoUrl() {
-  return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.navbar)}`);
+  return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.white)}`);
 }
 function toDate2(value) {
   if (!value) return null;

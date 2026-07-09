@@ -976,7 +976,7 @@ export function BookingPage() {
               />
               <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
                 Special requests
-                <span className="relative">
+                <span className="relative block">
                   <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
                   <textarea
                     id="requests"
@@ -1862,7 +1862,7 @@ function TextField({ error, icon, label, onBlur, onChange, placeholder, required
     <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative">
+      <span className="relative block">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}

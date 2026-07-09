@@ -20,6 +20,9 @@ function indexHtmlTransformPlugin(): Plugin {
             ? config.ogImage
             : `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`
           : `https://${config.domain}/brand/og-default.png`;
+        const twitterSite = config.twitterHandle.trim()
+          ? `<meta name="twitter:site" content="${config.twitterHandle.startsWith("@") ? config.twitterHandle : `@${config.twitterHandle}`}" />`
+          : "";
 
         return html
           .replace(/<title>[\s\S]*?<\/title>/i, `<title>${config.brandName}</title>`)
@@ -44,6 +47,22 @@ function indexHtmlTransformPlugin(): Plugin {
             `<meta property="og:image" content="${ogImage}" />`
           )
           .replace(
+            /<meta property="og:image:width" content="[^"]*"\s*\/>/i,
+            `<meta property="og:image:width" content="1200" />`
+          )
+          .replace(
+            /<meta property="og:image:height" content="[^"]*"\s*\/>/i,
+            `<meta property="og:image:height" content="630" />`
+          )
+          .replace(
+            /<meta property="og:image:alt" content="[^"]*"\s*\/>/i,
+            `<meta property="og:image:alt" content="${config.brandName}" />`
+          )
+          .replace(
+            /<meta property="og:locale" content="[^"]*"\s*\/>/i,
+            `<meta property="og:locale" content="${config.locale}" />`
+          )
+          .replace(
             /<meta property="og:url" content="[^"]*"\s*\/>/i,
             `<meta property="og:url" content="https://${config.domain}/" />`
           )
@@ -58,6 +77,10 @@ function indexHtmlTransformPlugin(): Plugin {
           .replace(
             /<meta name="twitter:image" content="[^"]*"\s*\/>/i,
             `<meta name="twitter:image" content="${ogImage}" />`
+          )
+          .replace(
+            /<meta name="twitter:site" content="[^"]*"\s*\/>/i,
+            twitterSite
           );
       }
     }
