@@ -847,10 +847,12 @@ export function BookingPage() {
 
   const getBackToPath = () => {
     if (isReviewStep) {
-      return `/book?step=guest-details&${continueParams.toString()}`;
+      return `/book?${continueParams.toString()}`;
     }
     if (isGuestDetailsStep) {
-      return `/book?${continueParams.toString()}`;
+      const step1Params = new URLSearchParams(continueParams);
+      step1Params.delete("step");
+      return `/book?${step1Params.toString()}`;
     }
     return "/rooms";
   };
@@ -1808,7 +1810,7 @@ function BookingHeader({ backTo }: { backTo: string }) {
         <Link to="/" aria-label={config.brandName} className="flex items-center justify-center">
           <img src={`/brand/${config.logos.navbar}`} alt={config.brandName} className="h-10 w-auto" />
         </Link>
-        <span className="min-h-11 min-w-11" />
+        <div className="min-h-11 min-w-11" />
       </div>
     </header>
   );

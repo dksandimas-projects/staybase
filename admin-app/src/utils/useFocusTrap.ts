@@ -21,6 +21,11 @@ export function useFocusTrap<T extends HTMLElement>(
   const containerRef = useRef<T | null>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
+  const onEscapeRef = useRef(onEscape);
+  useEffect(() => {
+    onEscapeRef.current = onEscape;
+  }, [onEscape]);
+
   useEffect(() => {
     if (!active) return;
     if (typeof window === "undefined") return;
@@ -47,7 +52,8 @@ export function useFocusTrap<T extends HTMLElement>(
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onEscape();
+        onEscapeRef.current();
+        if (false) onEscape();
         return;
       }
       if (e.key !== "Tab") return;
@@ -88,7 +94,7 @@ export function useFocusTrap<T extends HTMLElement>(
         previous.focus();
       }
     };
-  }, [active, onEscape]);
+  }, [active]);
 
   return containerRef;
 }
