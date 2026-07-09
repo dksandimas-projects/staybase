@@ -14,6 +14,17 @@ export const PublicHeroSchema = z.object({
 });
 
 export const HomepageContentSchema = PublicHeroSchema.extend({
+  sectionHeaders: z.object({
+    roomsEyebrow: z.string().default(""),
+    roomsHeading: z.string().default(""),
+    roomsSubtext: z.string().default(""),
+    amenitiesEyebrow: z.string().default(""),
+    amenitiesHeading: z.string().default(""),
+    amenitiesSubtext: z.string().default(""),
+    servicesEyebrow: z.string().default(""),
+    servicesHeading: z.string().default(""),
+    servicesSubtext: z.string().default("")
+  }).optional(),
   amenities: z.array(
     z.object({
       title: z.string(),
@@ -109,6 +120,9 @@ export const WebsiteContentSchema = z.object({
   corporate: CorporateContentSchema,
   rewards: RewardsContentSchema,
   branding: BrandingConfigSchema,
+  roomsCatalog: PublicHeroSchema.optional(),
+  contact: PublicHeroSchema.optional(),
+  notFound: PublicHeroSchema.optional(),
   privacyPolicyBody: z.string().optional(),
   cancellationPolicy: z.string().optional(),
   houseRules: z.string().optional(),

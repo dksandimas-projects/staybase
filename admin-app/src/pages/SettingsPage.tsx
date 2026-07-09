@@ -347,7 +347,7 @@ type EditModalState =
   | { open: true; isNew: boolean; method: PaymentMethodConfig };
 
 function emptyPaymentMethod(): PaymentMethodConfig {
-  return { method: "", label: "", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true, showInStore: true, showInCorporate: true };
+  return { method: "", label: "", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true, showInStore: true, showInCorporate: true, requireReferenceNumber: true };
 }
 
 function PaymentMethodsTabBody({
@@ -495,7 +495,8 @@ function PaymentMethodsTabBody({
       qrUrl: pm.qrUrl,
       isEnabled: pm.isEnabled,
       showInStore: pm.showInStore,
-      showInCorporate: pm.showInCorporate
+      showInCorporate: pm.showInCorporate,
+      requireReferenceNumber: pm.requireReferenceNumber !== false
     };
     if (editModal.isNew) {
       await onAdd(normalized);
@@ -839,6 +840,25 @@ function PaymentMethodsTabBody({
                 />
               </button>
               Visible to guests on the booking page
+            </label>
+
+            {/* Require Reference Number toggle */}
+            <label className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-gray-700">
+              <button
+                type="button"
+                onClick={() => handleModalField("requireReferenceNumber", editModal.method.requireReferenceNumber === false)}
+                aria-label={editModal.method.requireReferenceNumber !== false ? "Disable reference number requirement" : "Enable reference number requirement"}
+                className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                  editModal.method.requireReferenceNumber !== false ? "bg-primary" : "bg-gray-200"
+                }`}
+              >
+                <div
+                  className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                    editModal.method.requireReferenceNumber !== false ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              Require guest to provide a payment reference number
             </label>
 
             {/* QR code uploader — visible only on edit, not add.
@@ -1209,6 +1229,30 @@ export function SettingsPage() {
     websiteContent.corporate?.retreatCtaLabel ?? ""
   );
 
+  // Rooms Catalog, Contact, and Not Found page copy states
+  const [roomsCatalogHeroEyebrow, setRoomsCatalogHeroEyebrow] = useState(websiteContent.roomsCatalog?.heroEyebrow ?? "");
+  const [roomsCatalogHeroHeading, setRoomsCatalogHeroHeading] = useState(websiteContent.roomsCatalog?.heroHeading ?? "");
+  const [roomsCatalogHeroSubtext, setRoomsCatalogHeroSubtext] = useState(websiteContent.roomsCatalog?.heroSubtext ?? "");
+
+  const [contactHeroEyebrow, setContactHeroEyebrow] = useState(websiteContent.contact?.heroEyebrow ?? "");
+  const [contactHeroHeading, setContactHeroHeading] = useState(websiteContent.contact?.heroHeading ?? "");
+  const [contactHeroSubtext, setContactHeroSubtext] = useState(websiteContent.contact?.heroSubtext ?? "");
+
+  const [notFoundHeroEyebrow, setNotFoundHeroEyebrow] = useState(websiteContent.notFound?.heroEyebrow ?? "");
+  const [notFoundHeroHeading, setNotFoundHeroHeading] = useState(websiteContent.notFound?.heroHeading ?? "");
+  const [notFoundHeroSubtext, setNotFoundHeroSubtext] = useState(websiteContent.notFound?.heroSubtext ?? "");
+
+  // Homepage Section Headers states
+  const [roomsEyebrow, setRoomsEyebrow] = useState(websiteContent.homepage?.sectionHeaders?.roomsEyebrow ?? "");
+  const [roomsHeading, setRoomsHeading] = useState(websiteContent.homepage?.sectionHeaders?.roomsHeading ?? "");
+  const [roomsSubtext, setRoomsSubtext] = useState(websiteContent.homepage?.sectionHeaders?.roomsSubtext ?? "");
+  const [amenitiesEyebrow, setAmenitiesEyebrow] = useState(websiteContent.homepage?.sectionHeaders?.amenitiesEyebrow ?? "");
+  const [amenitiesHeading, setAmenitiesHeading] = useState(websiteContent.homepage?.sectionHeaders?.amenitiesHeading ?? "");
+  const [amenitiesSubtext, setAmenitiesSubtext] = useState(websiteContent.homepage?.sectionHeaders?.amenitiesSubtext ?? "");
+  const [servicesEyebrow, setServicesEyebrow] = useState(websiteContent.homepage?.sectionHeaders?.servicesEyebrow ?? "");
+  const [servicesHeading, setServicesHeading] = useState(websiteContent.homepage?.sectionHeaders?.servicesHeading ?? "");
+  const [servicesSubtext, setServicesSubtext] = useState(websiteContent.homepage?.sectionHeaders?.servicesSubtext ?? "");
+
 
 
   // 3. Rewards Config states
@@ -1386,6 +1430,28 @@ export function SettingsPage() {
     setCorporateRetreatCtaLabel(
       websiteContent.corporate?.retreatCtaLabel || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel
     );
+
+    // Sync Rooms Catalog, Contact, and Not Found page copy
+    setRoomsCatalogHeroEyebrow(websiteContent.roomsCatalog?.heroEyebrow || "");
+    setRoomsCatalogHeroHeading(websiteContent.roomsCatalog?.heroHeading || "");
+    setRoomsCatalogHeroSubtext(websiteContent.roomsCatalog?.heroSubtext || "");
+    setContactHeroEyebrow(websiteContent.contact?.heroEyebrow || "");
+    setContactHeroHeading(websiteContent.contact?.heroHeading || "");
+    setContactHeroSubtext(websiteContent.contact?.heroSubtext || "");
+    setNotFoundHeroEyebrow(websiteContent.notFound?.heroEyebrow || "");
+    setNotFoundHeroHeading(websiteContent.notFound?.heroHeading || "");
+    setNotFoundHeroSubtext(websiteContent.notFound?.heroSubtext || "");
+
+    // Sync Homepage Section Headers
+    setRoomsEyebrow(websiteContent.homepage?.sectionHeaders?.roomsEyebrow || "");
+    setRoomsHeading(websiteContent.homepage?.sectionHeaders?.roomsHeading || "");
+    setRoomsSubtext(websiteContent.homepage?.sectionHeaders?.roomsSubtext || "");
+    setAmenitiesEyebrow(websiteContent.homepage?.sectionHeaders?.amenitiesEyebrow || "");
+    setAmenitiesHeading(websiteContent.homepage?.sectionHeaders?.amenitiesHeading || "");
+    setAmenitiesSubtext(websiteContent.homepage?.sectionHeaders?.amenitiesSubtext || "");
+    setServicesEyebrow(websiteContent.homepage?.sectionHeaders?.servicesEyebrow || "");
+    setServicesHeading(websiteContent.homepage?.sectionHeaders?.servicesHeading || "");
+    setServicesSubtext(websiteContent.homepage?.sectionHeaders?.servicesSubtext || "");
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
@@ -1434,6 +1500,17 @@ export function SettingsPage() {
           heading: sparkRewardsHeading,
           description: sparkRewardsDescription,
           perks: sparkRewardsPerks
+        },
+        sectionHeaders: {
+          roomsEyebrow: roomsEyebrow.trim(),
+          roomsHeading: roomsHeading.trim(),
+          roomsSubtext: roomsSubtext.trim(),
+          amenitiesEyebrow: amenitiesEyebrow.trim(),
+          amenitiesHeading: amenitiesHeading.trim(),
+          amenitiesSubtext: amenitiesSubtext.trim(),
+          servicesEyebrow: servicesEyebrow.trim(),
+          servicesHeading: servicesHeading.trim(),
+          servicesSubtext: servicesSubtext.trim()
         }
       },
       corporate: {
@@ -1478,6 +1555,24 @@ export function SettingsPage() {
         heroEyebrow: rewardsHeroEyebrow,
         heroHeading: rewardsHeroHeading,
         heroSubtext: rewardsHeroSubtext
+      },
+      roomsCatalog: {
+        ...(websiteContent.roomsCatalog || {}),
+        heroEyebrow: roomsCatalogHeroEyebrow,
+        heroHeading: roomsCatalogHeroHeading,
+        heroSubtext: roomsCatalogHeroSubtext
+      },
+      contact: {
+        ...(websiteContent.contact || {}),
+        heroEyebrow: contactHeroEyebrow,
+        heroHeading: contactHeroHeading,
+        heroSubtext: contactHeroSubtext
+      },
+      notFound: {
+        ...(websiteContent.notFound || {}),
+        heroEyebrow: notFoundHeroEyebrow,
+        heroHeading: notFoundHeroHeading,
+        heroSubtext: notFoundHeroSubtext
       }
     }));
   };
@@ -2425,6 +2520,120 @@ export function SettingsPage() {
                     />
                   </label>
                 </div>
+
+                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <BedDouble size={12} /> Rooms Catalog hero
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow
+                      <input
+                        type="text"
+                        value={roomsCatalogHeroEyebrow}
+                        onChange={(e) => setRoomsCatalogHeroEyebrow(e.target.value)}
+                        placeholder="Rooms & rates"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Heading
+                      <input
+                        type="text"
+                        value={roomsCatalogHeroHeading}
+                        onChange={(e) => setRoomsCatalogHeroHeading(e.target.value)}
+                        placeholder="Our rooms"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      rows={2}
+                      value={roomsCatalogHeroSubtext}
+                      onChange={(e) => setRoomsCatalogHeroSubtext(e.target.value)}
+                      placeholder="Browse every room type we offer, then pick your dates in the next step."
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <Mail size={12} /> Contact Page hero
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow
+                      <input
+                        type="text"
+                        value={contactHeroEyebrow}
+                        onChange={(e) => setContactHeroEyebrow(e.target.value)}
+                        placeholder="Get in Touch"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Heading
+                      <input
+                        type="text"
+                        value={contactHeroHeading}
+                        onChange={(e) => setContactHeroHeading(e.target.value)}
+                        placeholder="contact us"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      rows={2}
+                      value={contactHeroSubtext}
+                      onChange={(e) => setContactHeroSubtext(e.target.value)}
+                      placeholder="Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist."
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    <Globe size={12} /> Not Found Page (404) hero
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Eyebrow
+                      <input
+                        type="text"
+                        value={notFoundHeroEyebrow}
+                        onChange={(e) => setNotFoundHeroEyebrow(e.target.value)}
+                        placeholder="Page not found"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Heading
+                      <input
+                        type="text"
+                        value={notFoundHeroHeading}
+                        onChange={(e) => setNotFoundHeroHeading(e.target.value)}
+                        placeholder="lost in bohol?"
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Subtext
+                    <textarea
+                      rows={2}
+                      value={notFoundHeroSubtext}
+                      onChange={(e) => setNotFoundHeroSubtext(e.target.value)}
+                      placeholder="We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay."
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
               </div>
 
               {/* Logo Overrides */}
@@ -2504,6 +2713,126 @@ export function SettingsPage() {
               via the single "Save Content" button. */}
           {activeTab === "website" && (
             <form onSubmit={handleSaveWebsiteContent} className="space-y-8 text-xs">
+              {/* Section Headers editor */}
+              <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
+                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Section Headers</h4>
+                <p className="text-[10px] text-gray-500">
+                  Customize the headings and subtext for the main sections of the homepage.
+                </p>
+                <div className="space-y-4">
+                  {/* Rooms Section */}
+                  <div className="rounded-lg border border-gray-100 bg-white p-3 space-y-3">
+                    <p className="font-bold text-gray-700 text-[10px] uppercase">Featured Rooms Section (&quot;Stay with us&quot;)</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={roomsEyebrow}
+                          onChange={(e) => setRoomsEyebrow(e.target.value)}
+                          placeholder="Stay with us"
+                          className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          value={roomsHeading}
+                          onChange={(e) => setRoomsHeading(e.target.value)}
+                          placeholder="Unassuming comfort, carefully kept"
+                          className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                      Subtext
+                      <input
+                        type="text"
+                        value={roomsSubtext}
+                        onChange={(e) => setRoomsSubtext(e.target.value)}
+                        placeholder="Rooms are intentionally simple..."
+                        className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Amenities Section */}
+                  <div className="rounded-lg border border-gray-100 bg-white p-3 space-y-3">
+                    <p className="font-bold text-gray-700 text-[10px] uppercase">Amenities Section</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={amenitiesEyebrow}
+                          onChange={(e) => setAmenitiesEyebrow(e.target.value)}
+                          placeholder="Amenities"
+                          className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          value={amenitiesHeading}
+                          onChange={(e) => setAmenitiesHeading(e.target.value)}
+                          placeholder="Everything important, nothing fussy"
+                          className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                      Subtext
+                      <input
+                        type="text"
+                        value={amenitiesSubtext}
+                        onChange={(e) => setAmenitiesSubtext(e.target.value)}
+                        placeholder="A boutique hotel should make the basics feel graceful..."
+                        className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Services Section */}
+                  <div className="rounded-lg border border-gray-100 bg-white p-3 space-y-3">
+                    <p className="font-bold text-gray-700 text-[10px] uppercase">Services Section</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={servicesEyebrow}
+                          onChange={(e) => setServicesEyebrow(e.target.value)}
+                          placeholder="Services"
+                          className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          value={servicesHeading}
+                          onChange={(e) => setServicesHeading(e.target.value)}
+                          placeholder="Plans made easier"
+                          className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-1.5 text-xs font-semibold text-gray-700">
+                      Subtext
+                      <input
+                        type="text"
+                        value={servicesSubtext}
+                        onChange={(e) => setServicesSubtext(e.target.value)}
+                        placeholder="For tours and transportation, our team can help coordinate..."
+                        className="min-h-[38px] rounded border border-gray-250 bg-white px-3 text-xs font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Guest Web Landing Editor</h3>
                 <p className="text-[10px] text-gray-500 mt-0.5">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -32,8 +32,105 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  Loader2
+  Loader2,
+  Move,
+  Info
 } from "lucide-react";
+
+const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+
+function toDate(value: any): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (value.toDate && typeof value.toDate === "function") return value.toDate();
+  if (typeof value === "string") return new Date(value);
+  if (value.seconds) return new Date(value.seconds * 1000);
+  return null;
+}
+
+function estimateNewTotalPrice(
+  booking: Booking,
+  targetRoomType: string,
+  checkInStr: string,
+  checkOutStr: string,
+  roomTypes: any[],
+  seasonalRateOverrides: any[],
+  corporateCodes: any[],
+  rewardsConfig: any,
+  breakfastConfig: any,
+  vouchers: any[]
+): number {
+  const typeEntry = roomTypes.find(t => t.value === targetRoomType);
+  if (!typeEntry) return 0;
+  
+  let baseRate = typeEntry.pricePerNight || 0;
+  let weekendRate = typeEntry.weekendRate || 0;
+
+  if (booking.isCorporate) {
+    let typeCorporateRate = typeEntry.corporateRate || 0;
+    baseRate = typeCorporateRate > 0 ? typeCorporateRate : baseRate;
+
+    if (booking.corporateCode) {
+      const corpData = corporateCodes.find(c => c.code === booking.corporateCode);
+      if (corpData && corpData.ratePerRoomType?.[targetRoomType]) {
+        baseRate = corpData.ratePerRoomType[targetRoomType];
+      }
+    }
+  }
+
+  const checkInDate = new Date(`${checkInStr}T00:00:00Z`);
+  const checkOutDate = new Date(`${checkOutStr}T00:00:00Z`);
+  const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
+
+  const roomBreakdown = booking.isCorporate
+    ? {
+        roomSubtotal: baseRate * numNights,
+      }
+    : calculateSeasonalAwareRoomBreakdown({
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        roomType: targetRoomType,
+        baseRate,
+        weekendRate: weekendRate || baseRate,
+        seasonalRateOverrides
+      });
+
+  const roomTotal = roomBreakdown.roomSubtotal;
+
+  const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || 250;
+  const breakfastTotal = booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
+  const subtotal = roomTotal + breakfastTotal;
+
+  let discountPct = booking.discountPct || 0;
+  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+  const afterSeniorPwd = subtotal - seniorPwdDiscount;
+
+  let voucherDiscount = 0;
+  if (booking.voucherCode) {
+    const voucherData = vouchers.find(v => v.code === booking.voucherCode);
+    if (voucherData) {
+      const vBase = Math.max(subtotal - seniorPwdDiscount, 0);
+      voucherDiscount = Math.round(calculateVoucherDiscount({
+        discountType: voucherData.discountType === "percent" ? "percent" : "flat",
+        discountValue: Number(voucherData.discountValue) || 0
+      }, vBase));
+    } else {
+      voucherDiscount = booking.voucherDiscount || 0;
+    }
+  }
+
+  const afterVoucher = afterSeniorPwd - voucherDiscount;
+
+  let memberDiscountPct = booking.memberDiscountPct || 0;
+  if (booking.memberId && rewardsConfig?.memberDiscountEnabled !== false) {
+    memberDiscountPct = Number(rewardsConfig?.memberDiscountPct) || 0;
+  }
+  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+  const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
+
+  return finalTotalPrice;
+}
 import config from "@config";
 import { jsPDF } from "jspdf";
 import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -151,6 +248,9 @@ export function BookingsPage() {
     websiteContent,
     rewardsConfig,
     members,
+    rescheduleBooking,
+    vouchers,
+    corporateCodes,
     paymentMethods,
     currentUser
   } = useAdmin();
@@ -223,6 +323,27 @@ export function BookingsPage() {
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [redeemPointsInput, setRedeemPointsInput] = useState("");
   const [isRedeemingPoints, setIsRedeemingPoints] = useState(false);
+
+  // Move Form States
+  const [showMoveForm, setShowMoveForm] = useState(false);
+  const [moveRoomId, setMoveRoomId] = useState("");
+  const [moveCheckIn, setMoveCheckIn] = useState("");
+  const [moveCheckOut, setMoveCheckOut] = useState("");
+  const [moveReason, setMoveReason] = useState("");
+  const [moveIsSubmitting, setMoveIsSubmitting] = useState(false);
+
+  // Sync Move states when selectedBooking changes
+  useEffect(() => {
+    if (selectedBooking) {
+      setMoveRoomId(selectedBooking.roomId || "");
+      const checkInDate = toDate(selectedBooking.checkIn);
+      const checkOutDate = toDate(selectedBooking.checkOut);
+      setMoveCheckIn(checkInDate ? checkInDate.toISOString().slice(0, 10) : "");
+      setMoveCheckOut(checkOutDate ? checkOutDate.toISOString().slice(0, 10) : "");
+      setMoveReason("");
+      setShowMoveForm(false);
+    }
+  }, [selectedBooking]);
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1507,6 +1628,83 @@ export function BookingsPage() {
     syncSelectedBooking({ breakfastSelections: selections });
   };
 
+  const sortedRooms = useMemo(() => {
+    return [...rooms]
+      .filter((room) => room.isActive)
+      .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }));
+  }, [rooms]);
+
+  const roomTypeLabels = useMemo(() => {
+    return roomTypes.reduce<Record<string, string>>((acc, type) => {
+      acc[type.value] = type.shortLabel || type.label;
+      return acc;
+    }, {});
+  }, [roomTypes]);
+
+  // Estimate pricing delta
+  const movePriceDelta = useMemo(() => {
+    if (!selectedBooking || !showMoveForm || !moveRoomId || !moveCheckIn || !moveCheckOut) return 0;
+    
+    const targetRoom = rooms.find(r => r.id === moveRoomId);
+    if (!targetRoom) return 0;
+    
+    try {
+      const estimatedPrice = estimateNewTotalPrice(
+        selectedBooking,
+        targetRoom.type,
+        moveCheckIn,
+        moveCheckOut,
+        roomTypes,
+        seasonalRateOverrides,
+        corporateCodes,
+        rewardsConfig,
+        breakfastConfig,
+        vouchers
+      );
+      return estimatedPrice - (selectedBooking.totalPrice || 0);
+    } catch (e) {
+      console.warn("Pricing estimate failed:", e);
+      return 0;
+    }
+  }, [selectedBooking, showMoveForm, moveRoomId, moveCheckIn, moveCheckOut, rooms, roomTypes, seasonalRateOverrides, corporateCodes, rewardsConfig, breakfastConfig, vouchers]);
+
+  const handleMoveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || !moveRoomId || !moveCheckIn || !moveCheckOut) return;
+    
+    setMoveIsSubmitting(true);
+    try {
+      const result = await rescheduleBooking({
+        bookingId: selectedBooking.id,
+        roomId: moveRoomId,
+        checkIn: moveCheckIn,
+        checkOut: moveCheckOut,
+        reason: moveReason
+      });
+      if (result.success) {
+        toast.success("Booking moved", "Room and dates updated successfully.");
+        const targetRoom = rooms.find(r => r.id === moveRoomId);
+        const updatedFields = {
+          roomId: moveRoomId,
+          roomNumber: targetRoom ? targetRoom.roomNumber : selectedBooking.roomNumber,
+          roomType: targetRoom ? targetRoom.type : selectedBooking.roomType,
+          checkIn: moveCheckIn,
+          checkOut: moveCheckOut,
+          totalPrice: selectedBooking.totalPrice + movePriceDelta
+        };
+        syncSelectedBooking(updatedFields);
+        setShowMoveForm(false);
+      } else {
+        toast.error("Failed to move booking", result.error || "Please choose another room or date range.");
+      }
+    } catch (err: any) {
+      console.error("Move booking failed:", err);
+      toast.error("Failed to move booking", err.message || "An unexpected error occurred.");
+    } finally {
+      setMoveIsSubmitting(false);
+    }
+  };
+
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedBooking && paymentAmount) {
@@ -1856,6 +2054,42 @@ export function BookingsPage() {
               </div>
             </div>
 
+            {/* Payment method & Reference number workstation */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                <CreditCard size={14} className="text-primary" />
+                Payment Method & Reference
+              </h3>
+              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[10px] uppercase font-bold text-gray-400">Payment Method</p>
+                    <p className="text-xs font-bold text-gray-900 mt-1 uppercase">
+                      {selectedBooking.paymentMethod || "Not specified"}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Payment Reference Number
+                      <input
+                        type="text"
+                        value={selectedBooking.paymentReferenceNumber || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          void updateBookingStatus(selectedBooking.id, selectedBooking.status, {
+                            paymentReferenceNumber: val || null
+                          });
+                          syncSelectedBooking({ paymentReferenceNumber: val || null });
+                        }}
+                        placeholder="e.g. GCash Ref # or Bank Trace #"
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800 font-medium"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Check-in registration workstation */}
             {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
               <div className="space-y-3">
@@ -2055,8 +2289,121 @@ export function BookingsPage() {
                   <p>Guests: {selectedBooking.numGuests}</p>
                   <p>Breakfast: {selectedBooking.hasBreakfast ? "Included" : "Excluded"}</p>
                 </div>
+                {/* Move Booking trigger */}
+                {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
+                  <div className="border-t border-gray-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowMoveForm(!showMoveForm)}
+                      className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition hover:bg-gray-50 active:scale-95"
+                    >
+                      <Move size={14} className="text-primary" />
+                      {showMoveForm ? "Cancel Move" : "Move / Upgrade Room"}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Move booking form */}
+            {selectedBooking && showMoveForm && (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Move size={14} className="text-primary" />
+                  Move / Upgrade Room Workstation
+                </h3>
+                <form onSubmit={handleMoveSubmit} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4 text-xs">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Target Room & Type
+                      <select
+                        required
+                        value={moveRoomId}
+                        onChange={(e) => setMoveRoomId(e.target.value)}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      >
+                        <option value="">Select Room</option>
+                        {sortedRooms.map((r) => {
+                          const label = roomTypeLabels[r.type] || r.type;
+                          return (
+                            <option key={r.id} value={r.id}>
+                              Room {r.roomNumber} ({label})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Check-In Date
+                      <input
+                        type="date"
+                        required
+                        value={moveCheckIn}
+                        onChange={(e) => setMoveCheckIn(e.target.value)}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Check-Out Date
+                      <input
+                        type="date"
+                        required
+                        value={moveCheckOut}
+                        onChange={(e) => setMoveCheckOut(e.target.value)}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                    Reason for Move
+                    <input
+                      type="text"
+                      value={moveReason}
+                      onChange={(e) => setMoveReason(e.target.value)}
+                      placeholder="e.g. Guest requested high floor / upgrade to Deluxe"
+                      className="min-h-[38px] rounded border border-gray-200 px-3 text-xs text-gray-800"
+                    />
+                  </label>
+
+                  {/* Price Delta block */}
+                  <div className="rounded-lg border border-gray-150 bg-gray-50/50 p-3 space-y-1.5">
+                    <p className="font-semibold text-gray-700">Estimated Price Delta</p>
+                    <div className="flex items-center justify-between text-xs">
+                      <span>Price Difference:</span>
+                      <span className={`font-bold ${movePriceDelta > 0 ? "text-amber-600" : movePriceDelta < 0 ? "text-emerald-600" : "text-gray-600"}`}>
+                        {movePriceDelta > 0 ? "+" : ""}{formatPrice(movePriceDelta)}
+                      </span>
+                    </div>
+                    {movePriceDelta > 0 && (
+                      <p className="text-[10px] text-gray-500 leading-normal">
+                        <Info size={12} className="inline mr-1 text-amber-500" />
+                        This move results in an upgrade cost. The guest will need to pay the additional balance of <strong>{formatPrice(movePriceDelta)}</strong> onsite.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowMoveForm(false)}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg border border-gray-200 px-4 font-semibold text-gray-700 hover:bg-gray-50 active:scale-95"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={moveIsSubmitting || !moveRoomId || !moveCheckIn || !moveCheckOut}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg bg-primary px-4 font-semibold text-white hover:bg-primary-dark disabled:opacity-50 active:scale-95"
+                    >
+                      {moveIsSubmitting ? "Moving..." : "Confirm Move"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
 
             {/* Financial totals */}
             <div className="space-y-3">

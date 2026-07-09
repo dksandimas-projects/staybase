@@ -22,7 +22,7 @@ export function getConfiguredBookingRefPrefix() {
 
 const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
-const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed"];
+const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 
 function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart;
@@ -220,6 +220,7 @@ interface CreateBookingBody {
   voucherCode?: string;
   paymentMethod: string;
   paymentProofUrl?: string | null;
+  paymentReferenceNumber?: string | null;
   // Per W1.3 / decision #79 / audit S1.5: the client no longer
   // sets `isCorporate` directly. The server derives it from a
   // validated `corporateCode` lookup. The `companyName` on the
@@ -270,6 +271,7 @@ export async function handleCreateBooking(req: any, res: any) {
     voucherCode,
     paymentMethod,
     paymentProofUrl,
+    paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
     linkedInquiryId
@@ -441,6 +443,17 @@ export async function handleCreateBooking(req: any, res: any) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data()!;
+
+      // Validate payment reference number if required
+      if (paymentMethod !== "pay-at-hotel") {
+        const paymentMethodsArr: any[] = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p) => p && p.method === paymentMethod);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && (!paymentReferenceNumber || !String(paymentReferenceNumber).trim())) {
+          throw new Error("Payment reference number is required.");
+        }
+      }
+
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
       if (!typeEntry) {
@@ -915,6 +928,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // `|| null` coalesces both `""` and `undefined` to
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
+        paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
@@ -1121,6 +1135,7 @@ export async function handleCreateWalkin(req: any, res: any) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
+    paymentReferenceNumber,
     status,
     totalPriceOverride,
     linkedInquiryId
@@ -1345,6 +1360,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
+        paymentReferenceNumber: paymentReferenceNumber || null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",
@@ -2508,6 +2524,13 @@ export async function handleRescheduleBooking(req: any, res: any) {
         ...updatedBooking,
         id: bookingId
       };
+
+      // If the guest is in-house (checked-in), sync room statuses
+      if (booking.status === "checked-in") {
+        const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
+        transaction.update(oldRoomRef, { status: "available" });
+        transaction.update(roomRef, { status: "occupied" });
+      }
 
       transaction.update(bookingRef, updatedBooking);
     });

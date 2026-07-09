@@ -229,6 +229,8 @@ export function BookingPage() {
   const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
+  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
+  const [paymentProofError, setPaymentProofError] = useState("");
 
   const [termsConsent, setTermsConsent] = useState(false);
   // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
@@ -721,12 +723,12 @@ export function BookingPage() {
       const file = e.target.files[0];
       const validationError = validateUploadFile(file);
       if (validationError) {
-        setSubmitError(validationError);
+        setPaymentProofError(validationError);
         e.target.value = "";
         return;
       }
       setUploadingPaymentProof(true);
-      setSubmitError("");
+      setPaymentProofError("");
       try {
         const compressed = await compressImageFile(file);
         const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
@@ -736,7 +738,7 @@ export function BookingPage() {
         setPaymentProofUpload({ name: file.name, url });
       } catch (err) {
         console.error("Payment proof upload failed:", err);
-        alert("Receipt upload failed. Please try again.");
+        setPaymentProofError("Receipt upload failed. Please check your connection and try again.");
       } finally {
         setUploadingPaymentProof(false);
       }
@@ -748,6 +750,17 @@ export function BookingPage() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError("");
+
+    // Validate payment reference number if required
+    if (paymentMethod !== "pay-at-hotel") {
+      const pmConfig = hotelConfig.paymentMethods?.find((p: any) => p.method === paymentMethod);
+      const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+      if (isRefRequired && !paymentReferenceNumber.trim()) {
+        setSubmitError("Please enter your payment reference number.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     try {
       const response = await fetch("/api/bookings/create", {
@@ -779,6 +792,7 @@ export function BookingPage() {
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
           paymentProofUrl: paymentProofUpload?.url ?? null,
+          paymentReferenceNumber: paymentReferenceNumber.trim() || null,
           // Per W1.3 / decision #79 / audit S1.5: the standard
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
@@ -1426,8 +1440,30 @@ export function BookingPage() {
                       </label>
                     )}
                   </div>
+                  {paymentProofError && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
+                  )}
                 </div>
               )}
+
+            {/* Reference Number Input */}
+            {paymentMethod !== "pay-at-hotel" && currentPaymentMethod?.requireReferenceNumber !== false && (
+              <div className="mt-4">
+                <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
+                  <span>
+                    Payment Reference Number <span className="text-red-500">*</span>
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={paymentReferenceNumber}
+                    onChange={(e) => setPaymentReferenceNumber(e.target.value)}
+                    placeholder="Enter transaction reference or trace number"
+                    className="min-h-11 rounded-lg border border-gray-250 bg-white px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light text-sm"
+                  />
+                </label>
+              </div>
+            )}
 
             {/* Honeypot field (hidden from user) */}
             <input

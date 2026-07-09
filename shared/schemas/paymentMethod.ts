@@ -28,7 +28,8 @@ export const PaymentMethodConfigSchema = z.object({
   // Optional on the schema for the same reason: pre-#111
   // entries do not have these fields.
   showInStore: z.boolean().optional(),
-  showInCorporate: z.boolean().optional()
+  showInCorporate: z.boolean().optional(),
+  requireReferenceNumber: z.boolean().optional()
 });
 
 export const PaymentMethodsArraySchema = z
