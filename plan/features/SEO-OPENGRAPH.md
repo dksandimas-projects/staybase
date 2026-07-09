@@ -81,11 +81,11 @@ Detect known crawler user-agents at the edge and stream an `index.html` variant 
 - Keep `PageMeta.tsx` for client-side nav (SPA route changes) — the two layers coexist.
 
 ### 5. Structured data — JSON-LD (G5)
-- Inject `schema.org/Hotel` (or `LodgingBusiness`) JSON-LD on the homepage: `name` (`brandName`/`legalName`), `address` (from `config.address`), `telephone`, `image`, `url`, `priceRange`, `sameAs` (`facebookUrl`, `instagramUrl`), `checkinTime`/`checkoutTime`.
+- Inject `schema.org/Hotel` (or `LodgingBusiness`) JSON-LD on the homepage: `name` (`brandName`/`legalName`), `address` (from `config.address`), `telephone`, `image`, `url`, `priceRange` (from new `config.priceRange`, relative band e.g. `₱₱` — see Q4), `sameAs` (`facebookUrl`, `instagramUrl`, `twitterHandle` URL when set), `checkinTime`/`checkoutTime`.
 - All values sourced from `hotel.config.ts` — no hardcoded strings (white-label rule).
 
 ### 6. OG polish (G6)
-- Add `og:image:width` (1200), `og:image:height` (630), `og:image:alt` (`brandName`), `og:locale` (from `config.locale`), `twitter:site` if a handle exists.
+- Add `og:image:width` (1200), `og:image:height` (630), `og:image:alt` (`brandName`), `og:locale` (from `config.locale`), and `twitter:site` from the new `config.twitterHandle` (rendered only when non-empty — see Q3).
 
 ### 7. Admin app stays out
 - Confirm `admin-app/index.html` carries `<meta name="robots" content="noindex, nofollow">` and ships the disallow `robots.txt`.
@@ -94,7 +94,7 @@ Detect known crawler user-agents at the edge and stream an `index.html` variant 
 
 ## White-label rules (hard)
 
-- Every string/URL derives from `hotel.config.ts` (`brandName`, `legalName`, `domain`, `ogImage`, `address`, `locale`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`). **No hardcoded "spark inn" / "sparkinnbohol.com".**
+- Every string/URL derives from `hotel.config.ts` (`brandName`, `legalName`, `domain`, `ogImage`, `address`, `locale`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, plus two new fields: `twitterHandle` and `priceRange`). **No hardcoded "spark inn" / "sparkinnbohol.com".**
 - `og-image.png` is a per-client asset → add to the `plan/docs/WHITE-LABEL.md` asset checklist.
 - `robots.txt` + `sitemap.xml` must template off `config.domain`.
 
@@ -126,5 +126,5 @@ Detect known crawler user-agents at the edge and stream an `index.html` variant 
 
 - ~~**Q1.** Approve Option A (build-time prerender) vs Option B (edge middleware)?~~ ✅ **Resolved 2026-07-09 — Option A (build-time prerender).** See `§Approach — Option A`.
 - **Q2.** Provide/approve the 1200×630 OG card design (logo + tagline on brand orange)?
-- **Q3.** Is there an X/Twitter handle for `twitter:site`? (none in config today)
-- **Q4.** `priceRange` value for JSON-LD (e.g. `₱₱`) — owner to confirm.
+- ~~**Q3.** Is there an X/Twitter handle for `twitter:site`?~~ ✅ **Resolved 2026-07-09 — support X/Twitter.** Add a `twitterHandle` field to `hotel.config.ts` and emit `twitter:site` from it; render the tag only when the field is non-empty (Spark Inn's handle value still to be supplied by owner — tag is omitted until then, card still works via `twitter:image`).
+- ~~**Q4.** `priceRange` value for JSON-LD?~~ ✅ **Resolved 2026-07-09 — relative band `₱₱`.** Store as a `priceRange` field in `hotel.config.ts`. Chosen over an explicit numeric range because Option A bakes JSON-LD at build time and live rates (seasonal/weekend overrides) would drift; the band never goes stale. A precise version (emitting `Offer`/`priceSpecification` from live rate data) is deferred post-launch.
