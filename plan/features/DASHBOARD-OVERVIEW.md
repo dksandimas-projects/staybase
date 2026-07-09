@@ -33,6 +33,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`
 - [ ] Recent bookings table — last 10 bookings regardless of status, clickable rows to booking detail
 - [ ] Intercom unread indicator — badge on sidebar nav item, count of unread messages across all rooms
+- [ ] **Today's Breakfast Prep section** — see §Implementation Plan — Today's Breakfast Prep below
 - [ ] All sections real-time via `onSnapshot`
 
 ## Data & Logic Checklist
@@ -46,6 +47,35 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Recent bookings: query `bookings` ordered by `createdAt desc`, limit 10
 - [ ] Intercom unread count: aggregate query across all `intercoms/{roomId}/messages` where `isRead: false` AND `sender: "guest"`
 - [ ] Confirm Payment CTA: updates booking status to `"payment-confirmed"` + triggers email
+
+## Implementation Plan — Today's Breakfast Prep (raised by owner, 2026-07-09)
+
+### Goal
+
+Front desk currently has no single, guided place to see "who ordered breakfast today, what did they order, and has it gone out yet." Give them one.
+
+### Current State
+
+`ReportsPage.tsx` already has the core aggregation logic (`dailyKitchenPrep`, lines ~306-331): it walks every breakfast-enabled booking's `breakfastSelections` map (`plan/docs/BACKEND.md §bookings` — keyed `yyyy-mm-dd-guest-n` → selected silog item name) and produces a per-date, per-item count. This is a **report** — it's on the Reports page, not the Dashboard, isn't scoped to "today" by default, and has no notion of "served" at all; it's a static count for kitchen quantity planning, not a checklist staff can work through.
+
+### Target Behavior
+
+- ⬜ New Dashboard section — "Today's Breakfast" — showing every guest with a breakfast selection for today (`checkIn ≤ today < checkOut`, `hasBreakfast: true`, per-guest-per-day entries from `breakfastSelections` for today's date key), each row: room number, guest name, selected silog item, and a Served / Not Served toggle.
+- ⬜ Toggling "Served" persists immediately (optimistic update + Firestore write, matching the rest of the dashboard's real-time pattern) so any staff member on shift sees the same up-to-date checklist — this is the "guided" part the owner asked for: front desk can tell at a glance what's left to go out this morning without cross-referencing the booking drawer per room.
+- ⬜ Section groups or badges by status — e.g. an unserved count badge ("3 remaining") so it's scannable without reading every row, and a "All served" empty/complete state once everything for today is checked off.
+- ⬜ Section is hidden (or shows "No breakfast orders today") when no bookings have breakfast selected for today — don't show an empty table.
+
+### Data Model Addition
+
+`breakfastSelections` stays as-is (`Record<string, string>`, key → item name) — do not change its shape, since Reports/exports/registration PDFs already depend on it. Add a **sibling** map on the booking document: `breakfastServed?: Record<string, boolean>`, using the identical `yyyy-mm-dd-guest-n` key format. A key present in `breakfastSelections` but absent (or `false`) in `breakfastServed` means "ordered, not yet served." This keeps the addition non-breaking and lets the Dashboard section and the existing Reports kitchen-prep view share the same keys.
+
+### Implementation Steps
+
+1. ⬜ Add `breakfastServed` to the `Booking` type in `shared/types/index.ts` and document it in `plan/docs/TYPES.md` / `plan/docs/BACKEND.md §bookings` alongside `breakfastSelections`.
+2. ⬜ Build a `useTodayBreakfast()`-style selector (or extend `AdminContext`) that filters currently-active bookings down to today's `breakfastSelections` entries, joined with room number/guest name.
+3. ⬜ Build the Dashboard section UI — list/table with the Served toggle per row, unserved-count badge, empty state.
+4. ⬜ Wire the toggle to `updateDoc` on `bookings/{bookingId}`, setting `breakfastServed.{key} = true/false`.
+5. ⬜ Reuse the same data for the Reports kitchen-prep view where useful, so "today" in both places is always consistent.
 
 ## Edge Cases & States
 
