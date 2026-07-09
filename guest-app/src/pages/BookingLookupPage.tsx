@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { scaleIn } from "@spark-inn/shared";
+import type { BookingRateBreakdown } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
@@ -10,6 +11,7 @@ import { Modal } from "../components/Modal";
 import { Navbar } from "../components/Navbar";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
+import { PriceBreakdown } from "../components/PriceBreakdown";
 import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -30,6 +32,7 @@ interface BookingData {
   numGuests: number;
   ratePerNight: number;
   totalPrice: number;
+  rateBreakdown?: BookingRateBreakdown | null;
   paymentMethod: string;
   status: string;
   hasBreakfast: boolean;
@@ -176,6 +179,7 @@ export function BookingLookupPage() {
         numGuests: Number(data.numGuests || 0),
         ratePerNight: Number(data.ratePerNight || 0),
         totalPrice: Number(data.totalPrice || 0),
+        rateBreakdown: data.rateBreakdown || null,
         paymentMethod: data.paymentMethod || "",
         status: data.status,
         hasBreakfast: Boolean(data.hasBreakfast),
@@ -650,6 +654,10 @@ export function BookingLookupPage() {
                         {paymentLabels[activeBooking.paymentMethod] ?? activeBooking.paymentMethod}
                       </span>
                     </div>
+
+                    {activeBooking.rateBreakdown ? (
+                      <PriceBreakdown breakdown={activeBooking.rateBreakdown} total={activeBooking.totalPrice} />
+                    ) : null}
 
                     <div className="border-t border-gray-100 pt-4 flex justify-between items-end">
                       <div>

@@ -2,7 +2,7 @@ import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
 import {
-  calculateSeasonalAwareRoomTotal,
+  calculateSeasonalAwareRoomBreakdown,
   calculateVoucherDiscount,
   getCheckInReadiness,
   normalizeSeasonalRateOverrides,
@@ -12,6 +12,7 @@ import {
   BOOKING_REF_REGEX,
   generateLookupToken
 } from "@spark-inn/shared";
+import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 
@@ -43,6 +44,47 @@ async function hasActiveRoomBlockConflict(
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
+}
+
+function buildRateBreakdown(input: {
+  roomLines: BookingRateLine[];
+  roomSubtotal: number;
+  breakfastTotal: number;
+  discountType: string;
+  discountPct: number;
+  voucherDiscount: number;
+  memberDiscountPct: number;
+  pointsRedeemedValue?: number;
+  finalTotal: number;
+}): BookingRateBreakdown {
+  const addOns = input.breakfastTotal > 0
+    ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
+    : [];
+  const subtotal = input.roomSubtotal + input.breakfastTotal;
+  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
+  const afterSeniorPwd = subtotal - seniorPwdDiscount;
+  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
+  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
+  const pointsRedeemedValue = Math.max(0, Number(input.pointsRedeemedValue) || 0);
+  const deductions = [
+    ...(seniorPwdDiscount > 0
+      ? [{
+          label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
+          amount: seniorPwdDiscount
+        }]
+      : []),
+    ...(input.voucherDiscount > 0 ? [{ label: "Voucher discount", amount: input.voucherDiscount }] : []),
+    ...(memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }] : []),
+    ...(pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : [])
+  ];
+
+  return {
+    roomSubtotal: input.roomSubtotal,
+    roomLines: input.roomLines,
+    addOns,
+    deductions,
+    finalTotal: input.finalTotal
+  };
 }
 
 // Per BF-21 (booking-flow audit 2026-06-26): the public
@@ -297,6 +339,7 @@ export async function handleCreateBooking(req: any, res: any) {
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
+    let finalRateBreakdown: BookingRateBreakdown | null = null;
     let computedData: any = {};
     let alreadyExistingBookingResponse: any = null;
     // Captured inside the transaction so the response payload
@@ -371,6 +414,7 @@ export async function handleCreateBooking(req: any, res: any) {
         const existing = existingBooking.data() || {};
         finalBookingRef = String(existing.bookingRef || "");
         finalTotalPrice = Number(existing.totalPrice || 0);
+        finalRateBreakdown = existing.rateBreakdown || null;
         assignedRoomId = String(existing.roomId || "");
         assignedRoomNumber = String(existing.roomNumber || "");
         alreadyExistingBookingResponse = {
@@ -380,6 +424,7 @@ export async function handleCreateBooking(req: any, res: any) {
           roomId: assignedRoomId,
           roomNumber: assignedRoomNumber,
           roomType: String(existing.roomType || roomType),
+          rateBreakdown: finalRateBreakdown,
           alreadyExists: true
         };
         return;
@@ -618,9 +663,20 @@ export async function handleCreateBooking(req: any, res: any) {
       // 5. Calculate Nightly Rate Total. Seasonal overrides apply to
       // standard bookings only; negotiated and flat corporate rates
       // intentionally keep their contract pricing.
-      const roomTotal = corporateDetails.isCorporate
-        ? activeRoomRate * numNights
-        : calculateSeasonalAwareRoomTotal({
+      const roomBreakdown = corporateDetails.isCorporate
+        ? {
+            roomSubtotal: activeRoomRate * numNights,
+            roomLines: [{
+              source: "corporate" as const,
+              label: corporateDetails.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+              startDate: checkIn,
+              endDate: checkOut,
+              nights: numNights,
+              nightlyRate: activeRoomRate,
+              subtotal: activeRoomRate * numNights
+            }]
+          }
+        : calculateSeasonalAwareRoomBreakdown({
             checkIn: checkInDate,
             checkOut: checkOutDate,
             roomType,
@@ -628,6 +684,7 @@ export async function handleCreateBooking(req: any, res: any) {
             weekendRate: typeWeekendRate,
             seasonalRateOverrides
           });
+      const roomTotal = roomBreakdown.roomSubtotal;
 
       // 6. Calculate Breakfast Add-on
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
@@ -769,6 +826,16 @@ export async function handleCreateBooking(req: any, res: any) {
       // handler now uses `originalTotalPrice - voucherDiscount`
       // to apply the voucher if one was also applied.
       const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: roomBreakdown.roomLines,
+        roomSubtotal: roomTotal,
+        breakfastTotal,
+        discountType,
+        discountPct,
+        voucherDiscount,
+        memberDiscountPct: appliedMemberDiscountPct,
+        finalTotal: totalPrice
+      });
 
       // 9. Generate Reference Number
       const { todayStr, todayCompact } = getManilaDateInfo();
@@ -789,6 +856,7 @@ export async function handleCreateBooking(req: any, res: any) {
       // Save output for outer scope
       finalBookingRef = bookingRef;
       finalTotalPrice = totalPrice;
+      finalRateBreakdown = rateBreakdown;
 
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
@@ -824,6 +892,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // without leaking the raw `guestEmail` in URLs.
         lookupToken: generateLookupToken(),
         totalPrice,
+        rateBreakdown,
         originalTotalPrice,
         discountType: discountType || "",
         discountPct,
@@ -914,6 +983,7 @@ export async function handleCreateBooking(req: any, res: any) {
         checkOut,
         numNights,
         totalPrice,
+        rateBreakdown,
         source: corporateDetails.isCorporate ? "corporate" : "online"
       };
     });
@@ -988,6 +1058,7 @@ export async function handleCreateBooking(req: any, res: any) {
         // `calculateBookingTotal` (which still carries the
         // weekend-rate override but is otherwise prone to drift).
         totalPrice: finalTotalPrice,
+        rateBreakdown: finalRateBreakdown,
         roomId: assignedRoomId,
         roomNumber: assignedRoomNumber,
         roomType
@@ -1168,7 +1239,7 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 4. Calculate Nightly Rate Total. Seasonal overrides beat
       // weekend rates for walk-ins unless staff enters a manual
       // total override below.
-      const roomTotal = calculateSeasonalAwareRoomTotal({
+      const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
         roomType: roomData.type,
@@ -1176,6 +1247,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         weekendRate: typeWeekendRate,
         seasonalRateOverrides
       });
+      const roomTotal = roomBreakdown.roomSubtotal;
 
       // 5. Calculate Breakfast Add-on
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
@@ -1188,6 +1260,26 @@ export async function handleCreateWalkin(req: any, res: any) {
       } else {
         finalTotalPrice = subtotal;
       }
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: totalPriceOverride !== undefined && totalPriceOverride !== null
+          ? [{
+              source: "manual",
+              label: "Manual front-desk rate",
+              startDate: checkIn,
+              endDate: checkOut,
+              nights: numNights,
+              nightlyRate: numNights > 0 ? Math.round(finalTotalPrice / numNights) : finalTotalPrice,
+              subtotal: finalTotalPrice
+            }]
+          : roomBreakdown.roomLines,
+        roomSubtotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? finalTotalPrice : roomTotal,
+        breakfastTotal: totalPriceOverride !== undefined && totalPriceOverride !== null ? 0 : breakfastTotal,
+        discountType: "",
+        discountPct: 0,
+        voucherDiscount: 0,
+        memberDiscountPct: 0,
+        finalTotal: finalTotalPrice
+      });
 
       // 6. Generate Reference Number
       const { todayStr, todayCompact } = getManilaDateInfo();
@@ -1223,6 +1315,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         numNights,
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
+        rateBreakdown,
         originalTotalPrice: subtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
@@ -1297,7 +1390,9 @@ export async function handleCreateWalkin(req: any, res: any) {
       success: true,
       data: {
         bookingId,
-        bookingRef: finalBookingRef
+        bookingRef: finalBookingRef,
+        totalPrice: finalTotalPrice,
+        rateBreakdown: newBooking?.rateBreakdown ?? null
       }
     });
 
@@ -2116,6 +2211,7 @@ async function enrichAndRespond(res: any, bookingData: any) {
       numGuests: bookingData.numGuests,
       ratePerNight: bookingData.ratePerNight,
       totalPrice: bookingData.totalPrice,
+      rateBreakdown: bookingData.rateBreakdown || null,
       paymentMethod: bookingData.paymentMethod,
       status: bookingData.status,
       hasBreakfast: bookingData.hasBreakfast,
@@ -2295,9 +2391,20 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const roomTotal = booking.isCorporate
-        ? activeRoomRate * numNights
-        : calculateSeasonalAwareRoomTotal({
+      const roomBreakdown = booking.isCorporate
+        ? {
+            roomSubtotal: activeRoomRate * numNights,
+            roomLines: [{
+              source: "corporate" as const,
+              label: booking.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+              startDate: checkIn,
+              endDate: checkOut,
+              nights: numNights,
+              nightlyRate: activeRoomRate,
+              subtotal: activeRoomRate * numNights
+            }]
+          }
+        : calculateSeasonalAwareRoomBreakdown({
             checkIn: checkInDate,
             checkOut: checkOutDate,
             roomType: room.type,
@@ -2305,6 +2412,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
             weekendRate: typeEntry.weekendRate || typeEntry.pricePerNight || 0,
             seasonalRateOverrides
           });
+      const roomTotal = roomBreakdown.roomSubtotal;
 
       const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
       const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
@@ -2352,6 +2460,17 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
       const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: roomBreakdown.roomLines,
+        roomSubtotal: roomTotal,
+        breakfastTotal,
+        discountType: booking.discountType || "",
+        discountPct,
+        voucherDiscount,
+        memberDiscountPct: appliedMemberDiscountPct,
+        pointsRedeemedValue: booking.pointsRedeemedValue || 0,
+        finalTotal: finalTotalPrice
+      });
 
       const rescheduleEntry = {
         fromRoomId: booking.roomId || "",
@@ -2377,6 +2496,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
         numNights,
         ratePerNight: activeRoomRate,
         totalPrice: finalTotalPrice,
+        rateBreakdown,
         originalTotalPrice,
         voucherDiscount,
         rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],

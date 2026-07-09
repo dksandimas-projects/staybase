@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type PaymentMethodConfig } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -101,6 +101,36 @@ function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | nul
   pdf.save(fileName);
   URL.revokeObjectURL(url);
   return "downloaded";
+}
+
+function AdminPriceBreakdown({ breakdown, total }: { breakdown?: BookingRateBreakdown | null; total: number }) {
+  if (!breakdown?.roomLines?.length) return null;
+  return (
+    <div className="space-y-2">
+      {breakdown.roomLines.map((line, index) => (
+        <div key={`${line.source}-${line.startDate}-${index}`} className="flex justify-between text-gray-600">
+          <span>{line.label} ({line.nights} x {formatPrice(line.nightlyRate)})</span>
+          <span>{formatPrice(line.subtotal)}</span>
+        </div>
+      ))}
+      {breakdown.addOns.map((line, index) => (
+        <div key={`add-on-${index}`} className="flex justify-between text-gray-500">
+          <span>{line.label}</span>
+          <span>{formatPrice(line.amount)}</span>
+        </div>
+      ))}
+      {breakdown.deductions.map((line, index) => (
+        <div key={`deduction-${index}`} className="flex justify-between text-status-red-text">
+          <span>{line.label}</span>
+          <span>-{formatPrice(line.amount)}</span>
+        </div>
+      ))}
+      <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
+        <span>Total Bill Amount:</span>
+        <span className="text-primary-dark">{formatPrice(breakdown.finalTotal || total)}</span>
+      </div>
+    </div>
+  );
 }
 
 export function BookingsPage() {
@@ -1166,51 +1196,60 @@ export function BookingsPage() {
     pdf.text("Pricing Breakdown", marginL, y);
     y += 6;
 
-    const subtotal = b.ratePerNight * b.numNights;
     pdf.setFontSize(10);
     pdf.setTextColor(50, 50, 50);
-    pdf.text(`Subtotal (${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)})`, labelColX, y);
-    pdf.text(formatAmount(subtotal), marginR, y, { align: "right" });
-    y += 5.5;
-
-    // Senior / PWD discount
-    if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
-      const discountLabel = b.discountType === "senior"
-        ? "Senior Citizen Discount"
-        : b.discountType === "pwd"
-          ? "PWD Discount"
-          : "Discount";
-      const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-      const discountAmount = Math.max(
-        0,
-        Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
-      );
-      pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
-      pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
+    if (b.rateBreakdown?.roomLines?.length) {
+      b.rateBreakdown.roomLines.forEach((line) => {
+        checkNewPage(6);
+        pdf.text(`${line.label} (${line.nights} x ${formatAmount(line.nightlyRate)})`, labelColX, y);
+        pdf.text(formatAmount(line.subtotal), marginR, y, { align: "right" });
+        y += 5.5;
+      });
+      b.rateBreakdown.addOns.forEach((line) => {
+        checkNewPage(6);
+        pdf.text(line.label, labelColX, y);
+        pdf.text(formatAmount(line.amount), marginR, y, { align: "right" });
+        y += 5.5;
+      });
+      b.rateBreakdown.deductions.forEach((line) => {
+        checkNewPage(6);
+        pdf.text(line.label, labelColX, y);
+        pdf.text(`-${formatAmount(line.amount)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      });
+    } else {
+      const subtotal = b.ratePerNight * b.numNights;
+      pdf.text(`Subtotal (${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)})`, labelColX, y);
+      pdf.text(formatAmount(subtotal), marginR, y, { align: "right" });
       y += 5.5;
-    }
 
-    // Voucher
-    if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
-      pdf.text(`Voucher (${b.voucherCode})`, labelColX, y);
-      pdf.text(`-${formatAmount(b.voucherDiscount)}`, marginR, y, { align: "right" });
-      y += 5.5;
-    }
+      if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
+        const discountLabel = b.discountType === "senior"
+          ? "Senior Citizen Discount"
+          : b.discountType === "pwd"
+            ? "PWD Discount"
+            : "Discount";
+        const storedDiscountBase = b.originalTotalPrice ?? subtotal;
+        const discountAmount = Math.max(
+          0,
+          Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
+        );
+        pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
+        pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      }
 
-    // Points redemption
-    if (b.pointsRedeemed && b.pointsRedeemed > 0) {
-      pdf.text(
-        `Spark Rewards: ${b.pointsRedeemed} pts redeemed`,
-        labelColX,
-        y
-      );
-      pdf.text(
-        `-${formatAmount(b.pointsRedeemedValue || 0)}`,
-        marginR,
-        y,
-        { align: "right" }
-      );
-      y += 5.5;
+      if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
+        pdf.text(`Voucher (${b.voucherCode})`, labelColX, y);
+        pdf.text(`-${formatAmount(b.voucherDiscount)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      }
+
+      if (b.pointsRedeemed && b.pointsRedeemed > 0) {
+        pdf.text(`Spark Rewards: ${b.pointsRedeemed} pts redeemed`, labelColX, y);
+        pdf.text(`-${formatAmount(b.pointsRedeemedValue || 0)}`, marginR, y, { align: "right" });
+        y += 5.5;
+      }
     }
 
     // Total
@@ -2010,20 +2049,26 @@ export function BookingsPage() {
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Financial Breakdown</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span>Room Charge ({selectedBooking.numNights} nights)</span>
-                  <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
-                </div>
-                {selectedBooking.hasBreakfast && (
-                  <div className="flex justify-between text-gray-500">
-                    <span>Breakfast Service charge</span>
-                    <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
-                  </div>
+                {selectedBooking.rateBreakdown ? (
+                  <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span>Room Charge ({selectedBooking.numNights} nights)</span>
+                      <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
+                    </div>
+                    {selectedBooking.hasBreakfast && (
+                      <div className="flex justify-between text-gray-500">
+                        <span>Breakfast Service charge</span>
+                        <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
+                      <span>Total Bill Amount:</span>
+                      <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
+                    </div>
+                  </>
                 )}
-                <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
-                  <span>Total Bill Amount:</span>
-                  <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
-                </div>
               </div>
             </div>
 
