@@ -4,7 +4,7 @@ import { useAdmin, IntercomMessage, StoreOrder } from "../context/AdminContext";
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { Drawer } from "../components/Drawer";
-import { IntercomChatPanel, type ThreadFilter } from "../components/IntercomChatPanel";
+import { IntercomChatPanel, type IntercomBookingSummary, type ThreadFilter } from "../components/IntercomChatPanel";
 import { StoreOrderMessageCard } from "../components/StoreOrderMessageCard";
 import { ArrowLeft } from "lucide-react";
 import {
@@ -27,6 +27,7 @@ export function IntercomInboxPage() {
     acceptCall,
     declineCall,
     rooms,
+    bookings,
     hotelConfig,
     storeOrders
   } = useAdmin();
@@ -239,6 +240,25 @@ export function IntercomInboxPage() {
     () => new Map(storeOrders.map((order) => [order.orderRef, order])),
     [storeOrders]
   );
+  const selectedBookingSummary = useMemo<IntercomBookingSummary | null>(() => {
+    if (!selectedRoomNumber) return null;
+    const activeStatuses = ["checked-in", "confirmed", "payment-confirmed"];
+    const matching = bookings
+      .filter((booking) => booking.roomNumber === selectedRoomNumber && activeStatuses.includes(booking.status))
+      .sort((a, b) => {
+        const priority = (status: string) => status === "checked-in" ? 0 : status === "confirmed" ? 1 : 2;
+        return priority(a.status) - priority(b.status);
+      })[0];
+    if (!matching) return null;
+    return {
+      guestName: matching.guestName,
+      bookingRef: matching.bookingRef,
+      checkIn: matching.checkIn,
+      checkOut: matching.checkOut,
+      status: matching.status,
+      specialRequests: matching.specialRequests || matching.notes || ""
+    };
+  }, [bookings, selectedRoomNumber]);
 
   useEffect(() => {
     // On mobile, the user explicitly taps a thread to open it. Auto-
@@ -473,6 +493,7 @@ export function IntercomInboxPage() {
             roomNumber={selectedRoomNumber}
             messages={activeChatMessages}
             storeOrdersByRef={storeOrdersByRef}
+            bookingSummary={selectedBookingSummary}
             threadFilter={threadFilter as ThreadFilter}
             isResolved={isSelectedThreadResolved}
             onToggleResolved={() => void handleToggleResolved()}
@@ -498,6 +519,7 @@ export function IntercomInboxPage() {
           roomNumber={selectedRoomNumber}
           messages={activeChatMessages}
           storeOrdersByRef={storeOrdersByRef}
+          bookingSummary={selectedBookingSummary}
           threadFilter={threadFilter as ThreadFilter}
           isResolved={isSelectedThreadResolved}
           onToggleResolved={() => void handleToggleResolved()}

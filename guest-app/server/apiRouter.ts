@@ -11,6 +11,7 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleVerifyIntercomGuest } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import config from "../../hotel.config";
@@ -864,6 +865,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     
     return await handleGetStoreOrderStatus(req, res);
+  }
+
+  if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-verify:${ip}`, 20, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many verification attempts. Please try again in a minute." });
+    }
+
+    return await handleVerifyIntercomGuest(req, res);
   }
 
   if (domain === "email" && action === "preview" && req.method === "POST") {
