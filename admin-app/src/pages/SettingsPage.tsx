@@ -1117,6 +1117,37 @@ export function SettingsPage() {
     setSearchParams(params, { replace: true });
   };
 
+  const [activeFromEmail, setActiveFromEmail] = useState<string>("");
+  const [activeAdminEmail, setActiveAdminEmail] = useState<string>("");
+
+  useEffect(() => {
+    if (activeTab !== "email") return;
+
+    let isMounted = true;
+    const fetchEmailConfig = async () => {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/email-config`, {
+          headers: {
+            "Authorization": token ? `Bearer ${token}` : ""
+          }
+        });
+        const data = await res.json();
+        if (data.success && isMounted) {
+          setActiveFromEmail(data.fromEmail);
+          setActiveAdminEmail(data.adminEmail);
+        }
+      } catch (err) {
+        console.error("Failed to load email config:", err);
+      }
+    };
+    void fetchEmailConfig();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab]);
+
   // On mobile, auto-scroll the horizontal tab bar to the active tab so
   // it's always visible. The user can still scroll the bar sideways to
   // reach any tab that falls outside the viewport.
@@ -4451,12 +4482,12 @@ export function SettingsPage() {
               <div className="grid gap-6 sm:grid-cols-2">
                 <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-5 space-y-2">
                   <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Resend Sender Address</span>
-                  <p className="text-sm font-semibold text-gray-900 font-mono">{config.supportEmail}</p>
+                  <p className="text-sm font-semibold text-gray-900 font-mono">{activeFromEmail || config.supportEmail}</p>
                   <p className="text-[10px] text-gray-500">Used as the `from` address for all transactional emails.</p>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-5 space-y-2">
                   <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Admin Notification Email</span>
-                  <p className="text-sm font-semibold text-gray-900 font-mono">{config.supportEmail}</p>
+                  <p className="text-sm font-semibold text-gray-900 font-mono">{activeAdminEmail || config.supportEmail}</p>
                   <p className="text-[10px] text-gray-500">Receives new corporate inquiry notifications and staff alerts.</p>
                 </div>
               </div>

@@ -788,6 +788,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleEraseMemberAccount(req, res);
   }
 
+  if (domain === "admin" && action === "email-config" && req.method === "GET") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    return res.status(200).json({
+      success: true,
+      fromEmail: process.env.RESEND_FROM_EMAIL || config.supportEmail,
+      adminEmail: process.env.RESEND_ADMIN_EMAIL || config.supportEmail
+    });
+  }
+
   if (domain === "admin" && action === "create-staff" && req.method === "POST") {
     // Per S4 (soft batch 2026-06-26): rate-limit the
     // staff-creation endpoint. An attacker with admin

@@ -193895,6 +193895,17 @@ async function handler(req, res) {
     req.user = authResult;
     return await handleEraseMemberAccount(req, res);
   }
+  if (domain === "admin" && action === "email-config" && req.method === "GET") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    return res.status(200).json({
+      success: true,
+      fromEmail: process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail,
+      adminEmail: process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail
+    });
+  }
   if (domain === "admin" && action === "create-staff" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-create-staff:${ip}`, 5, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many staff-creation requests. Please try again in a minute." });
