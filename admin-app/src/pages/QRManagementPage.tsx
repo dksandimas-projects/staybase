@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { QRCodeSVG } from "qrcode.react";
+import { QRCodeCanvas, QRCodeSVG } from "qrcode.react";
 import { AlertTriangle, Check, Download, Printer, QrCode, RefreshCcw } from "lucide-react";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import config from "@config";
@@ -33,6 +34,36 @@ function getQrMarkup(value: string, size = qrSize) {
       bgColor="white"
     />
   );
+}
+
+async function renderQrPngDataUrl(value: string, size = 512) {
+  const host = document.createElement("div");
+  host.style.position = "fixed";
+  host.style.left = "-9999px";
+  host.style.top = "0";
+  host.setAttribute("aria-hidden", "true");
+  document.body.appendChild(host);
+
+  const root = createRoot(host);
+  try {
+    root.render(
+      <QRCodeCanvas
+        value={value}
+        size={size}
+        level="M"
+        marginSize={2}
+        fgColor={config.colors.sidebar}
+        bgColor="white"
+      />
+    );
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const canvas = host.querySelector("canvas");
+    if (!canvas) throw new Error("QR canvas did not render.");
+    return canvas.toDataURL("image/png");
+  } finally {
+    root.unmount();
+    host.remove();
+  }
 }
 
 function getPrintableCard(room: Room, compact = false) {
@@ -213,38 +244,16 @@ export function QRManagementPage() {
 
   const handleDownloadPng = async (room: Room) => {
     const scanLink = getIntercomUrl(room);
-    const svgMarkup = getQrMarkup(scanLink, 512);
-    const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
-    const svgUrl = URL.createObjectURL(svgBlob);
-    const image = new Image();
-
-    image.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 512;
-      canvas.height = 512;
-      const context = canvas.getContext("2d");
-      if (!context) {
-        URL.revokeObjectURL(svgUrl);
-        setQrError("Unable to prepare the QR PNG. Please try again.");
-        return;
-      }
-      context.fillStyle = "white";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0);
-      URL.revokeObjectURL(svgUrl);
-
+    try {
+      setQrError("");
+      const pngUrl = await renderQrPngDataUrl(scanLink, 512);
       const link = document.createElement("a");
       link.download = `${config.brandName.replace(/\s+/g, "-")}-room-${room.roomNumber}-qr.png`;
-      link.href = canvas.toDataURL("image/png");
+      link.href = pngUrl;
       link.click();
-    };
-
-    image.onerror = () => {
-      URL.revokeObjectURL(svgUrl);
+    } catch {
       setQrError("Unable to download the QR image. Please try again.");
-    };
-
-    image.src = svgUrl;
+    }
   };
 
   const confirmRegenerate = async () => {

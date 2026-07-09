@@ -45,6 +45,7 @@ import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
+import { Modal } from "../components/Modal";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
 import { StepIndicator } from "../components/StepIndicator";
@@ -227,6 +228,7 @@ export function BookingPage() {
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
   const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
+  const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
 
   const [termsConsent, setTermsConsent] = useState(false);
   // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
@@ -861,6 +863,20 @@ export function BookingPage() {
     <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
       <BookingHeader backTo={getBackToPath()} />
       {content}
+      <Modal
+        title={imagePreview?.title ?? "Image preview"}
+        open={!!imagePreview}
+        onClose={() => setImagePreview(null)}
+        className="max-w-3xl"
+      >
+        {imagePreview ? (
+          <img
+            src={imagePreview.url}
+            alt={imagePreview.title}
+            className="max-h-[72vh] w-full rounded-lg object-contain"
+          />
+        ) : null}
+      </Modal>
     </main>
   );
 
@@ -1186,17 +1202,26 @@ export function BookingPage() {
                           <CheckCircle2 size={18} className="text-status-green-text" />
                           <span className="text-sm font-medium text-gray-800">{discountIdUpload.name}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDiscountIdUpload(null);
-                            setDiscountIdUploadError("");
-                            resetDiscountIdInput();
-                          }}
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                        >
-                          Delete
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setImagePreview({ title: discountIdUpload.name, url: discountIdUpload.url })}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDiscountIdUpload(null);
+                              setDiscountIdUploadError("");
+                              resetDiscountIdInput();
+                            }}
+                            className="text-xs font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">
@@ -1363,15 +1388,24 @@ export function BookingPage() {
                           <CheckCircle2 size={18} className="text-status-green-text" />
                           <span className="text-sm font-medium text-gray-800">{paymentProofUpload.name}</span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPaymentProofUpload(null);
-                          }}
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                        >
-                          Delete
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setImagePreview({ title: paymentProofUpload.name, url: paymentProofUpload.url })}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPaymentProofUpload(null);
+                            }}
+                            className="text-xs font-semibold text-red-600 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-4 text-center hover:bg-gray-100 transition-colors">

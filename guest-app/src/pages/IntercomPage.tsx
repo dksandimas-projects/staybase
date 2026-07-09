@@ -1141,8 +1141,8 @@ export function IntercomPage() {
         <header className="bg-gray-950 text-white p-4 shadow-sm z-30 flex flex-col gap-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-primary font-bold">
-                {roomId || "G"}
+              <div className="h-9 w-9 shrink-0 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center text-xs text-primary font-bold overflow-hidden">
+                {roomNumber || "G"}
               </div>
               <div>
                 <h1 className="font-bold text-sm leading-tight text-white">Room {roomNumber || roomId || "Guest"}</h1>
@@ -1183,16 +1183,16 @@ export function IntercomPage() {
           )}
 
           {/* Navigation Tabs */}
-          <div className="flex border-t border-white/10 pt-2.5 mt-1">
+          <div className="flex gap-2 border-t border-white/10 pt-3 mt-1">
             <button
               onClick={() => setActiveTab("chat")}
-              className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 relative ${
+              className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 relative ${
                 activeTab === "chat" 
-                  ? "border-primary text-primary" 
-                  : "border-transparent text-gray-400 hover:text-gray-200"
+                  ? "bg-primary text-white shadow-sm"
+                  : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
               }`}
             >
-              <MessageSquare size={14} />
+              <MessageSquare size={18} />
               Chat Support
               {unreadFromFrontDesk > 0 && activeTab !== "chat" && (
                 <span className="absolute -top-1 right-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-pulse">
@@ -1203,13 +1203,13 @@ export function IntercomPage() {
             {isStoreEnabled && (
               <button
                 onClick={() => setActiveTab("shop")}
-                className={`flex-1 pb-1.5 text-center text-xs font-bold border-b-2 transition flex items-center justify-center gap-1.5 ${
+                className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 ${
                   activeTab === "shop"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-gray-400 hover:text-gray-200"
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-white/5 text-gray-300 hover:bg-white/10 hover:text-white"
                 }`}
               >
-                <ShoppingBag size={14} />
+                <ShoppingBag size={18} />
                 {config.storeName}
               </button>
             )}

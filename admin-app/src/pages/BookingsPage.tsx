@@ -220,6 +220,7 @@ export function BookingsPage() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
+  const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [redeemPointsInput, setRedeemPointsInput] = useState("");
   const [isRedeemingPoints, setIsRedeemingPoints] = useState(false);
 
@@ -1795,10 +1796,9 @@ export function BookingsPage() {
                 </h3>
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
-                    <a
-                      href={selectedBooking.paymentProofUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
                       className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
                     >
                       <img
@@ -1806,7 +1806,7 @@ export function BookingsPage() {
                         alt={`Payment proof for ${selectedBooking.bookingRef}`}
                         className="h-44 w-full object-cover"
                       />
-                    </a>
+                    </button>
                     <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
                       <p>
                         Review the uploaded payment screenshot before confirming this booking.
@@ -1823,6 +1823,14 @@ export function BookingsPage() {
                         <Eye size={13} />
                         Open Full Size
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
+                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
+                      >
+                        <Eye size={13} />
+                        Preview
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1991,13 +1999,18 @@ export function BookingsPage() {
                 </h3>
                 <div className="rounded-lg border border-gray-200 bg-white p-5">
                   <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
-                    <div className="flex h-32 w-full items-center justify-center overflow-hidden rounded-lg bg-gray-100">
+                    <button
+                      type="button"
+                      disabled={!selectedBooking.guestIdPhotoUrl}
+                      onClick={() => selectedBooking.guestIdPhotoUrl && setImagePreview({ title: `Guest ID for ${selectedBooking.bookingRef}`, url: selectedBooking.guestIdPhotoUrl })}
+                      className="flex h-32 w-full items-center justify-center overflow-hidden rounded-lg bg-gray-100 disabled:cursor-default"
+                    >
                       {selectedBooking.guestIdPhotoUrl ? (
                         <img src={selectedBooking.guestIdPhotoUrl} alt="Guest ID preview" className="h-full w-full object-cover" />
                       ) : (
                         <ImageIcon size={22} className="text-gray-400" />
                       )}
-                    </div>
+                    </button>
                     <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-250 bg-gray-50 px-4 py-4 text-center transition hover:border-primary hover:bg-primary-light/30">
                       <span className="text-xs font-bold text-gray-800">Attach Guest ID Photo</span>
                       <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
@@ -2163,14 +2176,19 @@ export function BookingsPage() {
 
                   {selectedBooking.discountIdPhotoUrl && (
                     <div className="border border-gray-150 rounded-lg overflow-hidden max-w-[240px]">
-                      <img
-                        src={selectedBooking.discountIdPhotoUrl}
-                        alt={`${selectedBooking.discountType} ID`}
-                        className="w-full h-auto max-h-40 object-cover cursor-pointer hover:opacity-90"
-                        onClick={() => window.open(selectedBooking.discountIdPhotoUrl ?? "", "_blank")}
-                      />
+                      <button
+                        type="button"
+                        onClick={() => setImagePreview({ title: `${selectedBooking.discountType?.toUpperCase()} ID for ${selectedBooking.bookingRef}`, url: selectedBooking.discountIdPhotoUrl ?? "" })}
+                        className="block w-full"
+                      >
+                        <img
+                          src={selectedBooking.discountIdPhotoUrl}
+                          alt={`${selectedBooking.discountType} ID`}
+                          className="w-full h-auto max-h-40 object-cover hover:opacity-90"
+                        />
+                      </button>
                       <p className="text-[9px] text-center text-gray-400 py-1 bg-gray-50 border-t border-gray-150">
-                        Click image to open in new tab
+                        Click image to preview
                       </p>
                     </div>
                   )}
@@ -2847,10 +2865,9 @@ export function BookingsPage() {
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">GCash Proof of Remittance</h3>
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
-                    <a
-                      href={selectedOrder.paymentProofUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setImagePreview({ title: `GCash proof for ${selectedOrder.orderRef}`, url: selectedOrder.paymentProofUrl })}
                       className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
                     >
                       <img
@@ -2858,7 +2875,7 @@ export function BookingsPage() {
                         alt={`GCash proof for ${selectedOrder.orderRef}`}
                         className="h-44 w-full object-cover"
                       />
-                    </a>
+                    </button>
                     <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
                       <p>Review the uploaded store payment screenshot before confirming this order.</p>
                       <a
@@ -2870,6 +2887,14 @@ export function BookingsPage() {
                         <Eye size={13} />
                         Open Full Size
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => setImagePreview({ title: `GCash proof for ${selectedOrder.orderRef}`, url: selectedOrder.paymentProofUrl })}
+                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
+                      >
+                        <Eye size={13} />
+                        Preview
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -3182,6 +3207,20 @@ export function BookingsPage() {
             </div>
           </div>
         </form>
+      </Modal>
+      <Modal
+        title={imagePreview?.title ?? "Image preview"}
+        open={!!imagePreview}
+        onClose={() => setImagePreview(null)}
+        className="max-w-4xl"
+      >
+        {imagePreview ? (
+          <img
+            src={imagePreview.url}
+            alt={imagePreview.title}
+            className="max-h-[72vh] w-full rounded-lg object-contain"
+          />
+        ) : null}
       </Modal>
     </>
   );
