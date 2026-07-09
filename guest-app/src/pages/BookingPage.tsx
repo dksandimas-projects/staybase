@@ -770,7 +770,7 @@ export function BookingPage() {
             email: guestDetails.email,
             phone: guestDetails.phone,
             requests: guestDetails.requests,
-            consent: guestDetails.consent
+            consent: termsConsent
           },
           discountType: discountType === "none" ? "" : discountType,
           discountIdPhotoUrl: discountIdUpload?.url ?? null,
