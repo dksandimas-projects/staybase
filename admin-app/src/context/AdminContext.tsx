@@ -158,6 +158,7 @@ export interface Booking {
     signatureStatus: "pending" | "signed";
   };
   breakfastSelections?: Record<string, string>;
+  breakfastServed?: Record<string, boolean>;
   earlyCheckIn?: {
     status: "requested" | "approved" | "declined";
     requestedTime: string;

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
-import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink } from "lucide-react";
+import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -47,6 +47,55 @@ export function DashboardPage() {
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
   const recentBookings = bookings.slice(0, 10);
+
+  const todaysBreakfastItems = useMemo(() => {
+    const list: Array<{
+      bookingId: string;
+      bookingRef: string;
+      guestName: string;
+      roomNumber: string;
+      guestIndex: number;
+      key: string;
+      selection: string;
+      served: boolean;
+      status: string;
+    }> = [];
+
+    bookings.forEach((b: any) => {
+      if (!b.hasBreakfast || !["confirmed", "checked-in", "checked-out"].includes(b.status)) return;
+      for (let g = 1; g <= (b.numGuests || 0); g++) {
+        const key = `${todayKey}-guest-${g}`;
+        const selection = b.breakfastSelections?.[key];
+        if (selection) {
+          list.push({
+            bookingId: b.id,
+            bookingRef: b.bookingRef,
+            guestName: b.guestName,
+            roomNumber: b.roomNumber || "TBD",
+            guestIndex: g,
+            key,
+            selection,
+            served: !!b.breakfastServed?.[key],
+            status: b.status
+          });
+        }
+      }
+    });
+
+    return list;
+  }, [bookings, todayKey]);
+
+  const unservedBreakfastCount = useMemo(() => {
+    return todaysBreakfastItems.filter(item => !item.served).length;
+  }, [todaysBreakfastItems]);
+
+  const toggleBreakfastServed = async (bookingId: string, key: string, currentServed: boolean) => {
+    const booking = bookings.find(b => b.id === bookingId);
+    if (!booking) return;
+    const breakfastServed = { ...(booking.breakfastServed || {}) };
+    breakfastServed[key] = !currentServed;
+    await updateBookingStatus(bookingId, booking.status, { breakfastServed });
+  };
 
   // Active Intercom Threads Calculations
   const activeIntercomThreads = useMemo(() => {
@@ -173,71 +222,139 @@ export function DashboardPage() {
           icon={<MessageSquare size={18} />}
         />
       </div>
-
       {/* Operational workflow sections */}
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
-              <CreditCard size={18} className="text-primary" />
-              pending payment alerts
-            </h2>
-            <span className="rounded-full bg-primary-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-dark">
-              {pendingPayments.length} queued
-            </span>
-          </div>
-          <div className="space-y-3">
-            {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
-              <div key={booking.id} className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[72px_1fr_auto] sm:items-center">
-                <a
-                  href={booking.paymentProofUrl || undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white sm:w-16"
-                  aria-label={`Open payment proof for ${booking.bookingRef}`}
-                >
-                  {booking.paymentProofUrl ? (
-                    <img src={booking.paymentProofUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <CreditCard size={18} className="text-gray-400" />
-                  )}
-                </a>
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-bold text-gray-900">{booking.bookingRef}</p>
-                    <StatusBadge label="payment uploaded" status="payment-uploaded" />
-                  </div>
-                  <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
-                  <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
-                </div>
-                <div className="flex flex-col gap-2 sm:w-36">
-                  {booking.paymentProofUrl && (
-                    <a
-                      href={booking.paymentProofUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-                    >
-                      <Eye size={12} />
-                      View Proof
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void confirmPayment(booking.id)}
-                    className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+        <div className="space-y-6">
+          <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+                <CreditCard size={18} className="text-primary" />
+                pending payment alerts
+              </h2>
+              <span className="rounded-full bg-primary-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-dark">
+                {pendingPayments.length} queued
+              </span>
+            </div>
+            <div className="space-y-3">
+              {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
+                <div key={booking.id} className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[72px_1fr_auto] sm:items-center">
+                  <a
+                    href={booking.paymentProofUrl || undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white sm:w-16"
+                    aria-label={`Open payment proof for ${booking.bookingRef}`}
                   >
-                    Confirm Payment
+                    {booking.paymentProofUrl ? (
+                      <img src={booking.paymentProofUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <CreditCard size={18} className="text-gray-400" />
+                    )}
+                  </a>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-bold text-gray-900">{booking.bookingRef}</p>
+                      <StatusBadge label="payment uploaded" status="payment-uploaded" />
+                    </div>
+                    <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
+                    <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:w-36">
+                    {booking.paymentProofUrl && (
+                      <a
+                        href={booking.paymentProofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                      >
+                        <Eye size={12} />
+                        View Proof
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void confirmPayment(booking.id)}
+                      className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                    >
+                      Confirm Payment
                   </button>
+                  </div>
                 </div>
-              </div>
-            )) : (
-              <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-4 text-center text-xs font-semibold text-gray-500">
-                No payment proofs are waiting for review.
-              </p>
-            )}
-          </div>
-        </section>
+              )) : (
+                <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-4 text-center text-xs font-semibold text-gray-500">
+                  No payment proofs are waiting for review.
+                </p>
+              )}
+            </div>
+          </section>
+
+          {/* Today's Breakfast Prep */}
+          <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+                <Utensils size={18} className="text-primary" />
+                today's breakfast prep
+              </h2>
+              {todaysBreakfastItems.length > 0 && (
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                  unservedBreakfastCount > 0
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-green-105 text-green-700"
+                }`}>
+                  {unservedBreakfastCount > 0 ? `${unservedBreakfastCount} remaining` : "all served"}
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              {todaysBreakfastItems.length > 0 ? (
+                todaysBreakfastItems.map((item) => (
+                  <div
+                    key={`${item.bookingId}-${item.key}`}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-900">Room {item.roomNumber}</span>
+                        <span className="text-xs text-gray-600">· {item.guestName}</span>
+                      </div>
+                      <p className="mt-1 text-xs font-semibold text-primary-dark">
+                        Order: {item.selection}
+                      </p>
+                      <p className="text-[10px] font-semibold text-gray-400">
+                        Guest {item.guestIndex} · {item.bookingRef}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleBreakfastServed(item.bookingId, item.key, item.served)}
+                      className={`min-h-[34px] px-4 rounded-lg text-xs font-bold transition shadow-sm active:scale-95 flex items-center gap-1.5 ${
+                        item.served
+                          ? "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                          : "bg-primary text-white hover:bg-primary-dark"
+                      }`}
+                    >
+                      {item.served ? (
+                        <>
+                          <Check size={12} />
+                          Served
+                        </>
+                      ) : (
+                        "Mark Served"
+                      )}
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-6 text-center">
+                  <Utensils size={24} className="mx-auto text-gray-300 mb-2" />
+                  <p className="text-xs font-semibold text-gray-500">No breakfast orders today.</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
 
         <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">

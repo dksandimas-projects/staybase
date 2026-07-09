@@ -75,6 +75,15 @@ export function ReportsPage() {
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<ReportTab>("performance");
   const [dateRange, setDateRange] = useState("30");
+  const [customStartDate, setCustomStartDate] = useState(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - 29); // default to last 30 days
+    return d.toISOString().slice(0, 10);
+  });
+  const [customEndDate, setCustomEndDate] = useState(() => {
+    return new Date().toISOString().slice(0, 10);
+  });
   const [salesSubTab, setSalesSubTab] = useState<SalesSubTab>("bookings");
   const [searchTerm, setSearchTerm] = useState("");
   const [isFullBackupConfirmOpen, setFullBackupConfirmOpen] = useState(false);
@@ -96,18 +105,33 @@ export function ReportsPage() {
     fontSize: "11px"
   };
 
+  const isRangeValid = useMemo(() => {
+    if (dateRange !== "custom") return true;
+    return customEndDate >= customStartDate;
+  }, [dateRange, customStartDate, customEndDate]);
+
   const periodStart = useMemo(() => {
+    if (dateRange === "custom") {
+      const start = new Date(customStartDate);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - (Number(dateRange) - 1));
     return start;
-  }, [dateRange]);
+  }, [dateRange, customStartDate]);
 
   const periodEnd = useMemo(() => {
+    if (dateRange === "custom") {
+      const end = new Date(customEndDate);
+      end.setHours(23, 59, 59, 999);
+      return end;
+    }
     const end = new Date();
     end.setHours(23, 59, 59, 999);
     return end;
-  }, []);
+  }, [dateRange, customEndDate]);
 
   const isWithinSelectedRange = (value: string | Date | null | undefined) => {
     const date = toDate(value);
@@ -357,6 +381,10 @@ export function ReportsPage() {
 
   // ── CSV Export (Performance-style ledger) ──
   const handleExportCSV = () => {
+    if (!isRangeValid) {
+      toast.error("Invalid range", "Start date cannot be after end date.");
+      return;
+    }
     let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Total Price,Status,Source\n";
     filteredBookings.forEach(b => {
       const checkIn = toDate(b.checkIn);
@@ -368,6 +396,10 @@ export function ReportsPage() {
   };
 
   const handlePrintReport = () => {
+    if (!isRangeValid) {
+      toast.error("Invalid range", "Start date cannot be after end date.");
+      return;
+    }
     toast.info("Opening print dialog", "Choose Save as PDF in your browser print settings to export this report.");
     window.print();
   };
@@ -531,6 +563,10 @@ export function ReportsPage() {
 
   const handleExportFullBackup = () => {
     if (currentUser?.role !== "admin") return;
+    if (!isRangeValid) {
+      toast.error("Invalid range", "Start date cannot be after end date.");
+      return;
+    }
     // Legacy source-shape breadcrumbs for W3.4 regression tests:
     // XLSX.utils.json_to_sheet(bookingRows)
     // XLSX.utils.book_append_sheet(wb, bookingSheet, "Bookings")
@@ -540,6 +576,10 @@ export function ReportsPage() {
 
   // ── XLSX Export (Sales: 4 sheets) ──
   const handleExportSalesXLSX = () => {
+    if (!isRangeValid) {
+      toast.error("Invalid range", "Start date cannot be after end date.");
+      return;
+    }
     const dateRangeLabel = `${periodStart.toISOString().slice(0, 10)} to ${periodEnd.toISOString().slice(0, 10)}`;
 
     const summaryRows = [
@@ -641,7 +681,7 @@ export function ReportsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="w-32">
+          <div className="w-34 flex items-center gap-2">
             <select
               value={dateRange}
               onChange={(e) => setDateRange(e.target.value)}
@@ -651,8 +691,32 @@ export function ReportsPage() {
               <option value="7">Last 7 Days</option>
               <option value="30">Last 30 Days</option>
               <option value="90">Last Quarter</option>
+              <option value="custom">Custom Range</option>
             </select>
           </div>
+
+          {dateRange === "custom" && (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="min-h-[44px] rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+                aria-label="Start date"
+              />
+              <span className="text-xs text-gray-500">to</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="min-h-[44px] rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
+                aria-label="End date"
+              />
+              {!isRangeValid && (
+                <span className="text-xs text-red-650 font-medium">Invalid range</span>
+              )}
+            </div>
+          )}
 
           <button
             onClick={handleExportCSV}
