@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1 resolved to Option A build-time prerender; spec at `plan/features/SEO-OPENGRAPH.md`; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 triaged — QA-01 through QA-08 queued)
+> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved (Option A prerender; support X/Twitter via `twitterHandle`; `priceRange` band `₱₱`), Q2 OG-card design still open; spec at `plan/features/SEO-OPENGRAPH.md`; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 triaged — QA-01 through QA-08 queued)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -980,16 +980,17 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 ### Open questions (close with owner before build)
 - ✅ **Q1.** ~~Option A vs Option B?~~ **Resolved 2026-07-09 — Option A (build-time prerender):** no extra Vercel function, no UA sniffing, robust for all crawlers. Option B (per-record cards) deferred post-launch.
 - 🔴 **Q2.** Approve the 1200×630 OG card design (logo + tagline on brand orange).
-- 🟡 **Q3.** X/Twitter handle for `twitter:site` (none in `hotel.config.ts` today).
-- 🟡 **Q4.** `priceRange` value for the Hotel JSON-LD.
+- ✅ **Q3.** ~~X/Twitter handle for `twitter:site`?~~ **Resolved 2026-07-09 — support X/Twitter:** add `twitterHandle` to `hotel.config.ts`, emit `twitter:site` when set (Spark Inn's handle value TBD by owner; tag omitted until then).
+- ✅ **Q4.** ~~`priceRange` value?~~ **Resolved 2026-07-09 — relative band `₱₱`** via new `config.priceRange`; chosen over an explicit range because build-time JSON-LD would drift from live rates.
 
 ### Checklist
 - ⬜ **G3** — `guest-app/public/robots.txt` (`Allow: /` + `Sitemap:` pointer, templated off `config.domain`); `admin-app/public/robots.txt` → `Disallow: /`
 - ⬜ **G4** — `sitemap.xml` of indexable public routes (exclude `noIndex` routes), generated from the same route list as prerender so it can't drift
 - ⬜ **G2** — real 1200×630 `guest-app/public/og-image.png` (currently `config.ogImage` → 404); add to `WHITE-LABEL.md` asset checklist
 - ⬜ **G1** — per-route meta in the **served** HTML (prerender or edge injection) so non-JS crawlers see correct title/desc/OG per URL; keep `PageMeta.tsx` for SPA nav
-- ⬜ **G5** — `schema.org/Hotel` JSON-LD on homepage, all values from `hotel.config.ts` (`address`, `telephone`, `sameAs`, check-in/out times)
-- ⬜ **G6** — OG polish: `og:image:width`/`height`/`alt`, `og:locale` (from `config.locale`), `twitter:site`
+- ⬜ **G5** — `schema.org/Hotel` JSON-LD on homepage, all values from `hotel.config.ts` (`address`, `telephone`, `sameAs`, check-in/out times, `priceRange` = new `config.priceRange` band `₱₱` per Q4)
+- ⬜ **G6** — OG polish: `og:image:width`/`height`/`alt`, `og:locale` (from `config.locale`), `twitter:site` from new `config.twitterHandle` (per Q3, rendered only when set)
+- ⬜ **Config** — add `twitterHandle` + `priceRange` fields to `hotel.config.ts` (both new, feeding G5/G6)
 - ⬜ **Admin** — confirm `admin-app/index.html` carries `noindex, nofollow`
 - ⬜ **Verify** — Facebook Sharing Debugger + WhatsApp + Viber render distinct correct cards for ≥3 URLs; X Card Validator; Google Rich Results Test on JSON-LD
 - ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools
