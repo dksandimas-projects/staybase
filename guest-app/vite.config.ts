@@ -1,8 +1,71 @@
+import fs from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import config from "../hotel.config";
+
+const indexableRoutes = ["/", "/rooms", "/corporate", "/rewards", "/about", "/contact"] as const;
+
+function absolutePublicUrl(pathname: string) {
+  return `https://${config.domain}${pathname}`;
+}
+
+function absoluteAssetUrl(asset: string) {
+  return asset.startsWith("http")
+    ? asset
+    : absolutePublicUrl(`/${asset.replace(/^\/+/, "")}`);
+}
+
+function twitterUrl() {
+  const handle = config.twitterHandle.trim().replace(/^@/, "");
+  return handle ? `https://x.com/${handle}` : "";
+}
+
+function buildHotelJsonLd() {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Hotel",
+    name: config.brandName,
+    legalName: config.legalName,
+    description: config.metaDescription,
+    url: absolutePublicUrl("/"),
+    image: absoluteAssetUrl(config.ogImage),
+    telephone: config.frontDeskPhone,
+    email: config.supportEmail,
+    priceRange: config.priceRange,
+    checkinTime: config.checkInTime,
+    checkoutTime: config.checkOutTime,
+    sameAs: [config.facebookUrl, config.instagramUrl, twitterUrl()].filter(Boolean),
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: config.address.street,
+      addressLocality: config.address.city,
+      addressRegion: config.address.region,
+      postalCode: config.address.postalCode
+    }
+  };
+}
+
+function buildSitemapXml() {
+  const urls = indexableRoutes
+    .map((route) => `  <url>\n    <loc>${absolutePublicUrl(route)}</loc>\n  </url>`)
+    .join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+}
+
+function seoAssetsPlugin(): Plugin {
+  return {
+    name: "spark-inn-seo-assets",
+    closeBundle() {
+      const distDir = path.resolve(__dirname, "dist");
+      fs.mkdirSync(distDir, { recursive: true });
+      fs.writeFileSync(path.join(distDir, "sitemap.xml"), buildSitemapXml());
+      fs.writeFileSync(path.join(distDir, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${absolutePublicUrl("/sitemap.xml")}\n`);
+    }
+  };
+}
 
 // Per W4.2 / decision #106: Vite build-time transform that
 // substitutes the static <meta> tags in `index.html` with values
@@ -15,11 +78,7 @@ function indexHtmlTransformPlugin(): Plugin {
     transformIndexHtml: {
       order: "pre",
       handler(html) {
-        const ogImage = config.ogImage
-          ? config.ogImage.startsWith("http")
-            ? config.ogImage
-            : `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`
-          : `https://${config.domain}/brand/og-default.png`;
+        const ogImage = config.ogImage ? absoluteAssetUrl(config.ogImage) : absolutePublicUrl("/brand/og-default.png");
         const twitterSite = config.twitterHandle.trim()
           ? `<meta name="twitter:site" content="${config.twitterHandle.startsWith("@") ? config.twitterHandle : `@${config.twitterHandle}`}" />`
           : "";
@@ -81,6 +140,10 @@ function indexHtmlTransformPlugin(): Plugin {
           .replace(
             /<meta name="twitter:site" content="[^"]*"\s*\/>/i,
             twitterSite
+          )
+          .replace(
+            /<script type="application\/ld\+json" id="hotel-json-ld">[\s\S]*?<\/script>/i,
+            `<script type="application/ld+json" id="hotel-json-ld">${JSON.stringify(buildHotelJsonLd())}</script>`
           );
       }
     }
@@ -90,6 +153,7 @@ function indexHtmlTransformPlugin(): Plugin {
 export default defineConfig({
   plugins: [
     indexHtmlTransformPlugin(),
+    seoAssetsPlugin(),
     react(),
     VitePWA({
       registerType: "autoUpdate",
