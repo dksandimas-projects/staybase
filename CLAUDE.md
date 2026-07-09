@@ -63,6 +63,7 @@ Load only the bundle for your task type — do not read all MDs.
 | White-label deployment | `plan/docs/WHITE-LABEL.md` + `plan/docs/DECISIONS-ARCH.md` |
 | Spark Essentials store | `plan/features/STORE-GUEST.md` + `plan/features/STORE-MANAGEMENT.md` + `plan/docs/BACKEND.md` |
 | Spark Rewards / member auth | `plan/features/SPARK-REWARDS.md` + `plan/docs/BACKEND.md` |
+| SEO / Open Graph / link previews | `plan/features/SEO-OPENGRAPH.md` + `plan/docs/FRONTEND.md` + `plan/docs/WHITE-LABEL.md` |
 | Wireframe task (any screen) | `plan/docs/WIREFRAME-WORKFLOW.md` + `plan/docs/FRONTEND.md` + relevant feature MD |
 
 ---
@@ -121,6 +122,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/STORE-MANAGEMENT.md` — catalog management, order processing, store reports
 
 ### plan/features/ — Cross-cutting
+- `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions
 - `plan/features/EMAIL-PDF-STORAGE.md` — Resend email flows, jsPDF receipts, Storage uploads
 
