@@ -1142,7 +1142,7 @@ export function IntercomPage() {
         {/* Call Banner / Overlay */}
         {callState !== "idle" && (
           <div
-            className="absolute inset-0 bg-gray-950/95 backdrop-blur-md z-45 flex flex-col justify-between px-8 py-6 text-white text-center"
+            className="absolute inset-0 bg-gray-950/95 backdrop-blur-md z-50 flex flex-col justify-between px-8 py-6 text-white text-center"
             style={{
               paddingTop: "max(1.5rem, env(safe-area-inset-top))",
               paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))"
