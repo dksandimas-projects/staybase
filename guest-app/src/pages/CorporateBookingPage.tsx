@@ -1192,6 +1192,9 @@ export function CorporateBookingPage() {
                 placeholder="Maria"
                 required
                 value={guestDetails.firstName}
+                id="firstName"
+                name="firstName"
+                autoComplete="given-name"
               />
               <TextField
                 error={touchedFields.lastName ? guestErrors.lastName : ""}
@@ -1202,6 +1205,9 @@ export function CorporateBookingPage() {
                 placeholder="Santos"
                 required
                 value={guestDetails.lastName}
+                id="lastName"
+                name="lastName"
+                autoComplete="family-name"
               />
             </motion.div>
 
@@ -1216,6 +1222,9 @@ export function CorporateBookingPage() {
                 required
                 type="email"
                 value={guestDetails.email}
+                id="email"
+                name="email"
+                autoComplete="email"
               />
               <TextField
                 error={touchedFields.phone ? guestErrors.phone : ""}
@@ -1227,6 +1236,9 @@ export function CorporateBookingPage() {
                 required
                 type="tel"
                 value={guestDetails.phone}
+                id="phone"
+                name="phone"
+                autoComplete="tel"
               />
             </motion.div>
 
@@ -1235,11 +1247,13 @@ export function CorporateBookingPage() {
 
             <motion.div className="grid gap-5 sm:grid-cols-2 mt-4" variants={staggerChild}>
               {/* Company Name */}
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="companyName" className="grid gap-2 text-sm font-medium text-gray-700">
                 Company Name
                 <span className="relative">
                   <Building size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
                   <input
+                    id="companyName"
+                    name="companyName"
                     className={cn(
                       "min-h-11 w-full rounded-lg border py-2 pl-10 pr-3 text-gray-950 outline-none transition",
                       isFlatRate ? "border-gray-200 bg-white focus:border-primary focus:ring-2 focus:ring-primary-light" : "border-gray-100 bg-gray-50 text-gray-500 cursor-not-allowed"
@@ -1265,14 +1279,18 @@ export function CorporateBookingPage() {
                 placeholder="e.g. Regional Manager"
                 required
                 value={guestDetails.designation}
+                id="designation"
+                name="designation"
               />
             </motion.div>
 
             <motion.div className="mt-5 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
               {/* Purpose of Stay */}
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="purposeOfStay" className="grid gap-2 text-sm font-medium text-gray-700">
                 Purpose of Stay
                 <select
+                  id="purposeOfStay"
+                  name="purposeOfStay"
                   className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
                   value={guestDetails.purposeOfStay}
                   onChange={(e) => updateGuestDetail("purposeOfStay", e.target.value)}
@@ -1285,9 +1303,11 @@ export function CorporateBookingPage() {
               </label>
 
               {/* Billing Arrangement */}
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="billingArrangement" className="grid gap-2 text-sm font-medium text-gray-700">
                 Billing Arrangement
                 <select
+                  id="billingArrangement"
+                  name="billingArrangement"
                   className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
                   value={guestDetails.billingArrangement}
                   onChange={(e) => updateGuestDetail("billingArrangement", e.target.value)}
@@ -1300,11 +1320,13 @@ export function CorporateBookingPage() {
 
             <motion.div className="mt-5" variants={staggerChild}>
               {/* Company Address */}
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="companyAddress" className="grid gap-2 text-sm font-medium text-gray-700">
                 Company Address
                 <span className="relative">
                   <Building size={17} className="absolute left-3 top-4 text-primary" />
                   <textarea
+                    id="companyAddress"
+                    name="companyAddress"
                     rows={2}
                     className={cn(
                       "w-full rounded-lg border bg-white py-3 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
@@ -1338,12 +1360,16 @@ export function CorporateBookingPage() {
                 required
                 type="number"
                 value={guestDetails.guestCount}
+                id="guestCount"
+                name="guestCount"
               />
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="requests" className="grid gap-2 text-sm font-medium text-gray-700">
                 Special requests
                 <span className="relative">
                   <MessageSquareText size={17} className="absolute left-3 top-3 text-primary" />
                   <textarea
+                    id="requests"
+                    name="requests"
                     className="min-h-24 w-full rounded-lg border border-gray-200 bg-white py-3 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
                     onChange={(event) => updateGuestDetail("requests", event.target.value)}
                     placeholder="Late arrival notes, dietary options, quiet room request..."
@@ -1354,8 +1380,10 @@ export function CorporateBookingPage() {
             </motion.div>
 
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>
-              <label className="flex items-start gap-3 text-sm leading-6 text-gray-700">
+              <label htmlFor="corporateConsent" className="flex items-start gap-3 text-sm leading-6 text-gray-700 cursor-pointer">
                 <input
+                  id="corporateConsent"
+                  name="corporateConsent"
                   checked={guestDetails.consent}
                   className="mt-1 h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                   onChange={(event) => updateGuestDetail("consent", event.target.checked)}
@@ -1772,16 +1800,22 @@ interface TextFieldProps {
   required?: boolean;
   type?: string;
   value: string;
+  id?: string;
+  name?: string;
+  autoComplete?: string;
 }
 
-function TextField({ error, icon, label, onBlur, onChange, placeholder, required, type = "text", value }: TextFieldProps) {
+function TextField({ error, icon, label, onBlur, onChange, placeholder, required, type = "text", value, id, name, autoComplete }: TextFieldProps) {
   return (
-    <label className="grid gap-2 text-sm font-medium text-gray-700">
+    <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
       <span className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
+          id={id}
+          name={name}
+          autoComplete={autoComplete}
           className={cn(
             "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
             error ? "border-red-300" : "border-gray-200"
