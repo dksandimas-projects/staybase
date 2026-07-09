@@ -124,6 +124,31 @@ export interface SeasonalRateOverride {
   isActive: boolean;
 }
 
+export type BookingRateLineSource = "regular" | "weekend" | "seasonal" | "corporate" | "manual";
+
+export interface BookingRateLine {
+  source: BookingRateLineSource;
+  label: string;
+  startDate: string;
+  endDate: string;
+  nights: number;
+  nightlyRate: number;
+  subtotal: number;
+}
+
+export interface BookingRateAdjustmentLine {
+  label: string;
+  amount: number;
+}
+
+export interface BookingRateBreakdown {
+  roomSubtotal: number;
+  roomLines: BookingRateLine[];
+  addOns: BookingRateAdjustmentLine[];
+  deductions: BookingRateAdjustmentLine[];
+  finalTotal: number;
+}
+
 export interface RoomBlock {
   id: string;
   roomId: string;
@@ -156,6 +181,7 @@ export interface Booking {
   numNights: number;
   ratePerNight: number;
   totalPrice: number;
+  rateBreakdown?: BookingRateBreakdown | null;
   originalTotalPrice: number | null;
   discountType: DiscountType;
   discountPct: number;

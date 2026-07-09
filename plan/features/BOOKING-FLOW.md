@@ -35,7 +35,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Breakfast rate shown as combined nightly total — not broken out separately on the card
 - [ ] If breakfast is disabled (`breakfastConfig.isEnabled: false`) — Room Only shown, no breakfast option
 - [ ] Rate per night + computed total displayed on each card
-- [ ] If selected dates include mixed pricing, show a compact total breakdown so guests can see which nights used regular, weekend, or holiday/seasonal rates before they continue.
+- [x] If selected dates include mixed pricing, show a compact total breakdown so guests can see which nights used regular, weekend, or holiday/seasonal rates before they continue.
 - [ ] Pre-populated if navigating from Homepage checker or Rooms page CTA
 - [ ] Step indicator showing current step (1 of 4)
 - [ ] "No room types available for these dates" empty state with "try fewer guests or different dates" nudge
@@ -44,8 +44,8 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] **Room type booking** — per the `feature/booking-by-room-type` refactor: the client posts `roomType` (not `roomId`). The server's transaction reads the type entry from `settings/hotelConfig.roomTypes[]`, queries all active physical rooms of that type, and auto-assigns the first non-conflicting one. `Booking.roomId` is still a real `rooms/{id}` reference; the assigned room is server-derived and surfaced to the client via the `/api/bookings/create` response payload.
 - [ ] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings. Per W4.7: client calls `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` (rate-limited, 30/IP/min) which returns PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`). Client joins with the type catalog to compute "X of Y available" per type. The actual double-booking safety is the Firestore transaction in `/api/bookings/create` — see `plan/features/AVAILABILITY-LOCKING.md`.
 - [ ] Weekend rate applied automatically when stay includes Saturday or Sunday nights
-- [ ] Holiday/seasonal rate overrides applied per night before weekend/base rates, using the shared seasonal-aware pricing utility.
-- [ ] Price breakdown model derived from the same nightly-rate calculation as the booking total; never maintain a separate client-only formula.
+- [x] Holiday/seasonal rate overrides applied per night before weekend/base rates, using the shared seasonal-aware pricing utility.
+- [x] Price breakdown model derived from the same nightly-rate calculation as the booking total; never maintain a separate client-only formula.
 - [ ] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
 - [ ] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
 - [ ] Selected room type, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
@@ -76,15 +76,15 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ## Step 3 — Review & Confirm
 
 ### UI Checklist
-- [ ] Full booking summary (read-only) — room name, dates, nights, rate breakdown, breakfast add-on (if selected), subtotal
-- [ ] Price breakdown section:
-  - [ ] Shows regular nights count × regular nightly rate when present.
-  - [ ] Shows weekend nights count × weekend nightly rate when present.
-  - [ ] Shows each holiday/seasonal override label, affected nights count, and nightly rate when present.
-  - [ ] Shows room subtotal before breakfast, discounts, vouchers, and points.
-  - [ ] Shows breakfast as a separate line when selected: guests × nights × breakfast rate.
-  - [ ] Shows discount/voucher/member/points deductions as separate negative lines after the subtotal.
-  - [ ] Shows final total with the same value that will be submitted to `/api/bookings/create`.
+- [x] Full booking summary (read-only) — room name, dates, nights, rate breakdown, breakfast add-on (if selected), subtotal
+- [x] Price breakdown section:
+  - [x] Shows regular nights count × regular nightly rate when present.
+  - [x] Shows weekend nights count × weekend nightly rate when present.
+  - [x] Shows each holiday/seasonal override label, affected nights count, and nightly rate when present.
+  - [x] Shows room subtotal before breakfast, discounts, vouchers, and points.
+  - [x] Shows breakfast as a separate line when selected: guests × nights × breakfast rate.
+  - [x] Shows discount/voucher/member/points deductions as separate negative lines after the subtotal.
+  - [x] Shows final total with the same value that will be submitted to `/api/bookings/create`.
 - [ ] Discount selector — Senior Citizen (20%) / PWD (20%) / None
 - [ ] Discount ID upload — shown immediately when Senior Citizen or PWD is selected; hidden when None
   - [ ] Label: "Upload your OSCA Card" (Senior) or "Upload your PWD ID" (PWD)
@@ -142,7 +142,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [ ] Booking creation via `/api/bookings/create` using Firestore transaction — see `plan/features/AVAILABILITY-LOCKING.md`
 - [ ] Booking document ID is preallocated client-side for Storage uploads; booking reference generated server-side: `{config.bookingRefPrefix}-YYYYMMDD-NNN`
 - [ ] Rate locked at booking creation time — stored in `ratePerNight`
-- [ ] Rate breakdown locked at booking creation time — stored in `rateBreakdown` so later guest lookup, admin drawer, emails, and receipts explain the same total even if rates change.
+- [x] Rate breakdown locked at booking creation time — stored in `rateBreakdown` so later guest lookup, admin drawer, emails, and receipts explain the same total even if rates change.
 - [ ] Email triggered via `/api/email/booking-submitted` after successful creation — acts as an acknowledgment/receipt submission warning the guest that their booking/payment is under review and that an official confirmation will follow once verified
 - [ ] `isCorporate`, `corporateCode`, `companyName` set server-side — never trusted from client
 - [ ] Initial status: `"pending"` (or `"payment-uploaded"` if screenshot provided)

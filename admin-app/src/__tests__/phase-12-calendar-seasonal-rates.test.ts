@@ -60,11 +60,12 @@ describe("Phase 12 — calendar grid and seasonal rate overrides", () => {
     expect(ratesSrc).toMatch(/updateSettings\("hotelConfig",\s*\{[\s\S]*seasonalRateOverrides:\s*next/);
   });
 
-  it("server and guest booking pricing both use the shared seasonal calculator", () => {
-    expect(bookingServerSrc).toMatch(/calculateSeasonalAwareRoomTotal/);
+  it("server and guest booking pricing both use the shared seasonal breakdown calculator", () => {
+    expect(bookingServerSrc).toMatch(/calculateSeasonalAwareRoomBreakdown/);
     expect(bookingServerSrc).toMatch(/normalizeSeasonalRateOverrides\(hotelConfig\.seasonalRateOverrides\)/);
+    expect(bookingServerSrc).toMatch(/rateBreakdown/);
     expect(bookingServerSrc).toMatch(/hasActiveRoomBlockConflict/);
-    expect(bookingPageSrc).toMatch(/calculateSeasonalAwareRoomTotal/);
+    expect(bookingPageSrc).toMatch(/calculateSeasonalAwareRoomBreakdown/);
     expect(bookingPageSrc).toMatch(/seasonalRateOverrides/);
   });
 });

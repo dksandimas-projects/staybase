@@ -28,6 +28,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
+  calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal,
   getDateKeyInTimezone,
   getNumNights,
@@ -35,6 +36,7 @@ import {
   staggerContainer,
   compressImageFile
 } from "@spark-inn/shared";
+import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // Per BF-29 (booking-flow audit 2026-06-26): replace the
 // inline email regex with Zod's `z.string().email()` so the
 // validation matches the server-side schema (RFC-ish checks,
@@ -44,6 +46,7 @@ import { z } from "zod";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
+import { PriceBreakdown } from "../components/PriceBreakdown";
 import { StepIndicator } from "../components/StepIndicator";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
@@ -383,6 +386,35 @@ export function BookingPage() {
         memberDiscountPct
       })
     : 0;
+
+  const rateBreakdown = useMemo(() => {
+    if (!selectedTypeEntry || !selectedRoomRates) return null;
+    return buildGuestRateBreakdown({
+      roomLines: calculateTypeRoomBreakdown(selectedTypeEntry, checkIn, checkOut, seasonalRateOverrides).roomLines,
+      roomSubtotal: roomTotal,
+      breakfastTotal,
+      discountType,
+      discountPct,
+      voucherApplied,
+      voucherDiscount,
+      memberDiscountPct,
+      finalTotal: total
+    });
+  }, [
+    selectedTypeEntry,
+    selectedRoomRates,
+    checkIn,
+    checkOut,
+    seasonalRateOverrides,
+    roomTotal,
+    breakfastTotal,
+    discountType,
+    discountPct,
+    voucherApplied,
+    voucherDiscount,
+    memberDiscountPct,
+    total
+  ]);
 
   const continueParams = new URLSearchParams({
     step: "guest-details",
@@ -780,6 +812,10 @@ export function BookingPage() {
         paymentMethod,
         total: String(serverTotal ?? total)
       });
+      const confirmedBreakdown = result.data?.rateBreakdown || rateBreakdown;
+      if (confirmedBreakdown) {
+        confirmParams.set("rateBreakdown", encodeURIComponent(JSON.stringify(confirmedBreakdown)));
+      }
       navigate(`/book/confirm?${confirmParams.toString()}`);
     } catch (err: any) {
       console.error("Confirm booking error:", err);
@@ -984,6 +1020,7 @@ export function BookingPage() {
             voucherApplied={voucherApplied}
             memberDiscountPct={memberDiscountPct}
             isMember={!!memberProfile}
+            rateBreakdown={rateBreakdown}
           />
         </section>
 
@@ -1417,6 +1454,7 @@ export function BookingPage() {
             memberDiscountPct={memberDiscountPct}
             seasonalRateOverrides={seasonalRateOverrides}
             isMember={!!memberProfile}
+            rateBreakdown={rateBreakdown}
           />
         </section>
 
@@ -1558,15 +1596,17 @@ export function BookingPage() {
                 const liveBreakfastRate = breakfastConfig.isEnabled
                   ? (breakfastConfig.ratePerPersonPerNight || 0)
                   : 0;
+                const typeRoomBreakdown = calculateTypeRoomBreakdown(type, checkIn, checkOut, seasonalRateOverrides);
+                const hasMixedRates = typeRoomBreakdown.roomLines.length > 1;
                 const roomOnlyTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
-                  roomTotal: calculateTypeRoomTotal(type, checkIn, checkOut, seasonalRateOverrides)
+                  roomTotal: typeRoomBreakdown.roomSubtotal
                 });
                 const breakfastTotal = calculateBookingTotal({
                   ratePerNight: typePricePerNight,
                   numNights: nights,
-                  roomTotal: calculateTypeRoomTotal(type, checkIn, checkOut, seasonalRateOverrides),
+                  roomTotal: typeRoomBreakdown.roomSubtotal,
                   numGuests: guests,
                   breakfastRate: liveBreakfastRate,
                   hasBreakfast: true
@@ -1646,6 +1686,19 @@ export function BookingPage() {
                             />
                           ) : null}
                         </div>
+                        {hasMixedRates ? (
+                          <div className="mt-4 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+                            <p className="font-semibold text-gray-800">This stay uses mixed nightly rates.</p>
+                            <div className="mt-2 space-y-1">
+                              {typeRoomBreakdown.roomLines.map((line, lineIndex) => (
+                                <div key={`${type.value}-${line.source}-${lineIndex}`} className="flex justify-between gap-3">
+                                  <span>{line.label}: {line.nights} x {formatPrice(line.nightlyRate)}</span>
+                                  <span className="font-semibold text-gray-900">{formatPrice(line.subtotal)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </motion.article>
@@ -1682,13 +1735,13 @@ export function BookingPage() {
   );
 }
 
-function calculateTypeRoomTotal(
+function calculateTypeRoomBreakdown(
   type: { value: string; pricePerNight?: number; weekendRate?: number },
   checkIn: string,
   checkOut: string,
   seasonalRateOverrides: ReturnType<typeof useRoomTypes>["seasonalRateOverrides"]
 ) {
-  return calculateSeasonalAwareRoomTotal({
+  return calculateSeasonalAwareRoomBreakdown({
     checkIn: `${checkIn}T00:00:00Z`,
     checkOut: `${checkOut}T00:00:00Z`,
     roomType: type.value,
@@ -1696,6 +1749,49 @@ function calculateTypeRoomTotal(
     weekendRate: Number(type.weekendRate) || 0,
     seasonalRateOverrides
   });
+}
+
+function buildGuestRateBreakdown(input: {
+  roomLines: BookingRateLine[];
+  roomSubtotal: number;
+  breakfastTotal: number;
+  discountType: "none" | "senior" | "pwd";
+  discountPct: number;
+  voucherApplied: boolean;
+  voucherDiscount: number;
+  memberDiscountPct: number;
+  finalTotal: number;
+}): BookingRateBreakdown {
+  const addOns = input.breakfastTotal > 0
+    ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
+    : [];
+  const subtotal = input.roomSubtotal + input.breakfastTotal;
+  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
+  const afterSeniorPwd = subtotal - seniorPwdDiscount;
+  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
+  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
+  const deductions = [
+    ...(seniorPwdDiscount > 0
+      ? [{
+          label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
+          amount: seniorPwdDiscount
+        }]
+      : []),
+    ...(input.voucherApplied && input.voucherDiscount > 0
+      ? [{ label: "Voucher discount", amount: input.voucherDiscount }]
+      : []),
+    ...(memberDiscount > 0
+      ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }]
+      : [])
+  ];
+
+  return {
+    roomSubtotal: input.roomSubtotal,
+    roomLines: input.roomLines,
+    addOns,
+    deductions,
+    finalTotal: input.finalTotal
+  };
 }
 
 function BookingHeader({ backTo }: { backTo: string }) {
@@ -1780,6 +1876,7 @@ interface BookingReviewAsideProps {
   memberDiscountPct?: number;
   seasonalRateOverrides?: ReturnType<typeof useRoomTypes>["seasonalRateOverrides"];
   isMember?: boolean;
+  rateBreakdown?: BookingRateBreakdown | null;
 }
 
 function BookingReviewAside({
@@ -1802,7 +1899,8 @@ function BookingReviewAside({
   breakfastRate,
   memberDiscountPct = 0,
   seasonalRateOverrides = [],
-  isMember = false
+  isMember = false,
+  rateBreakdown = null
 }: BookingReviewAsideProps) {
   if (!typeLabel) return null;
 
@@ -1843,41 +1941,47 @@ function BookingReviewAside({
             <SummaryCell alignEnd label="Duration" value={`${nights} ${nights === 1 ? "night" : "nights"}`} />
           </div>
           <div className="mt-5 space-y-3 text-sm text-gray-600">
-            <div className="flex justify-between">
-              <span>Room rate</span>
-              <span>{formatPrice(roomTotal)}</span>
-            </div>
-            {hasBreakfast ? (
-              <div className="flex justify-between">
-                <span>Breakfast add-on</span>
-                <span>{formatPrice(breakfastTotal)}</span>
-              </div>
-            ) : null}
-            {discountPct > 0 ? (
-              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
-                <span>{discountType === "senior" ? "Senior Citizen" : "PWD"} Discount (20%)</span>
-                <span>-{formatPrice(discountAmount)}</span>
-              </div>
-            ) : null}
-            {voucherApplied ? (
-              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
-                <span>Voucher Discount</span>
-                <span>-{formatPrice(voucherDiscount)}</span>
-              </div>
-            ) : null}
-            {isMember && memberDiscountPct > 0 ? (
-              <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles size={12} />
-                  Spark Rewards Member Rate ({memberDiscountPct}%)
-                </span>
-                <span>-{formatPrice(memberDiscountAmount)}</span>
-              </div>
-            ) : null}
-            <div className="flex justify-between border-t border-dashed border-gray-200 pt-3 text-lg font-semibold text-gray-950">
-              <span>Total</span>
-              <span className="text-primary">{formatPrice(total)}</span>
-            </div>
+            {rateBreakdown ? (
+              <PriceBreakdown breakdown={rateBreakdown} total={total} />
+            ) : (
+              <>
+                <div className="flex justify-between">
+                  <span>Room rate</span>
+                  <span>{formatPrice(roomTotal)}</span>
+                </div>
+                {hasBreakfast ? (
+                  <div className="flex justify-between">
+                    <span>Breakfast add-on</span>
+                    <span>{formatPrice(breakfastTotal)}</span>
+                  </div>
+                ) : null}
+                {discountPct > 0 ? (
+                  <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                    <span>{discountType === "senior" ? "Senior Citizen" : "PWD"} Discount (20%)</span>
+                    <span>-{formatPrice(discountAmount)}</span>
+                  </div>
+                ) : null}
+                {voucherApplied ? (
+                  <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                    <span>Voucher Discount</span>
+                    <span>-{formatPrice(voucherDiscount)}</span>
+                  </div>
+                ) : null}
+                {isMember && memberDiscountPct > 0 ? (
+                  <div className="flex justify-between text-status-green-text bg-status-green-bg px-2 py-1 rounded">
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles size={12} />
+                      Spark Rewards Member Rate ({memberDiscountPct}%)
+                    </span>
+                    <span>-{formatPrice(memberDiscountAmount)}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between border-t border-dashed border-gray-200 pt-3 text-lg font-semibold text-gray-950">
+                  <span>Total</span>
+                  <span className="text-primary">{formatPrice(total)}</span>
+                </div>
+              </>
+            )}
           </div>
           <div className="mt-5 flex gap-3 rounded-lg bg-primary-light p-4 text-sm text-gray-700">
             <ShieldCheck size={18} className="mt-0.5 shrink-0 text-primary" />

@@ -114,6 +114,28 @@ function row(label: string, value: unknown) {
   `;
 }
 
+function rateBreakdownRows(booking: any) {
+  const breakdown = booking.rateBreakdown;
+  if (!breakdown || !Array.isArray(breakdown.roomLines) || breakdown.roomLines.length === 0) return "";
+  const roomRows = breakdown.roomLines.map((line: any) =>
+    row(
+      line.label || "Room rate",
+      `${Number(line.nights || 0)} night(s) x ${formatMoney(line.nightlyRate)} = ${formatMoney(line.subtotal)}`
+    )
+  ).join("");
+  const addOnRows = Array.isArray(breakdown.addOns)
+    ? breakdown.addOns.map((line: any) => row(line.label || "Add-on", formatMoney(line.amount))).join("")
+    : "";
+  const deductionRows = Array.isArray(breakdown.deductions)
+    ? breakdown.deductions.map((line: any) => row(line.label || "Discount", `-${formatMoney(line.amount)}`)).join("")
+    : "";
+  return `
+    ${roomRows}
+    ${addOnRows}
+    ${deductionRows}
+  `;
+}
+
 function bookingRows(booking: any) {
   const roomLabel = [
     booking.roomNumber ? `Room ${booking.roomNumber}` : "",
@@ -127,6 +149,7 @@ function bookingRows(booking: any) {
     ${row("Check-in", `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`)}
     ${row("Check-out", `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`)}
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
+    ${rateBreakdownRows(booking)}
     ${row("Total", formatMoney(booking.totalPrice))}
   `;
 }
