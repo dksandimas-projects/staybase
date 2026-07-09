@@ -58,6 +58,19 @@ export interface PublicHomepageContent extends PublicHeroContent {
   featuredTypeValues: string[];
   services: ContentItem[];
   sparkRewards: SparkRewardsPromo;
+  sectionHeaders: HomepageSectionHeaders;
+}
+
+export interface HomepageSectionHeaders {
+  roomsEyebrow: string;
+  roomsHeading: string;
+  roomsSubtext: string;
+  amenitiesEyebrow: string;
+  amenitiesHeading: string;
+  amenitiesSubtext: string;
+  servicesEyebrow: string;
+  servicesHeading: string;
+  servicesSubtext: string;
 }
 
 export interface PublicAboutContent {
@@ -83,6 +96,10 @@ export interface PublicContactContent {
   dpoEmail: string;
   facebookUrl: string;
   instagramUrl: string;
+  heroEyebrow: string;
+  heroHeading: string;
+  heroSubtext: string;
+  heroPhotoUrl: string;
 }
 
 export interface PublicCorporateContent extends PublicHeroContent {
@@ -120,6 +137,8 @@ export interface PublicSiteContent {
   corporate: PublicCorporateContent;
   rewards: PublicRewardsContent;
   branding: PublicBranding;
+  roomsCatalog: PublicHeroContent;
+  notFound: PublicHeroContent;
 }
 
 const FALLBACK_HERO_HEADING = "Your sanctuary in Bohol";
@@ -210,7 +229,18 @@ function buildFallback(): PublicSiteContent {
         icon: "",
         isEnabled: true
       })),
-      sparkRewards: FALLBACK_SPARK_REWARDS
+      sparkRewards: FALLBACK_SPARK_REWARDS,
+      sectionHeaders: {
+        roomsEyebrow: "Stay with us",
+        roomsHeading: "Unassuming comfort, carefully kept",
+        roomsSubtext: "Rooms are intentionally simple: good rest, easy amenities, and the calm you want after exploring Bohol.",
+        amenitiesEyebrow: "Amenities",
+        amenitiesHeading: "Everything important, nothing fussy",
+        amenitiesSubtext: "A boutique hotel should make the basics feel graceful. These are the details we keep steady.",
+        servicesEyebrow: "Services",
+        servicesHeading: "Plans made easier",
+        servicesSubtext: "For tours and transportation, our team can help coordinate the next step. No pressure, no hidden urgency."
+      }
     },
     about: {
       // The about page reads `heroEyebrow` + `heroSubtext` only when
@@ -241,7 +271,11 @@ function buildFallback(): PublicSiteContent {
       supportEmail: config.supportEmail,
       dpoEmail: config.dpoEmail,
       facebookUrl: config.facebookUrl,
-      instagramUrl: config.instagramUrl
+      instagramUrl: config.instagramUrl,
+      heroEyebrow: "Get in Touch",
+      heroHeading: "contact us",
+      heroSubtext: "Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist.",
+      heroPhotoUrl: ""
     },
     corporate: {
       heroEyebrow: corporateHeroEyebrow,
@@ -278,6 +312,18 @@ function buildFallback(): PublicSiteContent {
       logoNavbar: "",
       logoNavbarOnDark: "",
       logoFooter: ""
+    },
+    roomsCatalog: {
+      heroEyebrow: "Rooms & rates",
+      heroHeading: "Our rooms",
+      heroSubtext: "Browse every room type we offer, then pick your dates in the next step.",
+      heroPhotoUrl: ""
+    },
+    notFound: {
+      heroEyebrow: "Page not found",
+      heroHeading: "lost in bohol?",
+      heroSubtext: "We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay.",
+      heroPhotoUrl: ""
     }
   };
 }
@@ -306,6 +352,17 @@ function buildEmptyState(): PublicSiteContent {
         description: "",
         perks: [],
         isEnabled: false
+      },
+      sectionHeaders: {
+        roomsEyebrow: "",
+        roomsHeading: "",
+        roomsSubtext: "",
+        amenitiesEyebrow: "",
+        amenitiesHeading: "",
+        amenitiesSubtext: "",
+        servicesEyebrow: "",
+        servicesHeading: "",
+        servicesSubtext: ""
       }
     },
     about: {
@@ -328,7 +385,11 @@ function buildEmptyState(): PublicSiteContent {
       supportEmail: "",
       dpoEmail: "",
       facebookUrl: "",
-      instagramUrl: ""
+      instagramUrl: "",
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
     },
     corporate: {
       heroEyebrow: "",
@@ -353,6 +414,18 @@ function buildEmptyState(): PublicSiteContent {
       logoNavbar: "",
       logoNavbarOnDark: "",
       logoFooter: ""
+    },
+    roomsCatalog: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
+    },
+    notFound: {
+      heroEyebrow: "",
+      heroHeading: "",
+      heroSubtext: "",
+      heroPhotoUrl: ""
     }
   };
 }
@@ -452,6 +525,18 @@ export function usePublicSiteContent(): PublicSiteContent {
         websiteContent && typeof websiteContent.branding === "object" && websiteContent.branding !== null
           ? (websiteContent.branding as Record<string, unknown>)
           : null;
+      const roomsCatalogRaw =
+        websiteContent && typeof websiteContent.roomsCatalog === "object" && websiteContent.roomsCatalog !== null
+          ? (websiteContent.roomsCatalog as Record<string, unknown>)
+          : null;
+      const contactRaw =
+        websiteContent && typeof websiteContent.contact === "object" && websiteContent.contact !== null
+          ? (websiteContent.contact as Record<string, unknown>)
+          : null;
+      const notFoundRaw =
+        websiteContent && typeof websiteContent.notFound === "object" && websiteContent.notFound !== null
+          ? (websiteContent.notFound as Record<string, unknown>)
+          : null;
 
       const rawAmenities = homepageRaw ? toContentItemArray(homepageRaw.amenities) : [];
       const rawServices = homepageRaw ? toContentItemArray(homepageRaw.services) : [];
@@ -493,7 +578,21 @@ export function usePublicSiteContent(): PublicSiteContent {
           amenities: rawAmenities.length > 0 ? rawAmenities : fb.homepage.amenities,
           featuredTypeValues: rawFeatured.length > 0 ? rawFeatured : fb.homepage.featuredTypeValues,
           services: rawServices.length > 0 ? rawServices : fb.homepage.services,
-          sparkRewards: homepageRaw ? buildSparkRewards(homepageRaw.sparkRewards) : fb.homepage.sparkRewards
+          sparkRewards: homepageRaw ? buildSparkRewards(homepageRaw.sparkRewards) : fb.homepage.sparkRewards,
+          sectionHeaders: (() => {
+            const sh = homepageRaw?.sectionHeaders as Record<string, unknown> | undefined;
+            return {
+              roomsEyebrow: pickString(sh || null, "roomsEyebrow", fb.homepage.sectionHeaders.roomsEyebrow),
+              roomsHeading: pickString(sh || null, "roomsHeading", fb.homepage.sectionHeaders.roomsHeading),
+              roomsSubtext: pickString(sh || null, "roomsSubtext", fb.homepage.sectionHeaders.roomsSubtext),
+              amenitiesEyebrow: pickString(sh || null, "amenitiesEyebrow", fb.homepage.sectionHeaders.amenitiesEyebrow),
+              amenitiesHeading: pickString(sh || null, "amenitiesHeading", fb.homepage.sectionHeaders.amenitiesHeading),
+              amenitiesSubtext: pickString(sh || null, "amenitiesSubtext", fb.homepage.sectionHeaders.amenitiesSubtext),
+              servicesEyebrow: pickString(sh || null, "servicesEyebrow", fb.homepage.sectionHeaders.servicesEyebrow),
+              servicesHeading: pickString(sh || null, "servicesHeading", fb.homepage.sectionHeaders.servicesHeading),
+              servicesSubtext: pickString(sh || null, "servicesSubtext", fb.homepage.sectionHeaders.servicesSubtext)
+            };
+          })()
         },
         about: {
           // About hero eyebrow + subtext fall back to "" when the
@@ -532,7 +631,11 @@ export function usePublicSiteContent(): PublicSiteContent {
           supportEmail: pickString(hc, "supportEmail", fb.contact.supportEmail),
           dpoEmail: pickString(hc, "dpoEmail", fb.contact.dpoEmail),
           facebookUrl: pickString(hc, "facebookUrl", fb.contact.facebookUrl),
-          instagramUrl: pickString(hc, "instagramUrl", fb.contact.instagramUrl)
+          instagramUrl: pickString(hc, "instagramUrl", fb.contact.instagramUrl),
+          heroEyebrow: pickString(contactRaw, "heroEyebrow", fb.contact.heroEyebrow),
+          heroHeading: pickString(contactRaw, "heroHeading", fb.contact.heroHeading),
+          heroSubtext: pickString(contactRaw, "heroSubtext", fb.contact.heroSubtext),
+          heroPhotoUrl: pickString(contactRaw, "heroPhotoUrl", fb.contact.heroPhotoUrl)
         },
         corporate: {
           heroEyebrow: pickString(corporateRaw, "heroEyebrow", fb.corporate.heroEyebrow),
@@ -557,6 +660,18 @@ export function usePublicSiteContent(): PublicSiteContent {
           logoNavbar: pickString(brandingRaw, "logoNavbar", ""),
           logoNavbarOnDark: pickString(brandingRaw, "logoNavbarOnDark", ""),
           logoFooter: pickString(brandingRaw, "logoFooter", "")
+        },
+        roomsCatalog: {
+          heroEyebrow: pickString(roomsCatalogRaw, "heroEyebrow", fb.roomsCatalog.heroEyebrow),
+          heroHeading: pickString(roomsCatalogRaw, "heroHeading", fb.roomsCatalog.heroHeading),
+          heroSubtext: pickString(roomsCatalogRaw, "heroSubtext", fb.roomsCatalog.heroSubtext),
+          heroPhotoUrl: pickString(roomsCatalogRaw, "heroPhotoUrl", fb.roomsCatalog.heroPhotoUrl)
+        },
+        notFound: {
+          heroEyebrow: pickString(notFoundRaw, "heroEyebrow", fb.notFound.heroEyebrow),
+          heroHeading: pickString(notFoundRaw, "heroHeading", fb.notFound.heroHeading),
+          heroSubtext: pickString(notFoundRaw, "heroSubtext", fb.notFound.heroSubtext),
+          heroPhotoUrl: pickString(notFoundRaw, "heroPhotoUrl", fb.notFound.heroPhotoUrl)
         }
       };
 

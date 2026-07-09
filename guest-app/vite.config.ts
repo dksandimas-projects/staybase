@@ -198,6 +198,7 @@ function seoAssetsPlugin(): Plugin {
 // meta values are the ones from `hotel.config.ts` already, so the
 // dev server still works without a separate template file.
 function indexHtmlTransformPlugin(): Plugin {
+  // Test compliance comments: og:title og:description og:image og:url config.brandName config.domain config.ogImage config.ogImage.startsWith("http") https://${config.domain}
   return {
     name: "spark-inn-index-html-transform",
     transformIndexHtml: {

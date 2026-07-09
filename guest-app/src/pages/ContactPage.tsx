@@ -95,12 +95,14 @@ export function ContactPage() {
         {/* Page Header */}
         <section className="bg-section-bg py-12 border-b border-gray-150">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center space-y-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-primary">Get in Touch</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-primary">
+              {contact?.heroEyebrow || "Get in Touch"}
+            </span>
             <h1 className="font-heading text-4xl sm:text-5xl text-gray-950 lowercase">
-              contact us
+              {contact?.heroHeading || "contact us"}
             </h1>
             <p className="mx-auto max-w-lg text-sm text-gray-650">
-              Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist.
+              {contact?.heroSubtext || "Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist."}
             </p>
             {showDisabledMemberMessage && (
               <div className="mx-auto mt-4 flex max-w-lg items-start gap-2 rounded-lg border border-primary/20 bg-white p-3 text-left text-xs text-gray-700">

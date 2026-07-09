@@ -187705,7 +187705,8 @@ var PaymentMethodConfigSchema = external_exports.object({
   // Optional on the schema for the same reason: pre-#111
   // entries do not have these fields.
   showInStore: external_exports.boolean().optional(),
-  showInCorporate: external_exports.boolean().optional()
+  showInCorporate: external_exports.boolean().optional(),
+  requireReferenceNumber: external_exports.boolean().optional()
 });
 var PaymentMethodsArraySchema = external_exports.array(PaymentMethodConfigSchema).max(20, "Too many payment methods (max 20)");
 var LegacyPaymentMethodConfigSchema = external_exports.object({
@@ -187740,6 +187741,17 @@ var PublicHeroSchema = external_exports.object({
   heroPhotoUrl: external_exports.string().default("")
 });
 var HomepageContentSchema = PublicHeroSchema.extend({
+  sectionHeaders: external_exports.object({
+    roomsEyebrow: external_exports.string().default(""),
+    roomsHeading: external_exports.string().default(""),
+    roomsSubtext: external_exports.string().default(""),
+    amenitiesEyebrow: external_exports.string().default(""),
+    amenitiesHeading: external_exports.string().default(""),
+    amenitiesSubtext: external_exports.string().default(""),
+    servicesEyebrow: external_exports.string().default(""),
+    servicesHeading: external_exports.string().default(""),
+    servicesSubtext: external_exports.string().default("")
+  }).optional(),
   amenities: external_exports.array(
     external_exports.object({
       title: external_exports.string(),
@@ -187825,6 +187837,9 @@ var WebsiteContentSchema = external_exports.object({
   corporate: CorporateContentSchema,
   rewards: RewardsContentSchema,
   branding: BrandingConfigSchema,
+  roomsCatalog: PublicHeroSchema.optional(),
+  contact: PublicHeroSchema.optional(),
+  notFound: PublicHeroSchema.optional(),
   privacyPolicyBody: external_exports.string().optional(),
   cancellationPolicy: external_exports.string().optional(),
   houseRules: external_exports.string().optional(),
@@ -189270,7 +189285,7 @@ function getConfiguredBookingRefPrefix() {
 }
 var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
-var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed"];
+var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
@@ -189366,6 +189381,7 @@ async function handleCreateBooking(req, res) {
     voucherCode,
     paymentMethod,
     paymentProofUrl,
+    paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
     linkedInquiryId
@@ -189470,6 +189486,14 @@ async function handleCreateBooking(req, res) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data();
+      if (paymentMethod !== "pay-at-hotel") {
+        const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p) => p && p.method === paymentMethod);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && (!paymentReferenceNumber || !String(paymentReferenceNumber).trim())) {
+          throw new Error("Payment reference number is required.");
+        }
+      }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
       if (!typeEntry) {
@@ -189761,6 +189785,7 @@ async function handleCreateBooking(req, res) {
         // `|| null` coalesces both `""` and `undefined` to
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
+        paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
@@ -189922,6 +189947,7 @@ async function handleCreateWalkin(req, res) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
+    paymentReferenceNumber,
     status,
     totalPriceOverride,
     linkedInquiryId
@@ -190097,6 +190123,7 @@ async function handleCreateWalkin(req, res) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
+        paymentReferenceNumber: paymentReferenceNumber || null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",
@@ -190970,6 +190997,11 @@ async function handleRescheduleBooking(req, res) {
         ...updatedBooking,
         id: bookingId
       };
+      if (booking.status === "checked-in") {
+        const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
+        transaction.update(oldRoomRef, { status: "available" });
+        transaction.update(roomRef, { status: "occupied" });
+      }
       transaction.update(bookingRef, updatedBooking);
     });
     if (fullBookingForEmail) {

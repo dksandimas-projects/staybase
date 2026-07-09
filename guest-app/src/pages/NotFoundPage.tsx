@@ -3,11 +3,13 @@ import { motion, useReducedMotion } from "framer-motion";
 import { Compass, Home } from "lucide-react";
 import config from "@config";
 import { brandAsset } from "../utils/brand";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { scaleIn, VERSION } from "@spark-inn/shared";
 import { PrimaryButton } from "../components/PrimaryButton";
 
 export function NotFoundPage() {
   const shouldReduceMotion = useReducedMotion();
+  const { notFound } = usePublicSiteContent();
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-section-bg p-4 font-body text-gray-900">
@@ -35,12 +37,14 @@ export function NotFoundPage() {
         </div>
 
         <div className="mt-8 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wider text-primary">Page not found</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-primary">
+            {notFound?.heroEyebrow || "Page not found"}
+          </p>
           <h1 className="font-heading text-3xl lowercase text-gray-950">
-            lost in bohol?
+            {notFound?.heroHeading || "lost in bohol?"}
           </h1>
           <p className="mx-auto max-w-sm text-sm leading-6 text-gray-600">
-            We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay.
+            {notFound?.heroSubtext || "We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay."}
           </p>
         </div>
 

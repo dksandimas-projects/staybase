@@ -66,55 +66,62 @@ export async function compressImageFile(file: File, options: CompressImageOption
   }
 
   const settings = { ...defaultImageOptions, ...options };
-  const imageBitmap = await createImageBitmap(file);
-  const scale = Math.min(settings.maxWidth / imageBitmap.width, settings.maxHeight / imageBitmap.height, 1);
-  const width = Math.max(1, Math.round(imageBitmap.width * scale));
-  const height = Math.max(1, Math.round(imageBitmap.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  try {
+    const imageBitmap = await createImageBitmap(file);
+    const scale = Math.min(settings.maxWidth / imageBitmap.width, settings.maxHeight / imageBitmap.height, 1);
+    const width = Math.max(1, Math.round(imageBitmap.width * scale));
+    const height = Math.max(1, Math.round(imageBitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
 
-  const context = canvas.getContext("2d");
-  if (!context) {
+    const context = canvas.getContext("2d");
+    if (!context) {
+      imageBitmap.close();
+      throw new Error("Unable to prepare image compression.");
+    }
+
+    // Paint background white for formats without alpha channel (JPEG)
+    const outputSupportsAlpha = settings.mimeType !== "image/jpeg";
+    if (!outputSupportsAlpha) {
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+    }
+
+    context.drawImage(imageBitmap, 0, 0, width, height);
     imageBitmap.close();
-    throw new Error("Unable to prepare image compression.");
+
+    const blob = await canvasToBlob(canvas, settings.mimeType, settings.quality);
+    const ext = MIME_TO_EXTENSION[settings.mimeType];
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+    const compressedFile = new File([blob], `${baseName}.${ext}`, {
+      type: settings.mimeType,
+      lastModified: Date.now()
+    });
+    const dataUrl = await blobToDataUrl(blob);
+
+    return {
+      file: compressedFile,
+      dataUrl,
+      width,
+      height,
+      originalSize: file.size,
+      compressedSize: compressedFile.size
+    };
+  } catch (error) {
+    console.warn("Image compression failed, falling back to original file:", error);
+    try {
+      const dataUrl = await blobToDataUrl(file);
+      return {
+        file,
+        dataUrl,
+        width: 0,
+        height: 0,
+        originalSize: file.size,
+        compressedSize: file.size
+      };
+    } catch (fallbackError) {
+      throw new Error("Unable to process or read the selected image file.");
+    }
   }
-
-  // The default 2D canvas already has an alpha channel, so
-  // drawing a transparent PNG onto it preserves the alpha. JPEG
-  // output (the default) composites against the canvas
-  // background — if we leave the canvas transparent, browsers
-  // pick black (Chrome/Firefox) or white (Safari) when encoding
-  // the JPEG, which is non-deterministic and surprising. Paint
-  // an explicit white background only when the target format has
-  // no alpha channel. PNG / WebP outputs skip the fill so
-  // transparency is preserved end-to-end.
-  const outputSupportsAlpha = settings.mimeType !== "image/jpeg";
-  if (!outputSupportsAlpha) {
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-  }
-
-  context.drawImage(imageBitmap, 0, 0, width, height);
-  imageBitmap.close();
-
-  // PNG is lossless — the `quality` knob is meaningless for it
-  // and canvas.toBlob silently ignores it. WebP honors it.
-  const blob = await canvasToBlob(canvas, settings.mimeType, settings.quality);
-  const ext = MIME_TO_EXTENSION[settings.mimeType];
-  const baseName = file.name.replace(/\.[^.]+$/, "");
-  const compressedFile = new File([blob], `${baseName}.${ext}`, {
-    type: settings.mimeType,
-    lastModified: Date.now()
-  });
-  const dataUrl = await blobToDataUrl(blob);
-
-  return {
-    file: compressedFile,
-    dataUrl,
-    width,
-    height,
-    originalSize: file.size,
-    compressedSize: compressedFile.size
-  };
 }

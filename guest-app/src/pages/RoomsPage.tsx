@@ -10,6 +10,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { RoomTypeCard } from "../components/RoomTypeCard";
 import { useRoomTypes } from "../hooks/useRoomTypes";
 import { formatPrice } from "../utils/format";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 
 // Catalog-only rooms page. Renders one card per room type from
 // `settings/hotelConfig.roomTypes[]` (with the `DEFAULT_ROOM_TYPES`
@@ -22,6 +23,7 @@ import { formatPrice } from "../utils/format";
 // "browse all our types" entry point from the navbar / footer.
 export function RoomsPage() {
   const shouldReduceMotion = useReducedMotion();
+  const { roomsCatalog } = usePublicSiteContent();
   const { roomTypes, loading } = useRoomTypes();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedTypeValue, setSelectedTypeValue] = useState<string | null>(null);
@@ -76,10 +78,14 @@ export function RoomsPage() {
           initial={shouldReduceMotion ? false : "hidden"}
           variants={fadeUp}
         >
-          <p className="text-sm font-semibold uppercase tracking-wide text-primary">Rooms & rates</p>
-          <h1 className="font-heading text-4xl text-gray-950 sm:text-5xl">Our rooms</h1>
+          <p className="text-sm font-semibold uppercase tracking-wide text-primary">
+            {roomsCatalog?.heroEyebrow || "Rooms & rates"}
+          </p>
+          <h1 className="font-heading text-4xl text-gray-950 sm:text-5xl">
+            {roomsCatalog?.heroHeading || "Our rooms"}
+          </h1>
           <p className="max-w-2xl leading-7 text-gray-600">
-            Browse every room type we offer, then pick your dates in the next step.
+            {roomsCatalog?.heroSubtext || "Browse every room type we offer, then pick your dates in the next step."}
           </p>
         </motion.div>
       </section>
