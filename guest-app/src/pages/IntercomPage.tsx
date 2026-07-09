@@ -163,6 +163,7 @@ export function IntercomPage() {
   const iceUnsubscribeRef = useRef<(() => void) | null>(null);
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedIceIdsRef = useRef<Set<string>>(new Set());
+  const pendingIceCandidatesRef = useRef<RTCIceCandidate[]>([]);
 
   const playGuestRingbackTone = () => {
     try {
@@ -213,6 +214,7 @@ export function IntercomPage() {
       callTimeoutRef.current = null;
     }
     processedIceIdsRef.current.clear();
+    pendingIceCandidatesRef.current = [];
     guestPeerConnectionRef.current?.close();
     guestPeerConnectionRef.current = null;
     guestMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -767,6 +769,15 @@ export function IntercomPage() {
           }
           if (data.answer && !peerConnection.currentRemoteDescription) {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            // Flush pending ICE candidates once remoteDescription is set
+            while (pendingIceCandidatesRef.current.length > 0) {
+              const candidate = pendingIceCandidatesRef.current.shift();
+              if (candidate) {
+                void peerConnection.addIceCandidate(candidate).catch((err) => {
+                  console.warn("Failed to add queued ICE candidate:", err);
+                });
+              }
+            }
           }
           setCallState("connected");
           return;
@@ -789,7 +800,14 @@ export function IntercomPage() {
             if (data.from !== "staff" || processedIceIdsRef.current.has(change.doc.id)) return;
             processedIceIdsRef.current.add(change.doc.id);
             if (data.candidate) {
-              void peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+              const cand = new RTCIceCandidate(data.candidate);
+              if (peerConnection.remoteDescription) {
+                void peerConnection.addIceCandidate(cand).catch((err) => {
+                  console.warn("Failed to add ICE candidate directly:", err);
+                });
+              } else {
+                pendingIceCandidatesRef.current.push(cand);
+              }
             }
           });
         }
