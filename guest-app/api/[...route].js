@@ -187877,6 +187877,43 @@ function getManilaDateInfo(timezone = "Asia/Manila") {
   };
 }
 
+// ../shared/utils/checkin.ts
+var CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
+var REQUIRED_REGISTRATION_FIELDS = [
+  { key: "nationality", label: "Nationality" },
+  { key: "address", label: "Residential address" },
+  { key: "dateOfBirth", label: "Date of birth" },
+  { key: "gender", label: "Gender" },
+  { key: "idType", label: "ID type" },
+  { key: "idNumber", label: "ID number" },
+  { key: "emergencyContact", label: "Emergency contact" }
+];
+function hasValue(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function getCheckInReadiness(input) {
+  const missingItems = [];
+  if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status)) {
+    missingItems.push("Booking status must be confirmed or payment-confirmed");
+  }
+  if (!hasValue(input.guestIdPhotoUrl)) {
+    missingItems.push("Guest ID photo");
+  }
+  const registration = input.guestRegistration || {};
+  for (const field of REQUIRED_REGISTRATION_FIELDS) {
+    if (!hasValue(registration[field.key])) {
+      missingItems.push(field.label);
+    }
+  }
+  if (registration.signatureStatus !== "signed") {
+    missingItems.push("Guest signature marked signed");
+  }
+  return {
+    ready: missingItems.length === 0,
+    missingItems
+  };
+}
+
 // ../shared/utils/dates.ts
 function toDate(value) {
   return value instanceof Date ? new Date(value) : new Date(value);
@@ -190322,8 +190359,13 @@ async function handleCheckinBooking(req, res) {
         throw new Error("Booking not found.");
       }
       const bookingData = bookingDoc.data() || {};
-      if (!["confirmed", "payment-confirmed"].includes(bookingData.status)) {
-        throw new Error(`Booking can only be checked in from confirmed or payment-confirmed status (current: ${bookingData.status}).`);
+      const readiness = getCheckInReadiness({
+        status: bookingData.status,
+        guestIdPhotoUrl: bookingData.guestIdPhotoUrl,
+        guestRegistration: bookingData.guestRegistration
+      });
+      if (!readiness.ready) {
+        throw new Error(`Booking is not ready for check-in. Missing: ${readiness.missingItems.join(", ")}.`);
       }
       if (!bookingData.roomId) {
         throw new Error("Booking has no assigned room.");
@@ -190356,6 +190398,9 @@ async function handleCheckinBooking(req, res) {
     });
     return res.status(200).json({ success: true, data: { status: "checked-in" } });
   } catch (error) {
+    if (error?.message?.startsWith("Booking is not ready for check-in.") || error?.message?.startsWith("Assigned room") || error?.message === "Booking not found." || error?.message === "Booking has no assigned room.") {
+      return res.status(400).json({ success: false, error: error.message });
+    }
     console.error("Check-in booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
