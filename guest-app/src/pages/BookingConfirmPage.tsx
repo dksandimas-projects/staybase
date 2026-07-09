@@ -177,9 +177,9 @@ export function BookingConfirmPage() {
   // lost), render a friendly empty state instead of fake data.
   if (!hasAllParams) {
     return (
-      <main className="min-h-screen bg-gray-50 pb-20 font-body text-gray-900">
+      <main className="min-h-screen bg-gray-50 font-body text-gray-900">
         <Navbar />
-        <section className="mx-auto max-w-[620px] px-4 pt-20 text-center">
+        <section className="mx-auto max-w-[620px] px-4 pt-20 pb-20 text-center">
           <h1 className="font-heading text-3xl text-gray-950 sm:text-4xl">
             No booking details found
           </h1>
@@ -200,10 +200,10 @@ export function BookingConfirmPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-20 font-body text-gray-900">
+    <main className="min-h-screen bg-gray-50 font-body text-gray-900">
       <Navbar />
 
-      <section className="mx-auto max-w-[620px] px-4 pt-10">
+      <section className="mx-auto max-w-[620px] px-4 pt-10 pb-20">
         {/* Success Header */}
         <motion.div
           className="flex flex-col items-center text-center"

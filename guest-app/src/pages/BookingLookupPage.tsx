@@ -404,10 +404,10 @@ export function BookingLookupPage() {
   const cooldownSeconds = Math.ceil(cooldownRemainingMs / 1000);
 
   return (
-    <main className="min-h-screen bg-gray-50 pb-20 font-body text-gray-900">
+    <main className="min-h-screen bg-gray-50 font-body text-gray-900">
       <Navbar />
 
-      <section className="mx-auto max-w-4xl px-4 pt-10">
+      <section className="mx-auto max-w-4xl px-4 pt-10 pb-20">
         {!activeBooking ? (
           <motion.div
             variants={scaleIn}

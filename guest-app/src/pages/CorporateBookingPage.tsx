@@ -622,10 +622,12 @@ export function CorporateBookingPage() {
   function getBackToPath() {
     if (currentStepKey === "confirm") return "/corporate";
     if (currentStepKey === "review") {
-      return `/corporate/book?step=guest-details&${continueParams.toString()}`;
+      return `/corporate/book?${continueParams.toString()}`;
     }
     if (currentStepKey === "guest-details") {
-      return `/corporate/book?step=select-room&${continueParams.toString()}`;
+      const selectRoomParams = new URLSearchParams(continueParams);
+      selectRoomParams.set("step", "select-room");
+      return `/corporate/book?${selectRoomParams.toString()}`;
     }
     if (currentStepKey === "select-room") {
       return "/corporate/book";
@@ -773,7 +775,7 @@ export function CorporateBookingPage() {
               Corporate Booking Portal
             </span>
           </div>
-          <span className="min-h-11 min-w-11" />
+          <div className="min-h-11 min-w-11" />
         </div>
         
         {/* Persistent corporate rate badge — per W2.13 / decision #101 */}
