@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12 roadmap)
+> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1017,6 +1017,8 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
 - ⬜ Image preview modal — add a preview modal for uploaded images such as screenshot/receipts/guest IDs, etc. in the guest checkout flow and the admin bookings details view.
+- ✅ Dashboard Intercom stats — display unread message count metric card on dashboard and sidebar.
+- ✅ Real-time Audio Ringtone Alerts — play Web Audio synthesized notifications for new bookings, pending payments, guest messages, guest arrivals (check-ins), and departures (check-outs).
 
 ### Phase 12 Features Audit — fixes to close (audited 2026-07-08)
 

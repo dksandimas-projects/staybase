@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode, useCallback, useMemo } from "react";
 import {
   browserSessionPersistence,
   getIdTokenResult,
@@ -496,6 +496,12 @@ export interface AdminContextType {
     file: File
   ) => Promise<{ success: boolean; error?: string; url?: string }>;
   resetPaymentMethodQr: (method: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Audio Notifications & Intercom Counts
+  unreadIntercomCount: number;
+  soundsEnabled: boolean;
+  setSoundsEnabled: (enabled: boolean) => void;
+  playSynthNotification: (type: "booking" | "payment" | "message" | "arrival" | "departure") => void;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -1064,7 +1070,48 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           return b.bookingRef.localeCompare(a.bookingRef);
         });
 
-        setBookings(bookingsData);
+        setBookings((prev) => {
+          if (isLoadedRef.current) {
+            const prevIds = new Set(prev.map((b) => b.id));
+            const prevStatusMap = new Map(prev.map((b) => [b.id, b.status]));
+
+            let hasNewBooking = false;
+            let hasPaymentPending = false;
+            let hasNewArrival = false;
+            let hasNewDeparture = false;
+
+            bookingsData.forEach((b) => {
+              const prevStatus = prevStatusMap.get(b.id);
+              if (!prevIds.has(b.id)) {
+                hasNewBooking = true;
+                if (b.status === "payment-pending") {
+                  hasPaymentPending = true;
+                }
+              } else if (prevStatus !== b.status) {
+                if (b.status === "payment-pending") {
+                  hasPaymentPending = true;
+                }
+                if (b.status === "checked-in") {
+                  hasNewArrival = true;
+                }
+                if (b.status === "checked-out") {
+                  hasNewDeparture = true;
+                }
+              }
+            });
+
+            if (hasNewBooking) {
+              playSynthNotification("booking");
+            } else if (hasPaymentPending) {
+              playSynthNotification("payment");
+            } else if (hasNewArrival) {
+              playSynthNotification("arrival");
+            } else if (hasNewDeparture) {
+              playSynthNotification("departure");
+            }
+          }
+          return bookingsData;
+        });
         setBookingsLoading(false);
       },
       (error) => {
@@ -1850,6 +1897,147 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   const [intercoms, setIntercoms] = useState<Record<string, IntercomMessage[]>>({});
   const [intercomThreads, setIntercomThreads] = useState<Record<string, IntercomThread>>({});
 
+  // Audio Notifications State
+  const [soundsEnabled, setSoundsEnabledState] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("staybase_admin_sounds_enabled") !== "false";
+    }
+    return true;
+  });
+  const soundsEnabledRef = useRef(soundsEnabled);
+  useEffect(() => {
+    soundsEnabledRef.current = soundsEnabled;
+  }, [soundsEnabled]);
+
+  const setSoundsEnabled = useCallback((enabled: boolean) => {
+    setSoundsEnabledState(enabled);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("staybase_admin_sounds_enabled", String(enabled));
+    }
+  }, []);
+
+  const isLoadedRef = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      isLoadedRef.current = true;
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const playSynthNotification = useCallback((type: "booking" | "payment" | "message" | "arrival" | "departure") => {
+    if (!soundsEnabledRef.current) return;
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+
+      if (type === "message") {
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = "sine";
+        osc1.frequency.setValueAtTime(1567.98, now);
+        gain1.gain.setValueAtTime(0.05, now);
+        gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.08);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = "sine";
+        osc2.frequency.setValueAtTime(2093.00, now + 0.08);
+        gain2.gain.setValueAtTime(0.05, now + 0.08);
+        gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.08);
+        osc2.stop(now + 0.18);
+      } else if (type === "booking") {
+        const notes = [261.63, 329.63, 392.00, 523.25];
+        notes.forEach((freq, index) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.setValueAtTime(freq, now + index * 0.12);
+          gain.gain.setValueAtTime(0.1, now + index * 0.12);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.12 + 0.3);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + index * 0.12);
+          osc.stop(now + index * 0.12 + 0.3);
+        });
+      } else if (type === "payment") {
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = "sine";
+        osc1.frequency.setValueAtTime(659.25, now);
+        gain1.gain.setValueAtTime(0.1, now);
+        gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.25);
+
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = "sine";
+        osc2.frequency.setValueAtTime(440.00, now + 0.15);
+        gain2.gain.setValueAtTime(0.1, now + 0.15);
+        gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.15 + 0.35);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + 0.15);
+        osc2.stop(now + 0.15 + 0.35);
+      } else if (type === "arrival") {
+        const notes = [698.46, 880.00];
+        notes.forEach((freq, index) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + index * 0.1);
+          gain.gain.setValueAtTime(0.08, now + index * 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.1 + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + index * 0.1);
+          osc.stop(now + index * 0.1 + 0.25);
+        });
+      } else if (type === "departure") {
+        const notes = [880.00, 698.46];
+        notes.forEach((freq, index) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(freq, now + index * 0.1);
+          gain.gain.setValueAtTime(0.08, now + index * 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.1 + 0.25);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + index * 0.1);
+          osc.stop(now + index * 0.1 + 0.25);
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to play synth notification audio:", e);
+    }
+  }, []);
+
+  const unreadIntercomCount = useMemo(() => {
+    return Object.values(intercoms).reduce((count, messages) => {
+      const guestUnread = messages.filter((m) => m.sender === "guest" && !m.isRead);
+      return count + guestUnread.length;
+    }, 0);
+  }, [intercoms]);
+
   const formatIntercomTimestamp = (value: any) => {
     if (!value) return "";
     const date = typeof value.toDate === "function" ? value.toDate() : new Date(value);
@@ -1924,6 +2112,17 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           });
 
           setIntercoms((prev) => {
+            if (isLoadedRef.current) {
+              const prevMsgs = prev[roomNumber] || [];
+              const prevIds = new Set(prevMsgs.map((m) => m.id));
+              const hasNewGuestMsg = messages.some((m) => 
+                m.sender === "guest" && !m.isRead && !prevIds.has(m.id)
+              );
+              if (hasNewGuestMsg) {
+                playSynthNotification("message");
+              }
+            }
+
             if (messages.length === 0) {
               const { [roomNumber]: _removed, ...rest } = prev;
               return rest;
@@ -3766,7 +3965,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         staff,
         createStaff,
         disableStaff,
-        updateStaff
+        updateStaff,
+        unreadIntercomCount,
+        soundsEnabled,
+        setSoundsEnabled,
+        playSynthNotification
       }}
     >
       {children}
