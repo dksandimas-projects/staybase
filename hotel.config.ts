@@ -34,7 +34,7 @@ export const config = {
   },
   logos: {
     standard: "FINAL LOGO.png",
-    white: "FINAL LOGO-white.png",
+    white: "nav-bar-logo-white.png",
     navbar: "nav-bar-logo.png",
     icon: "ICON LOGO.png",
     wordmark: "TEXT LOGO.png"
