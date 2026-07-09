@@ -40,7 +40,9 @@ const ROUTE_HERO_MAP: Array<{ prefix: string; url: string }> = [
 function currentHero(): { url: string } | undefined {
   if (typeof window === "undefined") return undefined;
   const path = window.location.pathname;
-  return ROUTE_HERO_MAP.find((entry) => path.startsWith(entry.prefix));
+  return ROUTE_HERO_MAP.find((entry) => 
+    entry.prefix === "/" ? path === "/" : path.startsWith(entry.prefix)
+  );
 }
 
 // ─── Module initializer ──────────────────────────────────────────────────────
