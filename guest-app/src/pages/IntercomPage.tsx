@@ -153,10 +153,51 @@ export function IntercomPage() {
   const guestPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const guestMediaStreamRef = useRef<MediaStream | null>(null);
   const guestRemoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const guestAudioContextRef = useRef<AudioContext | null>(null);
+  const ringbackIntervalRef = useRef<any>(null);
   const callUnsubscribeRef = useRef<(() => void) | null>(null);
   const iceUnsubscribeRef = useRef<(() => void) | null>(null);
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedIceIdsRef = useRef<Set<string>>(new Set());
+
+  const playGuestRingbackTone = () => {
+    try {
+      if (!guestAudioContextRef.current) {
+        guestAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = guestAudioContextRef.current;
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+      const frequencies = [440, 480];
+      const duration = 1.5;
+
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(0.06, now + 0.05);
+      gainNode.gain.setValueAtTime(0.06, now + duration - 0.1);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+      const oscs = frequencies.map((freq) => {
+        const osc = ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now);
+        osc.connect(gainNode);
+        return osc;
+      });
+
+      gainNode.connect(ctx.destination);
+
+      oscs.forEach((osc) => {
+        osc.start(now);
+        osc.stop(now + duration);
+      });
+    } catch (e) {
+      console.warn("Failed to play guest ringback tone:", e);
+    }
+  };
 
   const stopGuestCallResources = () => {
     callUnsubscribeRef.current?.();
@@ -176,6 +217,10 @@ export function IntercomPage() {
       guestRemoteAudioRef.current.pause();
       guestRemoteAudioRef.current.srcObject = null;
       guestRemoteAudioRef.current = null;
+    }
+    if (ringbackIntervalRef.current) {
+      clearInterval(ringbackIntervalRef.current);
+      ringbackIntervalRef.current = null;
     }
   };
 
@@ -459,8 +504,35 @@ export function IntercomPage() {
   }, [callState]);
 
   useEffect(() => {
+    if (callState === "ringing" || callState === "requesting") {
+      if (!ringbackIntervalRef.current) {
+        playGuestRingbackTone();
+        ringbackIntervalRef.current = setInterval(() => {
+          playGuestRingbackTone();
+        }, 4500);
+      }
+    } else {
+      if (ringbackIntervalRef.current) {
+        clearInterval(ringbackIntervalRef.current);
+        ringbackIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (ringbackIntervalRef.current) {
+        clearInterval(ringbackIntervalRef.current);
+        ringbackIntervalRef.current = null;
+      }
+    };
+  }, [callState]);
+
+  useEffect(() => {
     return () => {
       stopGuestCallResources();
+      if (guestAudioContextRef.current) {
+        void guestAudioContextRef.current.close();
+        guestAudioContextRef.current = null;
+      }
     };
   }, []);
 
