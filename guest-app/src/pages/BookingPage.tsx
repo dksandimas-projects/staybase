@@ -358,11 +358,13 @@ export function BookingPage() {
 
   const voucherDiscount = useMemo(() => {
     if (!voucherApplied) return 0;
+    const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+    const voucherBase = Math.max(subtotal - seniorPwdDiscount, 0);
     if (voucherDiscountType === "percent") {
-      return Math.round(subtotal * (voucherDiscountValue / 100));
+      return Math.round(voucherBase * (voucherDiscountValue / 100));
     }
-    return voucherDiscountValue;
-  }, [voucherApplied, voucherDiscountType, voucherDiscountValue, subtotal]);
+    return Math.min(voucherDiscountValue, voucherBase);
+  }, [voucherApplied, voucherDiscountType, voucherDiscountValue, subtotal, discountPct]);
 
   const total = selectedTypeEntry && selectedRoomRates
     ? calculateBookingTotal({
@@ -586,6 +588,10 @@ export function BookingPage() {
       setVoucherError("Please enter a code.");
       return;
     }
+    if (!turnstileToken) {
+      setVoucherError("Security check is still loading. Please wait a moment, then apply the voucher again.");
+      return;
+    }
 
     setIsValidatingVoucher(true);
     setVoucherError("");
@@ -609,6 +615,7 @@ export function BookingPage() {
       }
 
       setVoucherApplied(true);
+      setVoucherCode(result.data.code || code);
       setVoucherDiscountValue(result.data.discountValue);
       setVoucherDiscountType(result.data.discountType);
       setVoucherError("");
@@ -1043,6 +1050,8 @@ export function BookingPage() {
                   value={voucherCode}
                   onChange={(e) => {
                     setVoucherCode(e.target.value);
+                    setVoucherApplied(false);
+                    setVoucherDiscountValue(0);
                     setVoucherError("");
                   }}
                   disabled={voucherApplied || isValidatingVoucher}
@@ -1059,7 +1068,7 @@ export function BookingPage() {
                 ) : (
                   <button
                     type="submit"
-                    disabled={isValidatingVoucher || !voucherCode.trim()}
+                    disabled={isValidatingVoucher || !voucherCode.trim() || !turnstileToken}
                     className="min-h-11 rounded-lg border border-primary px-6 text-sm font-semibold text-primary transition hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
                   >
                     {isValidatingVoucher ? "Applying..." : "Apply"}

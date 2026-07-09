@@ -922,6 +922,59 @@ describe("/api/bookings/create", () => {
         })
       });
     });
+
+    test("percent voucher applies after Senior/PWD discount during booking creation", async () => {
+      mockVouchers.SAVE10 = {
+        code: "SAVE10",
+        discountType: "percent",
+        discountValue: 10,
+        isActive: true,
+        expiresAt: { toDate: () => new Date(`${isoDate(90)}T00:00:00Z`) },
+        usageCap: 10,
+        usageCount: 2,
+        applicableRoomTypes: []
+      };
+
+      const body = {
+        bookingId: "bookingVoucherSenior1",
+        roomType: "standard-double",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Senior",
+          lastName: "Voucher",
+          email: "seniorvoucher@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "senior",
+        discountIdPhotoUrl: "https://storage.example/discount-id.jpg",
+        voucherCode: "save10",
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const created = setCalls.find((c) => c.path === "bookings/bookingVoucherSenior1")?.data;
+      expect(created).toBeDefined();
+      const seniorPwdDiscount = Math.round(created.originalTotalPrice * 0.2);
+      const expectedVoucherDiscount = Math.round((created.originalTotalPrice - seniorPwdDiscount) * 0.1);
+      expect(created.voucherCode).toBe("SAVE10");
+      expect(created.voucherDiscount).toBe(expectedVoucherDiscount);
+      expect(created.totalPrice).toBe(created.originalTotalPrice - seniorPwdDiscount - expectedVoucherDiscount);
+      expect(updateCalls).toContainEqual({
+        path: "vouchers/SAVE10",
+        data: expect.objectContaining({
+          usageCount: 3
+        })
+      });
+    });
   });
 
   describe("staff actions (walk-ins, payments, discount rejections, cancellations)", () => {

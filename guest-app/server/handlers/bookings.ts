@@ -3,6 +3,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
 import {
   calculateSeasonalAwareRoomTotal,
+  calculateVoucherDiscount,
   normalizeSeasonalRateOverrides,
   toDateOrNull,
   validateCorporateCode,
@@ -632,7 +633,17 @@ export async function handleCreateBooking(req: any, res: any) {
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
 
-      // 7. Voucher Validation
+      // 7a. Government Discount Validation
+      let discountPct = 0;
+      if (discountType === "senior" || discountType === "pwd") {
+        discountPct = 20;
+        // Verify discount ID is provided client-side
+        if (!discountIdPhotoUrl) {
+          throw new Error("Government-mandated discount requires verification ID photo.");
+        }
+      }
+
+      // 7b. Voucher Validation
       // Per W2.12 / decision #100: corporate bookings never accept
       // promo vouchers. Silently zero out the discount + clear the
       // code so the booking doc reflects `voucherDiscount: 0` even
@@ -690,12 +701,12 @@ export async function handleCreateBooking(req: any, res: any) {
 
           if (isValid) {
             appliedVoucherCode = formattedCode;
-            if (vData.discountType === "percent") {
-              voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
-            } else {
-              voucherDiscount = vData.discountValue;
-            }
-            voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+            const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
+            const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+            voucherDiscount = Math.round(calculateVoucherDiscount({
+              discountType: vData.discountType === "percent" ? "percent" : "flat",
+              discountValue: Number(vData.discountValue) || 0
+            }, voucherBase));
 
             // BR-01: defer the usage write until after the read
             // phase so valid voucher bookings do not trip
@@ -712,16 +723,6 @@ export async function handleCreateBooking(req: any, res: any) {
           }
         } else {
           throw new Error("Voucher no longer valid");
-        }
-      }
-
-      // 8. Government Discount Validation
-      let discountPct = 0;
-      if (discountType === "senior" || discountType === "pwd") {
-        discountPct = 20;
-        // Verify discount ID is provided client-side
-        if (!discountIdPhotoUrl) {
-          throw new Error("Government-mandated discount requires verification ID photo.");
         }
       }
 
@@ -2295,26 +2296,26 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
 
+      let discountPct = 0;
+      if (booking.discountType === "senior" || booking.discountType === "pwd") {
+        discountPct = 20;
+      }
+
       let voucherDiscount = 0;
       if (booking.voucherCode) {
         const voucherRef = adminDb.collection("vouchers").doc(booking.voucherCode);
         const voucherDoc = await transaction.get(voucherRef);
         if (voucherDoc.exists) {
           const vData = voucherDoc.data() || {};
-          if (vData.discountType === "percent") {
-            voucherDiscount = Math.round(subtotal * (vData.discountValue / 100));
-          } else {
-            voucherDiscount = vData.discountValue || 0;
-          }
-          voucherDiscount = Math.min(Math.max(voucherDiscount, 0), subtotal);
+          const seniorPwdDiscountForVoucher = Math.round(subtotal * (discountPct / 100));
+          const voucherBase = Math.max(subtotal - seniorPwdDiscountForVoucher, 0);
+          voucherDiscount = Math.round(calculateVoucherDiscount({
+            discountType: vData.discountType === "percent" ? "percent" : "flat",
+            discountValue: Number(vData.discountValue) || 0
+          }, voucherBase));
         } else {
           voucherDiscount = booking.voucherDiscount || 0;
         }
-      }
-
-      let discountPct = 0;
-      if (booking.discountType === "senior" || booking.discountType === "pwd") {
-        discountPct = 20;
       }
 
       let appliedMemberDiscountPct = 0;
