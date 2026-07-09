@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Route, Routes } from "react-router-dom";
+import { useEffect, type ReactNode } from "react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import config from "@config";
 import { Analytics } from "./components/Analytics";
 import { PageMeta } from "./components/PageMeta";
@@ -23,9 +23,20 @@ import { SignUpPage } from "./pages/SignUpPage";
 import { StaysPage } from "./pages/StaysPage";
 import { TermsPage } from "./pages/TermsPage";
 
+export function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
+
 export function App() {
   return (
     <>
+      <ScrollToTop />
       <Analytics />
       <Routes>
         <Route
