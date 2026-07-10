@@ -5,7 +5,7 @@ import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
-import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils } from "lucide-react";
+import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -55,6 +55,7 @@ export function DashboardPage() {
   const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
+  const [showRevenue, setShowRevenue] = useState(true);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setClockTick(Date.now()), 60_000);
@@ -95,6 +96,7 @@ export function DashboardPage() {
   const monthlyRevenue = bookings
     .filter((b) => b.checkIn?.startsWith(monthKey) && ["confirmed", "checked-in", "checked-out"].includes(b.status))
     .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
+  const revenueHelpText = "Revenue is the sum of totalPrice for bookings checking in this month with confirmed, checked-in, or checked-out status. It is booking value, not cash collected.";
   const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey, currentManilaMinutes, configuredCheckOutTime);
@@ -267,7 +269,22 @@ export function DashboardPage() {
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} />
         <StatsCard label="Total Bookings" value={String(monthlyBookingsCount)} />
-        <StatsCard label="Revenue" value={formatPrice(monthlyRevenue)} />
+        <StatsCard
+          label="Revenue"
+          value={showRevenue ? formatPrice(monthlyRevenue) : "Hidden"}
+          helpText={revenueHelpText}
+          headerAction={
+            <button
+              type="button"
+              onClick={() => setShowRevenue((current) => !current)}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary-light text-primary transition hover:bg-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/40"
+              aria-label={showRevenue ? "Hide dashboard revenue" : "Show dashboard revenue"}
+              title={showRevenue ? "Hide revenue" : "Show revenue"}
+            >
+              {showRevenue ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          }
+        />
         <StatsCard label="Pending Payments" value={String(pendingPayments.length)} />
         <StatsCard
           label="Unread Messages"
