@@ -854,6 +854,48 @@ describe("/api/bookings/create", () => {
       expect(setCalls.find((c) => c.path === "bookings/bookingRoomNotReady1")).toBeUndefined();
     });
 
+    test("does not block today's checked-in departure before the configured checkout time", async () => {
+      const { todayStr } = getManilaDateInfo();
+      const tomorrowKey = offsetDateKey(todayStr, 1);
+      mockSettings.hotelConfig.checkOutTime = "23:59";
+
+      mockBookings.push({
+        id: "departure_today_101",
+        bookingId: "departure_today_101",
+        roomId: "room_101",
+        status: "checked-in",
+        checkIn: { toDate: () => new Date(`${offsetDateKey(todayStr, -2)}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${todayStr}T00:00:00Z`) }
+      });
+
+      const body = {
+        bookingId: "bookingBeforeCheckout1",
+        roomType: "standard-double",
+        checkIn: todayStr,
+        checkOut: tomorrowKey,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Before",
+          lastName: "Checkout",
+          email: "before-checkout@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(setCalls.find((c) => c.path === "bookings/bookingBeforeCheckout1")).toBeDefined();
+    });
+
     test("rejects an unknown roomType with a user-facing error", async () => {
       const body = {
         bookingId: "bookingBadType1",

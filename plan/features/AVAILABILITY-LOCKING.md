@@ -34,7 +34,7 @@ The booking document ID and the public booking reference are different values. T
 
 ### Overdue checked-in occupancy
 
-A booking with status `"checked-in"` still represents physical room occupancy even after its scheduled checkout date. For same-day starts, the transaction treats any same-room booking with status `"checked-in"` and `checkOut <= todayKey` as a conflict, even when the historical date range no longer overlaps the requested stay. `todayKey` comes from the shared Manila-date helper and is compared as `YYYY-MM-DD`.
+A booking with status `"checked-in"` still represents physical room occupancy after it becomes overdue. For same-day starts, the transaction treats any same-room booking with status `"checked-in"` as a conflict when its `checkOut` date is before `todayKey`, or when its `checkOut` date is `todayKey` and Manila current time is at/after the configured checkout time. `todayKey` and current time come from the shared Manila-date helper; checkout time comes from `settings/hotelConfig.checkOutTime` with `hotel.config.ts` fallback.
 
 This prevents a room from being silently re-booked while the previous guest has not been manually checked out. Public booking creation and staff walk-ins return a distinct room-not-ready conflict; reschedule returns an admin-facing room-not-ready message. The dashboard surfaces overdue check-outs so staff can open the booking drawer and check the guest out manually. There is still no auto-checkout cron, fee, penalty, or guest email behavior.
 
@@ -62,7 +62,7 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
   - `roomId == <candidatePhysicalRoomId>` (one read per candidate of the chosen type)
   - `status` NOT IN `["cancelled"]`
   - `checkIn < requestedCheckOut` AND `checkOut > requestedCheckIn`
-- [ ] Same-day starts also reject a room when a same-room booking is still `"checked-in"` and its stored `checkOut` date is `<= todayKey`
+- [ ] Same-day starts also reject a room when a same-room booking is still `"checked-in"` and its stored `checkOut` date is before `todayKey`, or is `todayKey` after configured checkout time
 - [ ] If no candidate of the requested type is free → abort transaction, return `{ success: false, error: "Room no longer available" }`
 - [ ] If a candidate is free → create booking document with all fields (including the assigned room's `roomId` + `roomNumber`), return `{ success: true, data: { bookingId, bookingRef, roomId, roomNumber, roomType } }`
 - [ ] Booking document created at the preallocated `bookingId` supplied by the client; never generate a different document ID inside the transaction
@@ -75,7 +75,7 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 
 - [ ] Two guests submitting for the same room/dates simultaneously — transaction ensures only one succeeds
 - [ ] Room blocked between guest viewing availability and submitting — transaction catches this
-- [ ] Previous guest is still `"checked-in"` after their checkout date — same-day booking creation, walk-in creation, and reschedule reject the occupied physical room until staff checks the prior booking out
+- [ ] Previous guest is still `"checked-in"` after their checkout date/time — same-day booking creation, walk-in creation, and reschedule reject the occupied physical room until staff checks the prior booking out
 - [ ] Network timeout during transaction — client receives error, booking NOT created (idempotent)
 - [ ] Retry on network error — safe, transaction will either succeed or fail cleanly (no duplicates)
 - [ ] Upload succeeds but booking transaction fails — no booking document is created; uploaded proof/ID objects are orphaned and staff-invisible until a future cleanup job removes unused preallocated paths
@@ -86,7 +86,7 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 - [ ] Open two browser sessions, both on Step 3 for the same room/dates — submit simultaneously — only one booking created, other receives conflict error
 - [ ] Room manually blocked in admin while guest is in booking flow — guest receives unavailability error on submit
 - [ ] Walk-in booking in admin for dates that conflict with an online booking — authenticated API route returns conflict error and the modal shows it
-- [ ] Same-day booking for a room with a past-dated still-checked-in booking returns the room-not-ready conflict instead of creating a new booking
+- [ ] Same-day booking for a room with a past-dated still-checked-in booking, or today's still-checked-in departure after checkout time, returns the room-not-ready conflict instead of creating a new booking
 - [ ] All created bookings have unique `bookingRef` values — no duplicates in Firestore
 
 ## References
