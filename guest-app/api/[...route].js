@@ -189347,8 +189347,29 @@ function rangesOverlap(aStart, aEnd, bStart, bEnd) {
 function dateKeyFromDate(date) {
   return date.toISOString().slice(0, 10);
 }
+function parseCheckoutTimeToMinutes(timeValue, fallback = hotel_config_default.checkOutTime || "12:00") {
+  const raw = String(timeValue || fallback).trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+  if (!match) {
+    return fallback === "12:00" ? 720 : parseCheckoutTimeToMinutes(fallback, "12:00");
+  }
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const meridiem = match[3]?.toUpperCase();
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes < 0 || minutes > 59) {
+    return fallback === "12:00" ? 720 : parseCheckoutTimeToMinutes(fallback, "12:00");
+  }
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return fallback === "12:00" ? 720 : parseCheckoutTimeToMinutes(fallback, "12:00");
+    if (meridiem === "PM" && hours !== 12) hours += 12;
+    if (meridiem === "AM" && hours === 12) hours = 0;
+  }
+  if (hours < 0 || hours > 23) return fallback === "12:00" ? 720 : parseCheckoutTimeToMinutes(fallback, "12:00");
+  return hours * 60 + minutes;
+}
 function hasLingeringCheckedInConflict(input) {
-  return input.status === "checked-in" && input.requestedCheckInKey === input.todayKey && dateKeyFromDate(input.existingCheckOut) <= input.todayKey;
+  const existingCheckOutKey = dateKeyFromDate(input.existingCheckOut);
+  return input.status === "checked-in" && input.requestedCheckInKey === input.todayKey && (existingCheckOutKey < input.todayKey || existingCheckOutKey === input.todayKey && input.currentMinutes >= input.checkoutMinutes);
 }
 function getOccupancyConflictReason(input) {
   const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
@@ -189361,7 +189382,9 @@ function getOccupancyConflictReason(input) {
     status: input.bookingData.status,
     existingCheckOut,
     requestedCheckInKey: input.requestedCheckInKey,
-    todayKey: input.todayKey
+    todayKey: input.todayKey,
+    currentMinutes: input.currentMinutes,
+    checkoutMinutes: parseCheckoutTimeToMinutes(input.checkOutTime)
   })) {
     return "lingering-checked-in";
   }
@@ -189486,7 +189509,8 @@ async function handleCreateBooking(req, res) {
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
-  const { todayStr: manilaToday } = getManilaDateInfo();
+  const { todayStr: manilaToday, manilaDate: currentManilaDate } = getManilaDateInfo();
+  const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
   if (checkIn < manilaToday) {
     return res.status(400).json({
       success: false,
@@ -189614,7 +189638,9 @@ async function handleCreateBooking(req, res) {
           requestedCheckIn: checkInDate,
           requestedCheckOut: checkOutDate,
           requestedCheckInKey: checkIn,
-          todayKey: manilaToday
+          todayKey: manilaToday,
+          currentMinutes: currentManilaMinutes,
+          checkOutTime: hotelConfig.checkOutTime
         })).find(Boolean);
         if (conflictReason === "lingering-checked-in") {
           sawLingeringCheckedInConflict = true;
@@ -190052,7 +190078,8 @@ async function handleCreateWalkin(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
-  const { todayStr: todayKey } = getManilaDateInfo();
+  const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
+  const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
@@ -190105,7 +190132,9 @@ async function handleCreateWalkin(req, res) {
         requestedCheckIn: checkInDate,
         requestedCheckOut: checkOutDate,
         requestedCheckInKey: checkIn,
-        todayKey
+        todayKey,
+        currentMinutes: currentManilaMinutes,
+        checkOutTime: hotelConfig.checkOutTime
       })).find(Boolean);
       const hasConflict = Boolean(conflictReason);
       if (hasConflict) {
@@ -190917,7 +190946,8 @@ async function handleRescheduleBooking(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
-  const { todayStr: todayKey } = getManilaDateInfo();
+  const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
+  const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
@@ -190940,6 +190970,9 @@ async function handleRescheduleBooking(req, res) {
         const windowActive = blockedFrom && blockedTo ? rangesOverlap(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
         if (windowActive) throw new Error("Target room is blocked for those dates.");
       }
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.data() || {};
+      const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const overlapQuery = adminDb.collection("bookings").where("roomId", "==", String(roomId)).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const overlapSnapshot = await transaction.get(overlapQuery);
       const conflictReason = overlapSnapshot.docs.filter((doc) => doc.id !== String(bookingId)).map((doc) => getOccupancyConflictReason({
@@ -190947,16 +190980,15 @@ async function handleRescheduleBooking(req, res) {
         requestedCheckIn: checkInDate,
         requestedCheckOut: checkOutDate,
         requestedCheckInKey: checkIn,
-        todayKey
+        todayKey,
+        currentMinutes: currentManilaMinutes,
+        checkOutTime: hotelConfig.checkOutTime
       })).find(Boolean);
       if (conflictReason) {
         throw new Error(conflictReason === "lingering-checked-in" ? "Target room is not ready because the previous guest has not checked out yet." : "Target room already has a booking in that date range.");
       }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
-      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
-      const hotelConfig = hotelConfigDoc.data() || {};
-      const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
       const breakfastConfig = breakfastConfigDoc.data() || {};
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);

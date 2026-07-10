@@ -31,7 +31,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA
 - [ ] Today's check-ins list — bookings with `checkIn = today` and status `"confirmed"`
 - [ ] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`
-- [ ] Overdue Check-outs warning section — shown only when at least one booking has status `"checked-in"` and `checkOut` strictly before today's Manila date; each row shows guest name, room number, days overdue, and opens the booking drawer for checkout action
+- [ ] Overdue Check-outs warning section — shown only when at least one booking has status `"checked-in"` and either `checkOut` is before today's Manila date or `checkOut` is today and Manila current time is at/after configured checkout time; each row shows guest name, room number, overdue timing, and opens the booking drawer for checkout action
 - [ ] Recent bookings table — last 10 bookings regardless of status, clickable rows to booking detail
 - [ ] Intercom unread indicator — badge on sidebar nav item, count of unread messages across all rooms
 - [ ] **Today's Breakfast Prep section** — see §Implementation Plan — Today's Breakfast Prep below
@@ -45,7 +45,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Pending payments: query `bookings` where `status == "payment-uploaded"`, ordered by `createdAt`
 - [ ] Today's check-ins: query `bookings` where `checkIn` is today AND `status == "confirmed"`
 - [ ] Today's check-outs: query `bookings` where `checkOut` is today AND `status == "checked-in"`
-- [ ] Overdue check-outs: filter bookings where `status == "checked-in"` and `checkOut < todayKey`; `todayKey` comes from the shared Manila-date helper and is compared as `YYYY-MM-DD`
+- [ ] Overdue check-outs: filter bookings where `status == "checked-in"` and (`checkOut < todayKey` OR `checkOut == todayKey` after `settings/hotelConfig.checkOutTime`, falling back to `hotel.config.ts`); `todayKey` and current time come from the shared Manila-date helper
 - [ ] Recent bookings: query `bookings` ordered by `createdAt desc`, limit 10
 - [ ] Intercom unread count: aggregate query across all `intercoms/{roomId}/messages` where `isRead: false` AND `sender: "guest"`
 - [ ] Confirm Payment CTA: updates booking status to `"payment-confirmed"` + triggers email
@@ -97,7 +97,7 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 - [ ] Pending payment alert appears when a guest uploads a screenshot
 - [ ] Confirm Payment CTA changes booking status and sends email
 - [ ] Today's check-ins/check-outs show correct bookings for today's date
-- [ ] Overdue check-outs appear only for still-checked-in bookings whose checkout date is before today, and each row opens the booking detail drawer
+- [ ] Overdue check-outs appear only for still-checked-in bookings whose checkout date is before today, or whose checkout time has passed today, and each row opens the booking detail drawer
 - [ ] Intercom unread badge count matches actual unread messages
 - [ ] Dashboard loads in under 2s
 

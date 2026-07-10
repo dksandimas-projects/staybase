@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getManilaDateInfo } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
@@ -24,14 +24,42 @@ export function getDaysOverdue(checkOut: string, todayKey: string) {
   return Math.max(0, Math.round((todayTime - checkOutTime) / 86_400_000));
 }
 
-export function selectOverdueCheckouts(bookings: Booking[], todayKey: string) {
-  return bookings.filter(b => b.status === "checked-in" && b.checkOut < todayKey);
+export function parseTimeToMinutes(timeValue: string | undefined | null, fallback = "12:00") {
+  const raw = String(timeValue || fallback).trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+  if (!match) return parseTimeToMinutes(fallback, "12:00");
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const meridiem = match[3]?.toUpperCase();
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes < 0 || minutes > 59) {
+    return parseTimeToMinutes(fallback, "12:00");
+  }
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return parseTimeToMinutes(fallback, "12:00");
+    if (meridiem === "PM" && hours !== 12) hours += 12;
+    if (meridiem === "AM" && hours === 12) hours = 0;
+  }
+  if (hours < 0 || hours > 23) return parseTimeToMinutes(fallback, "12:00");
+  return hours * 60 + minutes;
+}
+
+export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, currentMinutes: number, checkOutTime: string) {
+  const checkoutMinutes = parseTimeToMinutes(checkOutTime);
+  return bookings.filter(b => b.status === "checked-in" && (
+    b.checkOut < todayKey || (b.checkOut === todayKey && currentMinutes >= checkoutMinutes)
+  ));
 }
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
+  const [clockTick, setClockTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setClockTick(Date.now()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const toLocalDateKey = (date: Date) => {
     const tz = config.timezone || "Asia/Manila";
@@ -47,7 +75,10 @@ export function DashboardPage() {
     return `${year}-${month}-${day}`;
   };
 
-  const todayKey = getManilaDateInfo(config.timezone).todayStr;
+  const manilaDateInfo = useMemo(() => getManilaDateInfo(config.timezone), [clockTick]);
+  const todayKey = manilaDateInfo.todayStr;
+  const currentManilaMinutes = manilaDateInfo.manilaDate.getHours() * 60 + manilaDateInfo.manilaDate.getMinutes();
+  const configuredCheckOutTime = hotelConfig?.checkOutTime || config.checkOutTime || "12:00";
   const monthKey = todayKey.slice(0, 7);
 
   // Metrics Calculations
@@ -66,8 +97,9 @@ export function DashboardPage() {
     .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
   const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
-  const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
-  const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey);
+  const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey, currentManilaMinutes, configuredCheckOutTime);
+  const overdueCheckoutIds = new Set(overdueCheckouts.map((b) => b.id));
+  const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in" && !overdueCheckoutIds.has(b.id));
   const recentBookings = bookings.slice(0, 10);
 
   const todaysBreakfastItems = useMemo(() => {
@@ -396,6 +428,9 @@ export function DashboardPage() {
               <div className="space-y-2">
                 {overdueCheckouts.map((booking) => {
                   const daysOverdue = getDaysOverdue(booking.checkOut, todayKey);
+                  const overdueLabel = daysOverdue > 0
+                    ? `${daysOverdue} day${daysOverdue === 1 ? "" : "s"} overdue`
+                    : `checkout time passed (${configuredCheckOutTime})`;
                   return (
                     <button
                       key={booking.id}
@@ -406,7 +441,7 @@ export function DashboardPage() {
                       <span className="min-w-0">
                         <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
                         <span className="block text-[10px] font-semibold text-amber-800">
-                          Room {booking.roomNumber || "TBD"} · {daysOverdue} day{daysOverdue === 1 ? "" : "s"} overdue
+                          Room {booking.roomNumber || "TBD"} · {overdueLabel}
                         </span>
                       </span>
                       <ArrowRight size={14} className="shrink-0 text-amber-700" />
