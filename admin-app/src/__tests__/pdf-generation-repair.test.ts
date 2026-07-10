@@ -38,15 +38,28 @@ describe("PDF generation repair", () => {
     expect(registrationBody).toMatch(/printLight:\s*true/);
   });
 
-  it("sizes breakfast silog rows from the active menu and redraws headers after page breaks", () => {
+  it("lays out the registration PDF as a compact one-page form", () => {
     const registrationStart = bookingsPage.indexOf("const printRegistrationPDF");
     const registrationEnd = bookingsPage.indexOf("const printBookingReceiptPDF", registrationStart);
     const registrationBody = bookingsPage.slice(registrationStart, registrationEnd);
-    expect(registrationBody).toMatch(/optionGap\s*=\s*4\.2/);
-    expect(registrationBody).toMatch(/rowH\s*=\s*Math\.max\(12,\s*activeSilogItems\.length\s*\*\s*optionGap\s*\+\s*5\)/);
-    expect(registrationBody).toMatch(/const\s+drawBreakfastHeader\s*=\s*\(\)\s*=>/);
-    expect(registrationBody).toMatch(/if\s*\(y\s*\+\s*rowH\s*\+\s*16\s*>\s*280\)/);
-    expect(registrationBody).toMatch(/fitCellText/);
+    expect(registrationBody).toMatch(/compact:\s*true/);
+    expect(registrationBody).toMatch(/leftW\s*=\s*68/);
+    expect(registrationBody).toMatch(/rightW\s*=\s*marginR\s*-\s*rightX/);
+    expect(registrationBody).toMatch(/drawCompactSectionTitle\("Guest Information"/);
+    expect(registrationBody).toMatch(/drawCompactSectionTitle\("Registration Details"/);
+    expect(registrationBody).toMatch(/drawCompactSectionTitle\("Government-Issued ID"/);
+    expect(registrationBody).toMatch(/drawCompactSectionTitle\("Guest Acknowledgment"/);
+  });
+
+  it("renders breakfast silog selections as compact inline guest rows", () => {
+    const registrationStart = bookingsPage.indexOf("const printRegistrationPDF");
+    const registrationEnd = bookingsPage.indexOf("const printBookingReceiptPDF", registrationStart);
+    const registrationBody = bookingsPage.slice(registrationStart, registrationEnd);
+    expect(registrationBody).toMatch(/breakfastTop\s*=\s*Math\.min\(Math\.max\(y\s*\+\s*3,\s*232\),\s*276\s*-\s*breakfastH\)/);
+    expect(registrationBody).toMatch(/Guest \$\{g \+ 1\}:/);
+    expect(registrationBody).toMatch(/pdf\.rect\(optionX,\s*y\s*-\s*2\.8,\s*2\.7,\s*2\.7\)/);
+    expect(registrationBody).not.toMatch(/Available Items:/);
+    expect(registrationBody).not.toMatch(/drawBreakfastHeader/);
   });
 
   it("wraps PDF builders in visible success and error toasts", () => {
