@@ -1,5 +1,5 @@
 import { adminDb } from "../lib/firebase-admin";
-import { sendContactInquiryTrigger } from "./email";
+import { sendContactInquiryTrigger, sendContactConfirmationTrigger } from "./email";
 
 interface ContactInquiryBody {
   name?: string;
@@ -83,7 +83,13 @@ export async function handleCreateContactInquiry(req: any, res: any) {
     try {
       await sendContactInquiryTrigger({ id: docRef.id, ...inquiry });
     } catch (emailError) {
-      console.error("Contact inquiry notification failed:", emailError);
+      console.error("Contact inquiry notification failed");
+    }
+
+    try {
+      await sendContactConfirmationTrigger({ id: docRef.id, ...inquiry });
+    } catch (emailError) {
+      console.error("Contact inquiry confirmation failed");
     }
 
     return res.status(200).json({

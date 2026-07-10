@@ -22,6 +22,8 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Check-in reminder | `/api/email/checkin-reminder` | Guest | 1 day before `checkIn` date |
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
 | New corporate inquiry | `/api/email/corporate-inquiry` | Staff (admin email) | When inquiry form submitted on guest site |
+| Corporate inquiry confirmation | *(inline trigger)* | Submitter (guest email) | Sent to submitter immediately after corporate inquiry submission |
+| Contact inquiry confirmation | *(inline trigger)* | Submitter (guest email) | Sent to submitter immediately after contact form submission |
 | Discount rejected | `/api/email/discount-rejected` | Guest | When staff rejects Senior/PWD discount ID |
 | Early check-in request | `/api/email/early-checkin-request` | Staff (admin email) | When Spark Rewards member requests early check-in for an upcoming booking |
 | Voucher issued *(per `DECISIONS-FEATURES.md #104` — implemented in Phase 11.6 Batch 10)* | `/api/email/voucher-issued` | Guest | When admin creates a voucher with a non-empty `guestEmail` |
@@ -43,6 +45,8 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 - [ ] Check-in reminder: room details, check-in time, hotel address, contact
 - [ ] Booking cancelled: cancellation confirmation, reason (if provided)
 - [ ] Corporate inquiry: inquiry details (company, contact, dates, requirements), link to admin dashboard
+- [x] Corporate inquiry confirmation: warm acknowledgement, echoes back company name, rooms needed, and preferred dates; guest-facing only (no admin links)
+- [x] Contact inquiry confirmation: warm acknowledgement, echoes back name, subject, and message; guest-facing only (no admin links)
 - [ ] Discount rejected: see §Discount Rejected Email below
 
 ### Discount Rejected Email

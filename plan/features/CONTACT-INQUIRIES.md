@@ -87,6 +87,7 @@ Strict mode rejects any unexpected field (defense in depth per `SECURITY.md §In
 - [ ] Subject: `[${config.brandName}] New contact inquiry: ${inquiry.subject}`
 - [ ] Body: name, email (clickable mailto), subject, message (preserved line breaks), submitted timestamp, link to admin inquiries page
 - [ ] Email send failure is logged but does not break the API response (matches corporate inquiry pattern at `corporate-inquiries.ts:42-46`)
+- [x] Submitter confirmation email template `contactConfirmationEmail` and trigger `sendContactConfirmationTrigger(inquiry)` sent to submitter's email address. Subject: `[${config.brandName}] We received your message`. Warm acknowledgement tone echoing name, subject, and message. Email send failure is caught, logged, and does not break the response.
 
 ### Firestore rules
 - [ ] Add `match /contactInquiries/{inquiryId}`:
