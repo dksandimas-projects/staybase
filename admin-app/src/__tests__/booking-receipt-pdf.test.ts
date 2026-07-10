@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 //
 // Per `plan/features/EMAIL-PDF-STORAGE.md §Booking Confirmation Receipt`,
 // the receipt must include:
-//   - Header: brand name, "Booking Confirmation Receipt" title
+//   - Header: navbar logo, brand styling, "Booking Confirmation Receipt" title
 //   - Booking ref + generated date/time
 //   - Guest info (name, email, phone)
 //   - Stay info (room, dates, nights, guests, rate/night)
@@ -51,11 +51,13 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(funcBody).toMatch(/new\s+jsPDF\(\s*\{\s*unit:\s*["']mm["']\s*,\s*format:\s*["']a4["']/);
     });
 
-    it("renders the brand name and document title", () => {
+    it("renders the branded logo header and document title", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/pdf\.text\(\s*config\.brandName/);
+      expect(bookingsPageSrc).toMatch(/getPdfBrandLogoDataUrl/);
+      expect(bookingsPageSrc).toMatch(/config\.logos\.navbar/);
+      expect(funcBody).toMatch(/drawPdfBrandHeader\(pdf/);
       expect(funcBody).toMatch(/Booking Confirmation Receipt/);
     });
 

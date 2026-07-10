@@ -187,6 +187,104 @@ function getJsPdfImageFormat(dataUrl: string, blobType = "") {
   return "JPEG";
 }
 
+async function imageUrlToDataUrl(url: string) {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  return await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function getPdfBrandLogoDataUrl() {
+  try {
+    return await imageUrlToDataUrl(`/brand/${config.logos.navbar}`);
+  } catch {
+    return "";
+  }
+}
+
+function drawPdfBrandHeader(
+  pdf: jsPDF,
+  options: {
+    logoDataUrl: string;
+    title: string;
+    subtitle?: string;
+    meta?: string;
+    brandRgb: [number, number, number];
+  }
+) {
+  const pageW = 210;
+  const marginL = 15;
+  const marginR = pageW - 15;
+  const headerY = 12;
+  const headerH = 32;
+  const sidebarRgb = hexToRgb(config.colors.sidebar);
+
+  pdf.setFillColor(...sidebarRgb);
+  pdf.rect(0, 0, pageW, headerH, "F");
+  pdf.setFillColor(...options.brandRgb);
+  pdf.rect(0, headerH - 2, pageW, 2, "F");
+
+  if (options.logoDataUrl) {
+    pdf.addImage(options.logoDataUrl, getJsPdfImageFormat(options.logoDataUrl, "image/png"), marginL, headerY, 48, 12.5);
+  } else {
+    setPdfFont(pdf, "Inter");
+    pdf.setFontSize(13);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text(config.brandName, marginL, headerY + 8);
+  }
+
+  setPdfFont(pdf, "Inter");
+  pdf.setFontSize(16);
+  pdf.setTextColor(255, 255, 255);
+  pdf.text(options.title, marginR, headerY + 3, { align: "right" });
+
+  pdf.setFontSize(8);
+  pdf.setTextColor(220, 226, 235);
+  if (options.subtitle) {
+    pdf.text(options.subtitle, marginR, headerY + 9, { align: "right" });
+  }
+  if (options.meta) {
+    pdf.text(options.meta, marginR, headerY + 14, { align: "right" });
+  }
+
+  return headerH + 10;
+}
+
+function drawPdfSectionTitle(pdf: jsPDF, title: string, x: number, y: number, brandRgb: [number, number, number]) {
+  pdf.setFillColor(254, 243, 226);
+  pdf.roundedRect(x, y - 5, 3, 5, 1, 1, "F");
+  pdf.setFontSize(12);
+  pdf.setTextColor(30, 30, 30);
+  pdf.text(title, x + 6, y);
+  pdf.setDrawColor(230, 230, 230);
+  pdf.setLineWidth(0.15);
+  pdf.line(x + 6 + pdf.getTextWidth(title) + 4, y - 1.5, 195, y - 1.5);
+  pdf.setDrawColor(...brandRgb);
+}
+
+function drawPdfFooter(pdf: jsPDF, bookingRef: string, footerNote: string, brandRgb: [number, number, number]) {
+  const pageW = 210;
+  const footerY = 278;
+  pdf.setDrawColor(...brandRgb);
+  pdf.setLineWidth(0.35);
+  pdf.line(15, footerY, 195, footerY);
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(100, 100, 100);
+  pdf.text(footerNote, pageW / 2, footerY + 5, { align: "center" });
+  pdf.setFontSize(7);
+  pdf.setTextColor(150, 150, 150);
+  pdf.text(
+    `${config.brandName} | ${config.address?.street ?? ""}${config.address?.street ? ", " : ""}${config.address?.city ?? ""} | ${config.frontDeskPhone ?? ""} | ${config.supportEmail ?? ""}`,
+    pageW / 2,
+    footerY + 9,
+    { align: "center" }
+  );
+  pdf.text(`Booking Ref: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center" });
+}
+
 function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | null) {
   const blob = pdf.output("blob");
   const url = URL.createObjectURL(blob);
@@ -895,52 +993,52 @@ export function BookingsPage() {
     try {
       const pdf = new jsPDF({ unit: "mm", format: "a4" });
       await registerBrandPdfFonts(pdf);
+      const logoDataUrl = await getPdfBrandLogoDataUrl();
       setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
-    let y = 15;
+    const generatedAt = new Date().toLocaleString("en-PH", {
+      timeZone: config.timezone || "Asia/Manila",
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
+    let y = drawPdfBrandHeader(pdf, {
+      logoDataUrl,
+      title: "Guest Registration Form",
+      subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
+      meta: generatedAt,
+      brandRgb
+    });
 
     const checkNewPage = (needed: number) => {
       if (y + needed > 280) {
         pdf.addPage();
-        y = 15;
+        y = drawPdfBrandHeader(pdf, {
+          logoDataUrl,
+          title: "Guest Registration Form",
+          subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
+          meta: generatedAt,
+          brandRgb
+        });
       }
     };
 
-    // ── Header ──
-    setPdfFont(pdf, "Apollo");
-    pdf.setFontSize(18);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Guest Registration Form", pageW / 2, y, { align: "center" });
-    y += 8;
-    setPdfFont(pdf, "Inter");
-
-    pdf.setDrawColor(...brandRgb);
-    pdf.setLineWidth(0.5);
-    pdf.line(marginL, y, marginR, y);
-    y += 8;
-
     // Booking info row
+    pdf.setFillColor(248, 250, 252);
+    pdf.roundedRect(marginL, y - 4, marginR - marginL, 20, 2, 2, "F");
     pdf.setFontSize(9);
     pdf.setTextColor(80, 80, 80);
-    pdf.text(`Booking: ${b.bookingRef}`, marginL, y);
+    pdf.text(`Booking: ${b.bookingRef}`, marginL + 5, y);
     pdf.text(`Room: ${b.roomNumber} (${b.roomType})`, pageW / 2, y);
     y += 5;
-    pdf.text(`Check-in: ${b.checkIn}  |  Check-out: ${b.checkOut}`, marginL, y);
+    pdf.text(`Check-in: ${b.checkIn}  |  Check-out: ${b.checkOut}`, marginL + 5, y);
     y += 5;
-    pdf.text(`Guests: ${b.numGuests}  |  Nights: ${b.numNights}`, marginL, y);
-    y += 8;
-
-    pdf.setDrawColor(200, 200, 200);
-    pdf.setLineWidth(0.2);
-    pdf.line(marginL, y, marginR, y);
-    y += 8;
+    pdf.text(`Guests: ${b.numGuests}  |  Nights: ${b.numNights}`, marginL + 5, y);
+    y += 14;
 
     // ── Guest Information ──
-    pdf.setFontSize(13);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Guest Information", marginL, y);
+    drawPdfSectionTitle(pdf, "Guest Information", marginL, y, brandRgb);
     y += 7;
 
     pdf.setFontSize(10);
@@ -950,9 +1048,7 @@ export function BookingsPage() {
     pdf.text(`Phone: ${b.guestPhone}`, 20, y); y += 8;
 
     // ── Registration Details ──
-    pdf.setFontSize(13);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Registration Details", marginL, y);
+    drawPdfSectionTitle(pdf, "Registration Details", marginL, y, brandRgb);
     y += 7;
 
     pdf.setFontSize(10);
@@ -983,9 +1079,7 @@ export function BookingsPage() {
 
     // ── Guest ID Photo ──
     checkNewPage(70);
-    pdf.setFontSize(13);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Government-Issued ID", marginL, y);
+    drawPdfSectionTitle(pdf, "Government-Issued ID", marginL, y, brandRgb);
     y += 7;
 
     if (b.guestIdPhotoUrl) {
@@ -1049,14 +1143,7 @@ export function BookingsPage() {
     const houseRules = websiteContent?.houseRules;
     if (houseRules && houseRules.trim().length > 0) {
       checkNewPage(30);
-      pdf.setDrawColor(200, 200, 200);
-      pdf.setLineWidth(0.2);
-      pdf.line(marginL, y, marginR, y);
-      y += 8;
-
-      pdf.setFontSize(13);
-      pdf.setTextColor(30, 30, 30);
-      pdf.text("House Rules", marginL, y);
+      drawPdfSectionTitle(pdf, "House Rules", marginL, y, brandRgb);
       y += 7;
 
       pdf.setFontSize(9);
@@ -1081,9 +1168,7 @@ export function BookingsPage() {
 
     // ── Signature ──
     checkNewPage(30);
-    pdf.setDrawColor(200, 200, 200);
-    pdf.setLineWidth(0.2);
-    pdf.line(marginL, y, marginR, y);
+    drawPdfSectionTitle(pdf, "Guest Acknowledgment", marginL, y, brandRgb);
     y += 10;
 
     pdf.setFontSize(9);
@@ -1101,14 +1186,7 @@ export function BookingsPage() {
     if (b.hasBreakfast) {
       checkNewPage(50);
 
-      pdf.setDrawColor(...brandRgb);
-      pdf.setLineWidth(0.5);
-      pdf.line(marginL, y, marginR, y);
-      y += 8;
-
-      pdf.setFontSize(13);
-      pdf.setTextColor(30, 30, 30);
-      pdf.text("Breakfast Silog Selections", marginL, y);
+      drawPdfSectionTitle(pdf, "Breakfast Silog Selections", marginL, y, brandRgb);
       y += 5;
       pdf.setFontSize(8);
       pdf.setTextColor(120, 120, 120);
@@ -1207,20 +1285,20 @@ export function BookingsPage() {
     const footerY = 280;
     if (y > footerY - 10) {
       pdf.addPage();
-      y = 15;
+      y = drawPdfBrandHeader(pdf, {
+        logoDataUrl,
+        title: "Guest Registration Form",
+        subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
+        meta: generatedAt,
+        brandRgb
+      });
     }
-    pdf.setDrawColor(200, 200, 200);
-    pdf.setLineWidth(0.2);
-    pdf.line(marginL, footerY, marginR, footerY);
-    pdf.setFontSize(7);
-    pdf.setTextColor(160, 160, 160);
-    pdf.text(
-      `Generated by ${config.brandName} guest registration system — ${getManilaDateInfo(config.timezone).todayStr}`,
-      pageW / 2,
-      footerY + 6,
-      { align: "center" }
+    drawPdfFooter(
+      pdf,
+      b.bookingRef,
+      `Generated by ${config.brandName} guest registration system - ${getManilaDateInfo(config.timezone).todayStr}`,
+      brandRgb
     );
-    pdf.text(`Booking Ref: ${b.bookingRef} | Room ${b.roomNumber}`, pageW / 2, footerY + 10, { align: "center" });
 
       const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
       toast.success(
@@ -1242,6 +1320,7 @@ export function BookingsPage() {
     try {
       const pdf = new jsPDF({ unit: "mm", format: "a4" });
       await registerBrandPdfFonts(pdf);
+      const logoDataUrl = await getPdfBrandLogoDataUrl();
       setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
@@ -1253,7 +1332,13 @@ export function BookingsPage() {
     const checkNewPage = (needed: number) => {
       if (y + needed > 280) {
         pdf.addPage();
-        y = 15;
+        y = drawPdfBrandHeader(pdf, {
+          logoDataUrl,
+          title: "Booking Confirmation Receipt",
+          subtitle: `Booking Reference: ${b.bookingRef}`,
+          meta: `Generated: ${generatedAt}`,
+          brandRgb
+        });
       }
     };
 
@@ -1261,39 +1346,29 @@ export function BookingsPage() {
       formatPrice(value).replace(/\u00A0/g, " ");
 
     // ── Header ──
-    setPdfFont(pdf, "Apollo");
-    pdf.setFontSize(20);
-    pdf.setTextColor(...brandRgb);
-    pdf.text(config.brandName, pageW / 2, y, { align: "center" });
-    y += 7;
-
-    setPdfFont(pdf, "Inter");
-    pdf.setFontSize(16);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Booking Confirmation Receipt", pageW / 2, y, { align: "center" });
-    y += 6;
-
-    pdf.setDrawColor(...brandRgb);
-    pdf.setLineWidth(0.5);
-    pdf.line(marginL, y, marginR, y);
-    y += 6;
-
-    // Booking ref + generated-on
-    pdf.setFontSize(9);
-    pdf.setTextColor(100, 100, 100);
-    pdf.text(`Booking Reference: ${b.bookingRef}`, marginL, y);
     const generatedAt = new Date().toLocaleString("en-PH", {
       timeZone: config.timezone || "Asia/Manila",
       dateStyle: "medium",
       timeStyle: "short"
     });
-    pdf.text(`Generated: ${generatedAt}`, marginR, y, { align: "right" });
+    y = drawPdfBrandHeader(pdf, {
+      logoDataUrl,
+      title: "Booking Confirmation Receipt",
+      subtitle: `Booking Reference: ${b.bookingRef}`,
+      meta: `Generated: ${generatedAt}`,
+      brandRgb
+    });
+
+    pdf.setFillColor(248, 250, 252);
+    pdf.roundedRect(marginL, y - 4, marginR - marginL, 13, 2, 2, "F");
+    pdf.setFontSize(9);
+    pdf.setTextColor(80, 80, 80);
+    pdf.text(`Booking Reference: ${b.bookingRef}`, marginL + 5, y + 1);
+    pdf.text(`Generated: ${generatedAt}`, marginR - 5, y + 1, { align: "right" });
     y += 8;
 
     // ── Guest Information ──
-    pdf.setFontSize(12);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Guest Information", marginL, y);
+    drawPdfSectionTitle(pdf, "Guest Information", marginL, y, brandRgb);
     y += 6;
 
     pdf.setFontSize(10);
@@ -1303,9 +1378,7 @@ export function BookingsPage() {
     pdf.text(`Phone: ${b.guestPhone}`, labelColX, y); y += 8;
 
     // ── Stay Information ──
-    pdf.setFontSize(12);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Stay Information", marginL, y);
+    drawPdfSectionTitle(pdf, "Stay Information", marginL, y, brandRgb);
     y += 6;
 
     pdf.setFontSize(10);
@@ -1328,14 +1401,7 @@ export function BookingsPage() {
 
     // ── Pricing Breakdown ──
     checkNewPage(60);
-    pdf.setDrawColor(200, 200, 200);
-    pdf.setLineWidth(0.2);
-    pdf.line(marginL, y, marginR, y);
-    y += 6;
-
-    pdf.setFontSize(12);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Pricing Breakdown", marginL, y);
+    drawPdfSectionTitle(pdf, "Pricing Breakdown", marginL, y, brandRgb);
     y += 6;
 
     pdf.setFontSize(10);
@@ -1396,23 +1462,20 @@ export function BookingsPage() {
 
     // Total
     y += 2;
-    pdf.setDrawColor(150, 150, 150);
-    pdf.setLineWidth(0.3);
-    pdf.line(marginL, y, marginR, y);
+    pdf.setFillColor(255, 247, 237);
+    pdf.roundedRect(marginL, y - 3.5, marginR - marginL, 11, 2, 2, "F");
     y += 6;
 
     pdf.setFontSize(12);
-    pdf.setTextColor(30, 30, 30);
+    pdf.setTextColor(...brandRgb);
     pdf.text("Total", labelColX, y);
     pdf.text(formatAmount(b.totalPrice), marginR, y, { align: "right" });
-    y += 8;
+    y += 11;
 
     // ── Special Requests / Notes ──
     if (b.specialRequests && b.specialRequests.trim().length > 0) {
       checkNewPage(20);
-      pdf.setFontSize(12);
-      pdf.setTextColor(30, 30, 30);
-      pdf.text("Special Requests", marginL, y);
+      drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
       y += 6;
 
       pdf.setFontSize(10);
@@ -1428,14 +1491,7 @@ export function BookingsPage() {
 
     // ── Payment Breakdown ──
     checkNewPage(40);
-    pdf.setDrawColor(...brandRgb);
-    pdf.setLineWidth(0.5);
-    pdf.line(marginL, y, marginR, y);
-    y += 6;
-
-    pdf.setFontSize(12);
-    pdf.setTextColor(30, 30, 30);
-    pdf.text("Payments Collected", marginL, y);
+    drawPdfSectionTitle(pdf, "Payments Collected", marginL, y, brandRgb);
     y += 6;
 
     const payments = selectedBookingPayments;
@@ -1519,32 +1575,19 @@ export function BookingsPage() {
     const footerY = 280;
     if (y > footerY - 20) {
       pdf.addPage();
-      y = 15;
+      y = drawPdfBrandHeader(pdf, {
+        logoDataUrl,
+        title: "Booking Confirmation Receipt",
+        subtitle: `Booking Reference: ${b.bookingRef}`,
+        meta: `Generated: ${generatedAt}`,
+        brandRgb
+      });
     }
-    pdf.setDrawColor(200, 200, 200);
-    pdf.setLineWidth(0.2);
-    pdf.line(marginL, footerY, marginR, footerY);
-    pdf.setFontSize(8);
-    pdf.setTextColor(120, 120, 120);
-    pdf.text(
+    drawPdfFooter(
+      pdf,
+      b.bookingRef,
       "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property.",
-      pageW / 2,
-      footerY + 5,
-      { align: "center" }
-    );
-    pdf.setFontSize(7);
-    pdf.setTextColor(160, 160, 160);
-    pdf.text(
-      `${config.brandName} — ${config.address?.street ?? ""}${config.address?.street ? ", " : ""}${config.address?.city ?? ""} | ${config.frontDeskPhone ?? ""} | ${config.supportEmail ?? ""}`,
-      pageW / 2,
-      footerY + 10,
-      { align: "center" }
-    );
-    pdf.text(
-      `Generated by ${config.brandName} booking system — ${getManilaDateInfo(config.timezone).todayStr}`,
-      pageW / 2,
-      footerY + 14,
-      { align: "center" }
+      brandRgb
     );
 
       const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-receipt.pdf`, pdfWindow);
