@@ -1,6 +1,23 @@
 import { adminDb } from "../lib/firebase-admin";
 import { validateCorporateCode } from "@spark-inn/shared";
 
+function parseCorporateCodeExpiry(value: any): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (typeof value.seconds === "number") {
+    return new Date(value.seconds * 1000);
+  }
+  return null;
+}
+
 export async function handleValidateCorporateCode(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -47,7 +64,7 @@ export async function handleValidateCorporateCode(req: any, res: any) {
 
     const corporateCode = {
       isActive: data.isActive !== false,
-      expiresAt: data.expiresAt ? data.expiresAt.toDate() : null,
+      expiresAt: parseCorporateCodeExpiry(data.expiresAt),
       usageCap: data.usageCap ?? null,
       usageCount: data.usageCount || 0,
     };
