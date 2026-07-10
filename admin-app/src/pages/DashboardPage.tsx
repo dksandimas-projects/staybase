@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAdmin } from "../context/AdminContext";
+import { getManilaDateInfo } from "@spark-inn/shared";
+import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
@@ -8,6 +9,24 @@ import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, LogIn, L
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
+
+export function getDaysOverdue(checkOut: string, todayKey: string) {
+  const checkOutTime = Date.UTC(
+    Number(checkOut.slice(0, 4)),
+    Number(checkOut.slice(5, 7)) - 1,
+    Number(checkOut.slice(8, 10))
+  );
+  const todayTime = Date.UTC(
+    Number(todayKey.slice(0, 4)),
+    Number(todayKey.slice(5, 7)) - 1,
+    Number(todayKey.slice(8, 10))
+  );
+  return Math.max(0, Math.round((todayTime - checkOutTime) / 86_400_000));
+}
+
+export function selectOverdueCheckouts(bookings: Booking[], todayKey: string) {
+  return bookings.filter(b => b.status === "checked-in" && b.checkOut < todayKey);
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -28,7 +47,7 @@ export function DashboardPage() {
     return `${year}-${month}-${day}`;
   };
 
-  const todayKey = toLocalDateKey(new Date());
+  const todayKey = getManilaDateInfo(config.timezone).todayStr;
   const monthKey = todayKey.slice(0, 7);
 
   // Metrics Calculations
@@ -48,6 +67,7 @@ export function DashboardPage() {
   const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const todaysDepartures = bookings.filter(b => b.checkOut === todayKey && b.status === "checked-in");
+  const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey);
   const recentBookings = bookings.slice(0, 10);
 
   const todaysBreakfastItems = useMemo(() => {
@@ -362,6 +382,41 @@ export function DashboardPage() {
         </div>
 
         <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
+          {overdueCheckouts.length > 0 && (
+            <div className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
+                  <AlertTriangle size={18} className="text-amber-700" />
+                  overdue check-outs
+                </h2>
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                  {overdueCheckouts.length} urgent
+                </span>
+              </div>
+              <div className="space-y-2">
+                {overdueCheckouts.map((booking) => {
+                  const daysOverdue = getDaysOverdue(booking.checkOut, todayKey);
+                  return (
+                    <button
+                      key={booking.id}
+                      type="button"
+                      onClick={() => openBooking(booking.id)}
+                      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/80 px-3 py-2 text-left shadow-sm hover:bg-white"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
+                        <span className="block text-[10px] font-semibold text-amber-800">
+                          Room {booking.roomNumber || "TBD"} · {daysOverdue} day{daysOverdue === 1 ? "" : "s"} overdue
+                        </span>
+                      </span>
+                      <ArrowRight size={14} className="shrink-0 text-amber-700" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
             <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
               <LogIn size={18} className="text-primary" />
