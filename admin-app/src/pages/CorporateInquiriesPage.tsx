@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAdmin, CorporateInquiry } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -13,6 +13,7 @@ import { db } from "../firebase/config";
 
 export function CorporateInquiriesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     corporateInquiries,
     updateInquiryStatus,
@@ -65,6 +66,14 @@ export function CorporateInquiriesPage() {
     ));
     setIsDrawerOpen(true);
   };
+
+  useEffect(() => {
+    const inquiryId = searchParams.get("inquiryId");
+    if (!inquiryId || corporateInquiries.length === 0) return;
+    const inquiry = corporateInquiries.find((item) => item.id === inquiryId);
+    if (!inquiry || selectedInquiry?.id === inquiryId) return;
+    handleRowClick(inquiry);
+  }, [corporateInquiries, searchParams, selectedInquiry?.id]);
 
   const handleStatusChange = async (status: CorporateInquiry["status"]) => {
     if (selectedInquiry) {
@@ -318,7 +327,14 @@ export function CorporateInquiriesPage() {
       <Drawer
         title={selectedInquiry ? `Corporate Quote: ${selectedInquiry.companyName}` : ""}
         open={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
+        onClose={() => {
+          setIsDrawerOpen(false);
+          if (searchParams.has("inquiryId")) {
+            const nextParams = new URLSearchParams(searchParams);
+            nextParams.delete("inquiryId");
+            setSearchParams(nextParams, { replace: true });
+          }
+        }}
       >
         {selectedInquiry && (
           <div className="space-y-8 text-sm">

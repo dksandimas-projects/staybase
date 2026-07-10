@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getManilaDateInfo } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
-import { BedDouble, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso } from "lucide-react";
+import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -52,10 +52,12 @@ export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, cu
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
+  const [corporateHelpOpen, setCorporateHelpOpen] = useState(false);
+  const corporateHelpId = useId();
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setClockTick(Date.now()), 60_000);
@@ -96,8 +98,12 @@ export function DashboardPage() {
   const monthlyRevenue = bookings
     .filter((b) => b.checkIn?.startsWith(monthKey) && ["confirmed", "checked-in", "checked-out"].includes(b.status))
     .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
+  const occupancyHelpText = "Occupancy is based on rooms currently marked occupied divided by all rooms in the room list.";
+  const bookingsHelpText = "Bookings counts reservations created during the current month, based on each booking's createdAt month.";
   const revenueHelpText = "Revenue is the sum of totalPrice for bookings checking in this month with confirmed, checked-in, or checked-out status. It is booking value, not cash collected.";
+  const corporateHelpText = "This alert only shows corporate inquiries still marked new, so fresh leads stay visible until staff moves them forward in the pipeline.";
   const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
+  const newCorporateInquiries = corporateInquiries.filter(inquiry => inquiry.status === "new");
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey, currentManilaMinutes, configuredCheckOutTime);
   const overdueCheckoutIds = new Set(overdueCheckouts.map((b) => b.id));
@@ -273,6 +279,7 @@ export function DashboardPage() {
           context={`${occupiedRoomsCount} of ${totalRoomsCount} rooms occupied`}
           icon={<BedDouble size={18} />}
           tone={occupiedRoomsCount > 0 ? "primary" : "neutral"}
+          helpText={occupancyHelpText}
         />
         <StatsCard
           label="Bookings"
@@ -280,6 +287,7 @@ export function DashboardPage() {
           context={`${monthKey} check-in activity`}
           icon={<CalendarDays size={18} />}
           tone={monthlyBookingsCount > 0 ? "info" : "neutral"}
+          helpText={bookingsHelpText}
         />
         <StatsCard
           label="Revenue"
@@ -433,6 +441,66 @@ export function DashboardPage() {
             </div>
           )}
         </section>
+
+        {newCorporateInquiries.length > 0 && (
+          <section className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
+                <Building2 size={18} className="text-amber-700" />
+                new corporate inquiries
+                <span className="relative inline-flex">
+                  <button
+                    type="button"
+                    onClick={() => setCorporateHelpOpen((open) => !open)}
+                    onBlur={() => setCorporateHelpOpen(false)}
+                    aria-expanded={corporateHelpOpen}
+                    aria-controls={corporateHelpId}
+                    aria-label="About new corporate inquiries"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white/70 text-[11px] font-bold text-amber-800 hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  >
+                    i
+                  </button>
+                  <span
+                    id={corporateHelpId}
+                    role="tooltip"
+                    className={
+                      "absolute left-1/2 top-8 z-20 w-64 -translate-x-1/2 rounded-lg bg-gray-950 px-3 py-2 font-body text-[11px] font-medium leading-relaxed text-white shadow-lg " +
+                      (corporateHelpOpen ? "block" : "hidden")
+                    }
+                  >
+                    {corporateHelpText}
+                  </span>
+                </span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => navigate("/corporate")}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+              >
+                View Pipeline
+                <ArrowRight size={12} />
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {newCorporateInquiries.slice(0, 6).map((inquiry) => (
+                <button
+                  key={inquiry.id}
+                  type="button"
+                  onClick={() => navigate(`/corporate?inquiryId=${encodeURIComponent(inquiry.id)}`)}
+                  className="flex min-h-[58px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/85 px-3 py-2 text-left shadow-sm hover:bg-white"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-gray-900">{inquiry.companyName}</span>
+                    <span className="block truncate text-[10px] font-semibold text-amber-800">
+                      {inquiry.contactPerson} · {inquiry.numRooms} {inquiry.numRooms === 1 ? "room" : "rooms"}
+                    </span>
+                  </span>
+                  <ArrowRight size={14} className="shrink-0 text-amber-700" />
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="grid gap-5 lg:grid-cols-3">
           <div className={`rounded-card p-5 shadow-sm ring-1 ${
