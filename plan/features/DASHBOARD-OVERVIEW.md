@@ -6,7 +6,7 @@
 
 ## Overview
 
-The main dashboard at `/` — the first screen staff see after login. Designed for rapid scanning: glanceable stats, live room status grid with housekeeping toggles, pending payment alerts, and today's arrivals/departures. No decorative elements — every element is actionable or informational.
+The main dashboard at `/` — the first screen staff see after login. Designed for rapid scanning: contextual stats, urgent operational alerts first, compact daily operations, live room status grid with housekeeping toggles, and today's arrivals/departures. No decorative elements — every element is actionable or informational.
 
 ---
 
@@ -24,13 +24,14 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 
 ## UI Checklist
 
-- [ ] Stat cards row — Occupancy Rate (today), Total Bookings (this month), Revenue (this month), Pending Payments (count)
-- [ ] `StatsCard.tsx` — label, large value, optional trend vs. yesterday/last month
+- [ ] Stat cards row — Occupancy Rate (today), Bookings (this month), Revenue (this month), Pending Payments (count), Unread Messages (count); each card includes a leading icon, one line of available context, and state-aware tone so `0` alerts read muted
+- [ ] `StatsCard.tsx` — label, large value, optional context/trend, optional help tooltip, optional header action; hidden revenue displays a masked peso figure rather than the word "Hidden"
+- [ ] Operational hierarchy — urgent/actionable cards lead the dashboard, daily ops sit in a compact middle band, guest chats sit below, and passive empty states are visually muted
 - [ ] Room status grid — one cell per room (all active rooms), shows room number, type, booking status badge, housekeeping status badge
 - [ ] Housekeeping status toggle per room — Clean / Dirty / In Progress — tap/click cycles through states, instant Firestore update
-- [ ] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA
-- [ ] Today's check-ins list — bookings with `checkIn = today` and status `"confirmed"`
-- [ ] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`
+- [ ] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA; warm attention styling when non-empty
+- [ ] Today's check-ins list — bookings with `checkIn = today` and status `"confirmed"`; compact muted row when empty
+- [ ] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`; compact muted row when empty
 - [ ] Overdue Check-outs warning section — shown only when at least one booking has status `"checked-in"` and either `checkOut` is before today's Manila date or `checkOut` is today and Manila current time is at/after configured checkout time; each row shows guest name, room number, overdue timing, and opens the booking drawer for checkout action
 - [ ] Recent bookings table — last 10 bookings regardless of status, clickable rows to booking detail
 - [ ] Intercom unread indicator — badge on sidebar nav item, count of unread messages across all rooms
@@ -82,8 +83,9 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 ## Edge Cases & States
 
 - [ ] Loading state — skeleton for each section independently (sections load as data arrives)
-- [ ] No pending payments — hide section or show "No pending payments"
-- [ ] No check-ins/check-outs today — show "No arrivals today" / "No departures today"
+- [ ] No pending payments — show a compact muted row, not an urgent card treatment
+- [ ] No check-ins/check-outs today — show compact muted rows so empty sections do not compete with urgent work
+- [ ] No breakfast orders today — show a compact muted row in the daily ops band
 - [ ] No overdue check-outs — hide the warning section entirely so the dashboard does not show an empty alert
 - [ ] Overdue check-outs — keep the warning section usable on mobile with stacked rows and 44px minimum tap targets
 - [ ] Stat cards — handle zero values gracefully (0% occupancy, ₱0 revenue)
