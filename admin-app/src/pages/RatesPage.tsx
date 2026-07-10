@@ -624,7 +624,17 @@ export function RatesPage() {
           isActive: voucherPayload.isActive,
           guestEmail: voucherPayload.guestEmail
         })
-      : await addVoucher(voucherPayload);
+      : await addVoucher({
+          code: vchCode.trim().toUpperCase(),
+          discountType,
+          discountValue: parseFloat(discountValue) || 0,
+          usageCap: usageCap ? parseInt(usageCap) : null,
+          expiresAt: expiresAt || null,
+          applicableRoomTypes: applicableRooms,
+          isActive: vchIsActive,
+          createdBy: currentUser?.uid || "staff",
+          guestEmail: vchGuestEmail.trim() || null
+        });
     if (!result.success) {
       toast.error(editingVoucher ? "Voucher not updated" : "Voucher not created", result.error || "Please review the voucher details.");
       return;
