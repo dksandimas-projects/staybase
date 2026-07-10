@@ -56,7 +56,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [x] Status transitions available per current status (see logic below)
 - [ ] Notes field in drawer — staff can add/edit internal notes, saved to booking
 - [ ] Receipt button — generates and opens printable/downloadable PDF receipt (jsPDF)
-- [ ] Email receipt button — triggers email with receipt to guest
+- [x] Resend Transactional Email panel — allows manual resending of standard transactional email templates (Booking Submitted, Booking Confirmed, Payment Confirmed, Check-in Reminder, Booking Cancelled, Discount Rejected) to the guest's email. Recommends templates based on current booking status or discount status.
 - [x] Check-in registration workstation — shown in drawer for `confirmed` / `checked-in`
   - [x] Guest registry fields: nationality, address, DOB, gender, ID type + number, emergency contact, vehicle plate
   - [x] Physical registration signature status toggle

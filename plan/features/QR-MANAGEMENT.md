@@ -26,16 +26,18 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 - [x] QR grid — one card per room (all rooms), shows room number, room name, and rendered QR code
 - [x] QR code rendered using `qrcode.react` — links to `/intercom/{roomId}` on `www.sparkinnbohol.com`
+- [x] QR Target selector — dropdown to select the target destination (Front Desk Intercom / Spark Essentials Store). Adjusts the generated QR URL and print label dynamically.
 - [x] Regenerate button per room — generates a new unique room QR token / QR value, updates Firestore
 - [x] Regenerate confirmation modal — "This will invalidate the current QR code. Guests with the old QR code will not be able to chat."
 - [x] Print single QR button — opens print dialog for that room's QR card
 - [x] Print all QRs button — generates a printable page with 4-up A4 layout (4 QR cards per A4 page)
-- [x] Print layout: each card shows room number, room name, spark inn logo, QR code, brief instruction ("Scan to chat with the front desk")
+- [x] Print layout: each card shows room number, room name, spark inn logo, QR code, dynamic instruction ("Scan to chat with the front desk" or "Scan to order from Spark Essentials")
 - [x] Download single QR as PNG option
 
 ## Data & Logic Checklist
 
 - [x] QR code URL format: `https://www.sparkinnbohol.com/intercom/{roomId}`
+- [x] QR code URL format for Spark Essentials: `https://www.sparkinnbohol.com/intercom/{roomId}?tab=shop`
 - [x] `roomId` is the guest intercom route parameter; room numbers are accepted by the guest route and resolved against Firestore rooms
 - [x] Regenerate: updates optional `rooms/{roomId}.qrToken`; QR falls back to room doc ID when no token exists
 - [x] Guest route resolution: `/intercom/:roomId` accepts room doc ID, room number, or regenerated `qrToken`
