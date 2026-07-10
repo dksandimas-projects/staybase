@@ -103,11 +103,11 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(funcBody).toMatch(/drawAmountRow/);
     });
 
-    it("formats PDF currency with a Unicode-safe peso prefix", () => {
+    it("formats PDF currency with a Unicode-safe PHP prefix", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/`\\u20B1\$\{Math\.round\(value \|\| 0\)\.toLocaleString\("en-PH"\)\}`/);
+      expect(funcBody).toMatch(/`PHP \$\{Math\.round\(value \|\| 0\)\.toLocaleString\("en-PH"\)\}`/);
       expect(funcBody).not.toMatch(/formatPrice\(value\)/);
     });
 
@@ -115,10 +115,10 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/cardH\s*=\s*9\s*\+\s*rows\.length\s*\*\s*4\.8/);
-      expect(funcBody).toMatch(/amountX\s*=\s*marginR\s*-\s*4/);
-      expect(funcBody).toMatch(/pdf\.text\(amount,\s*amountX,\s*y,\s*\{ align:\s*["']right["'] \}\)/);
-      expect(funcBody).toMatch(/pdf\.setFont\("helvetica",\s*opts\.bold \? "bold" : "normal"\)/);
+      expect(funcBody).toMatch(/cardH\s*=\s*7\.5\s*\+\s*rows\.length\s*\*\s*4\.2/);
+      expect(funcBody).toMatch(/amountX\s*=\s*marginR\s*-\s*5/);
+      expect(funcBody).toMatch(/pdf\.text\(amount,\s*amountX,\s*y,\s*\{\s*align:\s*["']right["'],\s*charSpace:\s*0\s*\}\)/);
+      expect(funcBody).toMatch(/pdf\.setFont\("helvetica",\s*["']bold["']\)/);
     });
 
     it("renders payments-collected section when payments exist", () => {
@@ -152,8 +152,8 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
       expect(bookingsPageSrc).toMatch(/footerY\s*=\s*278/);
-      expect(funcBody).toMatch(/footerY\s*=\s*Math\.min\(245,\s*Math\.max\(178,\s*y\s*\+\s*16\)\)/);
-      expect(funcBody).toMatch(/drawPdfFooter\([\s\S]*?brandRgb,\s*footerY/);
+      expect(funcBody).toMatch(/footerY\s*=\s*y\s*\+\s*8/);
+      expect(funcBody).toMatch(/drawPdfFooter\([\s\S]*?brandRgb,\s*footerY\s*>\s*275/);
     });
 
     it("renders the BIR-receipt disclaimer footer", () => {
