@@ -24,12 +24,13 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 
 ## UI Checklist
 
-- [ ] Stat cards row — Occupancy Rate (today), Bookings (this month), Revenue (this month), Pending Payments (count), Unread Messages (count); each card includes a leading icon, one line of available context, and state-aware tone so `0` alerts read muted
+- [ ] Stat cards row — Occupancy Rate (today), Bookings (this month), Revenue (this month), Pending Payments (count), Unread Messages (count); each card includes a leading icon, one line of available context, and state-aware tone so `0` alerts read muted. Occupancy, Bookings, and Revenue include info tooltips explaining their calculation.
 - [ ] `StatsCard.tsx` — label, large value, optional context/trend, optional help tooltip, optional header action; hidden revenue displays a masked peso figure rather than the word "Hidden"
 - [ ] Operational hierarchy — urgent/actionable cards lead the dashboard, daily ops sit in a compact middle band, guest chats sit below, and passive empty states are visually muted
 - [ ] Room status grid — one cell per room (all active rooms), shows room number, type, booking status badge, housekeeping status badge
 - [ ] Housekeeping status toggle per room — Clean / Dirty / In Progress — tap/click cycles through states, instant Firestore update
 - [ ] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA; warm attention styling when non-empty
+- [ ] New corporate inquiries section — shown only when `corporateInquiries` has `status: "new"` rows; each row shows company, contact, requested room count, opens `/corporate?inquiryId=...`, and includes a tooltip explaining that only fresh/new leads appear here
 - [ ] Today's check-ins list — bookings with `checkIn = today` and status `"confirmed"`; compact muted row when empty
 - [ ] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`; compact muted row when empty
 - [ ] Overdue Check-outs warning section — shown only when at least one booking has status `"checked-in"` and either `checkOut` is before today's Manila date or `checkOut` is today and Manila current time is at/after configured checkout time; each row shows guest name, room number, overdue timing, and opens the booking drawer for checkout action
@@ -44,6 +45,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Room grid: `onSnapshot` on `rooms` collection — all rooms always shown regardless of status
 - [ ] Housekeeping toggle: `updateDoc` on `rooms/{roomId}` — update `housekeepingStatus` field
 - [ ] Pending payments: query `bookings` where `status == "payment-uploaded"`, ordered by `createdAt`
+- [ ] New corporate inquiries: use the existing `AdminContext.corporateInquiries` snapshot and filter `status == "new"` for dashboard action cards
 - [ ] Today's check-ins: query `bookings` where `checkIn` is today AND `status == "confirmed"`
 - [ ] Today's check-outs: query `bookings` where `checkOut` is today AND `status == "checked-in"`
 - [ ] Overdue check-outs: filter bookings where `status == "checked-in"` and (`checkOut < todayKey` OR `checkOut == todayKey` after `settings/hotelConfig.checkOutTime`, falling back to `hotel.config.ts`); `todayKey` and current time come from the shared Manila-date helper
@@ -87,6 +89,7 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 - [ ] No check-ins/check-outs today — show compact muted rows so empty sections do not compete with urgent work
 - [ ] No breakfast orders today — show a compact muted row in the daily ops band
 - [ ] No overdue check-outs — hide the warning section entirely so the dashboard does not show an empty alert
+- [ ] No new corporate inquiries — hide the dashboard inquiry alert entirely; the full pipeline remains available from the sidebar
 - [ ] Overdue check-outs — keep the warning section usable on mobile with stacked rows and 44px minimum tap targets
 - [ ] Stat cards — handle zero values gracefully (0% occupancy, ₱0 revenue)
 - [ ] Room grid — all rooms always visible even if blocked or inactive
@@ -100,6 +103,7 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 - [ ] Confirm Payment CTA changes booking status and sends email
 - [ ] Today's check-ins/check-outs show correct bookings for today's date
 - [ ] Overdue check-outs appear only for still-checked-in bookings whose checkout date is before today, or whose checkout time has passed today, and each row opens the booking detail drawer
+- [ ] New corporate inquiries appear only for `status: "new"` and each row opens the corporate inquiry drawer
 - [ ] Intercom unread badge count matches actual unread messages
 - [ ] Dashboard loads in under 2s
 
