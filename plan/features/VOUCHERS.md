@@ -28,12 +28,12 @@ Promo vouchers allow admins to create discount codes redeemable during the guest
 
 ## Admin UI Checklist (within Rates)
 
-- [ ] Vouchers list — table of all vouchers: code, discount type, value, usage (used/cap), expiry, status badge (Active/Inactive/Expired)
-- [ ] Create voucher form — code (unique), discount type (% or ₱), discount value, usage cap (optional), expiry date (optional), applicable room types (all or multi-select)
-- [ ] Enable / disable toggle per voucher
-- [ ] Usage stats — used count vs. cap displayed per voucher row
-- [ ] Expired vouchers shown in list with visual distinction (muted/greyed)
-- [ ] Admins can create and manage vouchers; Front Desk can redeem/inspect applied voucher outcomes from booking details but cannot manage campaigns.
+- [x] Vouchers list — table of all vouchers: code, discount type, value, usage (used/cap), expiry, status badge (Active/Inactive/Expired)
+- [x] Create/Edit voucher form — code (unique), discount type (% or ₱), discount value, usage cap (optional), expiry date (optional), applicable room types (all or multi-select). Vouchers are editable, but the code field is locked after creation.
+- [x] Enable / disable toggle per voucher
+- [x] Usage stats — used count vs. cap displayed per voucher row
+- [x] Expired vouchers shown in list with visual distinction (muted/greyed)
+- [x] Admins can create and manage vouchers; Front Desk can redeem/inspect applied voucher outcomes from booking details but cannot manage campaigns.
 
 ## Guest UI Checklist (Booking Flow Step 3)
 
