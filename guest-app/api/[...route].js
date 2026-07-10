@@ -191305,6 +191305,22 @@ async function handleValidateVoucher(req, res) {
 }
 
 // server/handlers/corporate-codes.ts
+function parseCorporateCodeExpiry(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value.toDate === "function") {
+    const date = value.toDate();
+    return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  if (typeof value.seconds === "number") {
+    return new Date(value.seconds * 1e3);
+  }
+  return null;
+}
 async function handleValidateCorporateCode(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -191338,7 +191354,7 @@ async function handleValidateCorporateCode(req, res) {
     }
     const corporateCode = {
       isActive: data.isActive !== false,
-      expiresAt: data.expiresAt ? data.expiresAt.toDate() : null,
+      expiresAt: parseCorporateCodeExpiry(data.expiresAt),
       usageCap: data.usageCap ?? null,
       usageCount: data.usageCount || 0
     };
