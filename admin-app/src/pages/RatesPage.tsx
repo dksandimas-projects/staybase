@@ -10,7 +10,7 @@ import { useToast } from "../components/Toast";
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import {
-  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck,
+  Plus, Tag, Gift, Trash2, Calendar, ShieldCheck, Pencil,
   Landmark, Save, ShieldAlert, CreditCard, Info, ChevronLeft, ChevronRight, X
 } from "lucide-react";
 import config from "@config";
@@ -55,6 +55,11 @@ function formatRateDay(value: Date) {
   return new Intl.DateTimeFormat(config.locale, { weekday: "short", day: "numeric" }).format(value);
 }
 
+function toDateInputValue(value: string | null | undefined) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
+
 function isDateInInclusiveRange(dateKey: string, startDate: string, endDate: string) {
   return dateKey >= startDate && dateKey <= endDate;
 }
@@ -63,9 +68,11 @@ export function RatesPage() {
   const {
     vouchers,
     addVoucher,
+    updateVoucher,
     toggleVoucherActive,
     corporateCodes,
     addCorporateCode,
+    updateCorporateCode,
     toggleCorporateCodeActive,
     deleteCorporateCode,
     seasonalRateOverrides,
@@ -82,6 +89,8 @@ export function RatesPage() {
   // Modal State
   const [isVchModalOpen, setIsVchModalOpen] = useState(false);
   const [isCorpModalOpen, setIsCorpModalOpen] = useState(false);
+  const [editingVoucher, setEditingVoucher] = useState<Voucher | null>(null);
+  const [editingCorporateCode, setEditingCorporateCode] = useState<CorporateCode | null>(null);
 
   // Two-click confirm state for the delete-corporate-code action.
   // Set to the code being confirmed; click 2 within 3s executes the delete.
@@ -99,6 +108,7 @@ export function RatesPage() {
   const [usageCap, setUsageCap] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [applicableRooms, setApplicableRooms] = useState<string[]>([]);
+  const [vchIsActive, setVchIsActive] = useState(true);
   // Per W4.4 / decision #104: optional guest email — when set,
   // the server fires a voucher-issued email to the guest with
   // the code in a large monospace block.
@@ -109,6 +119,7 @@ export function RatesPage() {
   const [companyName, setCompanyName] = useState("");
   const [corpExpiresAt, setCorpExpiresAt] = useState("");
   const [corpUsageCap, setCorpUsageCap] = useState("");
+  const [corpIsActive, setCorpIsActive] = useState(true);
 
   // Local pricing state per room type — the source of truth now lives on
   // the RoomType entry itself (per W3.6 / `plan/features/RATE-MANAGEMENT.md
@@ -511,33 +522,118 @@ export function RatesPage() {
     closeSeasonalOverrideEditor();
   };
 
+  const resetVoucherForm = () => {
+    setEditingVoucher(null);
+    setVchCode("");
+    setDiscountType("percent");
+    setDiscountValue("");
+    setUsageCap("");
+    setExpiresAt("");
+    setApplicableRooms([]);
+    setVchGuestEmail("");
+    setVchIsActive(true);
+  };
+
+  const openCreateVoucherModal = () => {
+    resetVoucherForm();
+    setIsVchModalOpen(true);
+  };
+
+  const openVoucherEditor = (voucher: Voucher) => {
+    setEditingVoucher(voucher);
+    setVchCode(voucher.code);
+    setDiscountType(voucher.discountType);
+    setDiscountValue(String(voucher.discountValue));
+    setUsageCap(voucher.usageCap === null ? "" : String(voucher.usageCap));
+    setExpiresAt(toDateInputValue(voucher.expiresAt));
+    setApplicableRooms(voucher.applicableRoomTypes || []);
+    setVchGuestEmail(voucher.guestEmail || "");
+    setVchIsActive(voucher.isActive);
+    setIsVchModalOpen(true);
+  };
+
+  const closeVoucherModal = () => {
+    setIsVchModalOpen(false);
+    resetVoucherForm();
+  };
+
+  const resetCorporateCodeForm = () => {
+    setEditingCorporateCode(null);
+    setCorpCode("");
+    setCompanyName("");
+    setCorpExpiresAt("");
+    setCorpUsageCap("");
+    setCorpIsActive(true);
+    setDirtyCorporateRateTypes(new Set());
+  };
+
+  const openCreateCorporateModal = () => {
+    resetCorporateCodeForm();
+    const nextRates: Record<string, string> = {};
+    roomTypes.forEach(type => {
+      nextRates[type.value] = String(type.corporateRate || type.pricePerNight || 0);
+    });
+    setRoomRates(nextRates);
+    setIsCorpModalOpen(true);
+  };
+
+  const openCorporateCodeEditor = (code: CorporateCode) => {
+    setEditingCorporateCode(code);
+    setCorpCode(code.code);
+    setCompanyName(code.companyName);
+    setCorpExpiresAt(toDateInputValue(code.expiresAt));
+    setCorpUsageCap(code.usageCap === null ? "" : String(code.usageCap));
+    setCorpIsActive(code.isActive);
+    const nextRates: Record<string, string> = {};
+    roomTypes.forEach(type => {
+      nextRates[type.value] = String(code.ratePerRoomType?.[type.value] ?? type.corporateRate ?? type.pricePerNight ?? 0);
+    });
+    setRoomRates(nextRates);
+    setDirtyCorporateRateTypes(new Set(roomTypes.map(type => type.value)));
+    setIsCorpModalOpen(true);
+  };
+
+  const closeCorporateModal = () => {
+    setIsCorpModalOpen(false);
+    resetCorporateCodeForm();
+  };
+
   const handleVoucherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vchCode || !discountValue) return;
 
-    const result = await addVoucher({
+    const voucherPayload = {
       code: vchCode.trim().toUpperCase(),
       discountType,
       discountValue: parseFloat(discountValue) || 0,
       usageCap: usageCap ? parseInt(usageCap) : null,
       expiresAt: expiresAt || null,
       applicableRoomTypes: applicableRooms,
-      isActive: true,
+      isActive: vchIsActive,
       createdBy: currentUser?.uid || "staff",
       guestEmail: vchGuestEmail.trim() || null
-    });
+    };
+
+    const result = editingVoucher
+      ? await updateVoucher(editingVoucher.id, {
+          discountType: voucherPayload.discountType,
+          discountValue: voucherPayload.discountValue,
+          usageCap: voucherPayload.usageCap,
+          expiresAt: voucherPayload.expiresAt,
+          applicableRoomTypes: voucherPayload.applicableRoomTypes,
+          isActive: voucherPayload.isActive,
+          guestEmail: voucherPayload.guestEmail
+        })
+      : await addVoucher(voucherPayload);
     if (!result.success) {
-      toast.error("Voucher not created", result.error || "Please choose a different code.");
+      toast.error(editingVoucher ? "Voucher not updated" : "Voucher not created", result.error || "Please review the voucher details.");
       return;
     }
 
-    setVchCode("");
-    setDiscountValue("");
-    setUsageCap("");
-    setExpiresAt("");
-    setApplicableRooms([]);
-    setIsVchModalOpen(false);
-    toast.success("Voucher created", `${vchCode.trim().toUpperCase()} is ready.`);
+    const savedCode = vchCode.trim().toUpperCase();
+    const wasEditing = Boolean(editingVoucher);
+    closeVoucherModal();
+    toast.success(wasEditing ? "Voucher updated" : "Voucher created", `${savedCode} is ready.`);
   };
 
   const handleCorpSubmit = async (e: React.FormEvent) => {
@@ -549,7 +645,7 @@ export function RatesPage() {
       rateMap[type.value] = parseFloat(roomRates[type.value]) || type.corporateRate || type.pricePerNight || 0;
     });
 
-    const result = await addCorporateCode({
+    const corporatePayload = {
       code: corpCode.trim().toUpperCase(),
       companyName,
       ratePerRoomType: rateMap,
@@ -559,20 +655,27 @@ export function RatesPage() {
       linkedInquiryId: "",
       createdBy: currentUser?.uid || "staff",
       createdAt: new Date().toISOString(),
-      isActive: true
-    });
+      isActive: corpIsActive
+    };
+
+    const result = editingCorporateCode
+      ? await updateCorporateCode(editingCorporateCode.code, {
+          companyName: corporatePayload.companyName,
+          ratePerRoomType: corporatePayload.ratePerRoomType,
+          expiresAt: corporatePayload.expiresAt,
+          usageCap: corporatePayload.usageCap,
+          isActive: corporatePayload.isActive
+        })
+      : await addCorporateCode(corporatePayload);
     if (!result.success) {
-      toast.error("Corporate code not created", result.error || "Please choose a different code.");
+      toast.error(editingCorporateCode ? "Corporate code not updated" : "Corporate code not created", result.error || "Please review the corporate code details.");
       return;
     }
 
-    setCorpCode("");
-    setCompanyName("");
-    setCorpExpiresAt("");
-    setCorpUsageCap("");
-    setDirtyCorporateRateTypes(new Set());
-    setIsCorpModalOpen(false);
-    toast.success("Corporate code created", `${corpCode.trim().toUpperCase()} is ready.`);
+    const savedCode = corpCode.trim().toUpperCase();
+    const wasEditing = Boolean(editingCorporateCode);
+    closeCorporateModal();
+    toast.success(wasEditing ? "Corporate code updated" : "Corporate code created", `${savedCode} is ready.`);
   };
 
   // Save room prices changes — per W3.6 the rate matrix lives on the
@@ -661,16 +764,25 @@ export function RatesPage() {
       header: "Actions",
       align: "end",
       render: (row) => (
-        <button
-          onClick={() => toggleVoucherActive(row.id)}
-          className={`min-h-[32px] px-3 rounded text-xs font-semibold shadow-sm transition ${
-            row.isActive 
-              ? "bg-red-50 text-red-700 hover:bg-red-100" 
-              : "bg-green-50 text-green-700 hover:bg-green-100"
-          }`}
-        >
-          {row.isActive ? "Deactivate" : "Activate"}
-        </button>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => openVoucherEditor(row)}
+            className="min-h-[32px] px-3 inline-flex items-center gap-1 rounded bg-gray-50 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-200"
+          >
+            <Pencil size={12} aria-hidden="true" />
+            Edit
+          </button>
+          <button
+            onClick={() => toggleVoucherActive(row.id)}
+            className={`min-h-[32px] px-3 rounded text-xs font-semibold shadow-sm transition ${
+              row.isActive
+                ? "bg-red-50 text-red-700 hover:bg-red-100"
+                : "bg-green-50 text-green-700 hover:bg-green-100"
+            }`}
+          >
+            {row.isActive ? "Deactivate" : "Activate"}
+          </button>
+        </div>
       )
     }
   ];
@@ -706,6 +818,13 @@ export function RatesPage() {
       align: "end",
       render: (row) => (
         <div className="flex justify-end gap-2">
+          <button
+            onClick={() => openCorporateCodeEditor(row)}
+            className="min-h-[32px] px-3 inline-flex items-center gap-1 rounded bg-gray-50 text-xs font-semibold text-gray-700 shadow-sm transition hover:bg-gray-200"
+          >
+            <Pencil size={12} aria-hidden="true" />
+            Edit
+          </button>
           <button
             onClick={() => toggleCorporateCodeActive(row.code)}
             className={`min-h-[32px] px-3 rounded text-xs font-semibold shadow-sm transition ${
@@ -751,6 +870,25 @@ export function RatesPage() {
       <p className="text-xs text-gray-500">
         {row.usageCount} {row.usageCap ? `/ ${row.usageCap} limit` : "usages"} · {row.expiresAt || "Never expires"}
       </p>
+      <div className="flex flex-wrap gap-2 pt-2">
+        <button
+          type="button"
+          onClick={() => openVoucherEditor(row)}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded bg-gray-50 px-3 text-xs font-semibold text-gray-700"
+        >
+          <Pencil size={12} aria-hidden="true" />
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleVoucherActive(row.id)}
+          className={`min-h-[36px] rounded px-3 text-xs font-semibold ${
+            row.isActive ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+          }`}
+        >
+          {row.isActive ? "Deactivate" : "Activate"}
+        </button>
+      </div>
     </div>
   );
 
@@ -764,6 +902,25 @@ export function RatesPage() {
       <p className="text-xs text-gray-500">
         {formatCorporateRateSummary(row.ratePerRoomType)} · {row.usageCount} bookings
       </p>
+      <div className="flex flex-wrap gap-2 pt-2">
+        <button
+          type="button"
+          onClick={() => openCorporateCodeEditor(row)}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded bg-gray-50 px-3 text-xs font-semibold text-gray-700"
+        >
+          <Pencil size={12} aria-hidden="true" />
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => toggleCorporateCodeActive(row.code)}
+          className={`min-h-[36px] rounded px-3 text-xs font-semibold ${
+            row.isActive ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+          }`}
+        >
+          {row.isActive ? "Deactivate" : "Activate"}
+        </button>
+      </div>
     </div>
   );
 
@@ -1422,7 +1579,7 @@ export function RatesPage() {
           </h2>
           
           <button
-            onClick={() => setIsVchModalOpen(true)}
+            onClick={openCreateVoucherModal}
             className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
           >
             <Plus size={14} />
@@ -1447,7 +1604,7 @@ export function RatesPage() {
           </h2>
           
           <button
-            onClick={() => setIsCorpModalOpen(true)}
+            onClick={openCreateCorporateModal}
             className="min-h-[36px] px-3.5 inline-flex items-center gap-1 rounded bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
           >
             <Plus size={14} />
@@ -1465,9 +1622,9 @@ export function RatesPage() {
 
       {/* Modal: Create Voucher (M-06) */}
       <Modal
-        title="Create Promo Voucher"
+        title={editingVoucher ? "Edit Promo Voucher" : "Create Promo Voucher"}
         open={isVchModalOpen}
-        onClose={() => setIsVchModalOpen(false)}
+        onClose={closeVoucherModal}
       >
         <form onSubmit={handleVoucherSubmit} className="space-y-4 text-xs font-body">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1479,8 +1636,12 @@ export function RatesPage() {
                 placeholder="e.g. SUMMER2026"
                 value={vchCode}
                 onChange={(e) => setVchCode(e.target.value)}
-                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+                disabled={Boolean(editingVoucher)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium disabled:bg-gray-100 disabled:text-gray-500"
               />
+              {editingVoucher ? (
+                <span className="text-[10px] font-medium text-gray-500">Codes are locked after creation so guest links and redemptions keep working.</span>
+              ) : null}
             </label>
 
             <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
@@ -1546,6 +1707,16 @@ export function RatesPage() {
             <span className="text-[10px] font-medium text-gray-500">Leave blank to keep the code in the admin only.</span>
           </label>
 
+          <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-700">
+            <input
+              type="checkbox"
+              checked={vchIsActive}
+              onChange={(e) => setVchIsActive(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+            />
+            Voucher is active
+          </label>
+
           {/* Room type check lists */}
           <div className="space-y-2">
             <p className="font-semibold text-gray-700">Applicable Room Layouts</p>
@@ -1567,13 +1738,13 @@ export function RatesPage() {
           <div className="flex gap-3 pt-4 justify-end">
             <button
               type="button"
-              onClick={() => setIsVchModalOpen(false)}
+              onClick={closeVoucherModal}
               className="min-h-[44px] px-5 rounded-lg border border-gray-255 text-xs font-semibold text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>
             <PrimaryButton type="submit" className="min-w-[150px]">
-              Spawn Voucher
+              {editingVoucher ? "Save Voucher" : "Spawn Voucher"}
             </PrimaryButton>
           </div>
         </form>
@@ -1581,9 +1752,9 @@ export function RatesPage() {
 
       {/* Modal: Create Corporate Code */}
       <Modal
-        title="Add Corporate Partner Code"
+        title={editingCorporateCode ? "Edit Corporate Partner Code" : "Add Corporate Partner Code"}
         open={isCorpModalOpen}
-        onClose={() => setIsCorpModalOpen(false)}
+        onClose={closeCorporateModal}
       >
         <form onSubmit={handleCorpSubmit} className="space-y-4 text-xs font-body">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1595,8 +1766,12 @@ export function RatesPage() {
                 placeholder="e.g. GLOBE2026"
                 value={corpCode}
                 onChange={(e) => setCorpCode(e.target.value)}
-                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium"
+                disabled={Boolean(editingCorporateCode)}
+                className="min-h-[44px] w-full rounded border border-gray-250 px-3 text-sm font-medium disabled:bg-gray-100 disabled:text-gray-500"
               />
+              {editingCorporateCode ? (
+                <span className="text-[10px] font-medium text-gray-500">Access codes are locked after creation because guests may already have them.</span>
+              ) : null}
             </label>
 
             <label className="flex flex-col gap-2 text-xs font-semibold text-gray-750">
@@ -1653,16 +1828,26 @@ export function RatesPage() {
             </div>
           </div>
 
+          <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 text-xs font-semibold text-gray-700">
+            <input
+              type="checkbox"
+              checked={corpIsActive}
+              onChange={(e) => setCorpIsActive(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+            />
+            Corporate code is active
+          </label>
+
           <div className="flex gap-3 pt-4 justify-end">
             <button
               type="button"
-              onClick={() => setIsCorpModalOpen(false)}
+              onClick={closeCorporateModal}
               className="min-h-[44px] px-5 rounded-lg border border-gray-255 text-xs font-semibold text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>
             <PrimaryButton type="submit" className="min-w-[150px]">
-              Confirm Partnership
+              {editingCorporateCode ? "Save Partnership" : "Confirm Partnership"}
             </PrimaryButton>
           </div>
         </form>
