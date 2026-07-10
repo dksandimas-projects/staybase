@@ -18,7 +18,8 @@ import {
   BedDouble, Plus, Trash2, ShieldAlert, ImageIcon, Package, Pencil,
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
-  Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw
+  Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
+  ChevronDown, ChevronUp
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -175,6 +176,52 @@ function SaveActionFooter({
         <SaveActionButton label={label} status={status} />
       )}
     </div>
+  );
+}
+
+function WebsiteContentSection({
+  title,
+  helper,
+  icon,
+  defaultOpen = false,
+  children
+}: {
+  title: string;
+  helper: React.ReactNode;
+  icon?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const panelId = `website-content-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+  return (
+    <section className="rounded-card border border-gray-150 bg-gray-50/30">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        onClick={() => setIsOpen((open) => !open)}
+        className="flex min-h-[56px] w-full items-center justify-between gap-3 rounded-card px-4 py-3 text-left transition hover:bg-white/70 focus:outline-none focus:ring-2 focus:ring-primary/30"
+      >
+        <span className="min-w-0">
+          <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+            {icon}
+            {title}
+          </span>
+          <span className="mt-1 block text-[10px] leading-relaxed text-gray-500">{helper}</span>
+        </span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500">
+          {isOpen ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div id={panelId} className="space-y-4 border-t border-gray-150 p-4">
+          {children}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -2764,11 +2811,12 @@ export function SettingsPage() {
           {activeTab === "website" && (
             <form onSubmit={handleSaveWebsiteContent} className="space-y-8 text-xs">
               {/* Section Headers editor */}
-              <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Section Headers</h4>
-                <p className="text-[10px] text-gray-500">
-                  Customize the headings and subtext for the main sections of the homepage.
-                </p>
+              <WebsiteContentSection
+                title="Homepage Section Headers"
+                helper="Customize the headings and subtext for the main sections of the homepage."
+                icon={<Globe size={12} aria-hidden="true" />}
+                defaultOpen
+              >
                 <div className="space-y-4">
                   {/* Rooms Section */}
                   <div className="rounded-lg border border-gray-100 bg-white p-3 space-y-3">
@@ -2881,7 +2929,7 @@ export function SettingsPage() {
                     </label>
                   </div>
                 </div>
-              </div>
+              </WebsiteContentSection>
 
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Guest Web Landing Editor</h3>
@@ -2893,11 +2941,11 @@ export function SettingsPage() {
               </div>
 
               {/* Amenities grid */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Amenities</h4>
-                <p className="text-[10px] text-gray-500">
-                  Four-up grid on the homepage. Each card shows an icon, a title, and a short description. Disabled items are hidden from the guest site.
-                </p>
+              <WebsiteContentSection
+                title="Homepage Amenities"
+                helper="Four-up grid on the homepage. Disabled items are hidden from the guest site."
+                icon={<Sparkles size={12} aria-hidden="true" />}
+              >
                 <ListEditor
                   label="Amenity items"
                   helper="Add or remove the boutique amenities shown to guests on the homepage. Reorder by using the up/down handles."
@@ -2905,15 +2953,18 @@ export function SettingsPage() {
                   onChange={setHomepageAmenities}
                   defaultIcon="sparkles"
                 />
-              </div>
+              </WebsiteContentSection>
 
               {/* Featured types selector (replaces the old per-room
                   picker; see TypePicker for the rationale). The
                   admin picks room types; the homepage renders one
                   card per type with the type's photo, bed,
                   amenities, capacity, and price. */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Featured Room Types</h4>
+              <WebsiteContentSection
+                title="Featured Room Types"
+                helper="Choose up to three room types for the homepage Stay with us section."
+                icon={<BedDouble size={12} aria-hidden="true" />}
+              >
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-[10px] text-blue-800">
                   <p className="font-bold">Heads-up — types, not rooms</p>
                   <p className="mt-1 leading-relaxed">
@@ -2932,14 +2983,14 @@ export function SettingsPage() {
                   value={homepageFeaturedTypeValues}
                   onChange={setHomepageFeaturedTypeValues}
                 />
-              </div>
+              </WebsiteContentSection>
 
               {/* Services cards */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Homepage Services</h4>
-                <p className="text-[10px] text-gray-500">
-                  Two-up service cards (Tour Packages, Car Rentals) that link to the contact form. The CTA is always &quot;Contact us&quot; → <code>/contact</code> and is not editable.
-                </p>
+              <WebsiteContentSection
+                title="Homepage Services"
+                helper={<>Two-up service cards that link to the contact form. CTA stays fixed to <code>/contact</code>.</>}
+                icon={<Package size={12} aria-hidden="true" />}
+              >
                 <ListEditor
                   label="Service items"
                   helper="Add or remove the service cards. Disable to hide a card from the homepage without deleting its content."
@@ -2947,14 +2998,14 @@ export function SettingsPage() {
                   onChange={setHomepageServices}
                   defaultIcon="palmtree"
                 />
-              </div>
+              </WebsiteContentSection>
 
               {/* Spark Rewards promo */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Spark Rewards Promo</h4>
-                <p className="text-[10px] text-gray-500">
-                  The dark promo block on the homepage that advertises the loyalty program. Hides entirely when disabled.
-                </p>
+              <WebsiteContentSection
+                title="Spark Rewards Promo"
+                helper="The dark promo block on the homepage. Hides entirely when disabled."
+                icon={<Star size={12} aria-hidden="true" />}
+              >
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
@@ -3004,21 +3055,17 @@ export function SettingsPage() {
                   defaultIcon="sparkles"
                   emptyItem={{ title: "", description: "", icon: "sparkles" }}
                 />
-              </div>
+              </WebsiteContentSection>
 
               {/* About page — body copy below the hero. The hero
                   itself is owned by the Branding tab; these fields
                   drive the mission, vision, and story sections on
                   `/about`. */}
-              <div className="space-y-6 rounded-card border border-gray-150 bg-gray-50/30 p-5">
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  <Award size={12} /> About us page
-                </div>
-                <p className="text-[10px] text-gray-500 -mt-3">
-                  Editable body content for <code>/about</code>. The hero eyebrow, heading, subtext, and photo live in the{" "}
-                  <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
-                  tab.
-                </p>
+              <WebsiteContentSection
+                title="About us page"
+                helper={<>Body content for <code>/about</code>. Hero copy and photo live in Branding.</>}
+                icon={<Award size={12} aria-hidden="true" />}
+              >
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
@@ -3053,7 +3100,7 @@ export function SettingsPage() {
                     className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                   />
                 </label>
-              </div>
+              </WebsiteContentSection>
 
               {/* Corporate page — perks, rooms overview copy, and the
                   retreat CTA banner. The corporate hero is owned by
@@ -3061,15 +3108,11 @@ export function SettingsPage() {
                   page. Fields with no override here fall back to
                   hardcoded copy in `CorporateStaysPage` so the page
                   is never blank on a fresh deploy. */}
-              <div className="space-y-6 rounded-card border border-gray-150 bg-gray-50/30 p-5">
-                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                  <Building2 size={12} /> Corporate page
-                </div>
-                <p className="text-[10px] text-gray-500 -mt-3">
-                  Editable content for <code>/corporate</code> other than the hero. The dark hero (eyebrow, heading, subtext, photo) lives in the{" "}
-                  <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
-                  tab.
-                </p>
+              <WebsiteContentSection
+                title="Corporate page"
+                helper={<>Content for <code>/corporate</code> other than the hero, which lives in Branding.</>}
+                icon={<Building2 size={12} aria-hidden="true" />}
+              >
 
                 {/* Perks grid */}
                 <div className="space-y-3">
@@ -3166,7 +3209,7 @@ export function SettingsPage() {
                     </label>
                   </div>
                 </div>
-              </div>
+              </WebsiteContentSection>
 
               <SaveActionFooter label="Save Content" status={getSaveStatus("website")} />
             </form>
