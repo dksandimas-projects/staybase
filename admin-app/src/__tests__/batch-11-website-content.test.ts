@@ -330,6 +330,23 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(settingsPageSrc).not.toMatch(/edit those values directly in.*Firestore/i);
   });
 
+  it("Website Content sections are collapsible to keep the editor scannable", () => {
+    expect(settingsPageSrc).toMatch(/function\s+WebsiteContentSection/);
+    expect(settingsPageSrc).toMatch(/aria-expanded=\{isOpen\}/);
+    expect(settingsPageSrc).toMatch(/aria-controls=\{panelId\}/);
+    expect(settingsPageSrc).toMatch(/<WebsiteContentSection[\s\S]*?title="Homepage Section Headers"[\s\S]*?defaultOpen/);
+    for (const title of [
+      "Homepage Amenities",
+      "Featured Room Types",
+      "Homepage Services",
+      "Spark Rewards Promo",
+      "About us page",
+      "Corporate page"
+    ]) {
+      expect(settingsPageSrc).toContain(`title="${title}"`);
+    }
+  });
+
   it("ListEditor supports add / remove / reorder + isEnabled toggle", () => {
     expect(listEditorSrc).toMatch(/function\s+add\s*\(/);
     expect(listEditorSrc).toMatch(/function\s+remove\s*\(/);
