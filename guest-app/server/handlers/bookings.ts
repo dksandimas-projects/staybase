@@ -22,11 +22,51 @@ export function getConfiguredBookingRefPrefix() {
 }
 
 const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+const ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready — previous guest has not checked out yet.";
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 
 function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart;
+}
+
+function dateKeyFromDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function hasLingeringCheckedInConflict(input: {
+  status: unknown;
+  existingCheckOut: Date;
+  requestedCheckInKey: string;
+  todayKey: string;
+}) {
+  return input.status === "checked-in"
+    && input.requestedCheckInKey === input.todayKey
+    && dateKeyFromDate(input.existingCheckOut) <= input.todayKey;
+}
+
+function getOccupancyConflictReason(input: {
+  bookingData: any;
+  requestedCheckIn: Date;
+  requestedCheckOut: Date;
+  requestedCheckInKey: string;
+  todayKey: string;
+}) {
+  const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
+  const existingCheckOut = toDateOrNull(input.bookingData.checkOut);
+  if (!existingCheckIn || !existingCheckOut) return null;
+  if (rangesOverlap(existingCheckIn, existingCheckOut, input.requestedCheckIn, input.requestedCheckOut)) {
+    return "overlap";
+  }
+  if (hasLingeringCheckedInConflict({
+    status: input.bookingData.status,
+    existingCheckOut,
+    requestedCheckInKey: input.requestedCheckInKey,
+    todayKey: input.todayKey
+  })) {
+    return "lingering-checked-in";
+  }
+  return null;
 }
 
 async function hasActiveRoomBlockConflict(
@@ -498,6 +538,7 @@ export async function handleCreateBooking(req: any, res: any) {
       }
 
       let assignedRoom: { id: string; data: any } | null = null;
+      let sawLingeringCheckedInConflict = false;
       for (const candidate of candidates) {
         const cData = candidate.data;
         // Per-room blocked window check
@@ -516,13 +557,19 @@ export async function handleCreateBooking(req: any, res: any) {
           .where("roomId", "==", candidate.id)
           .where("status", "in", ROOM_OCCUPYING_STATUSES);
         const overlapSnapshot = await transaction.get(overlapQuery);
-        const hasConflict = overlapSnapshot.docs.some((doc) => {
-          const data = doc.data();
-          const existingCheckIn = toDateOrNull(data.checkIn);
-          const existingCheckOut = toDateOrNull(data.checkOut);
-          if (!existingCheckIn || !existingCheckOut) return false;
-          return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
-        });
+        const conflictReason = overlapSnapshot.docs
+          .map((doc) => getOccupancyConflictReason({
+            bookingData: doc.data(),
+            requestedCheckIn: checkInDate,
+            requestedCheckOut: checkOutDate,
+            requestedCheckInKey: checkIn,
+            todayKey: manilaToday
+          }))
+          .find(Boolean);
+        if (conflictReason === "lingering-checked-in") {
+          sawLingeringCheckedInConflict = true;
+        }
+        const hasConflict = Boolean(conflictReason);
         if (hasConflict) {
           continue;
         }
@@ -535,7 +582,7 @@ export async function handleCreateBooking(req: any, res: any) {
       }
 
       if (!assignedRoom) {
-        throw new Error("Room no longer available");
+        throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
 
       const roomId = assignedRoom.id;
@@ -1094,7 +1141,7 @@ export async function handleCreateBooking(req: any, res: any) {
       || code.includes("INTERNAL")
     );
     let status: number;
-    if (error.message === "Room no longer available") {
+    if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
@@ -1163,6 +1210,8 @@ export async function handleCreateWalkin(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
 
+  const { todayStr: todayKey } = getManilaDateInfo();
+
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
@@ -1230,16 +1279,19 @@ export async function handleCreateWalkin(req: any, res: any) {
         .where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
       
-      const hasConflict = bookingsSnapshot.docs.some((doc) => {
-        const data = doc.data();
-        const existingCheckIn = toDateOrNull(data.checkIn);
-        const existingCheckOut = toDateOrNull(data.checkOut);
-        if (!existingCheckIn || !existingCheckOut) return false;
-        return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
-      });
+      const conflictReason = bookingsSnapshot.docs
+        .map((doc) => getOccupancyConflictReason({
+          bookingData: doc.data(),
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkIn,
+          todayKey
+        }))
+        .find(Boolean);
+      const hasConflict = Boolean(conflictReason);
 
       if (hasConflict) {
-        throw new Error("Room no longer available");
+        throw new Error(conflictReason === "lingering-checked-in" ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
       if (hasBlockConflict) {
@@ -1415,7 +1467,7 @@ export async function handleCreateWalkin(req: any, res: any) {
 
   } catch (error: any) {
     console.error("Walk-in booking creation failed:", error);
-    const status = error.message === "Room no longer available" ? 409 : 500;
+    const status = error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR ? 409 : 500;
     return res.status(status).json({
       success: false,
       error: error.message || "An unexpected error occurred during walk-in booking creation."
@@ -2334,6 +2386,8 @@ export async function handleRescheduleBooking(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
 
+  const { todayStr: todayKey } = getManilaDateInfo();
+
   try {
     let updatedBooking: any = null;
     let fullBookingForEmail: any = null;
@@ -2365,14 +2419,21 @@ export async function handleRescheduleBooking(req: any, res: any) {
         .where("roomId", "==", String(roomId))
         .where("status", "in", ROOM_OCCUPYING_STATUSES);
       const overlapSnapshot = await transaction.get(overlapQuery);
-      const hasConflict = overlapSnapshot.docs.some((doc) => {
-        if (doc.id === String(bookingId)) return false;
-        const data = doc.data();
-        const existingCheckIn = toDateOrNull(data.checkIn);
-        const existingCheckOut = toDateOrNull(data.checkOut);
-        return Boolean(existingCheckIn && existingCheckOut && rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate));
-      });
-      if (hasConflict) throw new Error("Target room already has a booking in that date range.");
+      const conflictReason = overlapSnapshot.docs
+        .filter((doc) => doc.id !== String(bookingId))
+        .map((doc) => getOccupancyConflictReason({
+          bookingData: doc.data(),
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkIn,
+          todayKey
+        }))
+        .find(Boolean);
+      if (conflictReason) {
+        throw new Error(conflictReason === "lingering-checked-in"
+          ? "Target room is not ready because the previous guest has not checked out yet."
+          : "Target room already has a booking in that date range.");
+      }
 
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
