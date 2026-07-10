@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarDays, Edit3, Plus, XCircle } from "lucide-react";
-import { calculateSeasonalAwareRoomTotal, getNumNights } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, getNumNights, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -207,7 +207,7 @@ export function CalendarPage() {
   const handleCreateBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selection || !selectedRoom || !selectedRoomType || !guestName.trim()) return;
-    const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || 300) : 0;
+    const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
     const totalPrice = selectedRoomTotal + (hasBreakfast ? breakfastRate * guestCount * selectedNights : 0);
     const result = await addWalkinBooking({
       roomId: selectedRoom.id,
