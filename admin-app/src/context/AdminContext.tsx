@@ -2899,7 +2899,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     },
     about: {
       heroHeading: "about us",
-      heroPhotoUrl: ""
+      heroPhotoUrl: "",
+      missionStatement: "",
+      visionStatement: "",
+      hotelStory: ""
     },
     roomsCatalog: {
       heroEyebrow: "",
@@ -3001,7 +3004,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       },
       about: {
         heroHeading: "about us",
-        heroPhotoUrl: ""
+        heroPhotoUrl: "",
+        missionStatement: "",
+        visionStatement: "",
+        hotelStory: ""
       },
       roomsCatalog: {
         heroEyebrow: "",
