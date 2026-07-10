@@ -2469,268 +2469,294 @@ export function SettingsPage() {
               <div className="space-y-5">
                 <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Hero Copy</h4>
 
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Homepage eyebrow
-                    <input
-                      type="text"
-                      value={homepageHeroEyebrow}
-                      onChange={(e) => setHomepageHeroEyebrow(e.target.value)}
-                      placeholder={config.tagline}
-                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
-                    Homepage heading
-                    <input
-                      type="text"
-                      required
-                      value={homepageHeroHeading}
-                      onChange={(e) => setHomepageHeroHeading(e.target.value)}
-                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                    />
-                  </label>
-                </div>
+                <WebsiteContentSection
+                  title="Homepage Hero"
+                  helper="Hero copy for the homepage (/). Eyebrow, heading, and subtext."
+                  icon={<Globe size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Homepage eyebrow
+                        <input
+                          type="text"
+                          value={homepageHeroEyebrow}
+                          onChange={(e) => setHomepageHeroEyebrow(e.target.value)}
+                          placeholder={config.tagline}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
+                        Homepage heading
+                        <input
+                          type="text"
+                          required
+                          value={homepageHeroHeading}
+                          onChange={(e) => setHomepageHeroHeading(e.target.value)}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
+                        />
+                      </label>
+                    </div>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Homepage subtext
-                  <input
-                    type="text"
-                    required
-                    value={homepageHeroSubtext}
-                    onChange={(e) => setHomepageHeroSubtext(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                  />
-                </label>
-
-                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    About hero
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Eyebrow
-                      <input
-                        type="text"
-                        value={aboutHeroEyebrow}
-                        onChange={(e) => setAboutHeroEyebrow(e.target.value)}
-                        placeholder="Our Story"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Heading
+                      Homepage subtext
                       <input
                         type="text"
                         required
-                        value={aboutHeroHeading}
-                        onChange={(e) => setAboutHeroHeading(e.target.value)}
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        value={homepageHeroSubtext}
+                        onChange={(e) => setHomepageHeroSubtext(e.target.value)}
+                        className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
                       />
                     </label>
                   </div>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Subtext
-                    <textarea
-                      rows={2}
-                      value={aboutHeroSubtext}
-                      onChange={(e) => setAboutHeroSubtext(e.target.value)}
-                      placeholder={`Discover the vision and heart behind ${config.brandName}'s intentional hospitality in Bohol.`}
-                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
-                    />
-                  </label>
-                </div>
+                </WebsiteContentSection>
 
-                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    <Building2 size={12} /> Corporate hero
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-3">
+                <WebsiteContentSection
+                  title="About Hero"
+                  helper={`Discover the vision and heart behind ${config.brandName}'s intentional hospitality in Bohol.`}
+                  icon={<Award size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={aboutHeroEyebrow}
+                          onChange={(e) => setAboutHeroEyebrow(e.target.value)}
+                          placeholder="Our Story"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          required
+                          value={aboutHeroHeading}
+                          onChange={(e) => setAboutHeroHeading(e.target.value)}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Eyebrow
-                      <input
-                        type="text"
-                        value={corporateHeroEyebrow}
-                        onChange={(e) => setCorporateHeroEyebrow(e.target.value)}
-                        placeholder="Curated hospitality for executive comfort"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      Subtext
+                      <textarea
+                        rows={2}
+                        value={aboutHeroSubtext}
+                        onChange={(e) => setAboutHeroSubtext(e.target.value)}
+                        placeholder={`Discover the vision and heart behind ${config.brandName}'s intentional hospitality in Bohol.`}
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
-                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
-                      Heading
-                      <input
-                        type="text"
+                  </div>
+                </WebsiteContentSection>
+
+                <WebsiteContentSection
+                  title="Corporate Hero"
+                  helper="Hero copy for the corporate page (/corporate)."
+                  icon={<Building2 size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={corporateHeroEyebrow}
+                          onChange={(e) => setCorporateHeroEyebrow(e.target.value)}
+                          placeholder="Curated hospitality for executive comfort"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 sm:col-span-2">
+                        Heading
+                        <input
+                          type="text"
+                          required
+                          value={corporateHeroHeading}
+                          onChange={(e) => setCorporateHeroHeading(e.target.value)}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Subtext
+                      <textarea
                         required
-                        value={corporateHeroHeading}
-                        onChange={(e) => setCorporateHeroHeading(e.target.value)}
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        rows={2}
+                        value={corporateHeroSubtext}
+                        onChange={(e) => setCorporateHeroSubtext(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
                   </div>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Subtext
-                    <textarea
-                      required
-                      rows={2}
-                      value={corporateHeroSubtext}
-                      onChange={(e) => setCorporateHeroSubtext(e.target.value)}
-                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
-                    />
-                  </label>
-                </div>
+                </WebsiteContentSection>
 
-                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    <Award size={12} /> Rewards hero
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                <WebsiteContentSection
+                  title="Rewards Hero"
+                  helper={`Hero copy for the loyalty program page (/rewards).`}
+                  icon={<Star size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Eyebrow pill (right of the program name)
+                        <input
+                          type="text"
+                          value={rewardsHeroEyebrow}
+                          onChange={(e) => setRewardsHeroEyebrow(e.target.value)}
+                          placeholder="Loyalty Program"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                        <span className="text-[10px] text-gray-500">Renders as &quot;{config.rewardsName || "Spark Rewards"} {rewardsHeroEyebrow || "Loyalty Program"}&quot; in the pill.</span>
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          required
+                          value={rewardsHeroHeading}
+                          onChange={(e) => setRewardsHeroHeading(e.target.value)}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Eyebrow pill (right of the program name)
-                      <input
-                        type="text"
-                        value={rewardsHeroEyebrow}
-                        onChange={(e) => setRewardsHeroEyebrow(e.target.value)}
-                        placeholder="Loyalty Program"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                      />
-                      <span className="text-[10px] text-gray-500">Renders as &quot;{config.rewardsName || "Spark Rewards"} {rewardsHeroEyebrow || "Loyalty Program"}&quot; in the pill.</span>
-                    </label>
-                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Heading
-                      <input
-                        type="text"
+                      Subtext
+                      <textarea
                         required
-                        value={rewardsHeroHeading}
-                        onChange={(e) => setRewardsHeroHeading(e.target.value)}
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        rows={2}
+                        value={rewardsHeroSubtext}
+                        onChange={(e) => setRewardsHeroSubtext(e.target.value)}
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
                   </div>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Subtext
-                    <textarea
-                      required
-                      rows={2}
-                      value={rewardsHeroSubtext}
-                      onChange={(e) => setRewardsHeroSubtext(e.target.value)}
-                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
-                    />
-                  </label>
-                </div>
+                </WebsiteContentSection>
 
-                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    <BedDouble size={12} /> Rooms Catalog hero
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                <WebsiteContentSection
+                  title="Rooms Catalog Hero"
+                  helper="Hero copy for the rooms catalog page (/rooms)."
+                  icon={<BedDouble size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={roomsCatalogHeroEyebrow}
+                          onChange={(e) => setRoomsCatalogHeroEyebrow(e.target.value)}
+                          placeholder="Rooms & rates"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          value={roomsCatalogHeroHeading}
+                          onChange={(e) => setRoomsCatalogHeroHeading(e.target.value)}
+                          placeholder="Our rooms"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Eyebrow
-                      <input
-                        type="text"
-                        value={roomsCatalogHeroEyebrow}
-                        onChange={(e) => setRoomsCatalogHeroEyebrow(e.target.value)}
-                        placeholder="Rooms & rates"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      Subtext
+                      <textarea
+                        rows={2}
+                        value={roomsCatalogHeroSubtext}
+                        onChange={(e) => setRoomsCatalogHeroSubtext(e.target.value)}
+                        placeholder="Browse every room type we offer, then pick your dates in the next step."
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
-                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Heading
-                      <input
-                        type="text"
-                        value={roomsCatalogHeroHeading}
-                        onChange={(e) => setRoomsCatalogHeroHeading(e.target.value)}
-                        placeholder="Our rooms"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                      />
-                    </label>
                   </div>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Subtext
-                    <textarea
-                      rows={2}
-                      value={roomsCatalogHeroSubtext}
-                      onChange={(e) => setRoomsCatalogHeroSubtext(e.target.value)}
-                      placeholder="Browse every room type we offer, then pick your dates in the next step."
-                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
-                    />
-                  </label>
-                </div>
+                </WebsiteContentSection>
 
-                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    <Mail size={12} /> Contact Page hero
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                <WebsiteContentSection
+                  title="Contact Page Hero"
+                  helper="Hero copy for the contact page (/contact)."
+                  icon={<Mail size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={contactHeroEyebrow}
+                          onChange={(e) => setContactHeroEyebrow(e.target.value)}
+                          placeholder="Get in Touch"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          value={contactHeroHeading}
+                          onChange={(e) => setContactHeroHeading(e.target.value)}
+                          placeholder="contact us"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Eyebrow
-                      <input
-                        type="text"
-                        value={contactHeroEyebrow}
-                        onChange={(e) => setContactHeroEyebrow(e.target.value)}
-                        placeholder="Get in Touch"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      Subtext
+                      <textarea
+                        rows={2}
+                        value={contactHeroSubtext}
+                        onChange={(e) => setContactHeroSubtext(e.target.value)}
+                        placeholder="Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist."
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
-                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Heading
-                      <input
-                        type="text"
-                        value={contactHeroHeading}
-                        onChange={(e) => setContactHeroHeading(e.target.value)}
-                        placeholder="contact us"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                      />
-                    </label>
                   </div>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Subtext
-                    <textarea
-                      rows={2}
-                      value={contactHeroSubtext}
-                      onChange={(e) => setContactHeroSubtext(e.target.value)}
-                      placeholder="Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist."
-                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
-                    />
-                  </label>
-                </div>
+                </WebsiteContentSection>
 
-                <div className="space-y-4 rounded-card border border-gray-150 bg-gray-50/40 p-4">
-                  <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                    <Globe size={12} /> Not Found Page (404) hero
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                <WebsiteContentSection
+                  title="Not Found Page (404) Hero"
+                  helper="Hero copy for the 404 page when a guest visits an invalid path."
+                  icon={<AlertTriangle size={12} aria-hidden="true" />}
+                >
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Eyebrow
+                        <input
+                          type="text"
+                          value={notFoundHeroEyebrow}
+                          onChange={(e) => setNotFoundHeroEyebrow(e.target.value)}
+                          placeholder="Page not found"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Heading
+                        <input
+                          type="text"
+                          value={notFoundHeroHeading}
+                          onChange={(e) => setNotFoundHeroHeading(e.target.value)}
+                          placeholder="lost in bohol?"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                        />
+                      </label>
+                    </div>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Eyebrow
-                      <input
-                        type="text"
-                        value={notFoundHeroEyebrow}
-                        onChange={(e) => setNotFoundHeroEyebrow(e.target.value)}
-                        placeholder="Page not found"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      Subtext
+                      <textarea
+                        rows={2}
+                        value={notFoundHeroSubtext}
+                        onChange={(e) => setNotFoundHeroSubtext(e.target.value)}
+                        placeholder="We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay."
+                        className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
-                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Heading
-                      <input
-                        type="text"
-                        value={notFoundHeroHeading}
-                        onChange={(e) => setNotFoundHeroHeading(e.target.value)}
-                        placeholder="lost in bohol?"
-                        className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                      />
-                    </label>
                   </div>
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Subtext
-                    <textarea
-                      rows={2}
-                      value={notFoundHeroSubtext}
-                      onChange={(e) => setNotFoundHeroSubtext(e.target.value)}
-                      placeholder="We couldn't find the page you were looking for. Let's get you back on track to your comfortable stay."
-                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
-                    />
-                  </label>
-                </div>
+                </WebsiteContentSection>
               </div>
 
               {/* Logo Overrides */}
@@ -2815,7 +2841,6 @@ export function SettingsPage() {
                 title="Homepage Section Headers"
                 helper="Customize the headings and subtext for the main sections of the homepage."
                 icon={<Globe size={12} aria-hidden="true" />}
-                defaultOpen
               >
                 <div className="space-y-4">
                   {/* Rooms Section */}
@@ -2930,15 +2955,6 @@ export function SettingsPage() {
                   </div>
                 </div>
               </WebsiteContentSection>
-
-              <div>
-                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Guest Web Landing Editor</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">
-                  List-based content for the public site. Hero photos and hero copy live in the{" "}
-                  <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
-                  tab.
-                </p>
-              </div>
 
               {/* Amenities grid */}
               <WebsiteContentSection
