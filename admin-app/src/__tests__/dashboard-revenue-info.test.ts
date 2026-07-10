@@ -22,6 +22,6 @@ describe("Dashboard revenue info controls", () => {
     expect(dashboardSrc).toMatch(/setShowRevenue/);
     expect(dashboardSrc).toMatch(/Hide dashboard revenue/);
     expect(dashboardSrc).toMatch(/Show dashboard revenue/);
-    expect(dashboardSrc).toMatch(/showRevenue \? formatPrice\(monthlyRevenue\) : "••••••"/);
+    expect(dashboardSrc).toMatch(/showRevenue \? formatPrice\(monthlyRevenue\) : `\$\{config\.currencySymbol\}•••••`/);
   });
 });
