@@ -50,6 +50,15 @@ export type RoomTypeEntry = {
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
 
+// Single source of truth for the breakfast rate fallback (PHP per
+// person, per night). The live rate lives in the Firestore document
+// `settings/breakfastConfig.ratePerPersonPerNight` and is snapshotted
+// onto `booking.breakfastRate` at booking time. This constant is used
+// ONLY as the fallback when that config doc / snapshot is missing or
+// unset. Every handler and UI must reference this — never a hardcoded
+// number — so the fallback can never drift out of sync again.
+export const DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
+
 // Default perks shown on the public /corporate page (under the hero).
 // Shared between the guest app (Firestore override → this fallback)
 // and the admin app (seeded into `mergeWebsiteContent` when the

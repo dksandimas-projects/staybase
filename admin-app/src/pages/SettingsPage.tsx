@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminContext";
 import {
   compressImageFile,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
@@ -1543,6 +1544,33 @@ export function SettingsPage() {
     setServicesEyebrow(websiteContent.homepage?.sectionHeaders?.servicesEyebrow || "");
     setServicesHeading(websiteContent.homepage?.sectionHeaders?.servicesHeading || "");
     setServicesSubtext(websiteContent.homepage?.sectionHeaders?.servicesSubtext || "");
+
+    // Sync Hotel Info (Hotel Profile) states
+    setHotelName(hotelConfig.hotelName || "");
+    setContactEmail(hotelConfig.contactEmail || "");
+    setContactPhone(hotelConfig.contactPhone || "");
+    setCheckInTime(hotelConfig.checkInTime || "");
+    setCheckOutTime(hotelConfig.checkOutTime || "");
+    setMissionStatement(hotelConfig.missionStatement || "");
+    setVisionStatement(hotelConfig.visionStatement || "");
+    setHotelStory(hotelConfig.hotelStory || "");
+    setFrontDeskPhone(hotelConfig.frontDeskPhone || "");
+    setSupportEmail(hotelConfig.supportEmail || "");
+    setDpoEmail(hotelConfig.dpoEmail || "");
+    setFacebookUrl(hotelConfig.facebookUrl || "");
+    setInstagramUrl(hotelConfig.instagramUrl || "");
+
+    // Safely format address: if it's a seeded object, convert to single-line string.
+    let addrStr = "";
+    if (hotelConfig.address) {
+      if (typeof hotelConfig.address === "string") {
+        addrStr = hotelConfig.address;
+      } else if (typeof hotelConfig.address === "object") {
+        const addr = hotelConfig.address as any;
+        addrStr = [addr.street, addr.city, addr.region, addr.postalCode].filter(Boolean).join(", ");
+      }
+    }
+    setAddress(addrStr);
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
 
   // Handle Form submissions
@@ -1735,7 +1763,7 @@ export function SettingsPage() {
     e.preventDefault();
     await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
       isEnabled: breakfastEnabled,
-      ratePerPersonPerNight: parseFloat(breakfastRate) || 300,
+      ratePerPersonPerNight: parseFloat(breakfastRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
       silogItems
     }));
   };

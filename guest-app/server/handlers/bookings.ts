@@ -10,7 +10,8 @@ import {
   validateCorporateCode,
   getManilaDateInfo,
   BOOKING_REF_REGEX,
-  generateLookupToken
+  generateLookupToken,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 import { z } from "zod";
@@ -545,8 +546,8 @@ export async function handleCreateBooking(req: any, res: any) {
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 250 };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
+      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
 
       // 4. Handle Corporate Code validation. Per W1.3 / decision #79 /
       // audit S1.5: the server is the only source of truth for
@@ -1248,8 +1249,8 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 250 };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
+      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
 
       // 4. Calculate Nightly Rate Total. Seasonal overrides beat
       // weekend rates for walk-ins unless staff enters a manual
@@ -2380,6 +2381,11 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.data() || {};
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+
+      // Load Breakfast Config (source of truth for the live rate). Read
+      // here alongside the other transaction reads, before any writes.
+      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
+      const breakfastConfig = breakfastConfigDoc.data() || {};
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
       if (!typeEntry) throw new Error("Room type configuration not found.");
 
@@ -2430,7 +2436,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
           });
       const roomTotal = roomBreakdown.roomSubtotal;
 
-      const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
+      const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
       const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
 
