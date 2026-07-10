@@ -55,7 +55,7 @@ export function DashboardPage() {
   const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
-  const [showRevenue, setShowRevenue] = useState(true);
+  const [showRevenue, setShowRevenue] = useState(false);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setClockTick(Date.now()), 60_000);
@@ -271,7 +271,7 @@ export function DashboardPage() {
         <StatsCard label="Total Bookings" value={String(monthlyBookingsCount)} />
         <StatsCard
           label="Revenue"
-          value={showRevenue ? formatPrice(monthlyRevenue) : "Hidden"}
+          value={showRevenue ? formatPrice(monthlyRevenue) : "••••••"}
           helpText={revenueHelpText}
           headerAction={
             <button
