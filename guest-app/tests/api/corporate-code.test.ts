@@ -51,6 +51,42 @@ vi.mock("../../server/lib/firebase-admin", () => {
         isActive: true,
       }),
     },
+    "STRINGDATE": {
+      exists: true,
+      data: () => ({
+        code: "STRINGDATE",
+        companyName: "String Date Corp",
+        ratePerRoomType: { "standard-double": 2100 },
+        expiresAt: "2027-12-31",
+        usageCap: null,
+        usageCount: 0,
+        isActive: true,
+      }),
+    },
+    "JSDATE": {
+      exists: true,
+      data: () => ({
+        code: "JSDATE",
+        companyName: "JS Date Corp",
+        ratePerRoomType: { "standard-double": 2200 },
+        expiresAt: new Date("2027-12-31"),
+        usageCap: null,
+        usageCount: 0,
+        isActive: true,
+      }),
+    },
+    "SECONDSDATE": {
+      exists: true,
+      data: () => ({
+        code: "SECONDSDATE",
+        companyName: "Seconds Date Corp",
+        ratePerRoomType: { "standard-double": 2300 },
+        expiresAt: { seconds: 1830211200 },
+        usageCap: null,
+        usageCount: 0,
+        isActive: true,
+      }),
+    },
   };
 
   const createDocRef = (path: string) => {
@@ -107,6 +143,54 @@ describe("/api/validate/corporate-code handler", () => {
         code: "ACME2026",
         companyName: "Acme Corporation",
         ratePerRoomType: expect.objectContaining({ "standard-double": 2500 }),
+      }),
+    });
+  });
+
+  test("validates corporate codes with string expiry dates", async () => {
+    const req = { method: "POST", body: { code: "STRINGDATE" } };
+    const res = mockResponse();
+
+    await handleValidateCorporateCode(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        code: "STRINGDATE",
+        companyName: "String Date Corp",
+      }),
+    });
+  });
+
+  test("validates corporate codes with JavaScript Date expiry values", async () => {
+    const req = { method: "POST", body: { code: "JSDATE" } };
+    const res = mockResponse();
+
+    await handleValidateCorporateCode(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        code: "JSDATE",
+        companyName: "JS Date Corp",
+      }),
+    });
+  });
+
+  test("validates corporate codes with serialized Firestore timestamp expiry values", async () => {
+    const req = { method: "POST", body: { code: "SECONDSDATE" } };
+    const res = mockResponse();
+
+    await handleValidateCorporateCode(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        code: "SECONDSDATE",
+        companyName: "Seconds Date Corp",
       }),
     });
   });
