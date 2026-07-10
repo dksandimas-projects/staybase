@@ -11,15 +11,17 @@ describe("Dashboard revenue info controls", () => {
     expect(dashboardSrc).toMatch(/sum of totalPrice/);
     expect(dashboardSrc).toMatch(/booking value, not cash collected/);
     expect(statsCardSrc).toMatch(/helpText/);
-    expect(statsCardSrc).toMatch(/title=\{helpText\}/);
-    expect(statsCardSrc).toMatch(/aria-label=\{helpText\}/);
+    expect(statsCardSrc).toMatch(/helpOpen/);
+    expect(statsCardSrc).toMatch(/setHelpOpen/);
+    expect(statsCardSrc).toMatch(/role="tooltip"/);
+    expect(statsCardSrc).toMatch(/aria-expanded=\{helpOpen\}/);
   });
 
-  it("lets staff hide and show the revenue value", () => {
-    expect(dashboardSrc).toMatch(/showRevenue/);
+  it("hides revenue by default with bullets and lets staff reveal it", () => {
+    expect(dashboardSrc).toMatch(/useState\(false\)/);
     expect(dashboardSrc).toMatch(/setShowRevenue/);
     expect(dashboardSrc).toMatch(/Hide dashboard revenue/);
     expect(dashboardSrc).toMatch(/Show dashboard revenue/);
-    expect(dashboardSrc).toMatch(/showRevenue \? formatPrice\(monthlyRevenue\) : "Hidden"/);
+    expect(dashboardSrc).toMatch(/showRevenue \? formatPrice\(monthlyRevenue\) : `\$\{config\.currencySymbol\}•••••`/);
   });
 });

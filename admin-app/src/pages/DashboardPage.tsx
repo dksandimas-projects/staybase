@@ -5,7 +5,7 @@ import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
-import { Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils } from "lucide-react";
+import { BedDouble, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
@@ -55,7 +55,7 @@ export function DashboardPage() {
   const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
-  const [showRevenue, setShowRevenue] = useState(true);
+  const [showRevenue, setShowRevenue] = useState(false);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setClockTick(Date.now()), 60_000);
@@ -267,11 +267,26 @@ export function DashboardPage() {
 
       {/* Stats Cards Row */}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <StatsCard label="Occupancy Rate" value={`${occupancyPercentage}%`} />
-        <StatsCard label="Total Bookings" value={String(monthlyBookingsCount)} />
+        <StatsCard
+          label="Occupancy"
+          value={`${occupancyPercentage}%`}
+          context={`${occupiedRoomsCount} of ${totalRoomsCount} rooms occupied`}
+          icon={<BedDouble size={18} />}
+          tone={occupiedRoomsCount > 0 ? "primary" : "neutral"}
+        />
+        <StatsCard
+          label="Bookings"
+          value={String(monthlyBookingsCount)}
+          context={`${monthKey} check-in activity`}
+          icon={<CalendarDays size={18} />}
+          tone={monthlyBookingsCount > 0 ? "info" : "neutral"}
+        />
         <StatsCard
           label="Revenue"
-          value={showRevenue ? formatPrice(monthlyRevenue) : "Hidden"}
+          value={showRevenue ? formatPrice(monthlyRevenue) : `${config.currencySymbol}•••••`}
+          context="Booking value this month"
+          icon={<PhilippinePeso size={18} />}
+          tone={monthlyRevenue > 0 ? "success" : "neutral"}
           helpText={revenueHelpText}
           headerAction={
             <button
@@ -285,30 +300,48 @@ export function DashboardPage() {
             </button>
           }
         />
-        <StatsCard label="Pending Payments" value={String(pendingPayments.length)} />
+        <StatsCard
+          label="Pending Payments"
+          value={String(pendingPayments.length)}
+          context={pendingPayments.length > 0 ? `${pendingPayments.length} proof${pendingPayments.length === 1 ? "" : "s"} queued` : "No payment proofs queued"}
+          icon={<CreditCard size={18} />}
+          tone={pendingPayments.length > 0 ? "warning" : "neutral"}
+        />
         <StatsCard
           label="Unread Messages"
           value={String(unreadIntercomCount)}
+          context={unreadIntercomCount > 0 ? `${unreadIntercomCount} guest chat${unreadIntercomCount === 1 ? "" : "s"} unread` : "No unread guest chats"}
           onClick={() => navigate("/intercom")}
           icon={<MessageSquare size={18} />}
+          tone={unreadIntercomCount > 0 ? "warning" : "neutral"}
         />
       </div>
       {/* Operational workflow sections */}
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <div className="space-y-6">
-          <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
-                <CreditCard size={18} className="text-primary" />
+      <div className="space-y-6">
+        <section className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className={`rounded-card p-5 shadow-sm ring-1 ${
+            pendingPayments.length > 0
+              ? "border border-amber-200 bg-amber-50 ring-amber-100"
+              : "bg-white ring-gray-200"
+          }`}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className={`flex items-center gap-2 text-lg font-heading lowercase tracking-tight ${
+                pendingPayments.length > 0 ? "text-amber-950" : "text-gray-950"
+              }`}>
+                <CreditCard size={18} className={pendingPayments.length > 0 ? "text-amber-700" : "text-primary"} />
                 pending payment alerts
               </h2>
-              <span className="rounded-full bg-primary-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-primary-dark">
+              <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                pendingPayments.length > 0
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-gray-100 text-gray-500"
+              }`}>
                 {pendingPayments.length} queued
               </span>
             </div>
             <div className="space-y-3">
               {pendingPayments.length > 0 ? pendingPayments.map((booking) => (
-                <div key={booking.id} className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[72px_1fr_auto] sm:items-center">
+                <div key={booking.id} className="grid gap-3 rounded-lg border border-amber-200 bg-white/85 p-3 shadow-sm sm:grid-cols-[72px_1fr_auto] sm:items-center">
                   <button
                     type="button"
                     onClick={() => {
@@ -317,7 +350,7 @@ export function DashboardPage() {
                       }
                     }}
                     disabled={!booking.paymentProofUrl}
-                    className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-white disabled:cursor-not-allowed sm:w-16"
+                    className="flex h-16 w-full items-center justify-center overflow-hidden rounded-lg border border-amber-200 bg-white disabled:cursor-not-allowed sm:w-16"
                     aria-label={booking.paymentProofUrl ? `Preview payment proof for ${booking.bookingRef}` : `No payment proof for ${booking.bookingRef}`}
                   >
                     {booking.paymentProofUrl ? (
@@ -339,7 +372,7 @@ export function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl ?? "" })}
-                        className="inline-flex min-h-[34px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
                       >
                         <Eye size={12} />
                         View Proof
@@ -348,92 +381,23 @@ export function DashboardPage() {
                     <button
                       type="button"
                       onClick={() => void confirmPayment(booking.id)}
-                      className="inline-flex min-h-[34px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
                     >
                       Confirm Payment
-                  </button>
+                    </button>
                   </div>
                 </div>
               )) : (
-                <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-4 text-center text-xs font-semibold text-gray-500">
+                <p className="rounded-lg border border-dashed border-gray-250 bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500">
                   No payment proofs are waiting for review.
                 </p>
               )}
             </div>
-          </section>
+          </div>
 
-          {/* Today's Breakfast Prep */}
-          <section className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
-                <Utensils size={18} className="text-primary" />
-                today's breakfast prep
-              </h2>
-              {todaysBreakfastItems.length > 0 && (
-                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                  unservedBreakfastCount > 0
-                    ? "bg-amber-100 text-amber-800"
-                    : "bg-green-105 text-green-700"
-                }`}>
-                  {unservedBreakfastCount > 0 ? `${unservedBreakfastCount} remaining` : "all served"}
-                </span>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              {todaysBreakfastItems.length > 0 ? (
-                todaysBreakfastItems.map((item) => (
-                  <div
-                    key={`${item.bookingId}-${item.key}`}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-gray-900">Room {item.roomNumber}</span>
-                        <span className="text-xs text-gray-600">· {item.guestName}</span>
-                      </div>
-                      <p className="mt-1 text-xs font-semibold text-primary-dark">
-                        Order: {item.selection}
-                      </p>
-                      <p className="text-[10px] font-semibold text-gray-400">
-                        Guest {item.guestIndex} · {item.bookingRef}
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => toggleBreakfastServed(item.bookingId, item.key, item.served)}
-                      className={`min-h-[34px] px-4 rounded-lg text-xs font-bold transition shadow-sm active:scale-95 flex items-center gap-1.5 ${
-                        item.served
-                          ? "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                          : "bg-primary text-white hover:bg-primary-dark"
-                      }`}
-                    >
-                      {item.served ? (
-                        <>
-                          <Check size={12} />
-                          Served
-                        </>
-                      ) : (
-                        "Mark Served"
-                      )}
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-lg border border-dashed border-gray-250 bg-gray-50 p-6 text-center">
-                  <Utensils size={24} className="mx-auto text-gray-300 mb-2" />
-                  <p className="text-xs font-semibold text-gray-500">No breakfast orders today.</p>
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
-
-        <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
           {overdueCheckouts.length > 0 && (
             <div className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
                   <AlertTriangle size={18} className="text-amber-700" />
                   overdue check-outs
@@ -453,7 +417,7 @@ export function DashboardPage() {
                       key={booking.id}
                       type="button"
                       onClick={() => openBooking(booking.id)}
-                      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/80 px-3 py-2 text-left shadow-sm hover:bg-white"
+                      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/85 px-3 py-2 text-left shadow-sm hover:bg-white"
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
@@ -468,19 +432,26 @@ export function DashboardPage() {
               </div>
             </div>
           )}
+        </section>
 
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
-              <LogIn size={18} className="text-primary" />
-              today's arrivals
-            </h2>
+        <section className="grid gap-5 lg:grid-cols-3">
+          <div className={`rounded-card p-5 shadow-sm ring-1 ${
+            todaysArrivals.length > 0 ? "bg-white ring-gray-200" : "bg-gray-50 ring-gray-200"
+          }`}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+                <LogIn size={18} className="text-primary" />
+                today's arrivals
+              </h2>
+              <span className="text-xs font-bold text-gray-400">{todaysArrivals.length}</span>
+            </div>
             <div className="space-y-2">
               {todaysArrivals.length > 0 ? todaysArrivals.map((booking) => (
                 <button
                   key={booking.id}
                   type="button"
                   onClick={() => openBooking(booking.id)}
-                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-left hover:bg-gray-50"
+                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 text-left hover:bg-gray-50"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
@@ -489,23 +460,28 @@ export function DashboardPage() {
                   <ArrowRight size={14} className="shrink-0 text-gray-400" />
                 </button>
               )) : (
-                <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No arrivals today.</p>
+                <p className="text-xs font-semibold text-gray-500">None scheduled today.</p>
               )}
             </div>
           </div>
 
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <h2 className="mb-3 flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
-              <LogOut size={18} className="text-primary" />
-              today's departures
-            </h2>
+          <div className={`rounded-card p-5 shadow-sm ring-1 ${
+            todaysDepartures.length > 0 ? "bg-white ring-gray-200" : "bg-gray-50 ring-gray-200"
+          }`}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+                <LogOut size={18} className="text-primary" />
+                today's departures
+              </h2>
+              <span className="text-xs font-bold text-gray-400">{todaysDepartures.length}</span>
+            </div>
             <div className="space-y-2">
               {todaysDepartures.length > 0 ? todaysDepartures.map((booking) => (
                 <button
                   key={booking.id}
                   type="button"
                   onClick={() => openBooking(booking.id)}
-                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 text-left hover:bg-gray-50"
+                  className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 text-left hover:bg-gray-50"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
@@ -514,69 +490,139 @@ export function DashboardPage() {
                   <ArrowRight size={14} className="shrink-0 text-gray-400" />
                 </button>
               )) : (
-                <p className="rounded-lg bg-gray-50 p-3 text-xs font-semibold text-gray-500">No departures today.</p>
+                <p className="text-xs font-semibold text-gray-500">None scheduled today.</p>
               )}
             </div>
           </div>
 
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <h2 className="mb-3 flex items-center justify-between gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
-              <span className="flex items-center gap-2">
-                <MessageSquare size={18} className="text-primary" />
-                Active Guest Chats
-              </span>
-              {activeIntercomThreads.some(t => t.unreadCount > 0) && (
-                <span className="rounded-full bg-green-105 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-green-700">
-                  Unread
+          <div className={`rounded-card p-5 shadow-sm ring-1 ${
+            todaysBreakfastItems.length > 0 ? "bg-white ring-gray-200" : "bg-gray-50 ring-gray-200"
+          }`}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+                <Utensils size={18} className="text-primary" />
+                today's breakfast prep
+              </h2>
+              {todaysBreakfastItems.length > 0 ? (
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+                  unservedBreakfastCount > 0
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-green-105 text-green-700"
+                }`}>
+                  {unservedBreakfastCount > 0 ? `${unservedBreakfastCount} remaining` : "all served"}
                 </span>
-              )}
-            </h2>
-            <div className="space-y-2">
-              {activeIntercomThreads.length > 0 ? (
-                activeIntercomThreads.slice(0, 5).map((thread) => {
-                  const hasUnread = thread.unreadCount > 0;
-                  return (
-                    <button
-                      key={thread.roomId}
-                      type="button"
-                      onClick={() => navigate(`/intercom?room=${encodeURIComponent(thread.roomNumber)}`)}
-                      className={`flex min-h-[48px] w-full items-center justify-between gap-3 rounded-lg border px-3 text-left transition hover:bg-gray-50 ${
-                        hasUnread ? "border-green-300 bg-green-50/20 shadow-sm" : "border-gray-200"
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${hasUnread ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
-                          <span className="text-xs font-bold text-gray-900">Room {thread.roomNumber}</span>
-                          <span className="text-[10px] font-semibold text-gray-400">· {thread.guestName}</span>
-                        </div>
-                        {thread.lastMessage ? (
-                          <p className="truncate mt-0.5 text-[10px] text-gray-600 font-semibold leading-normal">
-                            <span className="font-bold text-gray-550">{thread.lastMessage.sender === "guest" ? "Guest: " : "Staff: "}</span>
-                            {thread.lastMessage.text}
-                          </p>
-                        ) : (
-                          <p className="mt-0.5 text-[10px] text-gray-400 italic">No messages yet</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {hasUnread && (
-                          <span className="rounded-full bg-green-500 px-2 py-0.5 text-[9px] font-bold text-white leading-none">
-                            {thread.unreadCount}
-                          </span>
-                        )}
-                        <ExternalLink size={12} className="text-gray-400" />
-                      </div>
-                    </button>
-                  );
-                })
               ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-center text-gray-400 rounded-lg bg-gray-50 border border-dashed border-gray-200">
-                  <MessageSquare size={24} className="text-gray-300 mb-1.5" />
-                  <p className="text-xs font-semibold text-gray-500">No active guest chats.</p>
-                </div>
+                <span className="text-xs font-bold text-gray-400">0</span>
               )}
             </div>
+
+            <div className="space-y-2">
+              {todaysBreakfastItems.length > 0 ? (
+                todaysBreakfastItems.map((item) => (
+                  <div
+                    key={`${item.bookingId}-${item.key}`}
+                    className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[1fr_auto] sm:items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="font-bold text-gray-900">Room {item.roomNumber}</span>
+                        <span className="truncate text-xs text-gray-600">· {item.guestName}</span>
+                      </div>
+                      <p className="mt-1 truncate text-xs font-semibold text-primary-dark">
+                        Order: {item.selection}
+                      </p>
+                      <p className="text-[10px] font-semibold text-gray-400">
+                        Guest {item.guestIndex} · {item.bookingRef}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleBreakfastServed(item.bookingId, item.key, item.served)}
+                      className={`inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg px-4 text-xs font-bold shadow-sm transition active:scale-95 ${
+                        item.served
+                          ? "border border-green-200 bg-green-50 text-green-700 hover:bg-green-100"
+                          : "bg-primary text-white hover:bg-primary-dark"
+                      }`}
+                    >
+                      {item.served ? (
+                        <>
+                          <Check size={12} />
+                          Served
+                        </>
+                      ) : (
+                        "Mark Served"
+                      )}
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs font-semibold text-gray-500">No breakfast orders today.</p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className={`rounded-card p-5 shadow-sm ring-1 ${
+          activeIntercomThreads.some(t => t.unreadCount > 0)
+            ? "border border-amber-200 bg-amber-50 ring-amber-100"
+            : "bg-white ring-gray-200"
+        }`}>
+          <h2 className="mb-3 flex items-center justify-between gap-2 text-lg font-heading text-gray-950 lowercase tracking-tight">
+            <span className="flex items-center gap-2">
+              <MessageSquare size={18} className="text-primary" />
+              active guest chats
+            </span>
+            {activeIntercomThreads.some(t => t.unreadCount > 0) && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                unread
+              </span>
+            )}
+          </h2>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {activeIntercomThreads.length > 0 ? (
+              activeIntercomThreads.slice(0, 6).map((thread) => {
+                const hasUnread = thread.unreadCount > 0;
+                return (
+                  <button
+                    key={thread.roomId}
+                    type="button"
+                    onClick={() => navigate(`/intercom?room=${encodeURIComponent(thread.roomNumber)}`)}
+                    className={`flex min-h-[48px] w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition hover:bg-white ${
+                      hasUnread ? "border-amber-200 bg-white/85 shadow-sm" : "border-gray-200 bg-white hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full ${hasUnread ? "bg-amber-500 animate-pulse" : "bg-gray-300"}`} />
+                        <span className="text-xs font-bold text-gray-900">Room {thread.roomNumber}</span>
+                        <span className="truncate text-[10px] font-semibold text-gray-400">· {thread.guestName}</span>
+                      </div>
+                      {thread.lastMessage ? (
+                        <p className="mt-0.5 truncate text-[10px] font-semibold leading-normal text-gray-600">
+                          <span className="font-bold text-gray-550">{thread.lastMessage.sender === "guest" ? "Guest: " : "Staff: "}</span>
+                          {thread.lastMessage.text}
+                        </p>
+                      ) : (
+                        <p className="mt-0.5 text-[10px] italic text-gray-400">No messages yet</p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {hasUnread && (
+                        <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[9px] font-bold leading-none text-white">
+                          {thread.unreadCount}
+                        </span>
+                      )}
+                      <ExternalLink size={12} className="text-gray-400" />
+                    </div>
+                  </button>
+                );
+              })
+            ) : (
+              <p className="rounded-lg bg-gray-50 px-4 py-3 text-xs font-semibold text-gray-500 md:col-span-2 xl:col-span-3">
+                No active guest chats.
+              </p>
+            )}
           </div>
         </section>
       </div>
@@ -764,3 +810,5 @@ export function DashboardPage() {
     </div>
   );
 }
+
+export default DashboardPage;
