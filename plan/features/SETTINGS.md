@@ -234,6 +234,13 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 - [ ] **Auto-population** — the admin editor's state is pre-populated from `DEFAULT_CORPORATE_PAGE_CONTENT` whenever the corresponding Firestore field is empty, so the admin sees the current text in the inputs (no need to retype). On first admin load, a one-time backfill in `AdminContext` writes any empty `corporate.*` TEXT field (9 fields: hero eyebrow/heading/subtext + rooms overview eyebrow/heading/description + retreat heading/description/ctaLabel) to Firestore so the public site locks to the same copy the deploy-time fallback provides. The backfill is gated by a `useRef` so it runs at most once per session, and it is idempotent — subsequent loads short-circuit because every field is already populated. **`corporate.heroPhotoUrl` is intentionally NOT backfilled** — the guest app's `pickString` falls back to the static `corporateHeroImage` in `data/homepage.ts` when the field is empty, so persisting the default URL would (a) undo the admin's Reset action on the next dashboard load, and (b) freeze the hero image to the URL that existed at first load, preventing future edits to `corporateHeroImage` from reaching the public site
 - [ ] Source: `settings/websiteContent.corporate.{perks[], roomsOverview{Eyebrow,Heading,Description}, retreat{Heading,Description,CtaLabel}}`
 
+**About Us page** (everything on `/about` other than the hero, which lives on the Branding tab)
+- [ ] **Mission statement** — text shown in the mission card.
+- [ ] **Vision statement** — text shown in the vision card.
+- [ ] **Hotel story** — long-form body copy shown in the story section. Blank lines split into paragraphs on the public page.
+- [ ] Empty fields fall back to `settings/hotelConfig.{missionStatement,visionStatement,hotelStory}` and then to the deploy-time safe defaults.
+- [ ] Source: `settings/websiteContent.about.{missionStatement,visionStatement,hotelStory}`
+
 **Our Rooms / Contact Us:**
 - [ ] Note: "Room content managed in Room Management. Contact details managed in Hotel Info."
 

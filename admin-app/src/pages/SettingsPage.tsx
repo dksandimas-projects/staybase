@@ -1260,6 +1260,16 @@ export function SettingsPage() {
     websiteContent.corporate?.retreatCtaLabel ?? ""
   );
 
+  const [aboutMissionStatement, setAboutMissionStatement] = useState<string>(
+    websiteContent.about?.missionStatement || hotelConfig.missionStatement || ""
+  );
+  const [aboutVisionStatement, setAboutVisionStatement] = useState<string>(
+    websiteContent.about?.visionStatement || hotelConfig.visionStatement || ""
+  );
+  const [aboutHotelStory, setAboutHotelStory] = useState<string>(
+    websiteContent.about?.hotelStory || hotelConfig.hotelStory || ""
+  );
+
   // Rooms Catalog, Contact, and Not Found page copy states
   const [roomsCatalogHeroEyebrow, setRoomsCatalogHeroEyebrow] = useState(websiteContent.roomsCatalog?.heroEyebrow ?? "");
   const [roomsCatalogHeroHeading, setRoomsCatalogHeroHeading] = useState(websiteContent.roomsCatalog?.heroHeading ?? "");
@@ -1461,6 +1471,9 @@ export function SettingsPage() {
     setCorporateRetreatCtaLabel(
       websiteContent.corporate?.retreatCtaLabel || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel
     );
+    setAboutMissionStatement(websiteContent.about?.missionStatement || hotelConfig.missionStatement || "");
+    setAboutVisionStatement(websiteContent.about?.visionStatement || hotelConfig.visionStatement || "");
+    setAboutHotelStory(websiteContent.about?.hotelStory || hotelConfig.hotelStory || "");
 
     // Sync Rooms Catalog, Contact, and Not Found page copy
     setRoomsCatalogHeroEyebrow(websiteContent.roomsCatalog?.heroEyebrow || "");
@@ -1553,6 +1566,12 @@ export function SettingsPage() {
         retreatHeading: corporateRetreatHeading,
         retreatDescription: corporateRetreatDescription,
         retreatCtaLabel: corporateRetreatCtaLabel
+      },
+      about: {
+        ...(websiteContent.about || {}),
+        missionStatement: aboutMissionStatement,
+        visionStatement: aboutVisionStatement,
+        hotelStory: aboutHotelStory
       }
     }));
   };
@@ -2985,6 +3004,55 @@ export function SettingsPage() {
                   defaultIcon="sparkles"
                   emptyItem={{ title: "", description: "", icon: "sparkles" }}
                 />
+              </div>
+
+              {/* About page — body copy below the hero. The hero
+                  itself is owned by the Branding tab; these fields
+                  drive the mission, vision, and story sections on
+                  `/about`. */}
+              <div className="space-y-6 rounded-card border border-gray-150 bg-gray-50/30 p-5">
+                <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  <Award size={12} /> About us page
+                </div>
+                <p className="text-[10px] text-gray-500 -mt-3">
+                  Editable body content for <code>/about</code>. The hero eyebrow, heading, subtext, and photo live in the{" "}
+                  <button type="button" onClick={() => setActiveTab("branding")} className="font-bold text-primary hover:underline">Branding</button>{" "}
+                  tab.
+                </p>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Mission statement
+                    <textarea
+                      value={aboutMissionStatement}
+                      onChange={(e) => setAboutMissionStatement(e.target.value)}
+                      rows={4}
+                      placeholder="Short mission copy shown in the first card."
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Vision statement
+                    <textarea
+                      value={aboutVisionStatement}
+                      onChange={(e) => setAboutVisionStatement(e.target.value)}
+                      rows={4}
+                      placeholder="Short vision copy shown in the second card."
+                      className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                </div>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  Hotel story
+                  <textarea
+                    value={aboutHotelStory}
+                    onChange={(e) => setAboutHotelStory(e.target.value)}
+                    rows={8}
+                    placeholder="Long-form story copy. Separate paragraphs with a blank line."
+                    className="w-full rounded border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                  />
+                </label>
               </div>
 
               {/* Corporate page — perks, rooms overview copy, and the
