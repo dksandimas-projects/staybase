@@ -334,7 +334,7 @@ describe("Website Content editors — list-shaped homepage content", () => {
     expect(settingsPageSrc).toMatch(/function\s+WebsiteContentSection/);
     expect(settingsPageSrc).toMatch(/aria-expanded=\{isOpen\}/);
     expect(settingsPageSrc).toMatch(/aria-controls=\{panelId\}/);
-    expect(settingsPageSrc).toMatch(/<WebsiteContentSection[\s\S]*?title="Homepage Section Headers"[\s\S]*?defaultOpen/);
+    expect(settingsPageSrc).not.toMatch(/<WebsiteContentSection[\s\S]*?defaultOpen/);
     for (const title of [
       "Homepage Amenities",
       "Featured Room Types",

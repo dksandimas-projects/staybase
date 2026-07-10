@@ -188614,6 +188614,35 @@ async function sendCorporateInquiryTrigger(inquiry) {
     corporateInquiryEmail(inquiry)
   );
 }
+function corporateInquiryConfirmationEmail(inquiry) {
+  const safeInquiry = {
+    companyName: inquiry.companyName || "Not provided",
+    contactPerson: inquiry.contactPerson || "Not provided",
+    numRooms: inquiry.numRooms || "Not provided",
+    preferredDates: inquiry.preferredDates || "Not provided"
+  };
+  return emailLayout({
+    preheader: `We received your corporate inquiry for ${safeInquiry.companyName}.`,
+    eyebrow: "Inquiry received",
+    title: "We received your corporate inquiry",
+    intro: `Dear ${escapeHtml(safeInquiry.contactPerson)}, thank you for your interest in <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. We have received your corporate booking inquiry and our team will get back to you soon.`,
+    body: `
+      ${card("Inquiry summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Company", safeInquiry.companyName)}
+        ${row("Rooms needed", safeInquiry.numRooms)}
+        ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
+      </table>`)}
+    `
+  });
+}
+async function sendCorporateInquiryConfirmationTrigger(inquiry) {
+  if (!inquiry.email) return;
+  await sendEmail(
+    inquiry.email,
+    `[${hotel_config_default.brandName}] We received your corporate inquiry`,
+    corporateInquiryConfirmationEmail(inquiry)
+  );
+}
 function contactInquiryEmail(inquiry) {
   return emailLayout({
     preheader: `Website contact from ${inquiry.name} \u2014 ${inquiry.subject}`,
@@ -188638,6 +188667,29 @@ async function sendContactInquiryTrigger(inquiry) {
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New contact: ${inquiry.subject || "Website message"}`,
     contactInquiryEmail(inquiry)
+  );
+}
+function contactConfirmationEmail(inquiry) {
+  return emailLayout({
+    preheader: `We received your message regarding: ${inquiry.subject || "your contact inquiry"}.`,
+    eyebrow: "Message received",
+    title: "We received your message",
+    intro: `Dear ${escapeHtml(inquiry.name)}, thank you for reaching out to <strong>${escapeHtml(hotel_config_default.brandName)}</strong>. We have received your message and our team will get back to you soon.`,
+    body: `
+      ${card("Message details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Name", inquiry.name)}
+        ${row("Subject", inquiry.subject)}
+      </table>`)}
+      ${callout("warm", "Your message", escapeHtml(inquiry.message))}
+    `
+  });
+}
+async function sendContactConfirmationTrigger(inquiry) {
+  if (!inquiry.email) return;
+  await sendEmail(
+    inquiry.email,
+    `[${hotel_config_default.brandName}] We received your message`,
+    contactConfirmationEmail(inquiry)
   );
 }
 function earlyCheckinRequestEmail(booking, request) {
@@ -191452,7 +191504,12 @@ async function handleCreateCorporateInquiry(req, res) {
     try {
       await sendCorporateInquiryTrigger({ id: docRef.id, ...inquiry });
     } catch (emailError) {
-      console.error("Corporate inquiry notification failed:", emailError);
+      console.error("Corporate inquiry notification failed");
+    }
+    try {
+      await sendCorporateInquiryConfirmationTrigger({ id: docRef.id, ...inquiry });
+    } catch (emailError) {
+      console.error("Corporate inquiry confirmation failed");
     }
     return res.status(200).json({
       success: true,
@@ -191795,7 +191852,12 @@ async function handleCreateContactInquiry(req, res) {
     try {
       await sendContactInquiryTrigger({ id: docRef.id, ...inquiry });
     } catch (emailError) {
-      console.error("Contact inquiry notification failed:", emailError);
+      console.error("Contact inquiry notification failed");
+    }
+    try {
+      await sendContactConfirmationTrigger({ id: docRef.id, ...inquiry });
+    } catch (emailError) {
+      console.error("Contact inquiry confirmation failed");
     }
     return res.status(200).json({
       success: true,

@@ -480,6 +480,38 @@ export async function sendCorporateInquiryTrigger(inquiry: any) {
   );
 }
 
+function corporateInquiryConfirmationEmail(inquiry: any) {
+  const safeInquiry = {
+    companyName: inquiry.companyName || "Not provided",
+    contactPerson: inquiry.contactPerson || "Not provided",
+    numRooms: inquiry.numRooms || "Not provided",
+    preferredDates: inquiry.preferredDates || "Not provided"
+  };
+
+  return emailLayout({
+    preheader: `We received your corporate inquiry for ${safeInquiry.companyName}.`,
+    eyebrow: "Inquiry received",
+    title: "We received your corporate inquiry",
+    intro: `Dear ${escapeHtml(safeInquiry.contactPerson)}, thank you for your interest in <strong>${escapeHtml(config.brandName)}</strong>. We have received your corporate booking inquiry and our team will get back to you soon.`,
+    body: `
+      ${card("Inquiry summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Company", safeInquiry.companyName)}
+        ${row("Rooms needed", safeInquiry.numRooms)}
+        ${row("Preferred dates", typeof safeInquiry.preferredDates === "string" ? safeInquiry.preferredDates : JSON.stringify(safeInquiry.preferredDates))}
+      </table>`)}
+    `
+  });
+}
+
+export async function sendCorporateInquiryConfirmationTrigger(inquiry: any) {
+  if (!inquiry.email) return;
+  await sendEmail(
+    inquiry.email,
+    `[${config.brandName}] We received your corporate inquiry`,
+    corporateInquiryConfirmationEmail(inquiry)
+  );
+}
+
 function contactInquiryEmail(inquiry: any) {
   return emailLayout({
     preheader: `Website contact from ${inquiry.name} — ${inquiry.subject}`,
@@ -505,6 +537,31 @@ export async function sendContactInquiryTrigger(inquiry: any) {
     ADMIN_EMAIL,
     `[${config.brandName}] New contact: ${inquiry.subject || "Website message"}`,
     contactInquiryEmail(inquiry)
+  );
+}
+
+function contactConfirmationEmail(inquiry: any) {
+  return emailLayout({
+    preheader: `We received your message regarding: ${inquiry.subject || "your contact inquiry"}.`,
+    eyebrow: "Message received",
+    title: "We received your message",
+    intro: `Dear ${escapeHtml(inquiry.name)}, thank you for reaching out to <strong>${escapeHtml(config.brandName)}</strong>. We have received your message and our team will get back to you soon.`,
+    body: `
+      ${card("Message details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Name", inquiry.name)}
+        ${row("Subject", inquiry.subject)}
+      </table>`)}
+      ${callout("warm", "Your message", escapeHtml(inquiry.message))}
+    `
+  });
+}
+
+export async function sendContactConfirmationTrigger(inquiry: any) {
+  if (!inquiry.email) return;
+  await sendEmail(
+    inquiry.email,
+    `[${config.brandName}] We received your message`,
+    contactConfirmationEmail(inquiry)
   );
 }
 
