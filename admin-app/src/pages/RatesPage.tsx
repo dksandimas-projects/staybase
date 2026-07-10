@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAdmin, Voucher, CorporateCode } from "../context/AdminContext";
-import { getSeasonalRateForNight, isWeekendNight } from "@spark-inn/shared";
+import { getSeasonalRateForNight, isWeekendNight, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import type { SeasonalRateOverride } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
@@ -721,7 +721,7 @@ export function RatesPage() {
     e.preventDefault();
     await updateSettings("breakfastConfig", {
       ...breakfastConfig,
-      ratePerPersonPerNight: parseFloat(bfRate) || 300
+      ratePerPersonPerNight: parseFloat(bfRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
     });
     setBfRateDirty(false);
   };
