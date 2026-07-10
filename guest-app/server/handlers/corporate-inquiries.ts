@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
-import { sendCorporateInquiryTrigger, sendBookingTrigger } from "./email";
+import { sendCorporateInquiryTrigger, sendBookingTrigger, sendCorporateInquiryConfirmationTrigger } from "./email";
 import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
@@ -61,7 +61,13 @@ export async function handleCreateCorporateInquiry(req: any, res: any) {
     try {
       await sendCorporateInquiryTrigger({ id: docRef.id, ...inquiry });
     } catch (emailError) {
-      console.error("Corporate inquiry notification failed:", emailError);
+      console.error("Corporate inquiry notification failed");
+    }
+
+    try {
+      await sendCorporateInquiryConfirmationTrigger({ id: docRef.id, ...inquiry });
+    } catch (emailError) {
+      console.error("Corporate inquiry confirmation failed");
     }
 
     return res.status(200).json({

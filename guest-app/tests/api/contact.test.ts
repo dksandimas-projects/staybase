@@ -18,11 +18,11 @@ const { mockSendTrigger, mockSendConfirmationTrigger } = vi.hoisted(() => ({
 }));
 
 vi.mock("../../server/handlers/email", () => ({
-  sendCorporateInquiryTrigger: mockSendTrigger,
-  sendCorporateInquiryConfirmationTrigger: mockSendConfirmationTrigger
+  sendContactInquiryTrigger: mockSendTrigger,
+  sendContactConfirmationTrigger: mockSendConfirmationTrigger
 }));
 
-import { handleCreateCorporateInquiry } from "../../server/handlers/corporate-inquiries";
+import { handleCreateContactInquiry } from "../../server/handlers/contact";
 
 const mockResponse = () => {
   const res: any = {};
@@ -32,68 +32,67 @@ const mockResponse = () => {
 };
 
 const validBody = {
-  companyName: "Acme Corporation",
-  contactPerson: "Maria Santos",
-  email: "maria@acme.test",
-  phone: "+63 917 000 0000",
-  numRooms: "5",
-  preferredDates: "October 2026",
-  specialRequirements: "Needs meeting room access.",
+  name: "John Doe",
+  email: "john.doe@example.com",
+  subject: "Question about pool access",
+  message: "Hi, is the pool open during the rainy season? Thanks!",
   _hp: "",
   turnstileToken: "mock_token"
 };
 
-describe("/api/corporate/inquiry handler", () => {
+describe("/api/contact/inquiry handler", () => {
   beforeEach(() => {
     mockAdd.mockReset();
     mockSendTrigger.mockClear();
     mockSendConfirmationTrigger.mockClear();
   });
 
-  test("creates a corporate inquiry with normalized fields", async () => {
-    mockAdd.mockResolvedValueOnce({ id: "inq_123" });
+  test("creates a contact inquiry with normalized fields and triggers emails", async () => {
+    mockAdd.mockResolvedValueOnce({ id: "con_123" });
     const req = { method: "POST", body: validBody };
     const res = mockResponse();
 
-    await handleCreateCorporateInquiry(req, res);
+    await handleCreateContactInquiry(req, res);
 
     expect(mockAdd).toHaveBeenCalledWith(expect.objectContaining({
-      companyName: "Acme Corporation",
-      contactPerson: "Maria Santos",
-      email: "maria@acme.test",
-      phone: "+63 917 000 0000",
-      numRooms: 5,
-      preferredDates: "October 2026",
-      specialRequirements: "Needs meeting room access.",
+      name: "John Doe",
+      email: "john.doe@example.com",
+      subject: "Question about pool access",
+      message: "Hi, is the pool open during the rainy season? Thanks!",
       status: "new",
-      handler: "",
+      isRead: false,
+      handledBy: "",
       notes: [],
-      accessCodeId: ""
+      source: "contact-page"
     }));
     expect(mockAdd.mock.calls[0][0]).not.toHaveProperty("_hp");
     expect(mockAdd.mock.calls[0][0]).not.toHaveProperty("turnstileToken");
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { inquiryId: "inq_123" }
+      data: { inquiryId: "con_123" }
     });
-    expect(mockSendTrigger).toHaveBeenCalled();
+
+    expect(mockSendTrigger).toHaveBeenCalledWith(expect.objectContaining({
+      id: "con_123",
+      subject: "Question about pool access"
+    }));
     expect(mockSendConfirmationTrigger).toHaveBeenCalledWith(expect.objectContaining({
-      id: "inq_123",
-      email: "maria@acme.test"
+      id: "con_123",
+      email: "john.doe@example.com"
     }));
   });
 
-  test("rejects invalid inquiry fields", async () => {
-    const req = { method: "POST", body: { ...validBody, email: "not-an-email" } };
+  test("rejects invalid contact fields", async () => {
+    const req = { method: "POST", body: { ...validBody, email: "invalid-email" } };
     const res = mockResponse();
 
-    await handleCreateCorporateInquiry(req, res);
+    await handleCreateContactInquiry(req, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: "Please check the inquiry form and try again."
+      error: "Please share a valid email."
     });
   });
 
@@ -101,25 +100,25 @@ describe("/api/corporate/inquiry handler", () => {
     const req = { method: "GET", body: {} };
     const res = mockResponse();
 
-    await handleCreateCorporateInquiry(req, res);
+    await handleCreateContactInquiry(req, res);
 
     expect(res.status).toHaveBeenCalledWith(405);
   });
 
   test("success response is returned even if submitter confirmation email fails", async () => {
-    mockAdd.mockResolvedValueOnce({ id: "inq_456" });
+    mockAdd.mockResolvedValueOnce({ id: "con_456" });
     mockSendConfirmationTrigger.mockRejectedValueOnce(new Error("Email delivery failed"));
     const req = { method: "POST", body: validBody };
     const res = mockResponse();
 
-    await handleCreateCorporateInquiry(req, res);
+    await handleCreateContactInquiry(req, res);
 
     expect(mockSendTrigger).toHaveBeenCalled();
     expect(mockSendConfirmationTrigger).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { inquiryId: "inq_456" }
+      data: { inquiryId: "con_456" }
     });
   });
 });
