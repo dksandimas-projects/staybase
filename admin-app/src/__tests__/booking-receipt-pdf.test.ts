@@ -59,6 +59,7 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(bookingsPageSrc).toMatch(/config\.logos\.navbar/);
       expect(funcBody).toMatch(/drawPdfBrandHeader\(pdf/);
       expect(funcBody).toMatch(/Booking Confirmation Receipt/);
+      expect(funcBody).toMatch(/printLight:\s*true/);
     });
 
     it("renders booking ref + generated timestamp", () => {
@@ -73,31 +74,33 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/Name:\s*\$\{b\.guestName\}/);
-      expect(funcBody).toMatch(/Email:\s*\$\{b\.guestEmail\}/);
-      expect(funcBody).toMatch(/Phone:\s*\$\{b\.guestPhone\}/);
+      expect(funcBody).toMatch(/\{ label:\s*["']Name["'],\s*value:\s*b\.guestName \}/);
+      expect(funcBody).toMatch(/\{ label:\s*["']Email["'],\s*value:\s*b\.guestEmail \}/);
+      expect(funcBody).toMatch(/\{ label:\s*["']Phone["'],\s*value:\s*b\.guestPhone \}/);
     });
 
     it("renders stay info: room, dates, nights, guests, rate", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/Room:\s*\$\{b\.roomNumber\}\s*\(\$\{b\.roomType\}\)/);
-      expect(funcBody).toMatch(/Check-in:\s*\$\{b\.checkIn\}/);
-      expect(funcBody).toMatch(/Check-out:\s*\$\{b\.checkOut\}/);
-      expect(funcBody).toMatch(/Nights:\s*\$\{b\.numNights\}/);
-      expect(funcBody).toMatch(/Rate per night:/);
+      expect(funcBody).toMatch(/\{ label:\s*["']Room["'],\s*value:\s*`\$\{b\.roomNumber\}\s*\(\$\{b\.roomType\}\)` \}/);
+      expect(funcBody).toMatch(/\{ label:\s*["']Dates["'],\s*value:\s*`\$\{b\.checkIn\}\s*to\s*\$\{b\.checkOut\}` \}/);
+      expect(funcBody).toMatch(/\{ label:\s*["']Stay["'],\s*value:\s*`\$\{b\.numNights\}/);
+      expect(funcBody).toMatch(/formatAmount\(b\.ratePerNight\)\}\s*\/ night/);
+      expect(funcBody).toMatch(/drawInfoCard\("Guest"/);
+      expect(funcBody).toMatch(/drawInfoCard\("Stay"/);
     });
 
     it("renders pricing breakdown: subtotal + discount + voucher + points + total", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/Subtotal\s*\(/);
+      expect(funcBody).toMatch(/Room subtotal:/);
       expect(funcBody).toMatch(/Senior Citizen Discount|PWD Discount/);
       expect(funcBody).toMatch(/Voucher\s*\(\$\{b\.voucherCode\}\)/);
       expect(funcBody).toMatch(/\$\{b\.pointsRedeemed\}\s*pts redeemed/);
-      expect(funcBody).toMatch(/pdf\.text\(\s*["']Total["']/);
+      expect(funcBody).toMatch(/pdf\.text\(\s*["']Booking Total["']/);
+      expect(funcBody).toMatch(/drawAmountRow/);
     });
 
     it("renders payments-collected section when payments exist", () => {
@@ -105,16 +108,25 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
       expect(funcBody).toMatch(/Payments Collected/);
-      expect(funcBody).toMatch(/Total Collected/);
-      expect(funcBody).toMatch(/Outstanding Balance/);
+      expect(funcBody).toMatch(/Total collected/);
+      expect(funcBody).toMatch(/Balance due/);
     });
 
     it("falls back to 'Payment Method + Amount Due' when no payments", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/Payment Method:/);
-      expect(funcBody).toMatch(/Amount Due/);
+      expect(funcBody).toMatch(/Expected payment method:/);
+      expect(funcBody).toMatch(/Amount due at property/);
+    });
+
+    it("renders an easy-to-scan amount summary at the top", () => {
+      const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
+      const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
+      const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
+      expect(funcBody).toMatch(/Amount to collect/);
+      expect(funcBody).toMatch(/selectedBookingPayments\.reduce/);
+      expect(funcBody).toMatch(/Booking \$\{b\.bookingRef\} • Generated/);
     });
 
     it("renders the BIR-receipt disclaimer footer", () => {

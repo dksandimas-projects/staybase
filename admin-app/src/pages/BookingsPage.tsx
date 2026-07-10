@@ -213,6 +213,7 @@ function drawPdfBrandHeader(
     subtitle?: string;
     meta?: string;
     brandRgb: [number, number, number];
+    printLight?: boolean;
   }
 ) {
   const pageW = 210;
@@ -222,7 +223,7 @@ function drawPdfBrandHeader(
   const headerH = 32;
   const sidebarRgb = hexToRgb(config.colors.sidebar);
 
-  pdf.setFillColor(...sidebarRgb);
+  pdf.setFillColor(...(options.printLight ? [255, 255, 255] as [number, number, number] : sidebarRgb));
   pdf.rect(0, 0, pageW, headerH, "F");
   pdf.setFillColor(...options.brandRgb);
   pdf.rect(0, headerH - 2, pageW, 2, "F");
@@ -232,17 +233,17 @@ function drawPdfBrandHeader(
   } else {
     setPdfFont(pdf, "Inter");
     pdf.setFontSize(13);
-    pdf.setTextColor(255, 255, 255);
+    pdf.setTextColor(...(options.printLight ? [30, 30, 30] as [number, number, number] : [255, 255, 255] as [number, number, number]));
     pdf.text(config.brandName, marginL, headerY + 8);
   }
 
   setPdfFont(pdf, "Inter");
   pdf.setFontSize(16);
-  pdf.setTextColor(255, 255, 255);
+  pdf.setTextColor(...(options.printLight ? [30, 30, 30] as [number, number, number] : [255, 255, 255] as [number, number, number]));
   pdf.text(options.title, marginR, headerY + 3, { align: "right" });
 
   pdf.setFontSize(8);
-  pdf.setTextColor(220, 226, 235);
+  pdf.setTextColor(...(options.printLight ? [70, 70, 70] as [number, number, number] : [220, 226, 235] as [number, number, number]));
   if (options.subtitle) {
     pdf.text(options.subtitle, marginR, headerY + 9, { align: "right" });
   }
@@ -1008,7 +1009,8 @@ export function BookingsPage() {
       title: "Guest Registration Form",
       subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
       meta: generatedAt,
-      brandRgb
+      brandRgb,
+      printLight: true
     });
 
     const checkNewPage = (needed: number) => {
@@ -1019,7 +1021,8 @@ export function BookingsPage() {
           title: "Guest Registration Form",
           subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
           meta: generatedAt,
-          brandRgb
+          brandRgb,
+          printLight: true
         });
       }
     };
@@ -1204,42 +1207,82 @@ export function BookingsPage() {
         pdf.text("No active silog items configured.", 20, y);
         y += 6;
       } else {
-        const colW = Math.min(38, (pageW - 40) / (stayDates.length + 1));
         const startX = 20;
-        const rowH = 10;
+        const tableW = marginR - startX;
+        const guestColW = 35;
+        const dateColW = Math.max(28, (tableW - guestColW) / Math.max(stayDates.length, 1));
+        const tableWActual = guestColW + stayDates.length * dateColW;
+        const headerH = 10;
+        const optionGap = 4.2;
+        const rowH = Math.max(12, activeSilogItems.length * optionGap + 5);
 
-        // Header row
-        pdf.setFillColor(...brandRgb);
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(8);
-        pdf.rect(startX, y, colW, rowH, "F");
-        pdf.text("Guest", startX + 2, y + 6);
+        const fitCellText = (text: string, maxWidth: number) => {
+          let next = text;
+          while (next.length > 4 && pdf.getTextWidth(next) > maxWidth) {
+            next = `${next.slice(0, -2).trim()}…`;
+          }
+          return next;
+        };
 
-        let cx = startX + colW;
-        for (const date of stayDates) {
-          pdf.rect(cx, y, colW, rowH, "F");
-          const d = new Date(date);
-          const shortDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-          pdf.text(shortDate, cx + 2, y + 6);
-          cx += colW;
-        }
-        y += rowH;
+        const drawBreakfastHeader = () => {
+          pdf.setFillColor(255, 255, 255);
+          pdf.setDrawColor(...brandRgb);
+          pdf.setLineWidth(0.35);
+          pdf.rect(startX, y, tableWActual, headerH, "S");
+          pdf.setTextColor(40, 40, 40);
+          pdf.setFontSize(8);
+          pdf.text("Guest", startX + 2, y + 6);
+
+          let cx = startX + guestColW;
+          for (const date of stayDates) {
+            pdf.line(cx, y, cx, y + headerH);
+            const d = new Date(date);
+            const shortDate = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            pdf.text(shortDate, cx + 2, y + 6);
+            cx += dateColW;
+          }
+          y += headerH;
+        };
+
+        checkNewPage(headerH + Math.min(b.numGuests, 2) * rowH + 18);
+        drawBreakfastHeader();
 
         // Guest rows with checkbox options
         for (let g = 0; g < b.numGuests; g++) {
-          checkNewPage(rowH + activeSilogItems.length * 4 + 5);
+          if (y + rowH + 16 > 280) {
+            pdf.addPage();
+            y = drawPdfBrandHeader(pdf, {
+              logoDataUrl,
+              title: "Guest Registration Form",
+              subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
+              meta: generatedAt,
+              brandRgb,
+              printLight: true
+            });
+            drawPdfSectionTitle(pdf, "Breakfast Silog Selections", marginL, y, brandRgb);
+            y += 5;
+            pdf.setFontSize(8);
+            pdf.setTextColor(120, 120, 120);
+            pdf.text("Circle or check your choice for each guest per day.", marginL, y);
+            y += 7;
+            drawBreakfastHeader();
+          }
 
           if (g % 2 === 0) {
             pdf.setFillColor(248, 248, 248);
-            pdf.rect(startX, y, colW + stayDates.length * colW, rowH, "F");
+            pdf.rect(startX, y, tableWActual, rowH, "F");
           }
+          pdf.setDrawColor(225, 225, 225);
+          pdf.setLineWidth(0.15);
+          pdf.rect(startX, y, tableWActual, rowH, "S");
 
           pdf.setFontSize(9);
           pdf.setTextColor(50, 50, 50);
           pdf.text(`Guest ${g + 1}`, startX + 2, y + 6);
 
-          cx = startX + colW;
+          let cx = startX + guestColW;
           for (const date of stayDates) {
+            pdf.line(cx, y, cx, y + rowH);
             const key = `${date}-guest-${g + 1}`;
             const existingSelection = b.breakfastSelections?.[key];
 
@@ -1247,10 +1290,10 @@ export function BookingsPage() {
               // Already selected — show the choice with a checkmark
               pdf.setFontSize(8);
               pdf.setTextColor(30, 30, 30);
-              pdf.text(`✓ ${existingSelection}`, cx + 2, y + 6);
+              pdf.text(fitCellText(`✓ ${existingSelection}`, dateColW - 4), cx + 2, y + 6);
             } else {
               // Not selected — show checkbox options
-              let optionY = y + 4;
+              let optionY = y + 5;
               for (let si = 0; si < activeSilogItems.length; si++) {
                 const item = activeSilogItems[si];
                 pdf.setDrawColor(150, 150, 150);
@@ -1258,11 +1301,11 @@ export function BookingsPage() {
                 pdf.rect(cx + 2, optionY - 3, 3, 3);
                 pdf.setFontSize(7);
                 pdf.setTextColor(100, 100, 100);
-                pdf.text(item.name, cx + 6, optionY);
-                optionY += 3.5;
+                pdf.text(fitCellText(item.name, dateColW - 9), cx + 6, optionY);
+                optionY += optionGap;
               }
             }
-            cx += colW;
+            cx += dateColW;
           }
           y += rowH;
         }
@@ -1290,7 +1333,8 @@ export function BookingsPage() {
         title: "Guest Registration Form",
         subtitle: `${b.bookingRef} | Room ${b.roomNumber}`,
         meta: generatedAt,
-        brandRgb
+        brandRgb,
+        printLight: true
       });
     }
     drawPdfFooter(
@@ -1326,8 +1370,13 @@ export function BookingsPage() {
     const marginL = 15;
     const marginR = pageW - 15;
     const labelColX = 20;
-    const valueColX = 70;
     let y = 15;
+
+    const generatedAt = new Date().toLocaleString("en-PH", {
+      timeZone: config.timezone || "Asia/Manila",
+      dateStyle: "medium",
+      timeStyle: "short"
+    });
 
     const checkNewPage = (needed: number) => {
       if (y + needed > 280) {
@@ -1337,7 +1386,8 @@ export function BookingsPage() {
           title: "Booking Confirmation Receipt",
           subtitle: `Booking Reference: ${b.bookingRef}`,
           meta: `Generated: ${generatedAt}`,
-          brandRgb
+          brandRgb,
+          printLight: true
         });
       }
     };
@@ -1345,59 +1395,94 @@ export function BookingsPage() {
     const formatAmount = (value: number) =>
       formatPrice(value).replace(/\u00A0/g, " ");
 
+    const formatPaymentMethod = (method?: string) =>
+      method
+        ? method
+            .split("-")
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ")
+        : "—";
+
+    const drawInfoCard = (
+      title: string,
+      rows: { label: string; value: string }[],
+      x: number,
+      cardY: number,
+      width: number
+    ) => {
+      const cardH = 12 + rows.length * 6;
+      pdf.setFillColor(248, 250, 252);
+      pdf.roundedRect(x, cardY, width, cardH, 2, 2, "F");
+      pdf.setFontSize(8);
+      pdf.setTextColor(120, 120, 120);
+      pdf.text(title, x + 4, cardY + 6);
+      pdf.setFontSize(9);
+      rows.forEach((row, index) => {
+        const rowY = cardY + 12 + index * 6;
+        pdf.setTextColor(110, 110, 110);
+        pdf.text(row.label, x + 4, rowY);
+        pdf.setTextColor(45, 45, 45);
+        const wrapped = pdf.splitTextToSize(row.value, width - 36);
+        pdf.text(wrapped[0] || "—", x + width - 4, rowY, { align: "right" });
+      });
+      return cardH;
+    };
+
+    const drawAmountRow = (label: string, amount: string, opts: { muted?: boolean; danger?: boolean; bold?: boolean } = {}) => {
+      pdf.setFontSize(opts.bold ? 10 : 9);
+      pdf.setTextColor(opts.danger ? 190 : opts.muted ? 110 : 45, opts.danger ? 55 : opts.muted ? 110 : 45, opts.danger ? 55 : opts.muted ? 110 : 45);
+      pdf.text(label, labelColX, y);
+      pdf.text(amount, marginR, y, { align: "right" });
+      y += 5.8;
+    };
+
     // ── Header ──
-    const generatedAt = new Date().toLocaleString("en-PH", {
-      timeZone: config.timezone || "Asia/Manila",
-      dateStyle: "medium",
-      timeStyle: "short"
-    });
     y = drawPdfBrandHeader(pdf, {
       logoDataUrl,
       title: "Booking Confirmation Receipt",
       subtitle: `Booking Reference: ${b.bookingRef}`,
       meta: `Generated: ${generatedAt}`,
-      brandRgb
+      brandRgb,
+      printLight: true
     });
 
-    pdf.setFillColor(248, 250, 252);
-    pdf.roundedRect(marginL, y - 4, marginR - marginL, 13, 2, 2, "F");
+    pdf.setFillColor(255, 247, 237);
+    pdf.roundedRect(marginL, y - 4, marginR - marginL, 16, 2, 2, "F");
     pdf.setFontSize(9);
-    pdf.setTextColor(80, 80, 80);
-    pdf.text(`Booking Reference: ${b.bookingRef}`, marginL + 5, y + 1);
-    pdf.text(`Generated: ${generatedAt}`, marginR - 5, y + 1, { align: "right" });
-    y += 8;
+    pdf.setTextColor(...brandRgb);
+    pdf.text("Amount to collect", marginL + 5, y + 1);
+    pdf.setFontSize(14);
+    pdf.text(
+      formatAmount(Math.max(0, b.totalPrice - selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0))),
+      marginR - 5,
+      y + 2,
+      { align: "right" }
+    );
+    pdf.setFontSize(8);
+    pdf.setTextColor(90, 90, 90);
+    pdf.text(`Booking ${b.bookingRef} • Generated ${generatedAt}`, marginL + 5, y + 8);
+    y += 18;
 
     // ── Guest Information ──
-    drawPdfSectionTitle(pdf, "Guest Information", marginL, y, brandRgb);
-    y += 6;
-
-    pdf.setFontSize(10);
-    pdf.setTextColor(50, 50, 50);
-    pdf.text(`Name: ${b.guestName}`, labelColX, y); y += 5.5;
-    pdf.text(`Email: ${b.guestEmail}`, labelColX, y); y += 5.5;
-    pdf.text(`Phone: ${b.guestPhone}`, labelColX, y); y += 8;
-
-    // ── Stay Information ──
-    drawPdfSectionTitle(pdf, "Stay Information", marginL, y, brandRgb);
-    y += 6;
-
-    pdf.setFontSize(10);
-    pdf.setTextColor(50, 50, 50);
-    pdf.text(`Room: ${b.roomNumber} (${b.roomType})`, labelColX, y); y += 5.5;
-    pdf.text(`Check-in: ${b.checkIn}`, labelColX, y); y += 5.5;
-    pdf.text(`Check-out: ${b.checkOut}`, labelColX, y); y += 5.5;
-    pdf.text(`Nights: ${b.numNights}    Guests: ${b.numGuests}`, labelColX, y); y += 5.5;
-    pdf.text(`Rate per night: ${formatAmount(b.ratePerNight)}`, labelColX, y); y += 5.5;
-
+    const cardGap = 6;
+    const cardW = (marginR - marginL - cardGap) / 2;
+    const guestCardH = drawInfoCard("Guest", [
+      { label: "Name", value: b.guestName },
+      { label: "Email", value: b.guestEmail },
+      { label: "Phone", value: b.guestPhone }
+    ], marginL, y, cardW);
+    const stayRows = [
+      { label: "Room", value: `${b.roomNumber} (${b.roomType})` },
+      { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
+      { label: "Stay", value: `${b.numNights} night${b.numNights === 1 ? "" : "s"} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}` },
+      { label: "Rate", value: `${formatAmount(b.ratePerNight)} / night` }
+    ];
     if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
-      pdf.text(
-        `Includes breakfast: ${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night`,
-        labelColX,
-        y
-      );
-      y += 5.5;
+      stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
     }
-    y += 2;
+    const stayCardH = drawInfoCard("Stay", stayRows, marginL + cardW + cardGap, y, cardW);
+    y += Math.max(guestCardH, stayCardH) + 10;
 
     // ── Pricing Breakdown ──
     checkNewPage(60);
@@ -1409,27 +1494,22 @@ export function BookingsPage() {
     if (b.rateBreakdown?.roomLines?.length) {
       b.rateBreakdown.roomLines.forEach((line) => {
         checkNewPage(6);
-        pdf.text(`${line.label} (${line.nights} x ${formatAmount(line.nightlyRate)})`, labelColX, y);
-        pdf.text(formatAmount(line.subtotal), marginR, y, { align: "right" });
-        y += 5.5;
+        drawAmountRow(`${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
       });
       b.rateBreakdown.addOns.forEach((line) => {
         checkNewPage(6);
-        pdf.text(line.label, labelColX, y);
-        pdf.text(formatAmount(line.amount), marginR, y, { align: "right" });
-        y += 5.5;
+        drawAmountRow(line.label, formatAmount(line.amount));
       });
       b.rateBreakdown.deductions.forEach((line) => {
         checkNewPage(6);
-        pdf.text(line.label, labelColX, y);
-        pdf.text(`-${formatAmount(line.amount)}`, marginR, y, { align: "right" });
-        y += 5.5;
+        drawAmountRow(line.label, `-${formatAmount(line.amount)}`, { muted: true });
       });
     } else {
       const subtotal = b.ratePerNight * b.numNights;
-      pdf.text(`Subtotal (${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)})`, labelColX, y);
-      pdf.text(formatAmount(subtotal), marginR, y, { align: "right" });
-      y += 5.5;
+      drawAmountRow(
+        `Room subtotal: ${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)}`,
+        formatAmount(subtotal)
+      );
 
       if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
         const discountLabel = b.discountType === "senior"
@@ -1442,21 +1522,15 @@ export function BookingsPage() {
           0,
           Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
         );
-        pdf.text(`${discountLabel} (${b.discountPct}%)`, labelColX, y);
-        pdf.text(`-${formatAmount(discountAmount)}`, marginR, y, { align: "right" });
-        y += 5.5;
+        drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
       }
 
       if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
-        pdf.text(`Voucher (${b.voucherCode})`, labelColX, y);
-        pdf.text(`-${formatAmount(b.voucherDiscount)}`, marginR, y, { align: "right" });
-        y += 5.5;
+        drawAmountRow(`Voucher (${b.voucherCode})`, `-${formatAmount(b.voucherDiscount)}`, { muted: true });
       }
 
       if (b.pointsRedeemed && b.pointsRedeemed > 0) {
-        pdf.text(`Spark Rewards: ${b.pointsRedeemed} pts redeemed`, labelColX, y);
-        pdf.text(`-${formatAmount(b.pointsRedeemedValue || 0)}`, marginR, y, { align: "right" });
-        y += 5.5;
+        drawAmountRow(`Spark Rewards: ${b.pointsRedeemed} pts redeemed`, `-${formatAmount(b.pointsRedeemedValue || 0)}`, { muted: true });
       }
     }
 
@@ -1468,7 +1542,7 @@ export function BookingsPage() {
 
     pdf.setFontSize(12);
     pdf.setTextColor(...brandRgb);
-    pdf.text("Total", labelColX, y);
+    pdf.text("Booking Total", labelColX, y);
     pdf.text(formatAmount(b.totalPrice), marginR, y, { align: "right" });
     y += 11;
 
@@ -1499,7 +1573,7 @@ export function BookingsPage() {
       pdf.setFontSize(9);
       pdf.setTextColor(80, 80, 80);
       pdf.text("Date", labelColX, y);
-      pdf.text("Method", labelColX + 40, y);
+      pdf.text("Method", labelColX + 42, y);
       pdf.text("Amount", marginR, y, { align: "right" });
       y += 2;
       pdf.setDrawColor(220, 220, 220);
@@ -1521,7 +1595,7 @@ export function BookingsPage() {
             })
           : "—";
         pdf.text(recordedDate, labelColX, y);
-        pdf.text(pay.method || "—", labelColX + 40, y);
+        pdf.text(formatPaymentMethod(pay.method), labelColX + 42, y);
         pdf.text(formatAmount(pay.amount), marginR, y, { align: "right" });
         paymentsTotal += pay.amount;
         y += 5;
@@ -1533,17 +1607,13 @@ export function BookingsPage() {
       pdf.line(marginL, y, marginR, y);
       y += 5;
 
-      pdf.setFontSize(10);
-      pdf.setTextColor(50, 50, 50);
-      pdf.text("Total Collected", labelColX, y);
-      pdf.text(formatAmount(paymentsTotal), marginR, y, { align: "right" });
-      y += 5;
+      drawAmountRow("Total collected", formatAmount(paymentsTotal), { bold: true });
 
       const balance = b.totalPrice - paymentsTotal;
       pdf.setFontSize(11);
       if (balance <= 0) {
         pdf.setTextColor(34, 139, 34);
-        pdf.text("Outstanding Balance", labelColX, y);
+        pdf.text("Balance due", labelColX, y);
         pdf.text(formatAmount(0), marginR, y, { align: "right" });
         y += 6;
         pdf.setFontSize(9);
@@ -1551,7 +1621,7 @@ export function BookingsPage() {
         pdf.text("Fully settled. Thank you.", labelColX, y);
       } else {
         pdf.setTextColor(200, 60, 60);
-        pdf.text("Outstanding Balance", labelColX, y);
+        pdf.text("Balance due", labelColX, y);
         pdf.text(formatAmount(balance), marginR, y, { align: "right" });
       }
       y += 8;
@@ -1559,14 +1629,12 @@ export function BookingsPage() {
       // No payments yet — show payment method + amount due
       pdf.setFontSize(10);
       pdf.setTextColor(50, 50, 50);
-      const methodLabel = b.paymentMethod
-        ? b.paymentMethod.charAt(0).toUpperCase() + b.paymentMethod.slice(1)
-        : "—";
-      pdf.text(`Payment Method: ${methodLabel}`, labelColX, y);
+      const methodLabel = formatPaymentMethod(b.paymentMethod);
+      pdf.text(`Expected payment method: ${methodLabel}`, labelColX, y);
       y += 5.5;
       pdf.setFontSize(11);
       pdf.setTextColor(200, 60, 60);
-      pdf.text("Amount Due", labelColX, y);
+      pdf.text("Amount due at property", labelColX, y);
       pdf.text(formatAmount(b.totalPrice), marginR, y, { align: "right" });
       y += 8;
     }
@@ -1580,7 +1648,8 @@ export function BookingsPage() {
         title: "Booking Confirmation Receipt",
         subtitle: `Booking Reference: ${b.bookingRef}`,
         meta: `Generated: ${generatedAt}`,
-        brandRgb
+        brandRgb,
+        printLight: true
       });
     }
     drawPdfFooter(
