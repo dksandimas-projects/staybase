@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { getManilaDateInfo } from "@spark-inn/shared";
 import handler from "../../server/apiRouter";
 
 // Global mock state
@@ -331,6 +332,11 @@ const mockRequest = (body: any, method = "POST", url = "/api/bookings/create", c
 const isoDate = (offsetDays: number): string => {
   const d = new Date();
   d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+};
+const offsetDateKey = (dateKey: string, offsetDays: number): string => {
+  const d = new Date(`${dateKey}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + offsetDays);
   return d.toISOString().slice(0, 10);
 };
@@ -792,6 +798,60 @@ describe("/api/bookings/create", () => {
         error: "Room no longer available"
       });
       expect(setCalls.find((c) => c.path === "bookings/bookingNoRoom1")).toBeUndefined();
+    });
+
+    test("blocks a same-day booking when every room has a past-dated checked-in guest", async () => {
+      const { todayStr } = getManilaDateInfo();
+      const yesterdayKey = offsetDateKey(todayStr, -1);
+      const tomorrowKey = offsetDateKey(todayStr, 1);
+
+      mockBookings.push({
+        id: "lingering_101",
+        bookingId: "lingering_101",
+        roomId: "room_101",
+        status: "checked-in",
+        checkIn: { toDate: () => new Date(`${offsetDateKey(todayStr, -3)}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${yesterdayKey}T00:00:00Z`) }
+      });
+      mockBookings.push({
+        id: "lingering_102",
+        bookingId: "lingering_102",
+        roomId: "room_102",
+        status: "checked-in",
+        checkIn: { toDate: () => new Date(`${offsetDateKey(todayStr, -2)}T00:00:00Z`) },
+        checkOut: { toDate: () => new Date(`${yesterdayKey}T00:00:00Z`) }
+      });
+
+      const body = {
+        bookingId: "bookingRoomNotReady1",
+        roomType: "standard-double",
+        checkIn: todayStr,
+        checkOut: tomorrowKey,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Same",
+          lastName: "Day",
+          email: "sameday@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "Room not ready — previous guest has not checked out yet."
+      });
+      expect(setCalls.find((c) => c.path === "bookings/bookingRoomNotReady1")).toBeUndefined();
     });
 
     test("rejects an unknown roomType with a user-facing error", async () => {

@@ -187659,6 +187659,7 @@ if (!resendApiKey) {
 var resend = new Resend(resendApiKey || "re_mock_key");
 
 // ../shared/constants/index.ts
+var DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
 var MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 var PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
 
@@ -188431,7 +188432,8 @@ async function sendEmail(to3, subject, html) {
     from: FROM_EMAIL,
     to: to3,
     subject,
-    html
+    html,
+    replyTo: hotel_config_default.supportEmail
   });
 }
 async function findBooking(req, options) {
@@ -189336,10 +189338,34 @@ function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
 }
 var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
+}
+function dateKeyFromDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+function hasLingeringCheckedInConflict(input) {
+  return input.status === "checked-in" && input.requestedCheckInKey === input.todayKey && dateKeyFromDate(input.existingCheckOut) <= input.todayKey;
+}
+function getOccupancyConflictReason(input) {
+  const existingCheckIn = toDateOrNull(input.bookingData.checkIn);
+  const existingCheckOut = toDateOrNull(input.bookingData.checkOut);
+  if (!existingCheckIn || !existingCheckOut) return null;
+  if (rangesOverlap(existingCheckIn, existingCheckOut, input.requestedCheckIn, input.requestedCheckOut)) {
+    return "overlap";
+  }
+  if (hasLingeringCheckedInConflict({
+    status: input.bookingData.status,
+    existingCheckOut,
+    requestedCheckInKey: input.requestedCheckInKey,
+    todayKey: input.todayKey
+  })) {
+    return "lingering-checked-in";
+  }
+  return null;
 }
 async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate) {
   const blocksQuery = adminDb.collection("roomBlocks").where("roomId", "==", roomId).where("status", "==", "active");
@@ -189570,6 +189596,7 @@ async function handleCreateBooking(req, res) {
         throw new Error("Room no longer available");
       }
       let assignedRoom = null;
+      let sawLingeringCheckedInConflict = false;
       for (const candidate of candidates) {
         const cData = candidate.data;
         if (cData.status === "blocked") {
@@ -189582,13 +189609,17 @@ async function handleCreateBooking(req, res) {
         }
         const overlapQuery = adminDb.collection("bookings").where("roomId", "==", candidate.id).where("status", "in", ROOM_OCCUPYING_STATUSES);
         const overlapSnapshot = await transaction.get(overlapQuery);
-        const hasConflict = overlapSnapshot.docs.some((doc) => {
-          const data = doc.data();
-          const existingCheckIn = toDateOrNull(data.checkIn);
-          const existingCheckOut = toDateOrNull(data.checkOut);
-          if (!existingCheckIn || !existingCheckOut) return false;
-          return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
-        });
+        const conflictReason = overlapSnapshot.docs.map((doc) => getOccupancyConflictReason({
+          bookingData: doc.data(),
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkIn,
+          todayKey: manilaToday
+        })).find(Boolean);
+        if (conflictReason === "lingering-checked-in") {
+          sawLingeringCheckedInConflict = true;
+        }
+        const hasConflict = Boolean(conflictReason);
         if (hasConflict) {
           continue;
         }
@@ -189600,7 +189631,7 @@ async function handleCreateBooking(req, res) {
         break;
       }
       if (!assignedRoom) {
-        throw new Error("Room no longer available");
+        throw new Error(sawLingeringCheckedInConflict ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
       const roomId = assignedRoom.id;
       const roomData = assignedRoom.data;
@@ -189608,8 +189639,8 @@ async function handleCreateBooking(req, res) {
       assignedRoomNumber = String(roomData.roomNumber || "");
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 250 };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
+      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       let activeRoomRate = typeBaseRate;
       let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
@@ -189960,7 +189991,7 @@ async function handleCreateBooking(req, res) {
     const code = error?.code || "";
     const isInfraError = typeof code === "string" && (code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED") || code.includes("INTERNAL"));
     let status;
-    if (error.message === "Room no longer available") {
+    if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
@@ -190021,6 +190052,7 @@ async function handleCreateWalkin(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
+  const { todayStr: todayKey } = getManilaDateInfo();
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
@@ -190068,15 +190100,16 @@ async function handleCreateWalkin(req, res) {
       }
       const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const bookingsSnapshot = await transaction.get(bookingsQuery);
-      const hasConflict = bookingsSnapshot.docs.some((doc) => {
-        const data = doc.data();
-        const existingCheckIn = toDateOrNull(data.checkIn);
-        const existingCheckOut = toDateOrNull(data.checkOut);
-        if (!existingCheckIn || !existingCheckOut) return false;
-        return existingCheckIn < checkOutDate && existingCheckOut > checkInDate;
-      });
+      const conflictReason = bookingsSnapshot.docs.map((doc) => getOccupancyConflictReason({
+        bookingData: doc.data(),
+        requestedCheckIn: checkInDate,
+        requestedCheckOut: checkOutDate,
+        requestedCheckInKey: checkIn,
+        todayKey
+      })).find(Boolean);
+      const hasConflict = Boolean(conflictReason);
       if (hasConflict) {
-        throw new Error("Room no longer available");
+        throw new Error(conflictReason === "lingering-checked-in" ? ROOM_NOT_READY_PREVIOUS_GUEST_ERROR : "Room no longer available");
       }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, roomId, checkInDate, checkOutDate);
       if (hasBlockConflict) {
@@ -190084,8 +190117,8 @@ async function handleCreateWalkin(req, res) {
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 250 };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
+      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const roomBreakdown = calculateSeasonalAwareRoomBreakdown({
         checkIn: checkInDate,
         checkOut: checkOutDate,
@@ -190223,7 +190256,7 @@ async function handleCreateWalkin(req, res) {
     });
   } catch (error) {
     console.error("Walk-in booking creation failed:", error);
-    const status2 = error.message === "Room no longer available" ? 409 : 500;
+    const status2 = error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR ? 409 : 500;
     return res.status(status2).json({
       success: false,
       error: error.message || "An unexpected error occurred during walk-in booking creation."
@@ -190884,6 +190917,7 @@ async function handleRescheduleBooking(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
+  const { todayStr: todayKey } = getManilaDateInfo();
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
@@ -190908,19 +190942,23 @@ async function handleRescheduleBooking(req, res) {
       }
       const overlapQuery = adminDb.collection("bookings").where("roomId", "==", String(roomId)).where("status", "in", ROOM_OCCUPYING_STATUSES);
       const overlapSnapshot = await transaction.get(overlapQuery);
-      const hasConflict = overlapSnapshot.docs.some((doc) => {
-        if (doc.id === String(bookingId)) return false;
-        const data = doc.data();
-        const existingCheckIn = toDateOrNull(data.checkIn);
-        const existingCheckOut = toDateOrNull(data.checkOut);
-        return Boolean(existingCheckIn && existingCheckOut && rangesOverlap(existingCheckIn, existingCheckOut, checkInDate, checkOutDate));
-      });
-      if (hasConflict) throw new Error("Target room already has a booking in that date range.");
+      const conflictReason = overlapSnapshot.docs.filter((doc) => doc.id !== String(bookingId)).map((doc) => getOccupancyConflictReason({
+        bookingData: doc.data(),
+        requestedCheckIn: checkInDate,
+        requestedCheckOut: checkOutDate,
+        requestedCheckInKey: checkIn,
+        todayKey
+      })).find(Boolean);
+      if (conflictReason) {
+        throw new Error(conflictReason === "lingering-checked-in" ? "Target room is not ready because the previous guest has not checked out yet." : "Target room already has a booking in that date range.");
+      }
       const hasBlockConflict = await hasActiveRoomBlockConflict(transaction, String(roomId), checkInDate, checkOutDate);
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.data() || {};
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
+      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
+      const breakfastConfig = breakfastConfigDoc.data() || {};
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === room.type);
       if (!typeEntry) throw new Error("Room type configuration not found.");
       if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
@@ -190962,7 +191000,7 @@ async function handleRescheduleBooking(req, res) {
         seasonalRateOverrides
       });
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastRate = booking.breakfastRate || hotelConfig.breakfast?.rate || 0;
+      const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
       const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
       let discountPct = 0;
@@ -191613,8 +191651,8 @@ async function handleConvertInquiryToBooking(req, res) {
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 250 };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || 250 : 0;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
+      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
       let ratePerNight = Number(roomData.pricePerNight || 0);
       let codeUsageUpdate = null;

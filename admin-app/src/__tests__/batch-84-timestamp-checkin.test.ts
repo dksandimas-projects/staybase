@@ -109,15 +109,14 @@ describe("Phase 11.6 Batch 14 — booking checkIn/checkOut are always Firestore 
   });
 
   describe("Overlap checks use the safe read helper", () => {
-    it("calls toDateOrNull on data.checkIn and data.checkOut in handleCreateBooking", () => {
-      // Locate the first `hasConflict` block (handleCreateBooking).
-      const blockMatch = bookingsSrc.match(
-        /const\s+hasConflict\s*=\s*bookingsSnapshot\.docs\.some\(\s*\(doc\)\s*=>\s*\{[\s\S]*?\}\s*\);/
+    it("calls toDateOrNull on bookingData.checkIn and bookingData.checkOut in the shared occupancy conflict helper", () => {
+      const helperMatch = bookingsSrc.match(
+        /function\s+getOccupancyConflictReason\([\s\S]*?return\s+null;\s*\n\}/
       );
-      expect(blockMatch, "expected to find the overlap check").toBeTruthy();
-      const body = blockMatch![0];
-      expect(body).toMatch(/toDateOrNull\(data\.checkIn\)/);
-      expect(body).toMatch(/toDateOrNull\(data\.checkOut\)/);
+      expect(helperMatch, "expected to find the occupancy conflict helper").toBeTruthy();
+      const body = helperMatch![0];
+      expect(body).toMatch(/toDateOrNull\(input\.bookingData\.checkIn\)/);
+      expect(body).toMatch(/toDateOrNull\(input\.bookingData\.checkOut\)/);
       // Direct .toDate() calls on read-path values must be gone — those
       // crash on a legacy ISO string.
       expect(body).not.toMatch(/data\.checkIn\.toDate\(\)/);
@@ -125,12 +124,12 @@ describe("Phase 11.6 Batch 14 — booking checkIn/checkOut are always Firestore 
     });
 
     it("handles a malformed legacy value by skipping the conflict (no throw)", () => {
-      const blockMatch = bookingsSrc.match(
-        /const\s+hasConflict\s*=\s*bookingsSnapshot\.docs\.some\(\s*\(doc\)\s*=>\s*\{[\s\S]*?\}\s*\);/
+      const helperMatch = bookingsSrc.match(
+        /function\s+getOccupancyConflictReason\([\s\S]*?return\s+null;\s*\n\}/
       );
-      expect(blockMatch).toBeTruthy();
-      const body = blockMatch![0];
-      expect(body).toMatch(/if\s*\(\s*!existingCheckIn\s*\|\|\s*!existingCheckOut\s*\)\s*return\s+false/);
+      expect(helperMatch).toBeTruthy();
+      const body = helperMatch![0];
+      expect(body).toMatch(/if\s*\(\s*!existingCheckIn\s*\|\|\s*!existingCheckOut\s*\)\s*return\s+null/);
     });
   });
 

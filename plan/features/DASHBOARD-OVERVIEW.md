@@ -31,6 +31,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA
 - [ ] Today's check-ins list — bookings with `checkIn = today` and status `"confirmed"`
 - [ ] Today's check-outs list — bookings with `checkOut = today` and status `"checked-in"`
+- [ ] Overdue Check-outs warning section — shown only when at least one booking has status `"checked-in"` and `checkOut` strictly before today's Manila date; each row shows guest name, room number, days overdue, and opens the booking drawer for checkout action
 - [ ] Recent bookings table — last 10 bookings regardless of status, clickable rows to booking detail
 - [ ] Intercom unread indicator — badge on sidebar nav item, count of unread messages across all rooms
 - [ ] **Today's Breakfast Prep section** — see §Implementation Plan — Today's Breakfast Prep below
@@ -44,6 +45,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 - [ ] Pending payments: query `bookings` where `status == "payment-uploaded"`, ordered by `createdAt`
 - [ ] Today's check-ins: query `bookings` where `checkIn` is today AND `status == "confirmed"`
 - [ ] Today's check-outs: query `bookings` where `checkOut` is today AND `status == "checked-in"`
+- [ ] Overdue check-outs: filter bookings where `status == "checked-in"` and `checkOut < todayKey`; `todayKey` comes from the shared Manila-date helper and is compared as `YYYY-MM-DD`
 - [ ] Recent bookings: query `bookings` ordered by `createdAt desc`, limit 10
 - [ ] Intercom unread count: aggregate query across all `intercoms/{roomId}/messages` where `isRead: false` AND `sender: "guest"`
 - [ ] Confirm Payment CTA: updates booking status to `"payment-confirmed"` + triggers email
@@ -82,6 +84,8 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 - [ ] Loading state — skeleton for each section independently (sections load as data arrives)
 - [ ] No pending payments — hide section or show "No pending payments"
 - [ ] No check-ins/check-outs today — show "No arrivals today" / "No departures today"
+- [ ] No overdue check-outs — hide the warning section entirely so the dashboard does not show an empty alert
+- [ ] Overdue check-outs — keep the warning section usable on mobile with stacked rows and 44px minimum tap targets
 - [ ] Stat cards — handle zero values gracefully (0% occupancy, ₱0 revenue)
 - [ ] Room grid — all rooms always visible even if blocked or inactive
 
@@ -93,6 +97,7 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 - [ ] Pending payment alert appears when a guest uploads a screenshot
 - [ ] Confirm Payment CTA changes booking status and sends email
 - [ ] Today's check-ins/check-outs show correct bookings for today's date
+- [ ] Overdue check-outs appear only for still-checked-in bookings whose checkout date is before today, and each row opens the booking detail drawer
 - [ ] Intercom unread badge count matches actual unread messages
 - [ ] Dashboard loads in under 2s
 
