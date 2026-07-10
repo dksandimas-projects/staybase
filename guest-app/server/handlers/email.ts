@@ -272,7 +272,8 @@ async function sendEmail(to: string, subject: string, html: string) {
     from: FROM_EMAIL,
     to,
     subject,
-    html
+    html,
+    replyTo: config.supportEmail
   });
 }
 
