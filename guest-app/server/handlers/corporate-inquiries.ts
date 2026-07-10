@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
 import { sendCorporateInquiryTrigger, sendBookingTrigger, sendCorporateInquiryConfirmationTrigger } from "./email";
-import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
+import { toDateOrNull, getManilaDateInfo, generateLookupToken, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 const inquirySchema = z.object({
@@ -204,9 +204,9 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists
         ? breakfastConfigDoc.data()!
-        : { isEnabled: false, ratePerPersonPerNight: 250 };
+        : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
       const actualBreakfastRate = breakfastConfig.isEnabled
-        ? (breakfastConfig.ratePerPersonPerNight || 250)
+        ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT)
         : 0;
       const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
 

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminContext";
 import {
   compressImageFile,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
@@ -1735,7 +1736,7 @@ export function SettingsPage() {
     e.preventDefault();
     await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
       isEnabled: breakfastEnabled,
-      ratePerPersonPerNight: parseFloat(breakfastRate) || 300,
+      ratePerPersonPerNight: parseFloat(breakfastRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
       silogItems
     }));
   };
