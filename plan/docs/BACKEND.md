@@ -236,7 +236,7 @@ Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings �
 
 Single document. Stores editable public page content.
 
-Sections: `homepage` (hero, amenities, featuredTypeValues, services, sparkRewards), `about` (heroHeading, heroPhotoUrl), `corporate` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl, perks), `rewards` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl), `branding` (logoNavbar, logoNavbarOnDark, logoFooter)
+Sections: `homepage` (hero, amenities, featuredTypeValues, services, sparkRewards), `about` (hero, missionStatement, visionStatement, hotelStory), `corporate` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl, perks), `rewards` (heroEyebrow, heroHeading, heroSubtext, heroPhotoUrl), `branding` (logoNavbar, logoNavbarOnDark, logoFooter)
 
 **`homepage.services`** — array of service cards shown in the Services section:
 ```
@@ -249,6 +249,8 @@ Default items: Tour Packages, Car Rentals. CTA always links to `/contact`. Hide 
 { heading, description, perks, isEnabled }
 ```
 `perks` uses the same editable card shape as services: `{ title, description, icon, isEnabled }[]`. Hide section entirely if `isEnabled: false`; hide disabled perks within the section.
+
+**`about` body copy** — About Us page content below the hero. The editable fields are `missionStatement`, `visionStatement`, and `hotelStory`. These fields are edited from Settings → Website Content. Empty fields fall back to `settings/hotelConfig.{missionStatement,visionStatement,hotelStory}` and then to the deploy-time public site fallback copy. `hotelStory` is plain text; blank lines split into paragraphs on `/about`.
 
 **Per-page hero fields** (homepage / about / corporate / rewards) — every page with a hero has the same four-string shape: `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl`. All default to empty string. The guest app falls back to `data/homepage.ts` constants when the field is empty:
 

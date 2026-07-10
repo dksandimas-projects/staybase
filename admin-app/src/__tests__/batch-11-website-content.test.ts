@@ -125,13 +125,41 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(aboutSrc).not.toMatch(/photo-1542314831-068cd1dbfeeb/);
     });
 
-    it("renders mission, vision, and hotel story from hotelConfig", () => {
+    it("renders mission, vision, and hotel story from website content", () => {
       expect(aboutSrc).toMatch(/about\.missionStatement/);
       expect(aboutSrc).toMatch(/about\.visionStatement/);
       expect(aboutSrc).toMatch(/about\.hotelStory/);
       // The hard-coded mission and vision paragraphs must be gone.
       expect(aboutSrc).not.toMatch(/To deliver peaceful, consistent stays shaped by genuine/);
       expect(aboutSrc).not.toMatch(/gold standard of boutique lodging in Bohol/);
+    });
+  });
+
+  describe("Settings → Website Content — About page editor", () => {
+    const settingsSrc = readFileSync(
+      resolve(__dirname, "../../src/pages/SettingsPage.tsx"),
+      "utf8"
+    );
+    const hookSrc = readFileSync(
+      resolve(__dirname, "../../../guest-app/src/hooks/usePublicSiteContent.ts"),
+      "utf8"
+    );
+
+    it("exposes mission, vision, and story fields in the Website Content tab", () => {
+      expect(settingsSrc).toMatch(/aboutMissionStatement/);
+      expect(settingsSrc).toMatch(/aboutVisionStatement/);
+      expect(settingsSrc).toMatch(/aboutHotelStory/);
+      expect(settingsSrc).toMatch(/About us page/);
+    });
+
+    it("saves the About body fields to settings\\/websiteContent.about", () => {
+      expect(settingsSrc).toMatch(/about:\s*\{[\s\S]*?missionStatement:\s*aboutMissionStatement[\s\S]*?visionStatement:\s*aboutVisionStatement[\s\S]*?hotelStory:\s*aboutHotelStory/);
+    });
+
+    it("guest hook prefers websiteContent.about before hotelConfig fallback", () => {
+      expect(hookSrc).toMatch(/missionStatement:\s*pickString\(\s*aboutRaw,\s*["']missionStatement["']/);
+      expect(hookSrc).toMatch(/visionStatement:\s*pickString\(\s*aboutRaw,\s*["']visionStatement["']/);
+      expect(hookSrc).toMatch(/hotelStory:\s*pickString\(\s*aboutRaw,\s*["']hotelStory["']/);
     });
   });
 

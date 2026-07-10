@@ -605,18 +605,27 @@ export function usePublicSiteContent(): PublicSiteContent {
           heroHeading: pickString(aboutRaw, "heroHeading", fb.about.heroHeading),
           heroSubtext: pickString(aboutRaw, "heroSubtext", fb.about.heroSubtext),
           heroPhotoUrl: pickString(aboutRaw, "heroPhotoUrl", fb.about.heroPhotoUrl),
-          missionStatement:
-            (typeof hc.missionStatement === "string" && hc.missionStatement.length > 0
+          missionStatement: pickString(
+            aboutRaw,
+            "missionStatement",
+            typeof hc.missionStatement === "string" && hc.missionStatement.length > 0
               ? hc.missionStatement
-              : FALLBACK_ABOUT_MISSION),
-          visionStatement:
-            (typeof hc.visionStatement === "string" && hc.visionStatement.length > 0
+              : FALLBACK_ABOUT_MISSION
+          ),
+          visionStatement: pickString(
+            aboutRaw,
+            "visionStatement",
+            typeof hc.visionStatement === "string" && hc.visionStatement.length > 0
               ? hc.visionStatement
-              : FALLBACK_ABOUT_VISION(brandName)),
-          hotelStory:
-            (typeof hc.hotelStory === "string" && hc.hotelStory.length > 0
+              : FALLBACK_ABOUT_VISION(brandName)
+          ),
+          hotelStory: pickString(
+            aboutRaw,
+            "hotelStory",
+            typeof hc.hotelStory === "string" && hc.hotelStory.length > 0
               ? hc.hotelStory
-              : FALLBACK_ABOUT_STORY(brandName))
+              : FALLBACK_ABOUT_STORY(brandName)
+          )
         },
         contact: {
           // Phase 11.8 PR 3 — the 6 hotel contact details live on

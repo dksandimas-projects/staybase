@@ -368,9 +368,11 @@ export interface AdminContextType {
   // Vouchers & Corporate Rates
   vouchers: Voucher[];
   addVoucher: (voucher: Omit<Voucher, "id" | "createdAt" | "usageCount">) => Promise<{ success: boolean; error?: string }>;
+  updateVoucher: (voucherId: string, voucher: Omit<Voucher, "id" | "code" | "createdAt" | "createdBy" | "usageCount">) => Promise<{ success: boolean; error?: string }>;
   toggleVoucherActive: (voucherId: string) => void;
   corporateCodes: CorporateCode[];
   addCorporateCode: (code: CorporateCode) => Promise<{ success: boolean; error?: string }>;
+  updateCorporateCode: (code: string, updates: Omit<CorporateCode, "code" | "createdAt" | "createdBy" | "usageCount" | "linkedInquiryId">) => Promise<{ success: boolean; error?: string }>;
   toggleCorporateCodeActive: (code: string) => void;
   deleteCorporateCode: (code: string) => void;
 
@@ -1606,10 +1608,32 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const vchRef = doc(db, "vouchers", voucherId);
       const vch = vouchers.find(v => v.id === voucherId);
       if (vch) {
-        await updateDoc(vchRef, { isActive: !vch.isActive });
+        await updateDoc(vchRef, { isActive: !vch.isActive, updatedAt: serverTimestamp() });
       }
     } catch (error) {
       console.error("Error toggling voucher active:", error);
+    }
+  };
+
+  const updateVoucher = async (
+    voucherId: string,
+    voucher: Omit<Voucher, "id" | "code" | "createdAt" | "createdBy" | "usageCount">
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await updateDoc(doc(db, "vouchers", voucherId), {
+        discountType: voucher.discountType,
+        discountValue: voucher.discountValue,
+        usageCap: voucher.usageCap,
+        expiresAt: voucher.expiresAt,
+        applicableRoomTypes: voucher.applicableRoomTypes,
+        isActive: voucher.isActive,
+        guestEmail: voucher.guestEmail,
+        updatedAt: serverTimestamp()
+      });
+      return { success: true };
+    } catch (error) {
+      console.error("Error updating voucher:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Failed to update voucher." };
     }
   };
 
@@ -1678,10 +1702,30 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       const codeRef = doc(db, "corporateCodes", code);
       const existing = corporateCodes.find(c => c.code === code);
       if (existing) {
-        await updateDoc(codeRef, { isActive: !existing.isActive });
+        await updateDoc(codeRef, { isActive: !existing.isActive, updatedAt: serverTimestamp() });
       }
     } catch (error) {
       console.error("Error toggling corporate code active:", error);
+    }
+  };
+
+  const updateCorporateCode = async (
+    code: string,
+    updates: Omit<CorporateCode, "code" | "createdAt" | "createdBy" | "usageCount" | "linkedInquiryId">
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      await updateDoc(doc(db, "corporateCodes", code), {
+        companyName: updates.companyName,
+        ratePerRoomType: updates.ratePerRoomType,
+        expiresAt: updates.expiresAt,
+        usageCap: updates.usageCap,
+        isActive: updates.isActive,
+        updatedAt: serverTimestamp()
+      });
+      return { success: true };
+    } catch (error) {
+      console.error("Error updating corporate code:", error);
+      return { success: false, error: error instanceof Error ? error.message : "Failed to update corporate code." };
     }
   };
 
@@ -2855,7 +2899,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     },
     about: {
       heroHeading: "about us",
-      heroPhotoUrl: ""
+      heroPhotoUrl: "",
+      missionStatement: "",
+      visionStatement: "",
+      hotelStory: ""
     },
     roomsCatalog: {
       heroEyebrow: "",
@@ -2957,7 +3004,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       },
       about: {
         heroHeading: "about us",
-        heroPhotoUrl: ""
+        heroPhotoUrl: "",
+        missionStatement: "",
+        visionStatement: "",
+        hotelStory: ""
       },
       roomsCatalog: {
         heroEyebrow: "",
@@ -4121,9 +4171,11 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         cancelRoomBlock,
         vouchers,
         addVoucher,
+        updateVoucher,
         toggleVoucherActive,
         corporateCodes,
         addCorporateCode,
+        updateCorporateCode,
         toggleCorporateCodeActive,
         deleteCorporateCode,
         corporateInquiries,
