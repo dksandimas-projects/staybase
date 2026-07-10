@@ -6,6 +6,13 @@ const dashboardSrc = readFileSync(resolve(__dirname, "../pages/DashboardPage.tsx
 const statsCardSrc = readFileSync(resolve(__dirname, "../components/StatsCard.tsx"), "utf8");
 
 describe("Dashboard revenue info controls", () => {
+  it("explains occupancy and bookings calculations in stat tooltips", () => {
+    expect(dashboardSrc).toMatch(/occupancyHelpText/);
+    expect(dashboardSrc).toMatch(/rooms currently marked occupied divided by all rooms/);
+    expect(dashboardSrc).toMatch(/bookingsHelpText/);
+    expect(dashboardSrc).toMatch(/reservations created during the current month/);
+  });
+
   it("explains the revenue calculation in a tooltip", () => {
     expect(dashboardSrc).toMatch(/revenueHelpText/);
     expect(dashboardSrc).toMatch(/sum of totalPrice/);
