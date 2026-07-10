@@ -267,7 +267,7 @@ function drawPdfSectionTitle(pdf: jsPDF, title: string, x: number, y: number, br
   pdf.roundedRect(x, y - 5, 3, 5, 1, 1, "F");
   pdf.setFontSize(12);
   pdf.setTextColor(30, 30, 30);
-  pdf.text(title, x + 6, y);
+  pdf.text(title, x + 6, y, { charSpace: 0 });
   pdf.setDrawColor(230, 230, 230);
   pdf.setLineWidth(0.15);
   pdf.line(x + 6 + pdf.getTextWidth(title) + 4, y - 1.5, 195, y - 1.5);
@@ -287,16 +287,16 @@ function drawPdfFooter(
   pdf.line(15, footerY, 195, footerY);
   pdf.setFontSize(7.5);
   pdf.setTextColor(100, 100, 100);
-  pdf.text(footerNote, pageW / 2, footerY + 5, { align: "center" });
+  pdf.text(footerNote, pageW / 2, footerY + 5, { align: "center", charSpace: 0 });
   pdf.setFontSize(7);
   pdf.setTextColor(150, 150, 150);
   pdf.text(
     `${config.brandName} | ${config.address?.street ?? ""}${config.address?.street ? ", " : ""}${config.address?.city ?? ""} | ${config.frontDeskPhone ?? ""} | ${config.supportEmail ?? ""}`,
     pageW / 2,
     footerY + 9,
-    { align: "center" }
+    { align: "center", charSpace: 0 }
   );
-  pdf.text(`Booking Ref: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center" });
+  pdf.text(`Booking Ref: ${bookingRef}`, pageW / 2, footerY + 13, { align: "center", charSpace: 0 });
 }
 
 function openPdfOrDownload(pdf: jsPDF, fileName: string, pdfWindow: Window | null) {
@@ -1299,20 +1299,316 @@ export function BookingsPage() {
       await registerBrandPdfFonts(pdf);
       const logoDataUrl = await getPdfBrandLogoDataUrl();
       setPdfFont(pdf, "Inter");
-    const pageW = 210;
-    const marginL = 15;
-    const marginR = pageW - 15;
-    const labelColX = 20;
-    let y = 15;
+      const pageW = 210;
+      const marginL = 15;
+      const marginR = pageW - 15;
+      const labelColX = 20;
+      let y = 15;
 
-    const generatedAt = new Date().toLocaleString("en-PH", {
-      timeZone: config.timezone || "Asia/Manila",
-      dateStyle: "medium",
-      timeStyle: "short"
-    });
+      const generatedAt = new Date().toLocaleString("en-PH", {
+        timeZone: config.timezone || "Asia/Manila",
+        dateStyle: "medium",
+        timeStyle: "short"
+      });
 
-    const checkNewPage = (needed: number) => {
-      if (y + needed > 280) {
+      const checkNewPage = (needed: number) => {
+        if (y + needed > 280) {
+          pdf.addPage();
+          y = drawPdfBrandHeader(pdf, {
+            logoDataUrl,
+            title: "Booking Confirmation Receipt",
+            subtitle: `Booking Reference: ${b.bookingRef}`,
+            meta: `Generated: ${generatedAt}`,
+            brandRgb,
+            printLight: true,
+            compact: true
+          });
+        }
+      };
+
+      const paymentsTotalForSummary = selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
+      const amountDueForSummary = Math.max(0, b.totalPrice - paymentsTotalForSummary);
+      const amountX = marginR - 5; // Exactly X: 190, matching the Stay card right alignment
+
+      const formatAmount = (value: number) =>
+        `PHP ${Math.round(value || 0).toLocaleString("en-PH")}`;
+
+      const formatPaymentMethod = (method?: string) =>
+        method
+          ? method
+              .split("-")
+              .filter(Boolean)
+              .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+              .join(" ")
+          : "—";
+
+      const fitText = (text: string, maxWidth: number) => {
+        let next = text || "—";
+        while (next.length > 4 && pdf.getTextWidth(next) > maxWidth) {
+          next = `${next.slice(0, -2).trim()}…`;
+        }
+        return next;
+      };
+
+      const drawInfoCard = (
+        title: string,
+        rows: { label: string; value: string }[],
+        x: number,
+        cardY: number,
+        width: number
+      ) => {
+        const cardH = 7.5 + rows.length * 4.2;
+        pdf.setFillColor(248, 250, 252);
+        pdf.roundedRect(x, cardY, width, cardH, 1.5, 1.5, "F");
+        pdf.setFontSize(7.2);
+        pdf.setTextColor(120, 120, 120);
+        pdf.text(title, x + 5, cardY + 4.5, { charSpace: 0 });
+        pdf.setFontSize(8.0);
+        rows.forEach((row, index) => {
+          const rowY = cardY + 8.5 + index * 4.2;
+          pdf.setTextColor(110, 110, 110);
+          pdf.text(row.label, x + 5, rowY, { charSpace: 0 });
+          pdf.setTextColor(45, 45, 45);
+          pdf.text(fitText(row.value, width - 32), x + width - 5, rowY, { align: "right", charSpace: 0 });
+        });
+        return cardH;
+      };
+
+      const drawAmountRow = (label: string, amount: string, opts: { muted?: boolean; danger?: boolean; bold?: boolean } = {}) => {
+        pdf.setFontSize(opts.bold ? 9.4 : 8.4);
+        pdf.setTextColor(opts.danger ? 190 : opts.muted ? 110 : 45, opts.danger ? 55 : opts.muted ? 110 : 45, opts.danger ? 55 : opts.muted ? 110 : 45);
+        
+        // Regular font weight for descriptions
+        pdf.setFont("helvetica", "normal");
+        pdf.text(label, labelColX, y, { charSpace: 0 });
+        
+        // Bold font weight for currency values
+        pdf.setFont("helvetica", "bold");
+        pdf.text(amount, amountX, y, { align: "right", charSpace: 0 });
+        
+        setPdfFont(pdf, "Inter");
+        y += 4.4; // Tighter vertical line height
+      };
+
+      // ── Header ──
+      y = drawPdfBrandHeader(pdf, {
+        logoDataUrl,
+        title: "Booking Confirmation Receipt",
+        subtitle: `Booking Reference: ${b.bookingRef}`,
+        meta: `Generated: ${generatedAt}`,
+        brandRgb,
+        printLight: true,
+        compact: true // Compact header saves 10mm of vertical height
+      });
+
+      pdf.setFillColor(255, 247, 237);
+      pdf.roundedRect(marginL, y - 2, marginR - marginL, 10.5, 1.5, 1.5, "F");
+      pdf.setFontSize(8.0);
+      pdf.setTextColor(...brandRgb);
+      pdf.text("Amount to collect", marginL + 5, y + 1.2, { charSpace: 0 });
+      pdf.setFontSize(12.5);
+      pdf.setFont("helvetica", "bold");
+      pdf.text(
+        formatAmount(amountDueForSummary),
+        amountX,
+        y + 2.2,
+        { align: "right", charSpace: 0 }
+      );
+      setPdfFont(pdf, "Inter");
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(90, 90, 90);
+      pdf.text(`Booking ${b.bookingRef} • Generated ${generatedAt}`, marginL + 5, y + 6.2, { charSpace: 0 });
+      y += 12; // Reduced gap
+
+      // ── Guest & Stay Information ──
+      const cardGap = 6;
+      const cardW = (marginR - marginL - cardGap) / 2;
+      const guestCardH = drawInfoCard("Guest", [
+        { label: "Name", value: b.guestName },
+        { label: "Email", value: b.guestEmail },
+        { label: "Phone", value: b.guestPhone }
+      ], marginL, y, cardW);
+      const stayRows = [
+        { label: "Room", value: `${b.roomNumber} (${b.roomType})` },
+        { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
+        { label: "Stay", value: `${b.numNights} night${b.numNights === 1 ? "" : "s"} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}` },
+        { label: "Rate", value: `${formatAmount(b.ratePerNight)} / night` }
+      ];
+      if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
+        stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
+      }
+      const stayCardH = drawInfoCard("Stay", stayRows, marginL + cardW + cardGap, y, cardW);
+      y += Math.max(guestCardH, stayCardH) + 4.5; // Tighter vertical gap
+
+      // ── Pricing Breakdown ──
+      checkNewPage(45);
+      drawPdfSectionTitle(pdf, "Pricing Breakdown", marginL, y, brandRgb);
+      y += 4.5;
+
+      pdf.setFontSize(10);
+      pdf.setTextColor(50, 50, 50);
+      if (b.rateBreakdown?.roomLines?.length) {
+        b.rateBreakdown.roomLines.forEach((line) => {
+          checkNewPage(6);
+          drawAmountRow(`${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
+        });
+        b.rateBreakdown.addOns.forEach((line) => {
+          checkNewPage(6);
+          drawAmountRow(line.label, formatAmount(line.amount));
+        });
+        b.rateBreakdown.deductions.forEach((line) => {
+          checkNewPage(6);
+          drawAmountRow(line.label, `-${formatAmount(line.amount)}`, { muted: true });
+        });
+      } else {
+        const subtotal = b.ratePerNight * b.numNights;
+        drawAmountRow(
+          `Room subtotal: ${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)}`,
+          formatAmount(subtotal)
+        );
+
+        if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
+          const discountLabel = b.discountType === "senior"
+            ? "Senior Citizen Discount"
+            : b.discountType === "pwd"
+              ? "PWD Discount"
+              : "Discount";
+          const storedDiscountBase = b.originalTotalPrice ?? subtotal;
+          const discountAmount = Math.max(
+            0,
+            Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
+          );
+          drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
+        }
+
+        if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
+          drawAmountRow(`Voucher (${b.voucherCode})`, `-${formatAmount(b.voucherDiscount)}`, { muted: true });
+        }
+
+        if (b.pointsRedeemed && b.pointsRedeemed > 0) {
+          drawAmountRow(`Spark Rewards: ${b.pointsRedeemed} pts redeemed`, `-${formatAmount(b.pointsRedeemedValue || 0)}`, { muted: true });
+        }
+      }
+
+      // Booking Total Banner
+      y += 0.5;
+      pdf.setFillColor(255, 247, 237);
+      pdf.roundedRect(marginL, y - 2, marginR - marginL, 7.5, 1.5, 1.5, "F");
+      y += 3.2;
+
+      pdf.setFontSize(10);
+      pdf.setTextColor(...brandRgb);
+      pdf.text("Booking Total", labelColX, y, { charSpace: 0 });
+      pdf.setFont("helvetica", "bold");
+      pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
+      setPdfFont(pdf, "Inter");
+      y += 6.5;
+
+      // ── Special Requests / Notes ──
+      if (b.specialRequests && b.specialRequests.trim().length > 0) {
+        checkNewPage(15);
+        drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
+        y += 5;
+
+        pdf.setFontSize(10);
+        pdf.setTextColor(60, 60, 60);
+        const reqLines = pdf.splitTextToSize(b.specialRequests, pageW - 40);
+        for (const line of reqLines) {
+          checkNewPage(5);
+          pdf.text(line, labelColX, y, { charSpace: 0 });
+          y += 4.0;
+        }
+        y += 3;
+      }
+
+      // ── Payment Breakdown ──
+      checkNewPage(30);
+      drawPdfSectionTitle(pdf, "Payments Collected", marginL, y, brandRgb);
+      y += 4.5;
+
+      const payments = selectedBookingPayments;
+      if (payments.length > 0) {
+        pdf.setFontSize(9);
+        pdf.setTextColor(80, 80, 80);
+        pdf.text("Date", labelColX, y, { charSpace: 0 });
+        pdf.text("Method", labelColX + 42, y, { charSpace: 0 });
+        pdf.text("Amount", amountX, y, { align: "right", charSpace: 0 });
+        y += 1.8;
+        pdf.setDrawColor(220, 220, 220);
+        pdf.setLineWidth(0.15);
+        pdf.line(marginL, y, marginR, y);
+        y += 3.8;
+
+        let paymentsTotal = 0;
+        payments.forEach((pay) => {
+          checkNewPage(6);
+          pdf.setFontSize(9);
+          pdf.setTextColor(50, 50, 50);
+          const recordedDate = pay.recordedAt
+            ? new Date(pay.recordedAt).toLocaleDateString("en-PH", {
+                timeZone: config.timezone || "Asia/Manila",
+                year: "numeric",
+                month: "short",
+                day: "numeric"
+              })
+            : "—";
+          pdf.text(recordedDate, labelColX, y, { charSpace: 0 });
+          pdf.text(formatPaymentMethod(pay.method), labelColX + 42, y, { charSpace: 0 });
+          pdf.setFont("helvetica", "bold");
+          pdf.text(formatAmount(pay.amount), amountX, y, { align: "right", charSpace: 0 });
+          setPdfFont(pdf, "Inter");
+          paymentsTotal += pay.amount;
+          y += 4.2;
+        });
+
+        y += 0.8;
+        pdf.setDrawColor(200, 200, 200);
+        pdf.setLineWidth(0.2);
+        pdf.line(marginL, y, marginR, y);
+        y += 3.8;
+
+        drawAmountRow("Total collected", formatAmount(paymentsTotal), { bold: true });
+
+        const balance = b.totalPrice - paymentsTotal;
+        pdf.setFontSize(10);
+        if (balance <= 0) {
+          pdf.setTextColor(34, 139, 34);
+          pdf.text("Balance due", labelColX, y, { charSpace: 0 });
+          pdf.setFont("helvetica", "bold");
+          pdf.text(formatAmount(0), amountX, y, { align: "right", charSpace: 0 });
+          setPdfFont(pdf, "Inter");
+          y += 4.2;
+          pdf.setFontSize(8.4);
+          pdf.setTextColor(80, 80, 80);
+          pdf.text("Fully settled. Thank you.", labelColX, y, { charSpace: 0 });
+        } else {
+          pdf.setTextColor(200, 60, 60);
+          pdf.text("Balance due", labelColX, y, { charSpace: 0 });
+          pdf.setFont("helvetica", "bold");
+          pdf.text(formatAmount(balance), amountX, y, { align: "right", charSpace: 0 });
+          setPdfFont(pdf, "Inter");
+        }
+        y += 5;
+      } else {
+        // No payments yet — show payment method + amount due
+        pdf.setFontSize(10);
+        pdf.setTextColor(50, 50, 50);
+        const methodLabel = formatPaymentMethod(b.paymentMethod);
+        pdf.text(`Expected payment method: ${methodLabel}`, labelColX, y, { charSpace: 0 });
+        y += 5.0;
+        pdf.setFontSize(10);
+        pdf.setTextColor(200, 60, 60);
+        pdf.text("Amount due at property", labelColX, y, { charSpace: 0 });
+        pdf.setFont("helvetica", "bold");
+        pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
+        setPdfFont(pdf, "Inter");
+        y += 5;
+      }
+
+      // ── Footer ──
+      // Pull footer up dynamically, removing artificial large margins
+      const footerY = y + 8;
+      if (footerY > 275) {
         pdf.addPage();
         y = drawPdfBrandHeader(pdf, {
           logoDataUrl,
@@ -1320,303 +1616,17 @@ export function BookingsPage() {
           subtitle: `Booking Reference: ${b.bookingRef}`,
           meta: `Generated: ${generatedAt}`,
           brandRgb,
-          printLight: true
+          printLight: true,
+          compact: true
         });
       }
-    };
-
-    const paymentsTotalForSummary = selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    const amountDueForSummary = Math.max(0, b.totalPrice - paymentsTotalForSummary);
-    const amountX = marginR - 4;
-
-    const formatAmount = (value: number) =>
-      `\u20B1${Math.round(value || 0).toLocaleString("en-PH")}`;
-
-    const formatPaymentMethod = (method?: string) =>
-      method
-        ? method
-            .split("-")
-            .filter(Boolean)
-            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-            .join(" ")
-        : "—";
-
-    const fitText = (text: string, maxWidth: number) => {
-      let next = text || "—";
-      while (next.length > 4 && pdf.getTextWidth(next) > maxWidth) {
-        next = `${next.slice(0, -2).trim()}…`;
-      }
-      return next;
-    };
-
-    const drawInfoCard = (
-      title: string,
-      rows: { label: string; value: string }[],
-      x: number,
-      cardY: number,
-      width: number
-    ) => {
-      const cardH = 9 + rows.length * 4.8;
-      pdf.setFillColor(248, 250, 252);
-      pdf.roundedRect(x, cardY, width, cardH, 2, 2, "F");
-      pdf.setFontSize(7.5);
-      pdf.setTextColor(120, 120, 120);
-      pdf.text(title, x + 4, cardY + 5.2);
-      pdf.setFontSize(8.2);
-      rows.forEach((row, index) => {
-        const rowY = cardY + 9.8 + index * 4.8;
-        pdf.setTextColor(110, 110, 110);
-        pdf.text(row.label, x + 4, rowY);
-        pdf.setTextColor(45, 45, 45);
-        pdf.text(fitText(row.value, width - 32), x + width - 4, rowY, { align: "right" });
-      });
-      return cardH;
-    };
-
-    const drawAmountRow = (label: string, amount: string, opts: { muted?: boolean; danger?: boolean; bold?: boolean } = {}) => {
-      pdf.setFontSize(opts.bold ? 9.4 : 8.4);
-      pdf.setTextColor(opts.danger ? 190 : opts.muted ? 110 : 45, opts.danger ? 55 : opts.muted ? 110 : 45, opts.danger ? 55 : opts.muted ? 110 : 45);
-      pdf.text(label, labelColX, y);
-      pdf.setFont("helvetica", opts.bold ? "bold" : "normal");
-      pdf.text(amount, amountX, y, { align: "right" });
-      setPdfFont(pdf, "Inter");
-      y += 4.8;
-    };
-
-    // ── Header ──
-    y = drawPdfBrandHeader(pdf, {
-      logoDataUrl,
-      title: "Booking Confirmation Receipt",
-      subtitle: `Booking Reference: ${b.bookingRef}`,
-      meta: `Generated: ${generatedAt}`,
-      brandRgb,
-      printLight: true
-    });
-
-    pdf.setFillColor(255, 247, 237);
-    pdf.roundedRect(marginL, y - 3, marginR - marginL, 13, 2, 2, "F");
-    pdf.setFontSize(8.2);
-    pdf.setTextColor(...brandRgb);
-    pdf.text("Amount to collect", marginL + 5, y + 1);
-    pdf.setFontSize(12.5);
-    pdf.setFont("helvetica", "bold");
-    pdf.text(
-      formatAmount(amountDueForSummary),
-      amountX,
-      y + 2,
-      { align: "right" }
-    );
-    setPdfFont(pdf, "Inter");
-    pdf.setFontSize(8);
-    pdf.setTextColor(90, 90, 90);
-    pdf.text(`Booking ${b.bookingRef} • Generated ${generatedAt}`, marginL + 5, y + 7);
-    y += 15;
-
-    // ── Guest Information ──
-    const cardGap = 6;
-    const cardW = (marginR - marginL - cardGap) / 2;
-    const guestCardH = drawInfoCard("Guest", [
-      { label: "Name", value: b.guestName },
-      { label: "Email", value: b.guestEmail },
-      { label: "Phone", value: b.guestPhone }
-    ], marginL, y, cardW);
-    const stayRows = [
-      { label: "Room", value: `${b.roomNumber} (${b.roomType})` },
-      { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
-      { label: "Stay", value: `${b.numNights} night${b.numNights === 1 ? "" : "s"} • ${b.numGuests} guest${b.numGuests === 1 ? "" : "s"}` },
-      { label: "Rate", value: `${formatAmount(b.ratePerNight)} / night` }
-    ];
-    if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
-      stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
-    }
-    const stayCardH = drawInfoCard("Stay", stayRows, marginL + cardW + cardGap, y, cardW);
-    y += Math.max(guestCardH, stayCardH) + 7;
-
-    // ── Pricing Breakdown ──
-    checkNewPage(60);
-    drawPdfSectionTitle(pdf, "Pricing Breakdown", marginL, y, brandRgb);
-    y += 5;
-
-    pdf.setFontSize(10);
-    pdf.setTextColor(50, 50, 50);
-    if (b.rateBreakdown?.roomLines?.length) {
-      b.rateBreakdown.roomLines.forEach((line) => {
-        checkNewPage(6);
-        drawAmountRow(`${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
-      });
-      b.rateBreakdown.addOns.forEach((line) => {
-        checkNewPage(6);
-        drawAmountRow(line.label, formatAmount(line.amount));
-      });
-      b.rateBreakdown.deductions.forEach((line) => {
-        checkNewPage(6);
-        drawAmountRow(line.label, `-${formatAmount(line.amount)}`, { muted: true });
-      });
-    } else {
-      const subtotal = b.ratePerNight * b.numNights;
-      drawAmountRow(
-        `Room subtotal: ${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)}`,
-        formatAmount(subtotal)
-      );
-
-      if (b.discountPct && b.discountPct > 0 && b.discountType && b.discountType !== "none") {
-        const discountLabel = b.discountType === "senior"
-          ? "Senior Citizen Discount"
-          : b.discountType === "pwd"
-            ? "PWD Discount"
-            : "Discount";
-        const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-        const discountAmount = Math.max(
-          0,
-          Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
-        );
-        drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
-      }
-
-      if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
-        drawAmountRow(`Voucher (${b.voucherCode})`, `-${formatAmount(b.voucherDiscount)}`, { muted: true });
-      }
-
-      if (b.pointsRedeemed && b.pointsRedeemed > 0) {
-        drawAmountRow(`Spark Rewards: ${b.pointsRedeemed} pts redeemed`, `-${formatAmount(b.pointsRedeemedValue || 0)}`, { muted: true });
-      }
-    }
-
-    // Total
-    y += 1;
-    pdf.setFillColor(255, 247, 237);
-    pdf.roundedRect(marginL, y - 3, marginR - marginL, 9, 2, 2, "F");
-    y += 5;
-
-    pdf.setFontSize(10.5);
-    pdf.setTextColor(...brandRgb);
-    pdf.text("Booking Total", labelColX, y);
-    pdf.setFont("helvetica", "bold");
-    pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right" });
-    setPdfFont(pdf, "Inter");
-    y += 9;
-
-    // ── Special Requests / Notes ──
-    if (b.specialRequests && b.specialRequests.trim().length > 0) {
-      checkNewPage(20);
-      drawPdfSectionTitle(pdf, "Special Requests", marginL, y, brandRgb);
-      y += 6;
-
-      pdf.setFontSize(10);
-      pdf.setTextColor(60, 60, 60);
-      const reqLines = pdf.splitTextToSize(b.specialRequests, pageW - 40);
-      for (const line of reqLines) {
-        checkNewPage(5);
-        pdf.text(line, labelColX, y);
-        y += 4.5;
-      }
-      y += 4;
-    }
-
-    // ── Payment Breakdown ──
-    checkNewPage(40);
-    drawPdfSectionTitle(pdf, "Payments Collected", marginL, y, brandRgb);
-    y += 5;
-
-    const payments = selectedBookingPayments;
-    if (payments.length > 0) {
-      pdf.setFontSize(9);
-      pdf.setTextColor(80, 80, 80);
-      pdf.text("Date", labelColX, y);
-      pdf.text("Method", labelColX + 42, y);
-      pdf.text("Amount", amountX, y, { align: "right" });
-      y += 2;
-      pdf.setDrawColor(220, 220, 220);
-      pdf.setLineWidth(0.15);
-      pdf.line(marginL, y, marginR, y);
-      y += 4;
-
-      let paymentsTotal = 0;
-      payments.forEach((pay) => {
-        checkNewPage(6);
-        pdf.setFontSize(9);
-        pdf.setTextColor(50, 50, 50);
-        const recordedDate = pay.recordedAt
-          ? new Date(pay.recordedAt).toLocaleDateString("en-PH", {
-              timeZone: config.timezone || "Asia/Manila",
-              year: "numeric",
-              month: "short",
-              day: "numeric"
-            })
-          : "—";
-        pdf.text(recordedDate, labelColX, y);
-        pdf.text(formatPaymentMethod(pay.method), labelColX + 42, y);
-        pdf.setFont("helvetica", "bold");
-        pdf.text(formatAmount(pay.amount), amountX, y, { align: "right" });
-        setPdfFont(pdf, "Inter");
-        paymentsTotal += pay.amount;
-        y += 4.8;
-      });
-
-      y += 1;
-      pdf.setDrawColor(200, 200, 200);
-      pdf.setLineWidth(0.2);
-      pdf.line(marginL, y, marginR, y);
-      y += 4;
-
-      drawAmountRow("Total collected", formatAmount(paymentsTotal), { bold: true });
-
-      const balance = b.totalPrice - paymentsTotal;
-      pdf.setFontSize(11);
-      if (balance <= 0) {
-        pdf.setTextColor(34, 139, 34);
-        pdf.text("Balance due", labelColX, y);
-        pdf.setFont("helvetica", "bold");
-        pdf.text(formatAmount(0), amountX, y, { align: "right" });
-        setPdfFont(pdf, "Inter");
-        y += 5;
-        pdf.setFontSize(8.4);
-        pdf.setTextColor(80, 80, 80);
-        pdf.text("Fully settled. Thank you.", labelColX, y);
-      } else {
-        pdf.setTextColor(200, 60, 60);
-        pdf.text("Balance due", labelColX, y);
-        pdf.setFont("helvetica", "bold");
-        pdf.text(formatAmount(balance), amountX, y, { align: "right" });
-        setPdfFont(pdf, "Inter");
-      }
-      y += 6;
-    } else {
-      // No payments yet — show payment method + amount due
-      pdf.setFontSize(10);
-      pdf.setTextColor(50, 50, 50);
-      const methodLabel = formatPaymentMethod(b.paymentMethod);
-      pdf.text(`Expected payment method: ${methodLabel}`, labelColX, y);
-      y += 5.5;
-      pdf.setFontSize(11);
-      pdf.setTextColor(200, 60, 60);
-      pdf.text("Amount due at property", labelColX, y);
-      pdf.setFont("helvetica", "bold");
-      pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right" });
-      setPdfFont(pdf, "Inter");
-      y += 6;
-    }
-
-    // ── Footer ──
-    const footerY = Math.min(245, Math.max(178, y + 16));
-    if (footerY > 250) {
-      pdf.addPage();
-      y = drawPdfBrandHeader(pdf, {
-        logoDataUrl,
-        title: "Booking Confirmation Receipt",
-        subtitle: `Booking Reference: ${b.bookingRef}`,
-        meta: `Generated: ${generatedAt}`,
+      drawPdfFooter(
+        pdf,
+        b.bookingRef,
+        "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property.",
         brandRgb,
-        printLight: true
-      });
-    }
-    drawPdfFooter(
-      pdf,
-      b.bookingRef,
-      "This is a booking confirmation only. An official BIR receipt will be issued upon payment at the property.",
-      brandRgb,
-      footerY
-    );
+        footerY > 275 ? y + 8 : footerY
+      );
 
       const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-receipt.pdf`, pdfWindow);
       toast.success(
