@@ -22,6 +22,7 @@ import {
   bustPublicSiteContentCache,
   compressImageFile,
   normalizeSeasonalRateOverrides,
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   type BookingRateBreakdown,
   type ProtectedPaymentMethod,
   type RoomBlock,
@@ -3153,7 +3154,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   const [breakfastConfig, setBreakfastConfig] = useState({
     isEnabled: true,
-    ratePerPersonPerNight: 300,
+    ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
     silogItems: [
       { id: "sl-1", name: "Tapsilog", isActive: true },
       { id: "sl-2", name: "Longsilog", isActive: true },

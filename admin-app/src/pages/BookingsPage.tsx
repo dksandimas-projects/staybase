@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -97,7 +97,7 @@ function estimateNewTotalPrice(
 
   const roomTotal = roomBreakdown.roomSubtotal;
 
-  const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || 250;
+  const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
   const breakfastTotal = booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
   const subtotal = roomTotal + breakfastTotal;
 
@@ -595,7 +595,7 @@ export function BookingsPage() {
     return Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   };
   const numNights = getNumNights();
-  const brekkieRate = breakfastConfig.ratePerPersonPerNight || 300;
+  const brekkieRate = breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
   const totalPrice = roomChargeTotal + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
 
   // Table Columns Setup
@@ -1885,7 +1885,7 @@ export function BookingsPage() {
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
         hasBreakfast,
-        breakfastRate: hasBreakfast ? (breakfastConfig.ratePerPersonPerNight || 300) : 0,
+        breakfastRate: hasBreakfast ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0,
         guestIdPhotoUrl: null,
         handledBy: currentUser?.uid || "staff",
         cancellationReason: ""
@@ -3659,7 +3659,7 @@ export function BookingsPage() {
                 onChange={(e) => setHasBreakfast(e.target.checked)}
                 className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
               />
-              <span>Include Daily Breakfast (+₱{breakfastConfig.ratePerPersonPerNight || 300}/guest/night)</span>
+              <span>Include Daily Breakfast (+₱{breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT}/guest/night)</span>
             </label>
 
             <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
