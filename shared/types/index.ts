@@ -239,6 +239,28 @@ export interface Booking {
   updatedAt: Date;
 }
 
+export type IncidentalChargeCategory =
+  | "late-checkout"
+  | "early-checkin"
+  | "extra-person"
+  | "damage"
+  | "laundry"
+  | "other";
+
+export interface IncidentalCharge {
+  id: string;
+  bookingId?: string;
+  bookingRef?: string;
+  roomNumber?: string;
+  label: string;
+  amount: number;
+  category: IncidentalChargeCategory;
+  note: string;
+  addedBy: string;
+  addedAt: Date;
+  voidOf: string | null;
+}
+
 export type IntercomSender = "guest" | "front-desk";
 
 export interface IntercomMessage {
