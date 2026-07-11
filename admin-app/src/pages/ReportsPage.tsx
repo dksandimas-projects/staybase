@@ -1681,7 +1681,6 @@ export function ReportsPage() {
             )}
           </div>
         </div>
-        </div>
       </header>
 
       {/* Tabs */}
