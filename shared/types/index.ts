@@ -186,6 +186,7 @@ export interface Booking {
   originalTotalPrice: number | null;
   discountType: DiscountType;
   discountPct: number;
+  memberDiscountPct?: number;
   discountIdPhotoUrl: string | null;
   discountVerified: boolean;
   discountVerifiedBy: string | null;
