@@ -29,7 +29,7 @@ export function PageMeta({
   const absoluteImage = effectiveImage.startsWith("http")
     ? effectiveImage
     : `https://${config.domain}/${effectiveImage.replace(/^\/+/, "")}`;
-  const twitterHandle = publishedSeo?.twitterHandle || config.twitterHandle;
+  const twitterHandle = publishedSeo?.twitterHandle ?? config.twitterHandle;
 
   useEffect(() => {
     document.title = fullTitle;

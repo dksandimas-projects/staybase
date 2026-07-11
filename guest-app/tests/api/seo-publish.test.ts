@@ -52,6 +52,7 @@ describe("SEO publishing", () => {
       published: validPayload,
       publishedBy: "admin_1"
     }), { merge: true });
+    expect(mockSet).toHaveBeenLastCalledWith({ sourceChangesPending: false }, { merge: true });
     expect(fetchMock).toHaveBeenCalledWith(process.env.VERCEL_DEPLOY_HOOK_URL, { method: "POST" });
     expect(res.status).toHaveBeenCalledWith(202);
   });

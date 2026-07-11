@@ -1,5 +1,5 @@
 import { VERSION } from "@spark-inn/shared";
-import { Facebook, Instagram, Mail, MapPin, Phone } from "lucide-react";
+import { Facebook, Instagram, Mail, MapPin, Phone, Twitter } from "lucide-react";
 import { Link } from "react-router-dom";
 import config from "@config";
 import { resolveLogo } from "../utils/brand";
@@ -20,17 +20,20 @@ export function Footer() {
   const { branding, contact } = usePublicSiteContent();
   // Per Phase 11.8 PR 3: the contact block is admin-editable
   // from Settings → Hotel Info. The hook value wins when set; the
-  // deploy-time `hotel.config.ts` is the safe fallback so the
-  // footer never goes blank during the cold-load window before
-  // Firestore resolves (the hook already returns `config.X` as
-  // its own fallback, but the `||` here is belt-and-suspenders
-  // for the brief moment when both are missing during a deploy
-  // race).
+  // deploy-time `hotel.config.ts` is the safe fallback for required
+  // contact details. Social values use nullish fallback so an explicit
+  // empty string remains empty and hides that icon.
   const address = contact?.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
   const phone = contact?.frontDeskPhone || config.frontDeskPhone;
   const email = contact?.supportEmail || config.supportEmail;
-  const facebook = contact?.facebookUrl || config.facebookUrl;
-  const instagram = contact?.instagramUrl || config.instagramUrl;
+  const facebook = contact?.facebookUrl ?? config.facebookUrl;
+  const instagram = contact?.instagramUrl ?? config.instagramUrl;
+  const twitterHandle = contact?.twitterHandle ?? config.twitterHandle;
+  const twitterUrl = twitterHandle.startsWith("http")
+    ? twitterHandle
+    : twitterHandle.trim()
+      ? `https://x.com/${twitterHandle.trim().replace(/^@/, "")}`
+      : "";
   const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
   const phoneHref = `tel:${phone.replace(/[^\d+]/g, "")}`;
   const footerLogoSrc = resolveLogo(branding.logoFooter, config.logos.white);
@@ -72,7 +75,7 @@ export function Footer() {
             </a>
           </div>
           <div className="mt-5 flex gap-3 text-gray-300">
-            <a
+            {facebook && <a
               aria-label={`${config.brandName} on Facebook`}
               className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 transition hover:border-primary hover:text-primary-light"
               href={facebook}
@@ -80,8 +83,8 @@ export function Footer() {
               rel="noreferrer"
             >
               <Facebook size={18} />
-            </a>
-            <a
+            </a>}
+            {instagram && <a
               aria-label={`${config.brandName} on Instagram`}
               className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 transition hover:border-primary hover:text-primary-light"
               href={instagram}
@@ -89,7 +92,16 @@ export function Footer() {
               rel="noreferrer"
             >
               <Instagram size={18} />
-            </a>
+            </a>}
+            {twitterUrl && <a
+              aria-label={`${config.brandName} on X`}
+              className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-white/10 transition hover:border-primary hover:text-primary-light"
+              href={twitterUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Twitter size={18} />
+            </a>}
           </div>
         </div>
       </div>

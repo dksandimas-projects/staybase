@@ -2833,18 +2833,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   // Settings Mock States
   const [hotelConfig, setHotelConfig] = useState({
-    hotelName: config.brandName,
     address: `${config.address.street}, ${config.address.city}, ${config.address.region}`,
-    contactEmail: config.supportEmail,
-    contactPhone: config.frontDeskPhone,
     frontDeskPhone: config.frontDeskPhone,
     facebookUrl: `https://facebook.com/${config.brandName}`,
     instagramUrl: `https://instagram.com/${config.brandName}`,
+    twitterHandle: config.twitterHandle,
     checkInTime: "2:00 PM",
     checkOutTime: "12:00 PM",
-    missionStatement: "To deliver peaceful, consistent stays shaped by genuine, intentional hospitality.",
-    visionStatement: "To be Bohol's boutique standard.",
-    hotelStory: "A hospitality story built on consistency...",
     intercomQuickRequests: ["Extra Towels", "Bottled Water", "Room Cleaning", "Do Not Disturb"],
     notificationSoundUrl: "",
     roomTypes: [...DEFAULT_ROOM_TYPES],
@@ -3148,9 +3143,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     pointsPerHundred: 10,
     memberDiscountEnabled: true,
     memberDiscountPct: 10,
-    pointsRedemptionRate: 100,
-    rewardsName: "Spark Rewards",
-    rewardsTagline: "Earn points on completed stays, unlock member-only perks."
+    pointsRedemptionRate: 100
   });
 
   const [breakfastConfig, setBreakfastConfig] = useState({
@@ -3178,8 +3171,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     draft: {
       metaDescription: config.metaDescription,
       priceRange: config.priceRange,
-      ogImage: config.ogImage,
-      twitterHandle: config.twitterHandle
+      ogImage: config.ogImage
     }
   });
 

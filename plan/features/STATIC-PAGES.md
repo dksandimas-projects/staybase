@@ -85,7 +85,7 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 - [ ] **Contact form** (right column) — Name, Email, Subject, Message inputs, Submit button, success/error banners, honeypot, accessibility labels. Wired to `POST /api/contact`. Full spec: `plan/features/CONTACT-INQUIRIES.md` *(Per `DECISIONS-FEATURES.md #76`)*
 
 ### Data & Logic Checklist
-- [ ] Fetch `settings/hotelConfig` for address, phone, email, facebookUrl, instagramUrl
+- [ ] Fetch `settings/hotelConfig` for address, phone, email, facebookUrl, instagramUrl, twitterHandle; hide social icons whose saved value is empty
 - [ ] All contact info sourced from Settings — never hardcoded
 - [ ] **Form submission** calls `POST /api/contact` — see `CONTACT-INQUIRIES.md` for endpoint spec, schema, bot controls, email template, and Firestore rules
 

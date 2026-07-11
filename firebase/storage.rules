@@ -65,6 +65,14 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
+    // Search/social preview images uploaded from Settings → SEO & Search.
+    // Public read is required by social crawlers; staff-only write keeps
+    // the deploy-facing asset controlled by authenticated hotel users.
+    match /assets/seo/{allPaths=**} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     // Per `plan/features/SETTINGS.md §Payment Methods`: QR codes for
     // each booking payment method. Uploaded to Firebase Storage at
     // `assets/payment-methods/{method}/{timestamp}-{filename}` by

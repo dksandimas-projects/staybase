@@ -222,7 +222,7 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings → Hotel Info; each falls back to the deploy-time `hotel.config.ts` value when empty in the public hook): `hotelName`, `address`, `contactEmail`, `contactPhone`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `missionStatement`, `visionStatement`, `hotelStory`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`, `seasonalRateOverrides[]`
+Key fields (per Phase 11.8 PR 3, all admin-editable from Settings → Hotel Info): `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `twitterHandle`, `checkInTime`, `checkOutTime`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`, `seasonalRateOverrides[]`. Brand identity remains deploy-time in `hotel.config.ts`. Missing fields fall back to deploy-time config; explicitly blank social fields hide their public icons. Legacy `hotelName`, `contactEmail`, `contactPhone`, `missionStatement`, `visionStatement`, and `hotelStory` values may remain on old documents but are ignored; their canonical replacements are `hotel.config.ts`, `supportEmail`, `frontDeskPhone`, and `settings/websiteContent.about.*`.
 
 > **`paymentMethods[]`** — fully dynamic payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, `isEnabled`, `showInStore`, and `showInCorporate` flags. `isEnabled` controls the regular booking flow; `showInStore` controls the in-room store; `showInCorporate` controls corporate personal-pay. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. `cod` and `add-to-bill` are store-only entries in this same list. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
 
@@ -234,7 +234,7 @@ Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings �
 
 ### `settings/seo`
 
-Single public-readable, admin-write document for controlled SEO publishing. `draft` contains the editable default description, relative price band, social preview image URL, and X handle. `published` is a validated snapshot that also includes the current Hotel Settings address, front-desk phone, Facebook/Instagram URLs, and check-in/out times. The guest build reads only `published`; when absent or unavailable it falls back to `hotel.config.ts`. `publishedAt` and `publishedBy` record the latest publish request.
+Single public-readable, admin-write document for controlled SEO publishing. `draft` contains the editable default description, relative price band, and social preview image URL. Social images are uploaded from the admin app to Firebase Storage under `assets/seo/og-image/`; the draft stores the resulting public HTTPS URL. `published` is a validated snapshot that also includes the current Hotel Settings address, front-desk phone, Facebook/Instagram URLs, X handle, and check-in/out times. `sourceChangesPending` persists the reminder that canonical Hotel Settings differ from the last published snapshot; it clears only after the deploy hook accepts a publish request. The guest build reads only `published`; when absent or unavailable it falls back to `hotel.config.ts`. `publishedAt` and `publishedBy` record the latest publish request.
 
 ### `settings/websiteContent`
 
@@ -254,7 +254,7 @@ Default items: Tour Packages, Car Rentals. CTA always links to `/contact`. Hide 
 ```
 `perks` uses the same editable card shape as services: `{ title, description, icon, isEnabled }[]`. Hide section entirely if `isEnabled: false`; hide disabled perks within the section.
 
-**`about` body copy** — About Us page content below the hero. The editable fields are `missionStatement`, `visionStatement`, and `hotelStory`. These fields are edited from Settings → Website Content. Empty fields fall back to `settings/hotelConfig.{missionStatement,visionStatement,hotelStory}` and then to the deploy-time public site fallback copy. `hotelStory` is plain text; blank lines split into paragraphs on `/about`.
+**`about` body copy** — About Us page content below the hero. The editable fields are `missionStatement`, `visionStatement`, and `hotelStory`. Settings → Website Content is their only edit surface and `settings/websiteContent.about.*` is the single runtime source of truth. Empty fields fall back directly to deploy-time public-site copy. `hotelStory` is plain text; blank lines split into paragraphs on `/about`.
 
 **Per-page hero fields** (homepage / about / corporate / rewards) — every page with a hero has the same four-string shape: `heroEyebrow`, `heroHeading`, `heroSubtext`, `heroPhotoUrl`. All default to empty string. The guest app falls back to `data/homepage.ts` constants when the field is empty:
 
