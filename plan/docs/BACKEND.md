@@ -232,6 +232,10 @@ Key fields (per Phase 11.8 PR 3, all of these are admin-editable from Settings â
 
 ---
 
+### `settings/seo`
+
+Single public-readable, admin-write document for controlled SEO publishing. `draft` contains the editable default description, relative price band, social preview image URL, and X handle. `published` is a validated snapshot that also includes the current Hotel Settings address, front-desk phone, Facebook/Instagram URLs, and check-in/out times. The guest build reads only `published`; when absent or unavailable it falls back to `hotel.config.ts`. `publishedAt` and `publishedBy` record the latest publish request.
+
 ### `settings/websiteContent`
 
 Single document. Stores editable public page content.

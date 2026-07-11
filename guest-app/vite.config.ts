@@ -1,9 +1,62 @@
 import fs from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import config from "../hotel.config";
+import { SeoPublishSchema, type SeoPublishValues } from "../shared/schemas/seo";
+
+let effectiveSeo: SeoPublishValues = {
+  metaDescription: config.metaDescription,
+  priceRange: config.priceRange,
+  ogImage: config.ogImage,
+  twitterHandle: config.twitterHandle,
+  address: `${config.address.street}, ${config.address.city}, ${config.address.region}, ${config.address.postalCode}`,
+  frontDeskPhone: config.frontDeskPhone,
+  facebookUrl: config.facebookUrl,
+  instagramUrl: config.instagramUrl,
+  checkInTime: config.checkInTime,
+  checkOutTime: config.checkOutTime
+};
+
+function decodeFirestoreValue(value: any): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  if ("stringValue" in value) return value.stringValue;
+  if ("booleanValue" in value) return value.booleanValue;
+  if ("integerValue" in value) return Number(value.integerValue);
+  if ("doubleValue" in value) return Number(value.doubleValue);
+  if ("nullValue" in value) return null;
+  if (value.mapValue?.fields) {
+    return Object.fromEntries(
+      Object.entries(value.mapValue.fields).map(([key, nested]) => [key, decodeFirestoreValue(nested)])
+    );
+  }
+  return undefined;
+}
+
+async function loadPublishedSeo(mode: string) {
+  const env = loadEnv(mode, __dirname, "");
+  const projectId = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || env.VITE_FIREBASE_PROJECT_ID || env.FIREBASE_PROJECT_ID;
+  const apiKey = process.env.VITE_FIREBASE_API_KEY || env.VITE_FIREBASE_API_KEY;
+  if (!projectId || !apiKey) return;
+
+  const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/settings/seo?key=${encodeURIComponent(apiKey)}`;
+  try {
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+    if (response.status === 404) return;
+    if (!response.ok) throw new Error(`Firestore returned ${response.status}`);
+    const document = await response.json() as { fields?: Record<string, unknown> };
+    const published = decodeFirestoreValue(document.fields?.published);
+    const parsed = SeoPublishSchema.safeParse(published);
+    if (parsed.success) effectiveSeo = parsed.data;
+  } catch (error) {
+    console.warn("Published SEO settings were unavailable; using hotel.config.ts defaults.", error);
+  }
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 const indexableRoutes = ["/", "/rooms", "/corporate", "/rewards", "/about", "/contact"] as const;
 
@@ -45,7 +98,7 @@ function absoluteAssetUrl(asset: string) {
 }
 
 function twitterUrl() {
-  const handle = config.twitterHandle.trim().replace(/^@/, "");
+  const handle = effectiveSeo.twitterHandle.trim().replace(/^@/, "");
   return handle ? `https://x.com/${handle}` : "";
 }
 
@@ -55,18 +108,18 @@ function buildHotelJsonLd() {
     "@type": "Hotel",
     name: config.brandName,
     legalName: config.legalName,
-    description: config.metaDescription,
+    description: effectiveSeo.metaDescription,
     url: absolutePublicUrl("/"),
-    image: absoluteAssetUrl(config.ogImage),
-    telephone: config.frontDeskPhone,
+    image: absoluteAssetUrl(effectiveSeo.ogImage),
+    telephone: effectiveSeo.frontDeskPhone,
     email: config.supportEmail,
-    priceRange: config.priceRange,
-    checkinTime: config.checkInTime,
-    checkoutTime: config.checkOutTime,
-    sameAs: [config.facebookUrl, config.instagramUrl, twitterUrl()].filter(Boolean),
+    priceRange: effectiveSeo.priceRange,
+    checkinTime: effectiveSeo.checkInTime,
+    checkoutTime: effectiveSeo.checkOutTime,
+    sameAs: [effectiveSeo.facebookUrl, effectiveSeo.instagramUrl, twitterUrl()].filter(Boolean),
     address: {
       "@type": "PostalAddress",
-      streetAddress: config.address.street,
+      streetAddress: effectiveSeo.address,
       addressLocality: config.address.city,
       addressRegion: config.address.region,
       postalCode: config.address.postalCode
@@ -89,17 +142,18 @@ function ensureMetaTag(html: string, tag: string, pattern: RegExp) {
 
 function transformHtmlForRoute(html: string, route: keyof typeof routeMeta) {
   const meta = routeMeta[route];
+  const description = route === "/" ? effectiveSeo.metaDescription : meta.description;
   const canonicalUrl = absolutePublicUrl(route);
-  const ogImage = config.ogImage ? absoluteAssetUrl(config.ogImage) : absolutePublicUrl("/brand/og-default.png");
-  const twitterSite = config.twitterHandle.trim()
-    ? `<meta name="twitter:site" content="${config.twitterHandle.startsWith("@") ? config.twitterHandle : `@${config.twitterHandle}`}" />`
+  const ogImage = effectiveSeo.ogImage ? absoluteAssetUrl(effectiveSeo.ogImage) : absolutePublicUrl("/brand/og-default.png");
+  const twitterSite = effectiveSeo.twitterHandle.trim()
+    ? `<meta name="twitter:site" content="${escapeHtml(effectiveSeo.twitterHandle.startsWith("@") ? effectiveSeo.twitterHandle : `@${effectiveSeo.twitterHandle}`)}" />`
     : "";
 
   let nextHtml = html
     .replace(/<title>[\s\S]*?<\/title>/i, `<title>${meta.title}</title>`)
     .replace(
       /<meta name="description" content="[^"]*"\s*\/>/i,
-      `<meta name="description" content="${meta.description}" />`
+      `<meta name="description" content="${escapeHtml(description)}" />`
     )
     .replace(
       /<meta property="og:site_name" content="[^"]*"\s*\/>/i,
@@ -111,11 +165,11 @@ function transformHtmlForRoute(html: string, route: keyof typeof routeMeta) {
     )
     .replace(
       /<meta property="og:description" content="[^"]*"\s*\/>/i,
-      `<meta property="og:description" content="${meta.description}" />`
+      `<meta property="og:description" content="${escapeHtml(description)}" />`
     )
     .replace(
       /<meta property="og:image" content="[^"]*"\s*\/>/i,
-      `<meta property="og:image" content="${ogImage}" />`
+      `<meta property="og:image" content="${escapeHtml(ogImage)}" />`
     )
     .replace(
       /<meta property="og:image:width" content="[^"]*"\s*\/>/i,
@@ -143,11 +197,11 @@ function transformHtmlForRoute(html: string, route: keyof typeof routeMeta) {
     )
     .replace(
       /<meta name="twitter:description" content="[^"]*"\s*\/>/i,
-      `<meta name="twitter:description" content="${meta.description}" />`
+      `<meta name="twitter:description" content="${escapeHtml(description)}" />`
     )
     .replace(
       /<meta name="twitter:image" content="[^"]*"\s*\/>/i,
-      `<meta name="twitter:image" content="${ogImage}" />`
+      `<meta name="twitter:image" content="${escapeHtml(ogImage)}" />`
     )
     .replace(
       /<meta name="twitter:site" content="[^"]*"\s*\/>/i,
@@ -155,7 +209,7 @@ function transformHtmlForRoute(html: string, route: keyof typeof routeMeta) {
     )
     .replace(
       /<script type="application\/ld\+json" id="hotel-json-ld">[\s\S]*?<\/script>/i,
-      `<script type="application/ld+json" id="hotel-json-ld">${JSON.stringify(buildHotelJsonLd())}</script>`
+      `<script type="application/ld+json" id="hotel-json-ld">${JSON.stringify(buildHotelJsonLd()).replace(/</g, "\\u003c")}</script>`
     );
 
   nextHtml = ensureMetaTag(
@@ -210,7 +264,9 @@ function indexHtmlTransformPlugin(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(async ({ mode }) => {
+  if (mode !== "test") await loadPublishedSeo(mode);
+  return {
   plugins: [
     indexHtmlTransformPlugin(),
     seoAssetsPlugin(),
@@ -253,4 +309,5 @@ export default defineConfig({
       "@shared": path.resolve(__dirname, "../shared")
     }
   }
+  };
 });
