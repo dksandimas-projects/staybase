@@ -170,6 +170,7 @@ export function ReportsPage() {
     roomTypes,
     breakfastConfig,
     storeConfig,
+    rewardsConfig,
     storeOrders,
     storeItems,
     vouchers,
@@ -1765,6 +1766,7 @@ export function ReportsPage() {
           isMobile={isMobile}
           discountsSummary={discountsSummary}
           loyaltyLiability={loyaltyLiability}
+          rewardsConfig={rewardsConfig}
         />
       )}
 
@@ -2154,6 +2156,7 @@ function SalesTab(props: {
     totalPoints: number;
     liability: number;
   };
+  rewardsConfig?: any;
 }) {
   const {
     deltas,
@@ -2168,7 +2171,8 @@ function SalesTab(props: {
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
     toDate, chartColors, isMobile,
-    discountsSummary, loyaltyLiability
+    discountsSummary, loyaltyLiability,
+    rewardsConfig
   } = props;
 
   const breakfastEnabled = breakfastConfig?.isEnabled;
