@@ -5,6 +5,7 @@ export * from "./schemas/booking";
 export * from "./schemas/paymentMethod";
 export * from "./schemas/room";
 export * from "./schemas/websiteContent";
+export * from "./schemas/seo";
 export * from "./types";
 export * from "./utils/bookingDates";
 export * from "./utils/cache";

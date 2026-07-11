@@ -35,6 +35,9 @@ FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY=
 
+# Vercel Deploy Hook (server-side only; guest production deployment)
+VERCEL_DEPLOY_HOOK_URL=
+
 # Resend (server-side only)
 RESEND_API_KEY=
 
@@ -78,6 +81,7 @@ VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
 - In Vercel dashboard, set all env vars once — they apply to both the frontend build and the API functions in the same deployment
 - `FIREBASE_PROJECT_ID` appears twice (once as `VITE_FIREBASE_PROJECT_ID` for client, once as `FIREBASE_PROJECT_ID` for Admin SDK) — both are needed
 - `CRON_SECRET` protects scheduled Vercel Cron email jobs and must match the bearer token expected by `/api/email/checkin-reminder`
+- `VERCEL_DEPLOY_HOOK_URL` is called only by the authenticated admin SEO publish endpoint. Never prefix it with `VITE_` or expose it to browser code.
 
 ---
 

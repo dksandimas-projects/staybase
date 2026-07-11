@@ -14,6 +14,7 @@ import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStat
 import { handleVerifyIntercomGuest } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
+import { handlePublishSeo } from "./handlers/seo";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -798,6 +799,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fromEmail: process.env.RESEND_FROM_EMAIL || config.supportEmail,
       adminEmail: process.env.RESEND_ADMIN_EMAIL || config.supportEmail
     });
+  }
+
+  if (domain === "admin" && action === "publish-seo" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-publish-seo:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many publish requests. Please wait a minute and try again." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can publish SEO changes." });
+    }
+    (req as any).staff = authResult;
+    return await handlePublishSeo(req, res);
   }
 
   if (domain === "admin" && action === "create-staff" && req.method === "POST") {
