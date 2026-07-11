@@ -160,9 +160,18 @@ function hexToRgb(hex: string): [number, number, number] {
 // form must only ever submit one of these values.
 const EARLY_CHECKIN_TIME_OPTIONS = ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM"];
 const EARLY_CHECKIN_DEFAULT_TIME = "11:00 AM";
-const STORE_ONLY_ONSITE_PAYMENT_METHODS = new Set(["cod", "add-to-bill"]);
+// Methods that are not a real settlement tender for an onsite payment/refund:
+// store-only rails (cod, add-to-bill) and "pay-at-hotel", which is a
+// booking-time *intent*, not how the guest actually paid. Excluding
+// pay-at-hotel forces staff to record the true tender (Cash, GCash, …) so the
+// Daily Close reconciliation isn't polluted by ambiguous entries.
+const NON_TENDER_ONSITE_PAYMENT_METHODS = new Set(["cod", "add-to-bill", "pay-at-hotel"]);
+// Cash must always be recordable at the desk even if the hotel never added a
+// Cash method under Settings → Payment Methods (it is intentionally kept out
+// of the guest-facing paymentMethods config so it can't be offered online).
+const CASH_ONSITE_PAYMENT_METHOD: PaymentMethodConfig = { method: "cash", label: "Cash", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true };
 const LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS: PaymentMethodConfig[] = [
-  { method: "cash", label: "Cash", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true },
+  CASH_ONSITE_PAYMENT_METHOD,
   { method: "card", label: "Credit Card", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true },
   { method: "gcash", label: "GCash Transfer", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }
 ];
@@ -518,9 +527,12 @@ export function BookingsPage() {
   const onsitePaymentMethodOptions = useMemo(() => {
     const configured = paymentMethods.filter((method) => {
       const key = method.method.trim();
-      return key && !STORE_ONLY_ONSITE_PAYMENT_METHODS.has(key);
+      return key && !NON_TENDER_ONSITE_PAYMENT_METHODS.has(key);
     });
-    return configured.length > 0 ? configured : LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS;
+    const base = configured.length > 0 ? configured : LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS;
+    // Guarantee Cash is always selectable as an onsite tender.
+    const hasCash = base.some((method) => method.method.trim().toLowerCase() === "cash");
+    return hasCash ? base : [CASH_ONSITE_PAYMENT_METHOD, ...base];
   }, [paymentMethods]);
 
   const onsitePaymentMethodLabels = useMemo(() => {

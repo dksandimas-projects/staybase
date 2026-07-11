@@ -23,6 +23,7 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { collection, collectionGroup, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
+import { normalizePaymentMethodBucket, dateKeyInTimeZone } from "../utils/finance";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -58,6 +59,11 @@ interface ReportPayment {
   recordedBy: string;
   recordedAt: Date | null;
 }
+
+// The ledger rows as stored in Firestore, before the booking-derived display
+// fields (bookingRef / roomNumber / guestName) are joined in.
+type RawReportCharge = Omit<ReportCharge, "bookingRef" | "roomNumber">;
+type RawReportPayment = Omit<ReportPayment, "bookingRef" | "roomNumber" | "guestName">;
 
 interface ReceivableRow {
   bookingId: string;
@@ -134,10 +140,12 @@ const getOverlapNights = (
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
+  cash: "Cash",
   gcash: "GCash",
   "pay-at-hotel": "Pay at Hotel",
   paypal: "PayPal",
   bank: "Bank Transfer",
+  card: "Card",
   cod: "Cash on Delivery",
   "add-to-bill": "Add to Bill"
 };
@@ -196,8 +204,13 @@ export function ReportsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFullBackupConfirmOpen, setFullBackupConfirmOpen] = useState(false);
   const [isFullBackupExporting, setFullBackupExporting] = useState(false);
-  const [charges, setCharges] = useState<ReportCharge[]>([]);
-  const [payments, setPayments] = useState<ReportPayment[]>([]);
+  // Raw ledger rows straight from Firestore (no booking-derived fields). The
+  // guest name / ref / room are joined in a memo below so these listeners can
+  // stay subscribed once instead of tearing down and re-reading every payment
+  // and charge each time any booking changes (FR-05 — avoids needless
+  // pay-per-read Firestore traffic).
+  const [rawCharges, setRawCharges] = useState<RawReportCharge[]>([]);
+  const [rawPayments, setRawPayments] = useState<RawReportPayment[]>([]);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
@@ -205,15 +218,12 @@ export function ReportsPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
-      setCharges(snapshot.docs.map((chargeDoc) => {
+      setRawCharges(snapshot.docs.map((chargeDoc) => {
         const data = chargeDoc.data();
         const bookingId = chargeDoc.ref.parent.parent?.id || "";
-        const booking = bookings.find((item) => item.id === bookingId);
         return {
           id: chargeDoc.id,
           bookingId,
-          bookingRef: booking?.bookingRef || bookingId,
-          roomNumber: booking?.roomNumber || "",
           label: String(data.label || "Incidental charge"),
           amount: Number(data.amount || 0),
           category: String(data.category || "other"),
@@ -228,7 +238,7 @@ export function ReportsPage() {
       toast.error("Could not load incidental revenue", "The other reports remain available. Refresh to try again.");
     });
     return unsubscribe;
-  }, [bookings, toast]);
+  }, [toast]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "corporateInvoices"), (snapshot) => {
@@ -256,17 +266,13 @@ export function ReportsPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "payments"), (snapshot) => {
-      setPayments(snapshot.docs.map((paymentDoc) => {
+      setRawPayments(snapshot.docs.map((paymentDoc) => {
         const data = paymentDoc.data();
         const bookingId = paymentDoc.ref.parent.parent?.id || "";
-        const booking = bookings.find((item) => item.id === bookingId);
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
           bookingId,
-          bookingRef: booking?.bookingRef || bookingId,
-          roomNumber: booking?.roomNumber || "",
-          guestName: booking?.guestName || "",
           amount: Number(data.amount || 0),
           method: String(data.method || "unknown"),
           note: String(data.note || ""),
@@ -281,7 +287,7 @@ export function ReportsPage() {
       toast.error("Could not load collections", "Billed revenue remains available. Refresh to try again.");
     });
     return unsubscribe;
-  }, [bookings, toast]);
+  }, [toast]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -299,6 +305,46 @@ export function ReportsPage() {
     );
     return unsubscribe;
   }, []);
+
+  // Join booking-derived display fields (ref / room / guest) onto the raw
+  // ledger rows in memory. This keeps the payments/charges listeners above
+  // stable while the enriched `payments` / `charges` arrays consumed by the
+  // rest of the page still update whenever either the ledger or the bookings
+  // change — without re-reading Firestore (FR-05).
+  const bookingDisplayById = useMemo(() => {
+    const map = new Map<string, { bookingRef: string; roomNumber: string; guestName: string }>();
+    bookings.forEach((b) => map.set(b.id, {
+      bookingRef: b.bookingRef || b.id,
+      roomNumber: b.roomNumber || "",
+      guestName: b.guestName || ""
+    }));
+    return map;
+  }, [bookings]);
+
+  const charges = useMemo<ReportCharge[]>(() =>
+    rawCharges.map((charge) => {
+      const display = bookingDisplayById.get(charge.bookingId);
+      return {
+        ...charge,
+        bookingRef: display?.bookingRef || charge.bookingId,
+        roomNumber: display?.roomNumber || ""
+      };
+    }),
+    [rawCharges, bookingDisplayById]
+  );
+
+  const payments = useMemo<ReportPayment[]>(() =>
+    rawPayments.map((payment) => {
+      const display = bookingDisplayById.get(payment.bookingId);
+      return {
+        ...payment,
+        bookingRef: display?.bookingRef || payment.bookingId,
+        roomNumber: display?.roomNumber || "",
+        guestName: display?.guestName || ""
+      };
+    }),
+    [rawPayments, bookingDisplayById]
+  );
 
   const chartColors = [
     config.colors.primary,
@@ -350,10 +396,14 @@ export function ReportsPage() {
     return date >= periodStart && date <= periodEnd;
   };
 
-  // ── Revenue-eligible bookings (confirmed, checked-in, checked-out) ──
+  // ── Revenue-eligible bookings (payment-confirmed, confirmed, checked-in, checked-out) ──
+  // `payment-confirmed` is included so the billed side of the Collections
+  // Reconciliation matches the Receivables report (which already counts it);
+  // otherwise a paid-but-not-yet-confirmed booking's payment shows up as
+  // phantom "over-collected" cash until staff advance the status.
   const revenueBookings = useMemo(() =>
     bookings.filter(b =>
-      b.status === "confirmed" || b.status === "checked-in" || b.status === "checked-out"
+      b.status === "payment-confirmed" || b.status === "confirmed" || b.status === "checked-in" || b.status === "checked-out"
     ),
     [bookings]
   );
@@ -485,7 +535,9 @@ export function ReportsPage() {
     const rows = new Map<string, { date: string; count: number; total: number }>();
     rangePayments.forEach((payment) => {
       if (!payment.recordedAt) return;
-      const date = payment.recordedAt.toISOString().slice(0, 10);
+      // Group by hotel-timezone calendar day so this agrees with the Daily
+      // Close ledger (a 1 AM Manila payment must not land on the prior day).
+      const date = dateKeyInTimeZone(payment.recordedAt, config.timezone);
       const current = rows.get(date) || { date, count: 0, total: 0 };
       current.count += 1;
       current.total += payment.amount;
@@ -1807,6 +1859,7 @@ export function ReportsPage() {
           currentUser={currentUser}
           toDate={toDate}
           isMobile={isMobile}
+          staffNameMap={staffNameMap}
         />
       )}
 
@@ -3200,16 +3253,18 @@ interface DailyCloseTabProps {
   currentUser: any;
   toDate: (v: any) => Date | null;
   isMobile: boolean;
+  staffNameMap: Map<string, string>;
 }
 
-function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }: DailyCloseTabProps) {
+function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile, staffNameMap }: DailyCloseTabProps) {
   const toast = useToast();
-  const [dateStr, setDateStr] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const [dateStr, setDateStr] = useState(() => dateKeyInTimeZone(new Date(), config.timezone));
   const [countedCash, setCountedCash] = useState("");
   const [countedGCash, setCountedGCash] = useState("");
   const [countedBank, setCountedBank] = useState("");
   const [countedCard, setCountedCard] = useState("");
   const [countedPaypal, setCountedPaypal] = useState("");
+  const [countedOther, setCountedOther] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -3218,32 +3273,31 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
     return dailyCloses.find((c) => c.id === dateStr);
   }, [dailyCloses, dateStr]);
 
-  // Filter payments for selected date
+  // Filter payments for selected date, keyed on the hotel-timezone calendar
+  // day so the ledger matches the "Collections by day" grouping regardless of
+  // the admin's browser timezone.
   const dayPayments = useMemo(() => {
     return payments.filter((p) => {
       if (!p.recordedAt) return false;
-      return p.recordedAt.toLocaleDateString("en-CA") === dateStr;
+      return dateKeyInTimeZone(p.recordedAt, config.timezone) === dateStr;
     });
   }, [payments, dateStr]);
 
-  // Group and sum daily payments
+  // Group and sum daily payments. Unrecognized/ambiguous tenders (custom
+  // methods, "pay-at-hotel") land in `other` so they never silently inflate
+  // the physical cash count and manufacture a false drawer variance.
   const dailySummary = useMemo(() => {
     const summary = {
       cash: { payments: 0, refunds: 0, net: 0, count: 0 },
       gcash: { payments: 0, refunds: 0, net: 0, count: 0 },
       bank: { payments: 0, refunds: 0, net: 0, count: 0 },
       card: { payments: 0, refunds: 0, net: 0, count: 0 },
-      paypal: { payments: 0, refunds: 0, net: 0, count: 0 }
+      paypal: { payments: 0, refunds: 0, net: 0, count: 0 },
+      other: { payments: 0, refunds: 0, net: 0, count: 0 }
     };
 
     dayPayments.forEach((p) => {
-      const lowerMethod = (p.method || "").toLowerCase();
-      let key: keyof typeof summary = "cash";
-      if (lowerMethod === "gcash") key = "gcash";
-      else if (lowerMethod === "bank" || lowerMethod === "bank_transfer" || lowerMethod === "bank-transfer") key = "bank";
-      else if (lowerMethod === "card") key = "card";
-      else if (lowerMethod === "paypal") key = "paypal";
-
+      const key = normalizePaymentMethodBucket(p.method);
       const amt = p.amount;
       if (p.type === "refund") {
         const absAmt = Math.abs(amt);
@@ -3267,6 +3321,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
       setCountedBank(String(existingClose.countedNet?.bank ?? 0));
       setCountedCard(String(existingClose.countedNet?.card ?? 0));
       setCountedPaypal(String(existingClose.countedNet?.paypal ?? 0));
+      setCountedOther(String(existingClose.countedNet?.other ?? 0));
       setNotes(existingClose.notes || "");
     } else {
       setCountedCash("");
@@ -3274,6 +3329,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
       setCountedBank("");
       setCountedCard("");
       setCountedPaypal("");
+      setCountedOther("");
       setNotes("");
     }
   }, [existingClose]);
@@ -3289,21 +3345,24 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
   const bankVal = parseVal(countedBank);
   const cardVal = parseVal(countedCard);
   const paypalVal = parseVal(countedPaypal);
+  const otherVal = parseVal(countedOther);
 
   const varianceCash = cashVal - dailySummary.cash.net;
   const varianceGCash = gcashVal - dailySummary.gcash.net;
   const varianceBank = bankVal - dailySummary.bank.net;
   const varianceCard = cardVal - dailySummary.card.net;
   const variancePaypal = paypalVal - dailySummary.paypal.net;
+  const varianceOther = otherVal - dailySummary.other.net;
 
   const totalRecordedNet =
     dailySummary.cash.net +
     dailySummary.gcash.net +
     dailySummary.bank.net +
     dailySummary.card.net +
-    dailySummary.paypal.net;
+    dailySummary.paypal.net +
+    dailySummary.other.net;
 
-  const totalCountedNet = cashVal + gcashVal + bankVal + cardVal + paypalVal;
+  const totalCountedNet = cashVal + gcashVal + bankVal + cardVal + paypalVal + otherVal;
   const totalVariance = totalCountedNet - totalRecordedNet;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -3321,21 +3380,24 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
           gcash: dailySummary.gcash.net,
           bank: dailySummary.bank.net,
           card: dailySummary.card.net,
-          paypal: dailySummary.paypal.net
+          paypal: dailySummary.paypal.net,
+          other: dailySummary.other.net
         },
         countedNet: {
           cash: cashVal,
           gcash: gcashVal,
           bank: bankVal,
           card: cardVal,
-          paypal: paypalVal
+          paypal: paypalVal,
+          other: otherVal
         },
         variance: {
           cash: varianceCash,
           gcash: varianceGCash,
           bank: varianceBank,
           card: varianceCard,
-          paypal: variancePaypal
+          paypal: variancePaypal,
+          other: varianceOther
         },
         notes
       });
@@ -3556,6 +3618,40 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
                   </span>
                 </div>
               </div>
+
+              {/* Other Row — custom / ambiguous tenders (e.g. pay-at-hotel) */}
+              <div className="grid grid-cols-4 gap-4 items-center text-xs border-t border-gray-100 pt-4">
+                <div className="col-span-1">
+                  <p className="font-semibold text-gray-950">Other</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {dailySummary.other.count} payment{dailySummary.other.count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  <p className="text-gray-500">Recorded</p>
+                  <p className="font-semibold font-mono">{formatPrice(dailySummary.other.net)}</p>
+                </div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1">Counted Net</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={countedOther}
+                    disabled={Boolean(existingClose)}
+                    onChange={(e) => setCountedOther(e.target.value)}
+                    placeholder="₱0.00"
+                    className="w-full min-h-[36px] rounded-lg border border-gray-200 bg-white px-2.5 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500 font-mono"
+                  />
+                </div>
+                <div className="col-span-1 text-right">
+                  <p className="text-[10px] font-bold text-gray-500 mb-1">Variance</p>
+                  <span className={`font-bold font-mono px-2 py-0.5 rounded text-[11px] ${
+                    varianceOther === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}>
+                    {varianceOther >= 0 ? "+" : ""}{formatPrice(varianceOther)}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div className="border-t border-gray-100 pt-5 space-y-4">
@@ -3611,7 +3707,7 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
                         {p.type}
                       </td>
                       <td className="px-3 py-2 text-gray-600 uppercase">{PAYMENT_LABELS[p.method] || p.method}</td>
-                      <td className="px-3 py-2 text-gray-600">{p.recordedBy}</td>
+                      <td className="px-3 py-2 text-gray-600">{staffNameMap.get(p.recordedBy) || p.recordedBy}</td>
                       <td className={`px-3 py-2 font-mono font-bold text-right ${p.type === "refund" ? "text-red-650" : "text-emerald-750"}`}>
                         {p.type === "refund" ? "-" : ""}{formatPrice(p.amount)}
                       </td>
@@ -3683,7 +3779,8 @@ function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }:
                   (c.variance?.gcash ?? 0) +
                   (c.variance?.bank ?? 0) +
                   (c.variance?.card ?? 0) +
-                  (c.variance?.paypal ?? 0);
+                  (c.variance?.paypal ?? 0) +
+                  (c.variance?.other ?? 0);
                 return (
                   <button
                     key={c.id}
