@@ -76,6 +76,7 @@ export function RatesPage() {
     toggleCorporateCodeActive,
     deleteCorporateCode,
     seasonalRateOverrides,
+    hotelConfig,
     breakfastConfig,
     updateSettings,
     updateRoomType,
@@ -85,6 +86,17 @@ export function RatesPage() {
   } = useAdmin();
   const { isMobile } = useBreakpoint();
   const toast = useToast();
+  const seniorPwdOnlineEnabled = hotelConfig?.seniorPwdOnlineEnabled !== false;
+
+  const handleSeniorPwdOnlineToggle = async () => {
+    const next = !seniorPwdOnlineEnabled;
+    const saved = await updateSettings("hotelConfig", { seniorPwdOnlineEnabled: next, updatedAt: new Date() });
+    if (saved) {
+      toast.success("Online discount setting saved", next
+        ? "Eligible guests can claim Senior/PWD discounts during online booking."
+        : "Online claims are hidden; front-desk grants remain available.");
+    }
+  };
 
   // Modal State
   const [isVchModalOpen, setIsVchModalOpen] = useState(false);
@@ -1195,6 +1207,19 @@ export function RatesPage() {
               <p className="text-[9px] text-gray-400 leading-normal italic">
                 * Governed by Philippine laws RA 9994 / RA 10754. Hardcoded values are locked from staff changes to maintain strict legal compliance.
               </p>
+              <label className="mt-3 flex min-h-[52px] cursor-pointer items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white px-3 py-2">
+                <span>
+                  <span className="block text-xs font-semibold text-gray-800">Allow online Senior/PWD claims</span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-gray-500">When off, eligible guests are directed to present their ID at the front desk. Staff grants remain available.</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={seniorPwdOnlineEnabled}
+                  onChange={() => void handleSeniorPwdOnlineToggle()}
+                  className="h-5 w-5 shrink-0 accent-primary"
+                  aria-label="Allow online Senior/PWD discount claims"
+                />
+              </label>
             </div>
           </div>
         </div>
