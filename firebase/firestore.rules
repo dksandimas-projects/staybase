@@ -233,5 +233,19 @@ service cloud.firestore {
       allow create: if false;
       allow delete: if isAdmin();
     }
+    // ── collectionGroup rules ──────────────────────────────────────────────
+    // Firestore requires explicit collectionGroup rules for cross-document
+    // queries (collectionGroup(db, "charges") / "payments"). The nested
+    // document rules above cover single-document reads but not group queries.
+
+    match /{path=**}/charges/{chargeId} {
+      allow read: if isStaff();
+      allow update, delete: if false;
+    }
+
+    match /{path=**}/payments/{paymentId} {
+      allow read: if isStaff();
+      allow update, delete: if false;
+    }
   }
 }
