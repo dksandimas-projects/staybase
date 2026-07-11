@@ -149,6 +149,20 @@ service cloud.firestore {
       allow create: if isStaff();
     }
 
+    match /dailyCloses/{dateStr} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["dateStr", "closedAt", "closedBy", "recordedNet", "countedNet", "variance", "notes"])
+        && request.resource.data.dateStr == dateStr
+        && request.resource.data.closedAt == request.time
+        && request.resource.data.closedBy is string
+        && request.resource.data.recordedNet is map
+        && request.resource.data.countedNet is map
+        && request.resource.data.variance is map
+        && request.resource.data.notes is string;
+      allow update, delete: if false;
+    }
+
     // Per BI-08 (booking-intercom audit 2026-07-06): the
     // previous `allow read: if true` on both collections let
     // any anonymous visitor dump every voucher code, discount

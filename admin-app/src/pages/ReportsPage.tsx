@@ -14,16 +14,17 @@ import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
-  TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet
+  TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet,
+  Calendar, Lock, CheckCircle2
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
-import { collection, collectionGroup, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
-type ReportTab = "performance" | "sales";
+type ReportTab = "performance" | "sales" | "daily-close";
 type SalesSubTab = "bookings" | "breakfast" | "store" | "charges";
 
 interface ReportCharge {
@@ -152,6 +153,7 @@ export function ReportsPage() {
   const [payments, setPayments] = useState<ReportPayment[]>([]);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
+  const [dailyCloses, setDailyCloses] = useState<any[]>([]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
@@ -232,6 +234,23 @@ export function ReportsPage() {
     });
     return unsubscribe;
   }, [bookings, toast]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(collection(db, "dailyCloses"), orderBy("closedAt", "desc")),
+      (snapshot) => {
+        setDailyCloses(snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          closedAt: toDate(doc.data().closedAt)
+        })));
+      },
+      (error) => {
+        console.error("Failed to load daily closes:", error);
+      }
+    );
+    return unsubscribe;
+  }, []);
 
   const chartColors = [
     config.colors.primary,
@@ -1375,7 +1394,7 @@ export function ReportsPage() {
       </header>
 
       {/* Tabs */}
-      <div role="tablist" className="flex gap-1 rounded-lg bg-gray-100 p-1 max-w-sm">
+      <div role="tablist" className="flex gap-1 rounded-lg bg-gray-100 p-1 max-w-md">
         <button
           type="button"
           role="tab"
@@ -1397,6 +1416,17 @@ export function ReportsPage() {
           }`}
         >
           Sales
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "daily-close"}
+          onClick={() => setActiveTab("daily-close")}
+          className={`flex-1 min-h-[36px] rounded-md text-xs font-bold transition ${
+            activeTab === "daily-close" ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
+          }`}
+        >
+          Daily Close
         </button>
       </div>
 
@@ -1471,6 +1501,16 @@ export function ReportsPage() {
           isMobile={isMobile}
           discountsSummary={discountsSummary}
           loyaltyLiability={loyaltyLiability}
+        />
+      )}
+
+      {activeTab === "daily-close" && (
+        <DailyCloseTab
+          payments={payments}
+          dailyCloses={dailyCloses}
+          currentUser={currentUser}
+          toDate={toDate}
+          isMobile={isMobile}
         />
       )}
 
@@ -2743,4 +2783,536 @@ function triggerDownload(blob: Blob, filename: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+// ───────────────────── Daily Close Tab ─────────────────────
+
+interface DailyCloseTabProps {
+  payments: ReportPayment[];
+  dailyCloses: any[];
+  currentUser: any;
+  toDate: (v: any) => Date | null;
+  isMobile: boolean;
+}
+
+function DailyCloseTab({ payments, dailyCloses, currentUser, toDate, isMobile }: DailyCloseTabProps) {
+  const toast = useToast();
+  const [dateStr, setDateStr] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const [countedCash, setCountedCash] = useState("");
+  const [countedGCash, setCountedGCash] = useState("");
+  const [countedBank, setCountedBank] = useState("");
+  const [countedCard, setCountedCard] = useState("");
+  const [countedPaypal, setCountedPaypal] = useState("");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Check if a daily close document already exists for this date
+  const existingClose = useMemo(() => {
+    return dailyCloses.find((c) => c.id === dateStr);
+  }, [dailyCloses, dateStr]);
+
+  // Filter payments for selected date
+  const dayPayments = useMemo(() => {
+    return payments.filter((p) => {
+      if (!p.recordedAt) return false;
+      return p.recordedAt.toLocaleDateString("en-CA") === dateStr;
+    });
+  }, [payments, dateStr]);
+
+  // Group and sum daily payments
+  const dailySummary = useMemo(() => {
+    const summary = {
+      cash: { payments: 0, refunds: 0, net: 0, count: 0 },
+      gcash: { payments: 0, refunds: 0, net: 0, count: 0 },
+      bank: { payments: 0, refunds: 0, net: 0, count: 0 },
+      card: { payments: 0, refunds: 0, net: 0, count: 0 },
+      paypal: { payments: 0, refunds: 0, net: 0, count: 0 }
+    };
+
+    dayPayments.forEach((p) => {
+      const lowerMethod = (p.method || "").toLowerCase();
+      let key: keyof typeof summary = "cash";
+      if (lowerMethod === "gcash") key = "gcash";
+      else if (lowerMethod === "bank" || lowerMethod === "bank_transfer" || lowerMethod === "bank-transfer") key = "bank";
+      else if (lowerMethod === "card") key = "card";
+      else if (lowerMethod === "paypal") key = "paypal";
+
+      const amt = p.amount;
+      if (p.type === "refund") {
+        const absAmt = Math.abs(amt);
+        summary[key].refunds += absAmt;
+        summary[key].net -= absAmt;
+      } else {
+        summary[key].payments += amt;
+        summary[key].net += amt;
+      }
+      summary[key].count += 1;
+    });
+
+    return summary;
+  }, [dayPayments]);
+
+  // Set inputs if existing close is selected or found
+  useEffect(() => {
+    if (existingClose) {
+      setCountedCash(String(existingClose.countedNet?.cash ?? 0));
+      setCountedGCash(String(existingClose.countedNet?.gcash ?? 0));
+      setCountedBank(String(existingClose.countedNet?.bank ?? 0));
+      setCountedCard(String(existingClose.countedNet?.card ?? 0));
+      setCountedPaypal(String(existingClose.countedNet?.paypal ?? 0));
+      setNotes(existingClose.notes || "");
+    } else {
+      setCountedCash("");
+      setCountedGCash("");
+      setCountedBank("");
+      setCountedCard("");
+      setCountedPaypal("");
+      setNotes("");
+    }
+  }, [existingClose]);
+
+  // Handle inputs
+  const parseVal = (val: string) => {
+    const num = Number(val);
+    return Number.isNaN(num) ? 0 : num;
+  };
+
+  const cashVal = parseVal(countedCash);
+  const gcashVal = parseVal(countedGCash);
+  const bankVal = parseVal(countedBank);
+  const cardVal = parseVal(countedCard);
+  const paypalVal = parseVal(countedPaypal);
+
+  const varianceCash = cashVal - dailySummary.cash.net;
+  const varianceGCash = gcashVal - dailySummary.gcash.net;
+  const varianceBank = bankVal - dailySummary.bank.net;
+  const varianceCard = cardVal - dailySummary.card.net;
+  const variancePaypal = paypalVal - dailySummary.paypal.net;
+
+  const totalRecordedNet =
+    dailySummary.cash.net +
+    dailySummary.gcash.net +
+    dailySummary.bank.net +
+    dailySummary.card.net +
+    dailySummary.paypal.net;
+
+  const totalCountedNet = cashVal + gcashVal + bankVal + cardVal + paypalVal;
+  const totalVariance = totalCountedNet - totalRecordedNet;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (existingClose) return;
+    setSubmitting(true);
+    try {
+      const closeRef = doc(db, "dailyCloses", dateStr);
+      await setDoc(closeRef, {
+        dateStr,
+        closedAt: serverTimestamp(),
+        closedBy: currentUser?.name || currentUser?.email || "Staff",
+        recordedNet: {
+          cash: dailySummary.cash.net,
+          gcash: dailySummary.gcash.net,
+          bank: dailySummary.bank.net,
+          card: dailySummary.card.net,
+          paypal: dailySummary.paypal.net
+        },
+        countedNet: {
+          cash: cashVal,
+          gcash: gcashVal,
+          bank: bankVal,
+          card: cardVal,
+          paypal: paypalVal
+        },
+        variance: {
+          cash: varianceCash,
+          gcash: varianceGCash,
+          bank: varianceBank,
+          card: varianceCard,
+          paypal: variancePaypal
+        },
+        notes
+      });
+      toast.success("Daily Close Submitted", `Reconciliation log for ${dateStr} has been successfully closed.`);
+    } catch (error) {
+      console.error("Failed to submit daily close:", error);
+      toast.error("Submission Failed", "There was an error writing to Firestore.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Top Selector Card */}
+      <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">reconcile daily close</h2>
+            <p className="text-[10px] text-gray-500 mt-1">Review ledger transactions and submit physical cash drawer and online account counts.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-gray-500 uppercase">Select Date:</span>
+            <input
+              type="date"
+              value={dateStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              className="min-h-[36px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Aggregated Form Section */}
+        <div className="lg:col-span-2 space-y-6">
+          <form onSubmit={handleSubmit} className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-6">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Method Breakdown</span>
+              {existingClose ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-700">
+                  <Lock size={12} /> Closed & Locked
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-700">
+                  Pending Close
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {/* Cash Row */}
+              <div className="grid grid-cols-4 gap-4 items-center text-xs">
+                <div className="col-span-1">
+                  <p className="font-semibold text-gray-950">Cash</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {dailySummary.cash.count} payment{dailySummary.cash.count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  <p className="text-gray-500">Recorded</p>
+                  <p className="font-semibold font-mono">{formatPrice(dailySummary.cash.net)}</p>
+                </div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1">Physical Count</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={countedCash}
+                    disabled={Boolean(existingClose)}
+                    onChange={(e) => setCountedCash(e.target.value)}
+                    placeholder="₱0.00"
+                    className="w-full min-h-[36px] rounded-lg border border-gray-200 bg-white px-2.5 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500 font-mono"
+                  />
+                </div>
+                <div className="col-span-1 text-right">
+                  <p className="text-[10px] font-bold text-gray-500 mb-1">Variance</p>
+                  <span className={`font-bold font-mono px-2 py-0.5 rounded text-[11px] ${
+                    varianceCash === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}>
+                    {varianceCash >= 0 ? "+" : ""}{formatPrice(varianceCash)}
+                  </span>
+                </div>
+              </div>
+
+              {/* GCash Row */}
+              <div className="grid grid-cols-4 gap-4 items-center text-xs border-t border-gray-100 pt-4">
+                <div className="col-span-1">
+                  <p className="font-semibold text-gray-950">GCash</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {dailySummary.gcash.count} payment{dailySummary.gcash.count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  <p className="text-gray-500">Recorded</p>
+                  <p className="font-semibold font-mono">{formatPrice(dailySummary.gcash.net)}</p>
+                </div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1">Counted Balance</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={countedGCash}
+                    disabled={Boolean(existingClose)}
+                    onChange={(e) => setCountedGCash(e.target.value)}
+                    placeholder="₱0.00"
+                    className="w-full min-h-[36px] rounded-lg border border-gray-200 bg-white px-2.5 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500 font-mono"
+                  />
+                </div>
+                <div className="col-span-1 text-right">
+                  <p className="text-[10px] font-bold text-gray-500 mb-1">Variance</p>
+                  <span className={`font-bold font-mono px-2 py-0.5 rounded text-[11px] ${
+                    varianceGCash === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}>
+                    {varianceGCash >= 0 ? "+" : ""}{formatPrice(varianceGCash)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Bank Transfer Row */}
+              <div className="grid grid-cols-4 gap-4 items-center text-xs border-t border-gray-100 pt-4">
+                <div className="col-span-1">
+                  <p className="font-semibold text-gray-950">Bank Transfer</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {dailySummary.bank.count} payment{dailySummary.bank.count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  <p className="text-gray-500">Recorded</p>
+                  <p className="font-semibold font-mono">{formatPrice(dailySummary.bank.net)}</p>
+                </div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1">Counted Net</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={countedBank}
+                    disabled={Boolean(existingClose)}
+                    onChange={(e) => setCountedBank(e.target.value)}
+                    placeholder="₱0.00"
+                    className="w-full min-h-[36px] rounded-lg border border-gray-200 bg-white px-2.5 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500 font-mono"
+                  />
+                </div>
+                <div className="col-span-1 text-right">
+                  <p className="text-[10px] font-bold text-gray-500 mb-1">Variance</p>
+                  <span className={`font-bold font-mono px-2 py-0.5 rounded text-[11px] ${
+                    varianceBank === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}>
+                    {varianceBank >= 0 ? "+" : ""}{formatPrice(varianceBank)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Card Row */}
+              <div className="grid grid-cols-4 gap-4 items-center text-xs border-t border-gray-100 pt-4">
+                <div className="col-span-1">
+                  <p className="font-semibold text-gray-950">Card</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {dailySummary.card.count} payment{dailySummary.card.count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  <p className="text-gray-500">Recorded</p>
+                  <p className="font-semibold font-mono">{formatPrice(dailySummary.card.net)}</p>
+                </div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1">Counted Net</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={countedCard}
+                    disabled={Boolean(existingClose)}
+                    onChange={(e) => setCountedCard(e.target.value)}
+                    placeholder="₱0.00"
+                    className="w-full min-h-[36px] rounded-lg border border-gray-200 bg-white px-2.5 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500 font-mono"
+                  />
+                </div>
+                <div className="col-span-1 text-right">
+                  <p className="text-[10px] font-bold text-gray-500 mb-1">Variance</p>
+                  <span className={`font-bold font-mono px-2 py-0.5 rounded text-[11px] ${
+                    varianceCard === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}>
+                    {varianceCard >= 0 ? "+" : ""}{formatPrice(varianceCard)}
+                  </span>
+                </div>
+              </div>
+
+              {/* PayPal Row */}
+              <div className="grid grid-cols-4 gap-4 items-center text-xs border-t border-gray-100 pt-4">
+                <div className="col-span-1">
+                  <p className="font-semibold text-gray-950">PayPal</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {dailySummary.paypal.count} payment{dailySummary.paypal.count === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <div className="col-span-1">
+                  <p className="text-gray-500">Recorded</p>
+                  <p className="font-semibold font-mono">{formatPrice(dailySummary.paypal.net)}</p>
+                </div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-500 block mb-1">Counted Net</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={countedPaypal}
+                    disabled={Boolean(existingClose)}
+                    onChange={(e) => setCountedPaypal(e.target.value)}
+                    placeholder="₱0.00"
+                    className="w-full min-h-[36px] rounded-lg border border-gray-200 bg-white px-2.5 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500 font-mono"
+                  />
+                </div>
+                <div className="col-span-1 text-right">
+                  <p className="text-[10px] font-bold text-gray-500 mb-1">Variance</p>
+                  <span className={`font-bold font-mono px-2 py-0.5 rounded text-[11px] ${
+                    variancePaypal === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  }`}>
+                    {variancePaypal >= 0 ? "+" : ""}{formatPrice(variancePaypal)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 block mb-2">Reconciliation Notes</label>
+                <textarea
+                  value={notes}
+                  disabled={Boolean(existingClose)}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Explain any physical count variances here..."
+                  className="w-full min-h-[80px] rounded-lg border border-gray-200 p-3 text-xs outline-none focus:border-primary focus:ring-2 focus:ring-primary-light disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </div>
+
+              {!existingClose && (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full min-h-[44px] rounded-lg bg-primary hover:bg-primary-dark text-white font-bold text-xs shadow-sm transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? "Submitting Close..." : `Perform Daily Close for ${dateStr}`}
+                </button>
+              )}
+            </div>
+          </form>
+
+          {/* Today's Transactions Ledger List */}
+          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Transactions Ledger ({dateStr})</h3>
+              <p className="text-[10px] text-gray-400 mt-1">Audit log of recorded payments and refunds processed on this calendar date.</p>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-150">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50 text-left">
+                  <tr>
+                    {["Ref", "Guest / Room", "Type", "Method", "Staff", "Amount"].map((heading) => (
+                      <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {dayPayments.map((p) => (
+                    <tr key={p.id}>
+                      <td className="px-3 py-2 font-semibold text-gray-900">{p.bookingRef}</td>
+                      <td className="px-3 py-2 text-gray-600">
+                        {p.guestName} · Room {p.roomNumber}
+                      </td>
+                      <td className={`px-3 py-2 font-semibold capitalize ${p.type === "refund" ? "text-red-655" : "text-emerald-705"}`}>
+                        {p.type}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 uppercase">{PAYMENT_LABELS[p.method] || p.method}</td>
+                      <td className="px-3 py-2 text-gray-600">{p.recordedBy}</td>
+                      <td className={`px-3 py-2 font-mono font-bold text-right ${p.type === "refund" ? "text-red-650" : "text-emerald-750"}`}>
+                        {p.type === "refund" ? "-" : ""}{formatPrice(p.amount)}
+                      </td>
+                    </tr>
+                  ))}
+                  {dayPayments.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-gray-400">
+                        No transactions recorded on this date.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Side Summary & Historical Logs Panel */}
+        <div className="space-y-6">
+          {/* Side Overage / Shortage Indicator */}
+          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Totals Summary</h3>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-gray-600">
+                <span>Total Recorded Net:</span>
+                <span className="font-bold font-mono text-gray-800">{formatPrice(totalRecordedNet)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-gray-600">
+                <span>Total Counted Net:</span>
+                <span className="font-bold font-mono text-gray-800">{formatPrice(totalCountedNet)}</span>
+              </div>
+              <div className="border-t border-gray-100 pt-3 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Variance</p>
+                  {totalVariance !== 0 && (
+                    <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-bold text-red-655 bg-red-50 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                      <AlertTriangle size={10} /> Discrepancy
+                    </span>
+                  )}
+                  {totalVariance === 0 && (
+                    <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                      <CheckCircle2 size={10} /> Reconciled
+                    </span>
+                  )}
+                </div>
+                <span className={`text-xl font-heading font-bold font-mono ${
+                  totalVariance === 0 ? "text-emerald-700" : "text-red-705"
+                }`}>
+                  {totalVariance >= 0 ? "+" : ""}{formatPrice(totalVariance)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Historical Logs List */}
+          <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Daily Close Logs</h3>
+              <p className="text-[10px] text-gray-400 mt-1">Select a past close to view its reconciled drawer counts.</p>
+            </div>
+
+            <div className="divide-y divide-gray-100 max-h-96 overflow-auto">
+              {dailyCloses.map((c) => {
+                // Compute total variance for this historical close
+                const closeVariance =
+                  (c.variance?.cash ?? 0) +
+                  (c.variance?.gcash ?? 0) +
+                  (c.variance?.bank ?? 0) +
+                  (c.variance?.card ?? 0) +
+                  (c.variance?.paypal ?? 0);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setDateStr(c.id);
+                    }}
+                    className={`w-full text-left p-3 text-xs hover:bg-gray-50/80 transition flex flex-col gap-1 ${
+                      dateStr === c.id ? "bg-primary-light/30 border-l-2 border-primary" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-gray-900">{c.id}</span>
+                      <span className={`font-mono font-bold ${
+                        closeVariance === 0 ? "text-emerald-700" : "text-red-700"
+                      }`}>
+                        {closeVariance >= 0 ? "+" : ""}{formatPrice(closeVariance)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-gray-500">
+                      <span>Closed by {c.closedBy}</span>
+                      <span>{c.closedAt ? c.closedAt.toLocaleTimeString() : ""}</span>
+                    </div>
+                    {c.notes && (
+                      <p className="text-[10px] text-gray-400 line-clamp-1 italic mt-1 font-sans">"{c.notes}"</p>
+                    )}
+                  </button>
+                );
+              })}
+              {dailyCloses.length === 0 && (
+                <p className="p-6 text-center text-xs text-gray-400 font-sans">No close logs recorded yet.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
