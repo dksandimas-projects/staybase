@@ -92,6 +92,19 @@ export interface OnsitePayment {
   recordedAt: string;
 }
 
+export type IncidentalChargeCategory = "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other";
+
+export interface IncidentalCharge {
+  id: string;
+  label: string;
+  amount: number;
+  category: IncidentalChargeCategory;
+  note: string;
+  addedBy: string;
+  addedAt: string;
+  voidOf: string | null;
+}
+
 export interface Booking {
   id: string;
   bookingRef: string;

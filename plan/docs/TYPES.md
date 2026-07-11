@@ -216,6 +216,20 @@ OnsitePayment {
   recordedAt: Date
 }
 
+IncidentalCharge {
+  id: string
+  bookingId?: string
+  bookingRef?: string
+  roomNumber?: string
+  label: string
+  amount: number
+  category: "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other"
+  note: string
+  addedBy: string
+  addedAt: Date
+  voidOf: string | null
+}
+
 EarlyCheckInDetails {
   status: "requested" | "approved" | "declined"
   requestedTime: string

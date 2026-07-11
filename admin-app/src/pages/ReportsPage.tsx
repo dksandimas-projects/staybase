@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
 import {
   AreaChart, Area,
@@ -18,13 +18,27 @@ import {
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, collectionGroup, getDocs, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
 type ReportTab = "performance" | "sales";
-type SalesSubTab = "bookings" | "breakfast" | "store";
+type SalesSubTab = "bookings" | "breakfast" | "store" | "charges";
+
+interface ReportCharge {
+  id: string;
+  bookingId: string;
+  bookingRef: string;
+  roomNumber: string;
+  label: string;
+  amount: number;
+  category: string;
+  note: string;
+  addedBy: string;
+  addedAt: Date | null;
+  voidOf: string | null;
+}
 
 function formatMonthLabel(date: Date) {
   return new Intl.DateTimeFormat(config.locale, { month: "short", year: "2-digit" }).format(date);
@@ -88,6 +102,34 @@ export function ReportsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFullBackupConfirmOpen, setFullBackupConfirmOpen] = useState(false);
   const [isFullBackupExporting, setFullBackupExporting] = useState(false);
+  const [charges, setCharges] = useState<ReportCharge[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
+      setCharges(snapshot.docs.map((chargeDoc) => {
+        const data = chargeDoc.data();
+        const bookingId = chargeDoc.ref.parent.parent?.id || "";
+        const booking = bookings.find((item) => item.id === bookingId);
+        return {
+          id: chargeDoc.id,
+          bookingId,
+          bookingRef: booking?.bookingRef || bookingId,
+          roomNumber: booking?.roomNumber || "",
+          label: String(data.label || "Incidental charge"),
+          amount: Number(data.amount || 0),
+          category: String(data.category || "other"),
+          note: String(data.note || ""),
+          addedBy: String(data.addedBy || "staff"),
+          addedAt: toDate(data.addedAt),
+          voidOf: data.voidOf ? String(data.voidOf) : null
+        };
+      }));
+    }, (error) => {
+      console.error("Failed to load incidental charges:", error);
+      toast.error("Could not load incidental revenue", "The other reports remain available. Refresh to try again.");
+    });
+    return unsubscribe;
+  }, [bookings, toast]);
 
   const chartColors = [
     config.colors.primary,
@@ -186,12 +228,22 @@ export function ReportsPage() {
     [deliveredStoreOrders]
   );
 
-  const totalRevenue = roomRevenue + breakfastRevenue + storeRevenue;
-  const totalTransactions = rangeBookings.length + deliveredStoreOrders.length;
+  const rangeCharges = useMemo(
+    () => charges.filter((charge) => charge.addedAt && charge.addedAt >= periodStart && charge.addedAt <= periodEnd),
+    [charges, periodStart, periodEnd]
+  );
+
+  const incidentalRevenue = useMemo(
+    () => rangeCharges.reduce((sum, charge) => sum + charge.amount, 0),
+    [rangeCharges]
+  );
+
+  const totalRevenue = roomRevenue + breakfastRevenue + storeRevenue + incidentalRevenue;
+  const totalTransactions = rangeBookings.length + deliveredStoreOrders.length + rangeCharges.filter((charge) => charge.amount > 0).length;
 
   // ── Monthly revenue by stream (stacked bar) ──
   const monthlyRevenue = useMemo(() => {
-    const map = new Map<string, { month: string; room: number; breakfast: number; store: number; total: number; sortKey: string }>();
+    const map = new Map<string, { month: string; room: number; breakfast: number; store: number; incidentals: number; total: number; sortKey: string }>();
 
     const ensureMonth = (d: Date) => {
       const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, "0")}`;
@@ -201,6 +253,7 @@ export function ReportsPage() {
           room: 0,
           breakfast: 0,
           store: 0,
+          incidentals: 0,
           total: 0,
           sortKey: key
         });
@@ -225,10 +278,15 @@ export function ReportsPage() {
       slot.store += o.totalAmount || 0;
     });
 
+    rangeCharges.forEach((charge) => {
+      if (!charge.addedAt) return;
+      ensureMonth(charge.addedAt).incidentals += charge.amount;
+    });
+
     return Array.from(map.values())
-      .map(s => ({ ...s, total: s.room + s.breakfast + s.store }))
+      .map(s => ({ ...s, total: s.room + s.breakfast + s.store + s.incidentals }))
       .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  }, [rangeBookings, deliveredStoreOrders]);
+  }, [rangeBookings, deliveredStoreOrders, rangeCharges]);
 
   // ── Combined payment method breakdown (bookings + store orders) ──
   const combinedPaymentMethods = useMemo(() => {
@@ -379,6 +437,13 @@ export function ReportsPage() {
     [rangeStoreOrders, searchTerm]
   );
 
+  const filteredCharges = useMemo(() =>
+    rangeCharges.filter((charge) =>
+      matchesSearch(charge.bookingRef) || matchesSearch(charge.roomNumber) || matchesSearch(charge.label)
+    ),
+    [rangeCharges, searchTerm]
+  );
+
   // ── CSV Export (Performance-style ledger) ──
   const handleExportCSV = () => {
     if (!isRangeValid) {
@@ -411,6 +476,7 @@ export function ReportsPage() {
     toast.info("Preparing backup", "Collecting bookings, payments, members, store, vouchers, and inquiry data.");
     try {
       const paymentRows: Array<Record<string, unknown>> = [];
+      const chargeRows: Array<Record<string, unknown>> = [];
       await Promise.all(bookings.map(async (b: any) => {
         try {
           const paymentsSnap = await getDocs(collection(db, "bookings", b.id, "payments"));
@@ -429,6 +495,24 @@ export function ReportsPage() {
           console.error(`Failed to export payments for booking ${b.id}:`, error);
         }
       }));
+
+      const allChargesSnap = await getDocs(collectionGroup(db, "charges"));
+      allChargesSnap.forEach((chargeDoc) => {
+        const charge = chargeDoc.data();
+        const bookingId = chargeDoc.ref.parent.parent?.id || "";
+        const booking = bookings.find((item) => item.id === bookingId);
+        chargeRows.push({
+          "Booking Ref": booking?.bookingRef || bookingId,
+          Room: booking?.roomNumber || "",
+          Category: charge.category || "other",
+          Label: charge.label || "",
+          Amount: Number(charge.amount || 0),
+          Note: charge.note || "",
+          "Added By": charge.addedBy || "",
+          "Added At": toDate(charge.addedAt)?.toISOString() || "",
+          "Void Of": charge.voidOf || ""
+        });
+      });
 
       const wb = XLSX.utils.book_new();
 
@@ -454,10 +538,15 @@ export function ReportsPage() {
       "Points Redeemed": b.pointsRedeemed,
       "Points Value": b.pointsRedeemedValue,
       "Total Price": b.totalPrice,
+      "Incidental Charges": chargeRows
+        .filter((charge) => charge["Booking Ref"] === b.bookingRef)
+        .reduce((sum, charge) => sum + Number(charge.Amount || 0), 0),
       "Total Collected Onsite": paymentRows
         .filter((p) => p["Booking Ref"] === b.bookingRef)
         .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
-      "Outstanding Balance": (b.totalPrice || 0) - paymentRows
+      "Outstanding Balance": (b.totalPrice || 0) + chargeRows
+        .filter((charge) => charge["Booking Ref"] === b.bookingRef)
+        .reduce((sum, charge) => sum + Number(charge.Amount || 0), 0) - paymentRows
         .filter((p) => p["Booking Ref"] === b.bookingRef)
         .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
       "Payment Method": b.paymentMethod,
@@ -474,6 +563,7 @@ export function ReportsPage() {
     }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(bookingRows), "Bookings");
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(paymentRows), "Payments");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chargeRows), "Charges");
 
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(members.map((m: any) => ({
       "Member Number": m.memberNumber,
@@ -589,6 +679,7 @@ export function ReportsPage() {
       ["Room Revenue", roomRevenue],
       ["Breakfast Revenue", breakfastRevenue],
       ["Store Revenue", storeRevenue],
+      ["Incidental Revenue", incidentalRevenue],
       ["Total Bookings", rangeBookings.length],
       ["Total Store Orders (delivered)", deliveredStoreOrders.length],
       ["Total Transactions", totalTransactions],
@@ -633,11 +724,25 @@ export function ReportsPage() {
       o.status, toDate(o.createdAt)?.toISOString().slice(0, 10) || ""
     ]);
 
+    const chargeHeaders = ["Booking Ref", "Room", "Category", "Label", "Amount", "Note", "Added By", "Date", "Void Of"];
+    const chargeRows = filteredCharges.map((charge) => [
+      charge.bookingRef,
+      charge.roomNumber,
+      charge.category,
+      charge.label,
+      charge.amount,
+      charge.note,
+      charge.addedBy,
+      charge.addedAt?.toISOString() || "",
+      charge.voidOf || ""
+    ]);
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([...summaryRows]), "Summary");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([bookingsHeaders, ...bookingsRows]), "Bookings");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([breakfastHeaders, ...breakfastRows]), "Breakfast");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([storeHeaders, ...storeRows]), "Store Orders");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([chargeHeaders, ...chargeRows]), "Charges");
 
     XLSX.writeFile(wb, `spark-inn-sales-${periodStart.toISOString().slice(0, 10)}.xlsx`);
   };
@@ -809,6 +914,7 @@ export function ReportsPage() {
           roomRevenue={roomRevenue}
           breakfastRevenue={breakfastRevenue}
           storeRevenue={storeRevenue}
+          incidentalRevenue={incidentalRevenue}
           totalTransactions={totalTransactions}
           monthlyRevenue={monthlyRevenue}
           combinedPaymentMethods={combinedPaymentMethods}
@@ -826,6 +932,7 @@ export function ReportsPage() {
           filteredBookings={filteredBookings}
           filteredBreakfastBookings={filteredBreakfastBookings}
           filteredStoreOrders={filteredStoreOrders}
+          filteredCharges={filteredCharges}
           breakfastBookingsInRange={breakfastBookingsInRange}
           toDate={toDate}
           chartColors={chartColors}
@@ -1073,8 +1180,9 @@ function SalesTab(props: {
   roomRevenue: number;
   breakfastRevenue: number;
   storeRevenue: number;
+  incidentalRevenue: number;
   totalTransactions: number;
-  monthlyRevenue: Array<{ month: string; room: number; breakfast: number; store: number; total: number }>;
+  monthlyRevenue: Array<{ month: string; room: number; breakfast: number; store: number; incidentals: number; total: number }>;
   combinedPaymentMethods: Array<{ name: string; method: string; count: number; total: number; isUncollected: boolean }>;
   topStoreItems: Array<{ name: string; quantity: number; revenue: number }>;
   storeOrdersByStatus: Array<{ name: string; count: number }>;
@@ -1090,17 +1198,18 @@ function SalesTab(props: {
   filteredBookings: Array<any>;
   filteredBreakfastBookings: Array<any>;
   filteredStoreOrders: Array<any>;
+  filteredCharges: ReportCharge[];
   breakfastBookingsInRange: Array<any>;
   toDate: (v: any) => Date | null;
   chartColors: string[];
   isMobile: boolean;
 }) {
   const {
-    totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, totalTransactions,
+    totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
     monthlyRevenue, combinedPaymentMethods, topStoreItems, storeOrdersByStatus, lowStockItems,
     deliveredStoreOrders, breakfastConfig, dailyKitchenPrep,
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
-    filteredBookings, filteredBreakfastBookings, filteredStoreOrders, breakfastBookingsInRange,
+    filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
     toDate, chartColors, isMobile
   } = props;
 
@@ -1121,7 +1230,7 @@ function SalesTab(props: {
   return (
     <div className="space-y-8">
       {/* Summary KPI Cards */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
           <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Revenue</span>
           <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(totalRevenue)}</p>
@@ -1145,6 +1254,11 @@ function SalesTab(props: {
           <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Delivered orders only</span>
         </div>
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
+          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Incidental Revenue</span>
+          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(incidentalRevenue)}</p>
+          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Net of charge reversals</span>
+        </div>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
           <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Transactions</span>
           <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{totalTransactions}</p>
           <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Bookings + store orders</span>
@@ -1156,7 +1270,7 @@ function SalesTab(props: {
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Revenue by Stream</h2>
-            <p className="text-[10px] text-gray-500">Monthly contribution of Room, Breakfast, and Store revenue.</p>
+            <p className="text-[10px] text-gray-500">Monthly contribution of Room, Breakfast, Store, and incidental revenue.</p>
           </div>
           {monthlyRevenue.length === 0 ? (
             <div className="h-72 flex items-center justify-center text-xs text-gray-400">
@@ -1177,6 +1291,7 @@ function SalesTab(props: {
                   <Bar dataKey="room" stackId="revenue" name="Room" fill={chartColors[0]} radius={[0, 0, 0, 0]} />
                   <Bar dataKey="breakfast" stackId="revenue" name="Breakfast" fill={chartColors[1]} radius={[0, 0, 0, 0]} />
                   <Bar dataKey="store" stackId="revenue" name="Store" fill={chartColors[3]} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="incidentals" stackId="revenue" name="Incidentals" fill={chartColors[2]} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1306,8 +1421,8 @@ function SalesTab(props: {
           />
         </div>
 
-        <div role="tablist" className="grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 max-w-md">
-          {(["bookings", "breakfast", "store"] as const).map(tab => (
+        <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 sm:grid-cols-4 sm:max-w-2xl">
+          {(["bookings", "breakfast", "store", "charges"] as const).map(tab => (
             <button
               key={tab}
               type="button"
@@ -1318,7 +1433,7 @@ function SalesTab(props: {
                 salesSubTab === tab ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
               }`}
             >
-              {tab === "bookings" ? "Bookings" : tab === "breakfast" ? "Breakfast" : "Store Orders"}
+              {tab === "bookings" ? "Bookings" : tab === "breakfast" ? "Breakfast" : tab === "store" ? "Store Orders" : "Incidentals"}
             </button>
           ))}
         </div>
@@ -1333,6 +1448,10 @@ function SalesTab(props: {
 
         {salesSubTab === "store" && (
           <SalesStoreOrdersTable orders={filteredStoreOrders} toDate={toDate} isMobile={isMobile} />
+        )}
+
+        {salesSubTab === "charges" && (
+          <SalesChargesTable charges={filteredCharges} isMobile={isMobile} />
         )}
       </div>
 
@@ -1542,6 +1661,55 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
       {bookings.length > 50 && (
         <p className="text-[10px] text-gray-500 text-center mt-2">Showing 50 of {bookings.length} — export XLSX for the full set.</p>
       )}
+    </div>
+  );
+}
+
+function SalesChargesTable({ charges, isMobile }: { charges: ReportCharge[]; isMobile?: boolean }) {
+  if (charges.length === 0) {
+    return <p className="py-8 text-center text-xs text-gray-400">No incidental charges in this range.</p>;
+  }
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {charges.slice(0, 50).map((charge) => (
+          <div key={`${charge.bookingId}-${charge.id}`} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{charge.bookingRef}</span>
+              <span className={`text-sm font-bold ${charge.amount < 0 ? "text-red-600" : "text-primary-dark"}`}>{formatPrice(charge.amount)}</span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">{charge.label}</p>
+            <p className="mt-1 text-[11px] capitalize text-gray-600">Room {charge.roomNumber || "—"} · {charge.category.replace(/-/g, " ")}</p>
+            <p className="mt-1 text-[10px] text-gray-500">{charge.addedAt?.toISOString().slice(0, 10) || "—"} · {charge.addedBy}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse text-xs">
+        <thead>
+          <tr className="border-b-2 border-primary/20 text-left">
+            {['Booking Ref', 'Room', 'Category', 'Label', 'Added By', 'Date', 'Amount'].map((heading) => (
+              <th key={heading} className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 first:pl-0">{heading}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {charges.slice(0, 50).map((charge) => (
+            <tr key={`${charge.bookingId}-${charge.id}`} className="hover:bg-gray-50/50">
+              <td className="py-2.5 pr-3 font-semibold text-gray-900">{charge.bookingRef}</td>
+              <td className="px-3 py-2.5 text-gray-600">{charge.roomNumber || "—"}</td>
+              <td className="px-3 py-2.5 capitalize text-gray-600">{charge.category.replace(/-/g, " ")}</td>
+              <td className="px-3 py-2.5 text-gray-700">{charge.label}</td>
+              <td className="px-3 py-2.5 text-gray-600">{charge.addedBy}</td>
+              <td className="px-3 py-2.5 text-gray-600">{charge.addedAt?.toISOString().slice(0, 10) || "—"}</td>
+              <td className={`px-3 py-2.5 text-right font-bold ${charge.amount < 0 ? "text-red-600" : "text-primary-dark"}`}>{formatPrice(charge.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

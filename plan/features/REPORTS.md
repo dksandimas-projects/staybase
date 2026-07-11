@@ -71,7 +71,7 @@ Occupancy and booking patterns. Not revenue-focused.
 
 ## Tab 2 — Sales Report
 
-Consolidated revenue across all payment streams: room bookings, breakfast add-ons, and Spark Essentials store orders. This is the primary financial report for the hotel owner.
+Consolidated revenue across all payment streams: room bookings, breakfast add-ons, Spark Essentials store orders, and incidental folio charges. This is the primary financial report for the hotel owner.
 
 ### UI Checklist
 
@@ -80,16 +80,18 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [ ] **Room Revenue** — sum of booking `totalPrice` (includes any discounts/vouchers applied)
 - [ ] **Breakfast Revenue** — sum of `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`
 - [ ] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
+- [x] **Incidental Revenue** — net sum of append-only `bookings/{id}/charges` entries, including negative void reversals
 - [ ] **Total Transactions** — count of bookings + delivered store orders combined
 
 #### Charts
-- [ ] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store — shows contribution of each stream at a glance
+- [x] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store / Incidentals
 - [ ] **Revenue trend line** — total combined revenue per month over the selected period
 - [ ] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
 - [ ] **Payment method breakdown** — pie chart across all streams (GCash, Pay at Hotel, CoD, Add to Bill) — combined from bookings + store orders
 
 #### Sales Detail Table
-- [ ] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders**
+- [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
+- [x] **Incidentals sub-table** — Booking Ref, Room, Category, Label, Amount, Added By, Date
 - [ ] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
 - [ ] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
 - [ ] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
@@ -105,6 +107,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [ ] Room revenue: sum of `totalPrice` per booking (already net of discounts/vouchers)
 - [ ] Breakfast revenue: `breakfastRate × numGuests × numNights` computed per booking where `hasBreakfast: true` — NOT a separate collection, derived from booking documents
 - [ ] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
+- [x] Incidental revenue: real-time `collectionGroup("charges")`, filtered by `addedAt`; positive charges and negative reversals net together
 - [ ] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
 - [ ] Combined total: room revenue + breakfast revenue + store revenue
 - [ ] Payment method breakdown: merge payment method counts from `bookings.paymentMethod` + `storeOrders.paymentMethod`
@@ -146,7 +149,7 @@ Generated via jsPDF. Clean, branded layout intended for printing or sharing with
 
 ## Sales XLSX Export (Multi-sheet)
 
-One XLSX file with 4 sheets covering all revenue data.
+One XLSX file with 5 sheets covering all revenue data.
 
 ### Sheets
 | Sheet | Contents |
@@ -155,6 +158,7 @@ One XLSX file with 4 sheets covering all revenue data.
 | **Bookings** | All booking records (same columns as §Data Backup) |
 | **Breakfast** | Per-booking breakfast breakdown (ref, room, nights, guests, rate, total) |
 | **Store Orders** | All delivered store order records (ref, room, items, qty, price, total, payment, date) |
+| **Charges** | Incidental ledger entries joined to booking ref, including reversals |
 
 ### Summary Sheet Columns
 | Row | Value |
@@ -164,6 +168,7 @@ One XLSX file with 4 sheets covering all revenue data.
 | Room Revenue | ₱ |
 | Breakfast Revenue | ₱ |
 | Store Revenue | ₱ |
+| Incidental Revenue | ₱ |
 | Total Bookings | count |
 | Total Store Orders | count |
 | (blank row) | |
@@ -245,6 +250,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 |---|---|---|
 | **Bookings** | `bookings` | All bookings, all time, all statuses |
 | **Payments** | `bookings/{id}/payments` | All onsite payment entries, joined to booking ref |
+| **Charges** | `bookings/{id}/charges` | All incidental charges and reversal entries, joined to booking ref |
 | **Members** | `members` | All registered loyalty members |
 | **Store Orders** | `storeOrders` | All store orders, all statuses |
 | **Store Catalog** | `storeItems` | All store items including inactive |
