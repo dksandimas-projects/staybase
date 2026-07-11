@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
+> Last updated: July 11, 2026 (Finance & Reports Audit added under Phase 12 — 12 findings FIN-01..FIN-12 from `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`: reports cover billed revenue only; collections/refunds/receivables invisible. Previous: Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1064,6 +1064,34 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 
 **Already fixed, sheet was right:** Other Bugs Found row #12 (price breakdown for mixed weekday/weekend/holiday rates) is marked `Fixed? = Y` in the test sheet. At the start of this audit this roadmap still showed P5 as not started, but P5 ("Guest-facing price breakdown for mixed regular/weekend/holiday rates") was completed and marked ✅ above during this same session — no action needed, confirmed consistent.
 
+### Finance & Reports Audit — 2026-07-11 (gaps to close)
+
+> Finance/audit review of Reports & Metrics: can the hotel properly
+> account for booking income? Full findings (`FIN-01`..`FIN-12`),
+> severities, and fix guidance:
+> `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`. No SEV-1s — billed
+> revenue is computed correctly — but the reports only cover the accrual
+> side; actual cash movement (`bookings/{id}/payments`) is invisible to
+> every report. Build in the order listed.
+
+**SEV-2 (build first):**
+- ⬜ **FIN-01 — Collections (cash-basis) report** — new Sales section reading `bookings/{id}/payments` for the period, grouped by day / method / staff, with a billed-vs-collected-vs-outstanding reconciliation line (`ReportsPage.tsx`)
+- ⬜ **FIN-02 — Payment-method breakdown from actual payments** — current pie attributes full `totalPrice` to the booking-time `paymentMethod` even if the guest paid differently or not at all (`ReportsPage.tsx:234`); drive it from payment entries, split Add-to-Bill collected vs uncollected
+- ⬜ **FIN-03 — Refund model** — refund entry (signed amount or `type: "refund"`) with `reason` + `approvedBy` on the payments subcollection; surface in drawer + collections report; "cancelled bookings with money collected" view (today a cancelled booking's collected deposit vanishes from all reports)
+- ⬜ **FIN-04 — Receivables report** — aged unpaid balances on checked-out bookings, uncollected Add-to-Bill store charges, and a minimal corporate charge-back invoice record (corporate AR is entirely untracked today)
+
+**SEV-3:**
+- ⬜ **FIN-05 — Discounts & adjustments report** — gross→net revenue bridge (senior/PWD for RA 9994/10754 tax deduction claims, vouchers, points) + outstanding-points liability
+- ⬜ **FIN-06 — BIR/VAT scope decision** — no VAT fields, VAT-exempt tracking, or OR numbering anywhere; decide with owner and log in `plan/docs/DECISIONS-FEATURES.md` (+ fields if in scope)
+- ⬜ **FIN-07 — Daily Close view** — payments recorded today by method and `recordedBy` for drawer/GCash handover reconciliation (falls out of FIN-01)
+- ⬜ **FIN-08 — Export column alignment** — Sales XLSX Bookings sheet missing spec'd Breakfast/Discount/Voucher columns; Total Collected / Outstanding only exist in the admin-only Full Backup, not the date-ranged exports
+
+**SEV-4 (polish):**
+- ⬜ **FIN-09 — Revenue recognition quirks** — whole booking attributed to check-in month (no proration); future-dated confirmed bookings in a custom range counted as earned revenue
+- ⬜ **FIN-10 — Occupancy night-clipping** — occupancy % counts nights outside the selected range and misses overlapping stays that started before it (`ReportsPage.tsx:651`)
+- ⬜ **FIN-11 — Hotel finance KPIs** — ADR, RevPAR, revenue by room type (all derivable today; build after FIN-10)
+- ⬜ **FIN-12 — Prior-period comparison** — vs-previous-period deltas on revenue KPI cards
+
 ### Live Bug Reports — 2026-07-09 (guest Intercom, reported directly by owner on mobile)
 
 > Reported by DK from a live mobile session on `sparkinnbohol.com`, not from the test sheet. Not yet fixed — code-inspected for root cause only, no changes made per request.
@@ -1111,6 +1139,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
+| Finance & Reports Audit (July 11) | 12 | 0 | 12 (FIN-01..FIN-12 — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **363** | **330** | **~133** |
