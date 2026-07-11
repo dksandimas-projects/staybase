@@ -25,9 +25,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
-| **SEV-3 (minor)** | 2 | 4 | **6** |
+| **SEV-3 (minor)** | 0 | 6 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **6** | **8** | **14** |
+| **Total** | **4** | **10** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -214,7 +214,7 @@ sequential receipt numbering.
 
 ---
 
-### FIN-07 — No daily close / shift reconciliation report · `Open`
+### FIN-07 — No daily close / shift reconciliation report · `Fixed 2026-07-11`
 
 **Where:** payment entries already store `recordedAt`, `method`,
 `recordedBy` — no surface aggregates them per day/shift.
@@ -247,7 +247,7 @@ table with the spec's column list.
 
 ---
 
-### FIN-13 — Daily Close has no physical drawer count / cash variance entry · `Open`
+### FIN-13 — Daily Close has no physical drawer count / cash variance entry · `Fixed 2026-07-11`
 
 **Where:** extension of FIN-07 (no drawer-count surface exists anywhere;
 payment entries record what staff *typed*, not what was *counted*)
