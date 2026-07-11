@@ -1114,7 +1114,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 > maintenance rules: log new extras there, or quote them as Part 4 change
 > requests; queued FIN-05..FIN-13 must not be absorbed silently).
 
-- ⬜ **SA-01 — Reports: performance report PDF export must use jsPDF** — Schedule A §2.8 reads "Export performance report as PDF (jsPDF, includes charts and stat cards)", but `ReportsPage.tsx` currently calls `window.print()` with a "Choose Save as PDF" toast (`handleExportPDF`, ~line 823). jsPDF is only used for booking receipts (`BookingsPage.tsx`). Fix: generate the PDF client-side with `jspdf` + `html2canvas` (both already admin-app deps) — capture the Performance tab's stat cards and charts (Recharts SVG → canvas) into an A4 document and trigger a direct `.pdf` download, following the existing receipt-generation pattern in `BookingsPage.tsx`. Keep the print path as a secondary option if desired. Alternative (if the owner prefers the browser print output): get written client sign-off that print-to-PDF satisfies §2.8, and record it in `plan/docs/DECISIONS-FEATURES.md`.
+- ✅ **SA-01 — Reports: performance report PDF export must use jsPDF** — jsPDF + html2canvas client-side PDF export implemented on the reports workspace, providing pixel-perfect multi-page report downloads of active tab stat cards and Recharts graphics.
 
 ### Live Bug Reports — 2026-07-09 (guest Intercom, reported directly by owner on mobile)
 
