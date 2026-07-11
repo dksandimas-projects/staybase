@@ -149,6 +149,8 @@ export function BookingPage() {
   const [breakfastConfig, setBreakfastConfig] = useState({ isEnabled: false, ratePerPersonPerNight: 250 });
   const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
+  const seniorPwdOnlineEnabled = hotelConfig?.seniorPwdOnlineEnabled !== false;
+
   const [websiteContent, setWebsiteContent] = useState<any>(null);
   const [bookedRanges, setBookedRanges] = useState<
     Array<{ roomId: string; checkIn: string; checkOut: string; status: string }>
@@ -215,6 +217,14 @@ export function BookingPage() {
   const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
   const [discountIdUploadError, setDiscountIdUploadError] = useState("");
   const discountIdInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!seniorPwdOnlineEnabled && discountType !== "none") {
+      setDiscountType("none");
+      setDiscountIdUpload(null);
+      setDiscountIdUploadError("");
+    }
+  }, [seniorPwdOnlineEnabled, discountType]);
 
   // The payment method list is dynamic — managed from Settings →
   // Payment Methods in the admin app (per `plan/features/SETTINGS.md
@@ -1182,9 +1192,13 @@ export function BookingPage() {
             {/* Discount Section */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Discount Options</h3>
-              <p className="mt-1 text-sm text-gray-600">Select if you are eligible for government-mandated discounts. A valid ID must be uploaded.</p>
+              <p className="mt-1 text-sm text-gray-600">
+                {seniorPwdOnlineEnabled
+                  ? "Select if you are eligible for government-mandated discounts. A valid ID must be uploaded."
+                  : "Senior/PWD online claims are currently unavailable. Eligible guests may present a valid ID at check-in to receive the mandated discount."}
+              </p>
               
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {seniorPwdOnlineEnabled && <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 {(["none", "senior", "pwd"] as const).map((type) => (
                   <button
                     key={type}
@@ -1200,9 +1214,9 @@ export function BookingPage() {
                     {type === "none" ? "None" : type === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
                   </button>
                 ))}
-              </div>
+              </div>}
 
-              {discountType !== "none" && (
+              {seniorPwdOnlineEnabled && discountType !== "none" && (
                 <div className="mt-5">
                   <p className="text-sm font-semibold text-gray-700">
                     {discountType === "senior" ? "Upload OSCA Card Photo" : "Upload PWD ID Card Photo"} <span className="text-red-500">*</span>
