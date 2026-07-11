@@ -39,7 +39,7 @@ export const config = {
     icon: "ICON LOGO.png",
     wordmark: "TEXT LOGO.png"
   },
-  favicon: "ICON LOGO.png",
+  favicon: "favicon/favicon.ico",
   currency: "PHP",
   currencySymbol: "₱",
   locale: "en-PH",
