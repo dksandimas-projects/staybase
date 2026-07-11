@@ -25,9 +25,12 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 4 | 0 | **4** |
-| **SEV-3 (minor)** | 4 | 0 | **4** |
+| **SEV-3 (minor)** | 5 | 0 | **5** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **12** | **0** | **12** |
+| **Total** | **13** | **0** | **13** |
+
+Two further gaps were reviewed and deliberately **scoped out** rather than
+opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
 
 **Verdict:** the system tracks **billed revenue** (accrual side) well, but
 it barely tracks **money actually received** (cash side). Everything on
@@ -54,6 +57,13 @@ exist in operations but are invisible to every report.
   due and warns on unsettled checkout.
 - Full Backup includes Total Collected Onsite + Outstanding Balance per
   booking, and a dedicated Payments sheet.
+- **Payment records are append-only at the rules level**
+  (`firebase/firestore.rules:48-51` — `allow update, delete: if false`
+  on `bookings/{id}/payments`): nobody can edit or erase a recorded
+  payment after the fact. This is the single most important integrity
+  control for cash monitoring, and it is already in place. FIN-03's
+  refund design must preserve it (refunds are new signed entries, never
+  edits to existing ones).
 - Custom date ranges and CSV / Sales XLSX / print exports all read from
   the same `periodStart`/`periodEnd`, so figures agree across surfaces.
 
@@ -64,7 +74,8 @@ exist in operations but are invisible to every report.
 3. FIN-03 (refund model)
 4. FIN-05 (gross-to-net discounts report)
 5. FIN-06 (BIR/VAT decision — needs owner input, log in DECISIONS-FEATURES.md)
-6. FIN-07 (daily close) — falls out of the FIN-01 collections work
+6. FIN-07 + FIN-13 (daily close incl. drawer variance — build together;
+   falls out of the FIN-01 collections work)
 7. FIN-08..FIN-12 (SEV-3/4 batch — export columns, recognition quirks, KPIs)
 
 ---
@@ -234,6 +245,30 @@ table with the spec's column list.
 
 ---
 
+### FIN-13 — Daily Close has no physical drawer count / cash variance entry · `Open`
+
+**Where:** extension of FIN-07 (no drawer-count surface exists anywhere;
+payment entries record what staff *typed*, not what was *counted*)
+
+The FIN-07 Daily Close shows payments *recorded* per method and staff
+member, but there is nowhere to enter what was physically counted in the
+cash drawer (and confirmed in the GCash account) at shift end. Without a
+counted-amount entry, over/short conditions are undetectable — recorded
+₱5,000 cash with ₱4,700 in the drawer looks identical to a clean day.
+
+**Impact:** the daily reconciliation loop cannot be closed; cash leakage
+(errors or theft) is invisible until it is large enough to notice by
+accident.
+
+**Fix:** build with FIN-07, not after it: add a per-method "counted
+amount" input to the Daily Close view (cash drawer count, GCash balance
+check), persist it as a daily close record (`date`, per-method expected
+vs counted, variance, `closedBy`, optional note), and show the variance
+line prominently. Keep the close record append-only like payments —
+corrections are a new entry, not an edit.
+
+---
+
 ## SEV-4 — Nit / Polish
 
 ### FIN-09 — Revenue recognition quirks · `Open`
@@ -284,6 +319,42 @@ of equal length immediately before `periodStart`).
 
 ---
 
+## Scope boundaries — reviewed and deliberately NOT opened as findings
+
+Raised during the 2026-07-11 review of whether the FIN list is enough to
+monitor daily financial operations. Verdict: **with FIN-01..FIN-13 built,
+the system is sufficient for daily *income* operations monitoring; the
+two items below are consciously left outside the system.** Recorded here
+so the decision isn't re-litigated from scratch later.
+
+### Expenses & P&L — out of scope (external bookkeeping)
+
+The system tracks zero expenses — no payroll, utilities, supplies, or
+commissions — so it can never report *profit*, only income. This is
+intentional: it is a booking/PMS system, not accounting software. The
+supported pattern is the exports (Sales XLSX, Full Backup, and the
+FIN-01 collections report once built) feeding an external accountant or
+bookkeeping tool monthly; BIR filing needs proper books anyway. Building
+expense tracking into the admin app would be significant scope for
+something better handled outside it. Revisit only if the owner
+explicitly asks for in-app P&L.
+
+### Day-locking / night audit — deferred at current scale
+
+Bookings remain staff-editable after the fact
+(`firebase/firestore.rules` — `allow update: if isStaff()` on
+`bookings/{id}`), so a historical day's *billed revenue* figure can
+shift if someone edits an old booking. Payments being append-only
+mitigates the cash side, which is what matters most for daily controls.
+A classic night-audit day-lock (nightly immutable snapshot of the day's
+figures) is overkill for a 14-room property today. Trigger to revisit:
+the owner suspects historical figures are drifting, or staff headcount
+grows beyond a trusted-few. The cheap version when needed: a nightly
+snapshot document per day (billed, collected, by stream/method) written
+once and never updated.
+
+---
+
 ## Recommended feature list (mapped to findings)
 
 | # | Feature | Closes | Effort |
@@ -293,9 +364,12 @@ of equal length immediately before `periodStart`).
 | 3 | **Refund model** — refund entry with reason + approvedBy, surfaced in drawer + collections | FIN-03 | S–M |
 | 4 | **Discounts & adjustments report** — gross→net bridge, points liability | FIN-05 | S |
 | 5 | **BIR/VAT decision** logged in DECISIONS-FEATURES.md (+ fields if in scope) | FIN-06 | Decision + M if in scope |
-| 6 | **Daily Close view** | FIN-07 | S (after #1) |
+| 6 | **Daily Close view incl. drawer count + variance** | FIN-07, FIN-13 | S–M (after #1) |
 | 7 | **Export/table column alignment** — Collected/Outstanding/Discount/Voucher/Breakfast columns | FIN-08 | S |
 | 8 | **KPI pack** — ADR, RevPAR, revenue by room type, prior-period deltas, occupancy night-clipping | FIN-09..FIN-12 | S |
+
+Out of scope by decision (see §Scope boundaries): expenses/P&L (external
+bookkeeping), night-audit day-locking (deferred at current scale).
 
 ---
 
