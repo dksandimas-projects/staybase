@@ -452,6 +452,10 @@ export function BookingsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundMethod, setRefundMethod] = useState("cash");
+  const [refundReason, setRefundReason] = useState("");
+  const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [redeemPointsInput, setRedeemPointsInput] = useState("");
@@ -557,9 +561,12 @@ export function BookingsPage() {
         const data = docSnap.data();
         paymentsData.push({
           id: docSnap.id,
+          type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
           amount: data.amount || 0,
           method: data.method || "",
           note: data.note || "",
+          reason: data.reason || null,
+          approvedBy: data.approvedBy || null,
           recordedBy: data.recordedBy || "staff",
           recordedAt: data.recordedAt instanceof Date
             ? data.recordedAt.toISOString()
@@ -1885,6 +1892,34 @@ export function BookingsPage() {
     }
   };
 
+  const handleRefundSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || currentUser?.role !== "admin") return;
+    const amount = Number(refundAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || !refundReason.trim()) {
+      toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
+      return;
+    }
+    setIsRefunding(true);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+        body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+      setRefundAmount("");
+      setRefundReason("");
+      toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
+    } catch (error: any) {
+      toast.error("Could not record refund", error.message || "Please try again.");
+    } finally {
+      setIsRefunding(false);
+    }
+  };
+
   const handleAddChargeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBooking) return;
@@ -2960,10 +2995,10 @@ export function BookingsPage() {
                     {selectedBookingPayments.map((pay) => (
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
-                          <p className="font-semibold text-gray-800">{pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}</p>
+                          <p className="font-semibold text-gray-800">{pay.type === "refund" ? `Refund — ${pay.reason || pay.note}` : pay.note || "Onsite Payment"}</p>
+                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}{pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}</p>
                         </div>
-                        <span className="font-bold text-green-700">+{formatPrice(pay.amount)}</span>
+                        <span className={`font-bold ${pay.type === "refund" ? "text-red-600" : "text-green-700"}`}>{pay.amount >= 0 ? "+" : ""}{formatPrice(pay.amount)}</span>
                       </div>
                     ))}
                   </div>
@@ -3031,6 +3066,30 @@ export function BookingsPage() {
                     </button>
                   </div>
                 </form>
+
+                {currentUser?.role === "admin" && selectedBookingPayments.some((payment) => payment.amount > 0) && (
+                  <form onSubmit={handleRefundSubmit} className="rounded-lg border border-red-100 bg-red-50/40 p-4 space-y-3">
+                    <div>
+                      <p className="text-xs font-bold text-red-800">Record Refund</p>
+                      <p className="mt-1 text-[10px] text-red-700">Creates an immutable negative payment entry. Refunds cannot exceed net collected funds.</p>
+                    </div>
+                    <label className="block text-[10px] font-semibold text-gray-600">
+                      Refund amount
+                      <input type="number" min="0.01" step="0.01" required value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-red-100 bg-white px-3 text-xs" />
+                    </label>
+                    <label className="block text-[10px] font-semibold text-gray-600">
+                      Refund method
+                      <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-red-100 bg-white px-3 text-xs">
+                        {onsitePaymentMethodOptions.map((method) => <option key={method.method} value={method.method}>{method.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="block text-[10px] font-semibold text-gray-600">
+                      Reason
+                      <textarea required maxLength={500} rows={2} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Required approval and audit context" className="mt-1 w-full rounded-lg border border-red-100 bg-white p-3 text-xs" />
+                    </label>
+                    <button type="submit" disabled={isRefunding} className="min-h-[44px] w-full rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">{isRefunding ? "Recording refund..." : "Approve and record refund"}</button>
+                  </form>
+                )}
               </div>
             </div>
 

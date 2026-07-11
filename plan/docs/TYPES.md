@@ -209,9 +209,12 @@ Booking {
 
 OnsitePayment {
   id: string
+  type: "payment" | "refund"
   amount: number
   method: PaymentMethod
   note: string
+  reason: string | null
+  approvedBy: string | null
   recordedBy: string   // staff UID
   recordedAt: Date
 }

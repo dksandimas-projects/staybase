@@ -146,19 +146,22 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 
 ### `bookings/{bookingId}/payments/{paymentId}`
 
-Subcollection — audit trail of all onsite payments recorded by staff. Append-only, never edited or deleted.
+Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. All writes use authenticated server routes; Firestore client creation is denied.
 
 | Field | Type | Notes |
 |---|---|---|
-| `amount` | number | ₱ amount collected |
+| `type` | string | `payment` or `refund`; legacy positive entries default to `payment` |
+| `amount` | number | Positive amount collected or negative refund outflow |
 | `method` | string | `"cash"` \| `"gcash"` \| `"paypal"` \| other method name from `hotelConfig.paymentMethods` |
 | `note` | string | Optional context (e.g. "Balance after discount rejection") |
+| `reason` | string \| null | Required refund reason; null for payments |
+| `approvedBy` | string \| null | Admin UID for refunds; null for payments |
 | `recordedBy` | string | Staff UID |
 | `recordedAt` | timestamp | |
 
 Outstanding balance = `booking.totalPrice + billed store orders + sum(charges[].amount) − sum(payments[].amount)` — computed client-side, never stored.
 
-**Security rules:** Staff/Admin read + create; no updates or deletes (immutable audit trail).
+**Security rules:** Staff/Admin read; client create/update/delete denied. Server-authoritative payment/refund routes append entries with Admin SDK.
 
 ---
 

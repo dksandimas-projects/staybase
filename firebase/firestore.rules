@@ -46,7 +46,8 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /payments/{paymentId} {
-        allow read, create: if isStaff();
+        allow read: if isStaff();
+        allow create: if false; // Server-authoritative payment/refund APIs only.
         allow update, delete: if false;
       }
 
