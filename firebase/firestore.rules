@@ -49,6 +49,31 @@ service cloud.firestore {
         allow read, create: if isStaff();
         allow update, delete: if false;
       }
+
+      match /charges/{chargeId} {
+        allow read: if isStaff();
+        allow create: if isStaff()
+          && request.resource.data.keys().hasOnly(["label", "amount", "category", "note", "addedBy", "addedAt", "voidOf"])
+          && request.resource.data.label is string
+          && request.resource.data.label.size() > 0
+          && request.resource.data.label.size() <= 120
+          && request.resource.data.amount is number
+          && request.resource.data.amount != 0
+          && request.resource.data.category in ["late-checkout", "early-checkin", "extra-person", "damage", "laundry", "other"]
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 300
+          && request.resource.data.addedBy == request.auth.uid
+          && request.resource.data.addedAt == request.time
+          && (
+            (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
+            || (
+              request.resource.data.amount < 0
+              && request.resource.data.voidOf is string
+              && get(/databases/$(database)/documents/bookings/$(bookingId)/charges/$(request.resource.data.voidOf)).data.amount == -request.resource.data.amount
+            )
+          );
+        allow update, delete: if false;
+      }
     }
 
     // Per W1.4 / decision #49 / audit S2.3: anonymized booking audit

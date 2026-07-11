@@ -244,14 +244,14 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 5. **Settlement guardrails:** after re-pricing, if payments already collected exceed the new total, surface "guest is owed ₱X" (refund entry per FIN-03 once built); otherwise the outstanding balance simply shrinks. Offer the updated receipt PDF.
 6. **Reporting:** no report changes needed — `discountPct` / `voucherDiscount` / `originalTotalPrice` are already what exports and the FIN-05 gross-to-net bridge read; this flow just makes them truthful for at-desk grants.
 
-## Implementation Plan — Incidental Charges (Folio Charge Ledger)
+## Implementation — Incidental Charges (Folio Charge Ledger) *(FIN-14 shipped 2026-07-11)*
 
 > Owner request 2026-07-11. Closes `FIN-14`
 > (`plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`). Companion to the
 > post-booking discount/voucher plan above: that one adjusts the folio
 > *down* with authorization; this one adjusts it *up* with a paper trail.
 
-### Current State (confirmed in code, 2026-07-11)
+### Prior State (confirmed before implementation, 2026-07-11)
 
 - The checkout folio (`BookingsPage.tsx:1659` `getBookingFolio`) is a closed list: `booking.totalPrice` (room + breakfast, locked at creation) + delivered add-to-bill store orders. Nothing else can be charged.
 - `rateBreakdown.addOns` is only ever populated with the breakfast line server-side (`bookings.ts:132`) — it is a display breakdown, not an open charge ledger.
@@ -270,7 +270,7 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 - **Append-only, same as payments:** `firebase/firestore.rules` — `allow read, create: if isStaff(); allow update, delete: if false;`. Voiding = create a negative reversal entry with `voidOf`, never edit/delete. Corrections stay auditable.
 - Types added to `shared/types/index.ts` + documented in `plan/docs/TYPES.md` and `plan/docs/BACKEND.md §bookings`.
 
-### Target Workflow
+### Shipped Workflow
 
 1. **"Add charge" form in the drawer's Checkout Folio section** — category select, label, amount (`config.currencySymbol` prefix), optional note; 44px inputs; toast on save. Available from `checked-in` (and `confirmed` for pre-arrival fees); blocked after `checked-out`.
 2. **Void action** per charge row (single confirmation, reason → `note` on the reversal entry).
@@ -278,18 +278,18 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 
 ### Wiring Checklist — every surface that must include charges
 
-- ⬜ **Folio math** — `getBookingFolio` `grandTotal = totalPrice + storeTotal + chargesTotal`; `balance` and the due/overpaid/settled banner follow automatically
-- ⬜ **Checkout gate** — unsettled-balance warning at checkout uses the charge-inclusive balance (no separate change if it reads `getBookingFolio`)
-- ⬜ **Receipt / folio PDF** — itemized charge lines with category labels; voided pairs either hidden or shown netted
-- ⬜ **Onsite payments panel** — outstanding balance shown next to "Record Payment" uses charge-inclusive total
-- ⬜ **Reports — Sales tab** — incidentals as a 4th revenue stream: KPI card, stacked-bar segment, and an Incidentals sub-table (Booking Ref, Room, Category, Label, Amount, Added By, Date); update `plan/features/REPORTS.md` checklists when built
-- ⬜ **Sales XLSX** — Summary sheet gains "Incidental Revenue" row; new "Charges" sheet (same columns as sub-table)
-- ⬜ **Full Backup** — new "Charges" sheet joined to booking refs (mirror of the Payments sheet); add to the sheet table in `plan/features/REPORTS.md §Data Backup`
+- ✅ **Folio math** — `getBookingFolio` `grandTotal = totalPrice + storeTotal + chargesTotal`; `balance` and the due/overpaid/settled banner follow automatically
+- ✅ **Checkout gate** — unsettled-balance warning at checkout uses the charge-inclusive balance (no separate change if it reads `getBookingFolio`)
+- ✅ **Receipt / folio PDF** — itemized charge lines with category labels; voided pairs either hidden or shown netted
+- ✅ **Onsite payments panel** — outstanding balance shown next to "Record Payment" uses charge-inclusive total
+- ✅ **Reports — Sales tab** — incidentals as a 4th revenue stream: KPI card, stacked-bar segment, and an Incidentals sub-table (Booking Ref, Room, Category, Label, Amount, Added By, Date); update `plan/features/REPORTS.md` checklists when built
+- ✅ **Sales XLSX** — Summary sheet gains "Incidental Revenue" row; new "Charges" sheet (same columns as sub-table)
+- ✅ **Full Backup** — new "Charges" sheet joined to booking refs (mirror of the Payments sheet); add to the sheet table in `plan/features/REPORTS.md §Data Backup`
 - ⬜ **FIN-01 collections reconciliation** — the "billed" side = room + breakfast + store + charges, so billed-vs-collected stays truthful
 - ⬜ **FIN-04 receivables** — aged unpaid balances computed from the charge-inclusive folio
-- ⬜ **FIN-03 refunds** — a voided charge is a reversal entry here, not a payment refund; the two ledgers stay separate (charges = what's owed, payments = what moved)
-- ⬜ **Firestore rules** — `charges` subcollection added with the append-only pattern above
-- ⬜ **Docs** — `TYPES.md`, `BACKEND.md §bookings`, and `REPORTS.md` updated in the same PR (per CLAUDE.md task-start order step 5)
+- ✅ **FIN-03 refunds** — a voided charge is a reversal entry here, not a payment refund; the two ledgers stay separate (charges = what's owed, payments = what moved)
+- ✅ **Firestore rules** — `charges` subcollection added with the append-only pattern above
+- ✅ **Docs** — `TYPES.md`, `BACKEND.md §bookings`, and `REPORTS.md` updated in the same PR (per CLAUDE.md task-start order step 5)
 
 ## References
 

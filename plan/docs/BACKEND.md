@@ -156,9 +156,29 @@ Subcollection — audit trail of all onsite payments recorded by staff. Append-o
 | `recordedBy` | string | Staff UID |
 | `recordedAt` | timestamp | |
 
-Outstanding balance = `booking.totalPrice − sum(payments[].amount)` — computed client-side, never stored.
+Outstanding balance = `booking.totalPrice + billed store orders + sum(charges[].amount) − sum(payments[].amount)` — computed client-side, never stored.
 
 **Security rules:** Staff/Admin read + create; no updates or deletes (immutable audit trail).
+
+---
+
+### `bookings/{bookingId}/charges/{chargeId}`
+
+Append-only incidental folio ledger. Positive entries add an amount owed; voiding creates a negative reversal with `voidOf` pointing to the original entry. Existing records are never edited or deleted.
+
+| Field | Type | Notes |
+|---|---|---|
+| `label` | string | Staff-facing description shown on the folio and receipt |
+| `amount` | number | Positive charge or negative reversal |
+| `category` | string | `late-checkout`, `early-checkin`, `extra-person`, `damage`, `laundry`, or `other` |
+| `note` | string | Optional context; required as the void reason on reversals |
+| `addedBy` | string | Staff UID |
+| `addedAt` | timestamp | Server timestamp |
+| `voidOf` | string \| null | Original charge ID for reversal entries |
+
+Folio total = `booking.totalPrice + delivered billed-to-room store orders + sum(charges[].amount)`. Outstanding balance subtracts the append-only payments ledger from that total.
+
+**Security rules:** Staff/Admin read + create; no updates or deletes.
 
 ---
 
