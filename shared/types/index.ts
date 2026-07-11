@@ -186,6 +186,7 @@ export interface Booking {
   originalTotalPrice: number | null;
   discountType: DiscountType;
   discountPct: number;
+  memberDiscountPct?: number;
   discountIdPhotoUrl: string | null;
   discountVerified: boolean;
   discountVerifiedBy: string | null;
@@ -237,6 +238,53 @@ export interface Booking {
   earlyCheckIn?: EarlyCheckInDetails | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type IncidentalChargeCategory =
+  | "late-checkout"
+  | "early-checkin"
+  | "extra-person"
+  | "damage"
+  | "laundry"
+  | "other";
+
+export interface IncidentalCharge {
+  id: string;
+  bookingId?: string;
+  bookingRef?: string;
+  roomNumber?: string;
+  label: string;
+  amount: number;
+  category: IncidentalChargeCategory;
+  note: string;
+  addedBy: string;
+  addedAt: Date;
+  voidOf: string | null;
+}
+
+export interface PaymentEntry {
+  id: string;
+  type: "payment" | "refund";
+  amount: number;
+  method: string;
+  note: string;
+  reason: string | null;
+  approvedBy: string | null;
+  recordedBy: string;
+  recordedAt: Date;
+}
+
+export interface CorporateInvoice {
+  id: string;
+  companyName: string;
+  bookingIds: string[];
+  bookingRefs: string[];
+  amount: number;
+  status: "issued" | "paid";
+  issuedAt: Date;
+  issuedBy: string;
+  paidAt: Date | null;
+  paidBy: string | null;
 }
 
 export type IntercomSender = "guest" | "front-desk";

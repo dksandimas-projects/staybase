@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 9, 2026 (Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
+> Last updated: July 12, 2026 (SA-01 jsPDF performance-report export shipped — Schedule A Parts 1–3 coverage now 100%. Full FIN-05..FIN-13 finance queue shipped 07-11/07-12; Goodwill Scope Log updated accordingly — queue empty. Earlier: Goodwill Scope Log created — `plan/project/GOODWILL-SCOPE-LOG.md` itemizes all features delivered beyond Schedule A at no charge, plus rules for handling future extras. Contract Compliance section added — SA-01: Schedule A §2.8 requires the performance report PDF export to use jsPDF; was the only letter-of-the-spec deviation found in the signed-contract review. FIN-03 append-only admin-approved refunds shipped. FIN-04 Receivables & Aging with corporate invoice register shipped. FIN-01/FIN-02 Collections reconciliation and actual payment-method reporting shipped. Incidental charge ledger FIN-14 shipped — `bookings/{id}/charges` append-only subcollection, wired through folio/receipts/reports/exports; spec in `BOOKINGS-MANAGEMENT.md`. Post-booking discount & voucher application shipped — staff can grant Senior/PWD or voucher at check-in / walk-in; prerequisite for the Senior/PWD toggle; spec in `BOOKINGS-MANAGEMENT.md`. Senior/PWD discount online-booking toggle shipped — online path only, front-desk path stays mandatory for RA 9994/10754 compliance; Finance & Reports Audit added under Phase 12 — 13 findings FIN-01..FIN-13 from `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`: reports cover billed revenue only; collections/refunds/receivables invisible; FIN-13 drawer variance added + expenses/P&L and day-locking recorded as scoped-out decisions. Previous: Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1019,6 +1019,9 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ Image preview modal — add a preview modal for uploaded images such as screenshot/receipts/guest IDs, etc. in the guest checkout flow and the admin bookings details view.
 - ✅ Dashboard Intercom stats — display unread message count metric card on dashboard and sidebar.
 - ✅ Real-time Audio Ringtone Alerts — play Web Audio synthesized notifications for new bookings, pending payments, guest messages, guest arrivals (check-ins), and departures (check-outs).
+- ✅ **Senior/PWD discount online-booking toggle** *(owner request 2026-07-11)* — admin toggle (`settings/hotelConfig.seniorPwdOnlineEnabled`, default **on**) controlling whether the Senior/PWD discount selector + OSCA/PWD ID upload appear in the guest booking flow (`/book` Step 3). Server-authoritative: `handleCreateBooking` ignores/rejects `discountType` when disabled (never trust client, per Hard Rules). Toggle lives in the RatesPage "OSCA Legally Mandated Deductions" panel next to the read-only 20% rows. **Compliance scope — the toggle only removes the *online self-service* path; it must NOT allow refusing the discount itself:** the walk-in/admin drawer path stays always available so eligible guests presenting a valid ID at the front desk still receive the mandated 20% (RA 9994 / RA 10754). The 20% rate itself remains hardcoded and locked. When off, show a booking-flow note directing eligible guests to claim the discount at check-in. Spec: `plan/features/RATE-MANAGEMENT.md §Discount rules`. **Depends on the post-booking discount/voucher application item below — build that first (or together), otherwise "claim at check-in" points at a flow that doesn't exist.**
+- ✅ **Post-booking discount & voucher application (drawer + walk-in)** *(owner request 2026-07-11)* — staff can apply a Senior/PWD discount **or a promo voucher** to an existing booking at/before check-in, and the walk-in modal gains discount + voucher fields. Today neither exists: the drawer's verification panel only renders for bookings that claimed online (`BookingsPage.tsx:2590`), and walk-ins hardcode `discountPct: 0` / `voucherDiscount: 0` — so a senior presenting a valid ID at the desk (legally entitled to 20% under RA 9994/10754) gets honored **off the books**, making collected cash diverge from `totalPrice` and guaranteeing false shortfalls in the planned FIN-01/FIN-13 collections & variance reports. Server-authoritative route re-prices with the canonical stacking order (Senior/PWD → voucher → member), snapshots `originalTotalPrice`, stamps `discountVerifiedBy`; vouchers validated with the same server rules as online (expiry/cap/room-type scope) + atomic `usageCount` increment. Not gated by `seniorPwdOnlineEnabled` — the front-desk path is the legally mandated one. Full spec: `plan/features/BOOKINGS-MANAGEMENT.md §Implementation Plan — Post-Booking Discount & Voucher Application`.
+- ✅ **Incidental charges — folio charge ledger (FIN-14)** *(owner request 2026-07-11)* — staff can add ad-hoc charges (late checkout, early check-in fee, extra person/bed, damage, laundry, other) to a booking's folio. Today the folio is a closed list (room + breakfast + add-to-bill store orders — `getBookingFolio`, `BookingsPage.tsx:1659`) with no charge mechanism, so incidentals are collected off the books → unexplained cash overages once FIN-01/FIN-13 land. Design: `bookings/{id}/charges` subcollection mirroring the payments pattern — categorized, `addedBy`/`addedAt` stamped, **append-only at the rules level** (void = negative reversal entry with `voidOf`, never delete). Wired end-to-end: folio grandTotal/balance, checkout gate, receipt PDF, Sales tab as a 4th revenue stream + Incidentals sub-table, Sales XLSX + Full Backup "Charges" sheets, FIN-01 billed-side reconciliation, FIN-04 receivables, `TYPES.md`/`BACKEND.md`/`REPORTS.md` doc sync. Build before or with FIN-01 so the collections report's billed side is complete from day one. Full spec + wiring checklist: `plan/features/BOOKINGS-MANAGEMENT.md §Implementation Plan — Incidental Charges (Folio Charge Ledger)`.
 
 ### Phase 12 Features Audit — fixes to close (audited 2026-07-08)
 
@@ -1063,6 +1066,56 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **QA-04 (B-10)** — Payment/receipt screenshot upload reportedly hangs on "Uploading" on mobile with no error shown; desktop shows "Failed to upload"; non-image files can't be selected on either. Fixed by hardening `compressImageFile` in `shared/utils/images.ts` to use a safe FileReader/DataURL fallback if compression or canvas fails, and showing clear errors in booking page.
 
 **Already fixed, sheet was right:** Other Bugs Found row #12 (price breakdown for mixed weekday/weekend/holiday rates) is marked `Fixed? = Y` in the test sheet. At the start of this audit this roadmap still showed P5 as not started, but P5 ("Guest-facing price breakdown for mixed regular/weekend/holiday rates") was completed and marked ✅ above during this same session — no action needed, confirmed consistent.
+
+### Finance & Reports Audit — 2026-07-11 (gaps to close)
+
+> Finance/audit review of Reports & Metrics: can the hotel properly
+> account for booking income? Full findings (`FIN-01`..`FIN-12`),
+> severities, and fix guidance:
+> `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`. No SEV-1s — billed
+> revenue is computed correctly — but the reports only cover the accrual
+> side; actual cash movement (`bookings/{id}/payments`) is invisible to
+> every report. Build in the order listed.
+
+**SEV-2 (build first):**
+- ✅ **FIN-01 — Collections (cash-basis) report** — new Sales section reading `bookings/{id}/payments` for the period, grouped by day / method / staff, with a billed-vs-collected-vs-outstanding reconciliation line (`ReportsPage.tsx`)
+- ✅ **FIN-02 — Payment-method breakdown from actual payments** — current pie attributes full `totalPrice` to the booking-time `paymentMethod` even if the guest paid differently or not at all (`ReportsPage.tsx:234`); drive it from payment entries, split Add-to-Bill collected vs uncollected
+- ✅ **FIN-03 — Refund model** — refund entry (signed amount or `type: "refund"`) with `reason` + `approvedBy` on the payments subcollection; surface in drawer + collections report; "cancelled bookings with money collected" view (today a cancelled booking's collected deposit vanishes from all reports)
+- ✅ **FIN-04 — Receivables report** — aged unpaid balances on checked-out bookings, uncollected Add-to-Bill store charges, and a minimal corporate charge-back invoice record (corporate AR is entirely untracked today)
+
+**SEV-3:**
+- ✅ **FIN-05 — Discounts & adjustments report** — gross→net revenue bridge (senior/PWD for RA 9994/10754 tax deduction claims, vouchers, points) + outstanding-points liability
+- ✅ **FIN-06 — BIR/VAT scope decision** — calculated client-side on reports/exports, no OR/invoice printing (BIR manual OR booklets fallback); decision logged in `plan/docs/DECISIONS-FEATURES.md`
+- ✅ **FIN-07 — Daily Close view** — payments recorded today by method and `recordedBy` for drawer/GCash handover reconciliation (falls out of FIN-01)
+- ✅ **FIN-08 — Export column alignment** — Sales XLSX Bookings sheet missing spec'd Breakfast/Discount/Voucher columns; Total Collected / Outstanding only exist in the admin-only Full Backup, not the date-ranged exports
+- ✅ **FIN-13 — Drawer count + cash variance in Daily Close** — per-method counted-amount entry (cash drawer, GCash balance) vs recorded payments, persisted as an append-only daily close record with variance line; build together with FIN-07, not after
+- ✅ **FIN-14 — Incidental charge ledger** — `bookings/{id}/charges` append-only subcollection + drawer "Add charge" form + folio/receipt/report/export wiring; build before or with FIN-01 so the billed side of the reconciliation is complete (full item under Phase 12 list above; spec in `BOOKINGS-MANAGEMENT.md`)
+
+**SEV-4 (polish):**
+- ✅ **FIN-09 — Revenue recognition quirks** — whole booking check-in bias resolved via overlap proration; unpaid future bookings excluded
+- ✅ **FIN-10 — Occupancy night-clipping** — occupancy night count clipped to range boundaries; overlapping stays resolved
+- ✅ **FIN-11 — Hotel finance KPIs** — ADR, RevPAR, and revenue by room type split chart implemented in reports
+- ✅ **FIN-12 — Prior-period comparison** — vs-previous-period delta badges rendered on all revenue and booking KPI cards
+
+**Scoped out by decision (recorded in the audit doc §Scope boundaries — do not re-open without owner request):**
+- ⏸ Expenses & P&L tracking — out of scope; system is a PMS, not accounting software; exports feed external bookkeeping/BIR
+- ⏸ Day-locking / night-audit snapshots — deferred at 14-room scale; payments are already append-only at the rules level, which covers the cash side; revisit if historical figures drift or staff grows
+
+### Contract Compliance — Schedule A review (2026-07-11)
+
+> Source: review of the signed Software Development Agreement + Schedule A
+> (June 23, 2026) against the codebase. SA-01 was the single line item not
+> matching the letter of the spec; it shipped 2026-07-12, so **Schedule A
+> Parts 1–3 coverage is now 100%** ahead of the Final Delivery / acceptance
+> review.
+>
+> The same review found ~40 features delivered *beyond* Schedule A at no
+> charge — itemized in `plan/project/GOODWILL-SCOPE-LOG.md` (with
+> maintenance rules: log new extras there, or quote them as Part 4 change
+> requests). The FIN-05..FIN-13 queue has since shipped (2026-07-11/12) and
+> is recorded there as delivered goodwill; the queue is now empty.
+
+- ✅ **SA-01 — Reports: performance report PDF export must use jsPDF** — jsPDF + html2canvas client-side PDF export implemented on the reports workspace, providing pixel-perfect multi-page report downloads of active tab stat cards and Recharts graphics.
 
 ### Live Bug Reports — 2026-07-09 (guest Intercom, reported directly by owner on mobile)
 
@@ -1111,9 +1164,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
+| Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **363** | **330** | **~133** |
+| **Total** | **363** | **339** | **~124** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 

@@ -209,11 +209,41 @@ Booking {
 
 OnsitePayment {
   id: string
+  type: "payment" | "refund"
   amount: number
   method: PaymentMethod
   note: string
+  reason: string | null
+  approvedBy: string | null
   recordedBy: string   // staff UID
   recordedAt: Date
+}
+
+IncidentalCharge {
+  id: string
+  bookingId?: string
+  bookingRef?: string
+  roomNumber?: string
+  label: string
+  amount: number
+  category: "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other"
+  note: string
+  addedBy: string
+  addedAt: Date
+  voidOf: string | null
+}
+
+CorporateInvoice {
+  id: string
+  companyName: string
+  bookingIds: string[]
+  bookingRefs: string[]
+  amount: number
+  status: "issued" | "paid"
+  issuedAt: Date
+  issuedBy: string
+  paidAt: Date | null
+  paidBy: string | null
 }
 
 EarlyCheckInDetails {

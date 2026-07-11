@@ -189606,6 +189606,9 @@ async function handleCreateBooking(req, res) {
         throw new Error("Room type catalog is not configured.");
       }
       const hotelConfig = hotelConfigDoc.data();
+      if ((discountType === "senior" || discountType === "pwd") && hotelConfig.seniorPwdOnlineEnabled === false) {
+        throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
+      }
       if (paymentMethod !== "pay-at-hotel") {
         const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
         const pmConfig = paymentMethodsArr.find((p) => p && p.method === paymentMethod);
@@ -190077,6 +190080,8 @@ async function handleCreateWalkin(req, res) {
     paymentReferenceNumber,
     status,
     totalPriceOverride,
+    discountType: requestedDiscountType,
+    voucherCode: requestedVoucherCode,
     linkedInquiryId
   } = body;
   if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
@@ -190178,11 +190183,42 @@ async function handleCreateWalkin(req, res) {
       const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
-      if (totalPriceOverride !== void 0 && totalPriceOverride !== null) {
-        finalTotalPrice = Number(totalPriceOverride);
-      } else {
-        finalTotalPrice = subtotal;
+      const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
+      const discountPct = discountType ? 20 : 0;
+      const pricingSubtotal = totalPriceOverride !== void 0 && totalPriceOverride !== null ? Number(totalPriceOverride) : subtotal;
+      const seniorPwdDiscount = Math.round(pricingSubtotal * (discountPct / 100));
+      const voucherBase = Math.max(pricingSubtotal - seniorPwdDiscount, 0);
+      let voucherCode = "";
+      let voucherDiscount = 0;
+      let voucherUsageUpdate = null;
+      if (requestedVoucherCode) {
+        const formattedCode = String(requestedVoucherCode).trim().toUpperCase();
+        let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
+        let voucherDoc = await transaction.get(voucherRef);
+        if (!voucherDoc.exists) {
+          const voucherQuery = adminDb.collection("vouchers").where("code", "==", formattedCode).limit(1);
+          const voucherQuerySnap = await transaction.get(voucherQuery);
+          if (!voucherQuerySnap.empty) {
+            voucherDoc = voucherQuerySnap.docs[0];
+            voucherRef = voucherDoc.ref;
+          }
+        }
+        if (!voucherDoc.exists) throw new Error("Voucher is invalid or no longer available.");
+        const voucherData = voucherDoc.data();
+        const expiresAt = toDateOrNull(voucherData.expiresAt);
+        const voucherIsValid = voucherData.isActive !== false && (!expiresAt || expiresAt >= /* @__PURE__ */ new Date()) && (voucherData.usageCap == null || Number(voucherData.usageCount || 0) < Number(voucherData.usageCap)) && ((voucherData.applicableRoomTypes?.length ?? 0) === 0 || voucherData.applicableRoomTypes.includes(roomData.type));
+        if (!voucherIsValid) throw new Error("Voucher is invalid or no longer available.");
+        voucherCode = formattedCode;
+        voucherDiscount = Math.round(calculateVoucherDiscount({
+          discountType: voucherData.discountType === "percent" ? "percent" : "flat",
+          discountValue: Number(voucherData.discountValue) || 0
+        }, voucherBase));
+        voucherUsageUpdate = {
+          ref: voucherRef,
+          data: { usageCount: Number(voucherData.usageCount || 0) + 1, updatedAt: /* @__PURE__ */ new Date() }
+        };
       }
+      finalTotalPrice = Math.max(voucherBase - voucherDiscount, 0);
       const rateBreakdown = buildRateBreakdown({
         roomLines: totalPriceOverride !== void 0 && totalPriceOverride !== null ? [{
           source: "manual",
@@ -190190,14 +190226,14 @@ async function handleCreateWalkin(req, res) {
           startDate: checkIn,
           endDate: checkOut,
           nights: numNights,
-          nightlyRate: numNights > 0 ? Math.round(finalTotalPrice / numNights) : finalTotalPrice,
-          subtotal: finalTotalPrice
+          nightlyRate: numNights > 0 ? Math.round(pricingSubtotal / numNights) : pricingSubtotal,
+          subtotal: pricingSubtotal
         }] : roomBreakdown.roomLines,
-        roomSubtotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? finalTotalPrice : roomTotal,
+        roomSubtotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? pricingSubtotal : roomTotal,
         breakfastTotal: totalPriceOverride !== void 0 && totalPriceOverride !== null ? 0 : breakfastTotal,
-        discountType: "",
-        discountPct: 0,
-        voucherDiscount: 0,
+        discountType,
+        discountPct,
+        voucherDiscount,
         memberDiscountPct: 0,
         finalTotal: finalTotalPrice
       });
@@ -190226,7 +190262,7 @@ async function handleCreateWalkin(req, res) {
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
-        originalTotalPrice: subtotal,
+        originalTotalPrice: discountType || voucherCode ? pricingSubtotal : subtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
         // walkin flow writes a token too so the email
@@ -190234,16 +190270,16 @@ async function handleCreateWalkin(req, res) {
         // (reception sends it manually to the guest's
         // email).
         lookupToken: generateLookupToken(),
-        discountType: "",
-        discountPct: 0,
+        discountType,
+        discountPct,
         discountIdPhotoUrl: null,
-        discountVerified: false,
-        discountVerifiedBy: null,
+        discountVerified: Boolean(discountType),
+        discountVerifiedBy: discountType ? req.staff.uid || "staff" : null,
         discountRejected: false,
         discountRejectedBy: null,
         discountRejectionReason: "",
-        voucherCode: "",
-        voucherDiscount: 0,
+        voucherCode,
+        voucherDiscount,
         isCorporate: false,
         corporateCode: "",
         companyName: "",
@@ -190282,6 +190318,7 @@ async function handleCreateWalkin(req, res) {
       } else {
         transaction.set(counterRef, { count: 1 });
       }
+      if (voucherUsageUpdate) transaction.update(voucherUsageUpdate.ref, voucherUsageUpdate.data);
       transaction.set(bookingDocRef, newBooking);
     });
     const resolvedStatus = status || "confirmed";
@@ -190308,6 +190345,105 @@ async function handleCreateWalkin(req, res) {
       success: false,
       error: error.message || "An unexpected error occurred during walk-in booking creation."
     });
+  }
+}
+async function handleApplyBookingDiscount(req, res) {
+  const bookingId = String(req.body?.bookingId || "").trim();
+  const requestedDiscountType = req.body?.discountType;
+  const requestedVoucherCode = String(req.body?.voucherCode || "").trim().toUpperCase();
+  if (!bookingId || !requestedDiscountType && !requestedVoucherCode) {
+    return res.status(400).json({ success: false, error: "Choose a government discount or enter a voucher code." });
+  }
+  if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
+    return res.status(400).json({ success: false, error: "Invalid government discount type." });
+  }
+  try {
+    let result = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingSnap = await transaction.get(bookingRef);
+      if (!bookingSnap.exists) throw new Error("Booking not found.");
+      const booking = bookingSnap.data();
+      if (!["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"].includes(booking.status)) {
+        throw new Error("Discounts and vouchers cannot be applied after checkout or cancellation.");
+      }
+      if (booking.discountType || booking.voucherCode) {
+        throw new Error("This booking already has a discount or voucher. Existing grants cannot be replaced from this action.");
+      }
+      const breakdown = booking.rateBreakdown;
+      const subtotal = Number(booking.originalTotalPrice ?? Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0) ?? booking.totalPrice);
+      if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
+      const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
+      const discountPct = discountType ? 20 : 0;
+      const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+      const voucherBase = Math.max(subtotal - seniorPwdDiscount, 0);
+      let voucherDiscount = 0;
+      let voucherCode = "";
+      let voucherRef = null;
+      let voucherUsageCount = 0;
+      if (requestedVoucherCode) {
+        voucherRef = adminDb.collection("vouchers").doc(requestedVoucherCode);
+        let voucherSnap = await transaction.get(voucherRef);
+        if (!voucherSnap.exists) {
+          const querySnap = await transaction.get(adminDb.collection("vouchers").where("code", "==", requestedVoucherCode).limit(1));
+          if (!querySnap.empty) {
+            voucherSnap = querySnap.docs[0];
+            voucherRef = voucherSnap.ref;
+          }
+        }
+        if (!voucherSnap.exists) throw new Error("Voucher is invalid or no longer available.");
+        const voucher = voucherSnap.data();
+        const expiresAt = toDateOrNull(voucher.expiresAt);
+        const valid = voucher.isActive !== false && (!expiresAt || expiresAt >= /* @__PURE__ */ new Date()) && (voucher.usageCap == null || Number(voucher.usageCount || 0) < Number(voucher.usageCap)) && ((voucher.applicableRoomTypes?.length ?? 0) === 0 || voucher.applicableRoomTypes.includes(booking.roomType));
+        if (!valid) throw new Error("Voucher is invalid or no longer available.");
+        voucherCode = requestedVoucherCode;
+        voucherUsageCount = Number(voucher.usageCount || 0) + 1;
+        voucherDiscount = Math.round(calculateVoucherDiscount({
+          discountType: voucher.discountType === "percent" ? "percent" : "flat",
+          discountValue: Number(voucher.discountValue) || 0
+        }, voucherBase));
+      }
+      const afterVoucher = Math.max(voucherBase - voucherDiscount, 0);
+      const memberDiscountPct = Number(booking.memberDiscountPct || 0);
+      const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+      const pointsValue = Number(booking.pointsRedeemedValue || 0);
+      const totalPrice = Math.max(afterVoucher - memberDiscount - pointsValue, 0);
+      const rateBreakdown = buildRateBreakdown({
+        roomLines: breakdown?.roomLines || [],
+        roomSubtotal: Number(breakdown?.roomSubtotal || subtotal),
+        breakfastTotal: (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0),
+        discountType,
+        discountPct,
+        voucherDiscount,
+        memberDiscountPct,
+        pointsRedeemedValue: pointsValue,
+        finalTotal: totalPrice
+      });
+      const staffUid = req.staff?.uid || "staff";
+      const updates = {
+        originalTotalPrice: subtotal,
+        discountType,
+        discountPct,
+        discountVerified: Boolean(discountType),
+        discountVerifiedBy: discountType ? staffUid : null,
+        discountRejected: false,
+        discountRejectedBy: null,
+        discountRejectionReason: "",
+        voucherCode,
+        voucherDiscount,
+        totalPrice,
+        rateBreakdown,
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
+      transaction.update(bookingRef, updates);
+      result = updates;
+    });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    const message = error.message || "Unable to apply the discount or voucher.";
+    const status = message === "Booking not found." ? 404 : 400;
+    return res.status(status).json({ success: false, error: message });
   }
 }
 async function handleRejectDiscount(req, res) {
@@ -190498,9 +190634,12 @@ async function handleAddPayment(req, res) {
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const staffUid = req.staff?.uid || "staff";
   const paymentRecord = {
+    type: "payment",
     amount: numericAmount,
     method,
     note: safeNote,
+    reason: null,
+    approvedBy: null,
     recordedBy: staffUid,
     recordedAt: /* @__PURE__ */ new Date()
   };
@@ -190564,6 +190703,56 @@ async function handleAddPayment(req, res) {
     success: true,
     data: { ...paymentRecord, totalPaid }
   });
+}
+async function handleAddRefund(req, res) {
+  if (req.staff?.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only an administrator can approve refunds." });
+  }
+  const { bookingId, amount, method, reason } = req.body || {};
+  const numericAmount = Number(amount);
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const safeMethod = typeof method === "string" ? method.trim().slice(0, 80) : "";
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 1e6) {
+    return res.status(400).json({ success: false, error: "Refund amount must be between 0.01 and 1,000,000." });
+  }
+  if (!safeMethod || !safeReason) {
+    return res.status(400).json({ success: false, error: "Refund method and reason are required." });
+  }
+  try {
+    let refundRecord = {};
+    let netCollected = 0;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found");
+      const paymentsRef = bookingRef.collection("payments");
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      netCollected = paymentsSnapshot.docs.reduce((sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0), 0);
+      if (numericAmount > netCollected) {
+        throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
+      }
+      const approvedBy = req.staff.uid || "admin";
+      refundRecord = {
+        type: "refund",
+        amount: -numericAmount,
+        method: safeMethod,
+        note: safeReason,
+        reason: safeReason,
+        approvedBy,
+        recordedBy: approvedBy,
+        recordedAt: /* @__PURE__ */ new Date()
+      };
+      transaction.set(paymentsRef.doc(), refundRecord);
+    });
+    return res.status(200).json({ success: true, data: { ...refundRecord, netCollected: netCollected - numericAmount } });
+  } catch (error) {
+    if (error.message === "Booking not found") return res.status(404).json({ success: false, error: "Booking not found." });
+    const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
+    return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
+  }
 }
 async function handleConfirmBooking(req, res) {
   const { bookingId } = req.body || {};
@@ -193847,6 +194036,14 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleAddPayment(req, res);
   }
+  if (domain === "bookings" && action === "add-refund" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleAddRefund(req, res);
+  }
   if (domain === "bookings" && action === "reject-discount" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
@@ -193854,6 +194051,14 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRejectDiscount(req, res);
+  }
+  if (domain === "bookings" && action === "apply-discount" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleApplyBookingDiscount(req, res);
   }
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm:${ip}`, 30, 6e4)) {

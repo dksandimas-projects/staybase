@@ -146,19 +146,42 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 
 ### `bookings/{bookingId}/payments/{paymentId}`
 
-Subcollection — audit trail of all onsite payments recorded by staff. Append-only, never edited or deleted.
+Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. All writes use authenticated server routes; Firestore client creation is denied.
 
 | Field | Type | Notes |
 |---|---|---|
-| `amount` | number | ₱ amount collected |
+| `type` | string | `payment` or `refund`; legacy positive entries default to `payment` |
+| `amount` | number | Positive amount collected or negative refund outflow |
 | `method` | string | `"cash"` \| `"gcash"` \| `"paypal"` \| other method name from `hotelConfig.paymentMethods` |
 | `note` | string | Optional context (e.g. "Balance after discount rejection") |
+| `reason` | string \| null | Required refund reason; null for payments |
+| `approvedBy` | string \| null | Admin UID for refunds; null for payments |
 | `recordedBy` | string | Staff UID |
 | `recordedAt` | timestamp | |
 
-Outstanding balance = `booking.totalPrice − sum(payments[].amount)` — computed client-side, never stored.
+Outstanding balance = `booking.totalPrice + billed store orders + sum(charges[].amount) − sum(payments[].amount)` — computed client-side, never stored.
 
-**Security rules:** Staff/Admin read + create; no updates or deletes (immutable audit trail).
+**Security rules:** Staff/Admin read; client create/update/delete denied. Server-authoritative payment/refund routes append entries with Admin SDK.
+
+---
+
+### `bookings/{bookingId}/charges/{chargeId}`
+
+Append-only incidental folio ledger. Positive entries add an amount owed; voiding creates a negative reversal with `voidOf` pointing to the original entry. Existing records are never edited or deleted.
+
+| Field | Type | Notes |
+|---|---|---|
+| `label` | string | Staff-facing description shown on the folio and receipt |
+| `amount` | number | Positive charge or negative reversal |
+| `category` | string | `late-checkout`, `early-checkin`, `extra-person`, `damage`, `laundry`, or `other` |
+| `note` | string | Optional context; required as the void reason on reversals |
+| `addedBy` | string | Staff UID |
+| `addedAt` | timestamp | Server timestamp |
+| `voidOf` | string \| null | Original charge ID for reversal entries |
+
+Folio total = `booking.totalPrice + delivered billed-to-room store orders + sum(charges[].amount)`. Outstanding balance subtracts the append-only payments ledger from that total.
+
+**Security rules:** Staff/Admin read + create; no updates or deletes.
 
 ---
 
@@ -222,7 +245,7 @@ Subcollection — audit trail of all points changes.
 
 Single document. See `plan/docs/TYPES.md` for full type.
 
-Key fields (per Phase 11.8 PR 3, all admin-editable from Settings → Hotel Info): `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `twitterHandle`, `checkInTime`, `checkOutTime`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`, `seasonalRateOverrides[]`. Brand identity remains deploy-time in `hotel.config.ts`. Missing fields fall back to deploy-time config; explicitly blank social fields hide their public icons. Legacy `hotelName`, `contactEmail`, `contactPhone`, `missionStatement`, `visionStatement`, and `hotelStory` values may remain on old documents but are ignored; their canonical replacements are `hotel.config.ts`, `supportEmail`, `frontDeskPhone`, and `settings/websiteContent.about.*`.
+Key fields (per Phase 11.8 PR 3, all admin-editable from Settings → Hotel Info): `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `twitterHandle`, `checkInTime`, `checkOutTime`, `paymentMethods[]`, `intercomQuickRequests[]`, `notificationSoundUrl`, `roomTypes[]`, `seasonalRateOverrides[]`, `seniorPwdOnlineEnabled`. Brand identity remains deploy-time in `hotel.config.ts`. Missing fields fall back to deploy-time config; `seniorPwdOnlineEnabled` defaults on unless explicitly `false`. Explicitly blank social fields hide their public icons. Legacy `hotelName`, `contactEmail`, `contactPhone`, `missionStatement`, `visionStatement`, and `hotelStory` values may remain on old documents but are ignored; their canonical replacements are `hotel.config.ts`, `supportEmail`, `frontDeskPhone`, and `settings/websiteContent.about.*`.
 
 > **`paymentMethods[]`** — fully dynamic payment list, edited from Settings → Payment Methods. Each entry owns its `method` key, `label`, `accountName`, `accountNumber`, `qrUrl`, `isEnabled`, `showInStore`, and `showInCorporate` flags. `isEnabled` controls the regular booking flow; `showInStore` controls the in-room store; `showInCorporate` controls corporate personal-pay. "Pay at Hotel" is just another entry (`method: "pay-at-hotel"`, `isEnabled: true/false`) — there is no separate `payAtHotelEnabled` field. `cod` and `add-to-bill` are store-only entries in this same list. QR images are stored at `assets/payment-methods/{method}/{filename}` in Firebase Storage (public read, staff write). See `firebase/storage.rules` `match /assets/payment-methods/{method}/{fileName}` and `plan/features/SETTINGS.md §Payment Methods` for the full edit surface.
 
@@ -290,6 +313,26 @@ Additional legal/policy fields (editable by hotel admin from Settings):
 - `privacyPolicyBody` — full privacy policy text (plain text or light markdown)
 - `cancellationPolicy` — shown at booking Step 3 and in confirmation emails
 - `houseRules` — used in guest registration PDF at check-in
+
+---
+
+### `corporateInvoices/{invoiceId}`
+
+Minimal accounts-receivable invoice register for corporate charge-back balances.
+
+| Field | Type | Notes |
+|---|---|---|
+| `companyName` | string | Corporate account label |
+| `bookingIds` | string[] | Bookings covered by the invoice |
+| `bookingRefs` | string[] | Denormalized references for reporting/export |
+| `amount` | number | Outstanding amount at issue time |
+| `status` | string | `issued` or `paid` |
+| `issuedAt` | timestamp | Server timestamp |
+| `issuedBy` | string | Staff UID |
+| `paidAt` | timestamp \| null | Set when marked paid |
+| `paidBy` | string \| null | Staff UID |
+
+Staff can create and update invoice status; deletion is forbidden so the register retains its audit history. Invoice status does not create a payment entry automatically—the actual receipt must still be recorded in the booking payment ledger.
 
 ---
 

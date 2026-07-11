@@ -85,11 +85,27 @@ export interface Room {
 
 export interface OnsitePayment {
   id: string;
+  type: "payment" | "refund";
   amount: number;
   method: string;
   note: string;
+  reason: string | null;
+  approvedBy: string | null;
   recordedBy: string;
   recordedAt: string;
+}
+
+export type IncidentalChargeCategory = "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other";
+
+export interface IncidentalCharge {
+  id: string;
+  label: string;
+  amount: number;
+  category: IncidentalChargeCategory;
+  note: string;
+  addedBy: string;
+  addedAt: string;
+  voidOf: string | null;
 }
 
 export interface Booking {
@@ -1462,7 +1478,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           },
           paymentMethod: booking.paymentMethod,
           status: booking.status,
-          totalPriceOverride: booking.totalPriceOverride
+          totalPriceOverride: booking.totalPriceOverride,
+          discountType: booking.discountType,
+          voucherCode: booking.voucherCode
         })
       });
       const data = await res.json();

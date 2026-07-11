@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAdmin, Booking, OnsitePayment } from "../context/AdminContext";
+import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
 import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -133,7 +133,7 @@ function estimateNewTotalPrice(
 }
 import config from "@config";
 import { jsPDF } from "jspdf";
-import { collection, doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { auth } from "../firebase/auth";
@@ -381,6 +381,7 @@ export function BookingsPage() {
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
   const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
+  const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
 
   const [earlyCheckInAction, setEarlyCheckInAction] = useState<"approve" | "decline" | null>(null);
   const [earlyCheckInTimeOverride, setEarlyCheckInTimeOverride] = useState<string>("");
@@ -451,6 +452,10 @@ export function BookingsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundMethod, setRefundMethod] = useState("cash");
+  const [refundReason, setRefundReason] = useState("");
+  const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [redeemPointsInput, setRedeemPointsInput] = useState("");
@@ -504,6 +509,11 @@ export function BookingsPage() {
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
   const [priceOverride, setPriceOverride] = useState("");
+  const [walkinDiscountType, setWalkinDiscountType] = useState<"" | "senior" | "pwd">("");
+  const [walkinVoucherCode, setWalkinVoucherCode] = useState("");
+  const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
+  const [staffVoucherCode, setStaffVoucherCode] = useState("");
+  const [isApplyingStaffDiscount, setIsApplyingStaffDiscount] = useState(false);
 
   const onsitePaymentMethodOptions = useMemo(() => {
     const configured = paymentMethods.filter((method) => {
@@ -531,6 +541,12 @@ export function BookingsPage() {
   }, [onsitePaymentMethodOptions, paymentMethod]);
 
   const [selectedBookingPayments, setSelectedBookingPayments] = useState<OnsitePayment[]>([]);
+  const [selectedBookingCharges, setSelectedBookingCharges] = useState<IncidentalCharge[]>([]);
+  const [chargeCategory, setChargeCategory] = useState<IncidentalChargeCategory>("other");
+  const [chargeLabel, setChargeLabel] = useState("");
+  const [chargeAmount, setChargeAmount] = useState("");
+  const [chargeNote, setChargeNote] = useState("");
+  const [isSavingCharge, setIsSavingCharge] = useState(false);
 
   useEffect(() => {
     if (!selectedBooking?.id) {
@@ -545,9 +561,12 @@ export function BookingsPage() {
         const data = docSnap.data();
         paymentsData.push({
           id: docSnap.id,
+          type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
           amount: data.amount || 0,
           method: data.method || "",
           note: data.note || "",
+          reason: data.reason || null,
+          approvedBy: data.approvedBy || null,
           recordedBy: data.recordedBy || "staff",
           recordedAt: data.recordedAt instanceof Date
             ? data.recordedAt.toISOString()
@@ -564,6 +583,35 @@ export function BookingsPage() {
 
     return unsubscribe;
   }, [selectedBooking?.id]);
+
+  useEffect(() => {
+    if (!selectedBooking?.id) {
+      setSelectedBookingCharges([]);
+      return;
+    }
+    const chargesRef = collection(db, "bookings", selectedBooking.id, "charges");
+    const unsubscribe = onSnapshot(chargesRef, (snapshot) => {
+      const charges = snapshot.docs.map((chargeDoc) => {
+        const data = chargeDoc.data();
+        const addedAt = data.addedAt?.toDate ? data.addedAt.toDate().toISOString() : String(data.addedAt || "");
+        return {
+          id: chargeDoc.id,
+          label: String(data.label || "Incidental charge"),
+          amount: Number(data.amount || 0),
+          category: (data.category || "other") as IncidentalChargeCategory,
+          note: String(data.note || ""),
+          addedBy: String(data.addedBy || "staff"),
+          addedAt,
+          voidOf: data.voidOf ? String(data.voidOf) : null
+        };
+      }).sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+      setSelectedBookingCharges(charges);
+    }, (error) => {
+      console.error("Error listening to charges subcollection:", error);
+      toast.error("Could not load incidental charges", "Refresh the booking drawer and try again.");
+    });
+    return unsubscribe;
+  }, [selectedBooking?.id, toast]);
 
   // Filter available rooms based on type selected
   const availableRoomsOfType = rooms.filter(
@@ -1326,8 +1374,9 @@ export function BookingsPage() {
         }
       };
 
+      const receiptFolio = getBookingFolio(b);
       const paymentsTotalForSummary = selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
-      const amountDueForSummary = Math.max(0, b.totalPrice - paymentsTotalForSummary);
+      const amountDueForSummary = Math.max(0, receiptFolio.grandTotal - paymentsTotalForSummary);
       const amountX = marginR - 5; // Exactly X: 190, matching the Stay card right alignment
 
       const formatAmount = (value: number) =>
@@ -1504,6 +1553,20 @@ export function BookingsPage() {
       setPdfFont(pdf, "Inter");
       y += 6.5;
 
+      if (receiptFolio.storeCharges.length > 0 || receiptFolio.charges.length > 0) {
+        checkNewPage(12 + (receiptFolio.storeCharges.length + receiptFolio.charges.length) * 5);
+        drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
+        y += 4.5;
+        receiptFolio.storeCharges.forEach((order) => {
+          drawAmountRow(`Store order ${order.orderRef}`, formatAmount(order.totalAmount));
+        });
+        receiptFolio.charges.forEach((charge) => {
+          drawAmountRow(charge.label, formatAmount(charge.amount), { muted: charge.amount < 0 });
+        });
+        drawAmountRow("Folio total", formatAmount(receiptFolio.grandTotal), { bold: true });
+        y += 2;
+      }
+
       // ── Special Requests / Notes ──
       if (b.specialRequests && b.specialRequests.trim().length > 0) {
         checkNewPage(15);
@@ -1569,7 +1632,7 @@ export function BookingsPage() {
 
         drawAmountRow("Total collected", formatAmount(paymentsTotal), { bold: true });
 
-        const balance = b.totalPrice - paymentsTotal;
+        const balance = receiptFolio.grandTotal - paymentsTotal;
         pdf.setFontSize(10);
         if (balance <= 0) {
           pdf.setTextColor(34, 139, 34);
@@ -1600,7 +1663,7 @@ export function BookingsPage() {
         pdf.setTextColor(200, 60, 60);
         pdf.text("Amount due at property", labelColX, y, { charSpace: 0 });
         pdf.setFont("helvetica", "bold");
-        pdf.text(formatAmount(b.totalPrice), amountX, y, { align: "right", charSpace: 0 });
+        pdf.text(formatAmount(receiptFolio.grandTotal), amountX, y, { align: "right", charSpace: 0 });
         setPdfFont(pdf, "Inter");
         y += 5;
       }
@@ -1660,10 +1723,14 @@ export function BookingsPage() {
     const storeCharges = getBookingStoreCharges(booking);
     const storeTotal = storeCharges.reduce((sum, order) => sum + order.totalAmount, 0);
     const paymentsTotal = getBookingPaymentsTotal(booking);
-    const grandTotal = booking.totalPrice + storeTotal;
+    const charges = selectedBooking?.id === booking.id ? selectedBookingCharges : [];
+    const chargesTotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
+    const grandTotal = booking.totalPrice + storeTotal + chargesTotal;
     return {
       storeCharges,
       storeTotal,
+      charges,
+      chargesTotal,
       paymentsTotal,
       grandTotal,
       balance: grandTotal - paymentsTotal
@@ -1825,6 +1892,113 @@ export function BookingsPage() {
     }
   };
 
+  const handleRefundSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || currentUser?.role !== "admin") return;
+    const amount = Number(refundAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || !refundReason.trim()) {
+      toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
+      return;
+    }
+    setIsRefunding(true);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+        body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+      setRefundAmount("");
+      setRefundReason("");
+      toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
+    } catch (error: any) {
+      toast.error("Could not record refund", error.message || "Please try again.");
+    } finally {
+      setIsRefunding(false);
+    }
+  };
+
+  const handleAddChargeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking) return;
+    const amount = Number(chargeAmount);
+    if (!chargeLabel.trim() || !Number.isFinite(amount) || amount <= 0) {
+      toast.warning("Check charge details", "Enter a label and an amount greater than zero.");
+      return;
+    }
+    setIsSavingCharge(true);
+    try {
+      await addDoc(collection(db, "bookings", selectedBooking.id, "charges"), {
+        label: chargeLabel.trim(),
+        amount,
+        category: chargeCategory,
+        note: chargeNote.trim(),
+        addedBy: currentUser?.uid || "staff",
+        addedAt: serverTimestamp(),
+        voidOf: null
+      });
+      setChargeLabel("");
+      setChargeAmount("");
+      setChargeNote("");
+      setChargeCategory("other");
+      toast.success("Charge added", `${formatPrice(amount)} added to the booking folio.`);
+    } catch (error: any) {
+      toast.error("Could not add charge", error.message || "Please try again.");
+    } finally {
+      setIsSavingCharge(false);
+    }
+  };
+
+  const handleVoidCharge = async (reason: string) => {
+    if (!selectedBooking || !chargeToVoid) return;
+    try {
+      const reversalRef = doc(db, "bookings", selectedBooking.id, "charges", `void-${chargeToVoid.id}`);
+      await setDoc(reversalRef, {
+        label: `Reversal — ${chargeToVoid.label}`,
+        amount: -Math.abs(chargeToVoid.amount),
+        category: chargeToVoid.category,
+        note: reason.trim(),
+        addedBy: currentUser?.uid || "staff",
+        addedAt: serverTimestamp(),
+        voidOf: chargeToVoid.id
+      });
+      toast.success("Charge voided", "A reversal entry was added; the original record remains unchanged.");
+      setChargeToVoid(null);
+    } catch (error: any) {
+      toast.error("Could not void charge", error.message || "Please try again.");
+    }
+  };
+
+  const handleApplyStaffDiscount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
+    setIsApplyingStaffDiscount(true);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+        body: JSON.stringify({
+          bookingId: selectedBooking.id,
+          discountType: staffDiscountType,
+          voucherCode: staffVoucherCode.trim()
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to apply discount.");
+      syncSelectedBooking(payload.data);
+      setStaffDiscountType("");
+      setStaffVoucherCode("");
+      toast.success("Booking repriced", `New total: ${formatPrice(payload.data.totalPrice)}`);
+    } catch (error: any) {
+      toast.error("Could not apply discount", error.message || "Please check the details and try again.");
+    } finally {
+      setIsApplyingStaffDiscount(false);
+    }
+  };
+
   const [isWalkinSubmitting, setIsWalkinSubmitting] = useState(false);
 
   const handleWalkinSubmit = async (e: React.FormEvent) => {
@@ -1852,15 +2026,15 @@ export function BookingsPage() {
         totalPrice: priceOverride !== "" ? Number(priceOverride) : totalPrice,
         totalPriceOverride: priceOverride !== "" ? Number(priceOverride) : undefined,
         originalTotalPrice: totalPrice,
-        discountType: "",
-        discountPct: 0,
+        discountType: walkinDiscountType,
+        discountPct: walkinDiscountType ? 20 : 0,
         discountIdPhotoUrl: null,
         discountVerified: false,
         discountVerifiedBy: null,
         discountRejected: false,
         discountRejectedBy: null,
         discountRejectionReason: "",
-        voucherCode: "",
+        voucherCode: walkinVoucherCode.trim().toUpperCase(),
         voucherDiscount: 0,
         isCorporate: false,
         corporateCode: "",
@@ -1898,6 +2072,8 @@ export function BookingsPage() {
         setRoomNumber("");
         setPriceOverride("");
         setHasBreakfast(false);
+        setWalkinDiscountType("");
+        setWalkinVoucherCode("");
         setIsModalOpen(false);
         toast.success("Walk-in booking created", `Room ${roomNumber} for ${guestName}`);
       } else {
@@ -2586,6 +2762,30 @@ export function BookingsPage() {
               </div>
             )}
 
+            {!selectedBooking.discountType && !selectedBooking.voucherCode && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
+              <form onSubmit={handleApplyStaffDiscount} className="rounded-card border border-primary/20 bg-primary-light/20 p-4 space-y-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">Apply discount / voucher</h3>
+                  <p className="mt-1 text-[11px] text-gray-600">Use after sighting a valid Senior/PWD ID, or enter a promo code. Pricing is recalculated and audited by the server.</p>
+                </div>
+                <label className="block text-xs font-semibold text-gray-700">
+                  Government discount
+                  <select value={staffDiscountType} onChange={(e) => setStaffDiscountType(e.target.value as "" | "senior" | "pwd")} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
+                    <option value="">None</option>
+                    <option value="senior">Senior Citizen (20%)</option>
+                    <option value="pwd">PWD (20%)</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-semibold text-gray-700">
+                  Voucher code
+                  <input value={staffVoucherCode} onChange={(e) => setStaffVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional promo code" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
+                </label>
+                <button type="submit" disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="min-h-[44px] w-full rounded-lg bg-primary px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                  {isApplyingStaffDiscount ? "Applying..." : "Apply and reprice booking"}
+                </button>
+              </form>
+            )}
+
             {/* Government discount verification */}
             {selectedBooking.discountType && (
               <div className="space-y-3">
@@ -2795,16 +2995,26 @@ export function BookingsPage() {
                     {selectedBookingPayments.map((pay) => (
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
-                          <p className="font-semibold text-gray-800">{pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}</p>
+                          <p className="font-semibold text-gray-800">{pay.type === "refund" ? `Refund — ${pay.reason || pay.note}` : pay.note || "Onsite Payment"}</p>
+                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}{pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}</p>
                         </div>
-                        <span className="font-bold text-green-700">+{formatPrice(pay.amount)}</span>
+                        <span className={`font-bold ${pay.type === "refund" ? "text-red-600" : "text-green-700"}`}>{pay.amount >= 0 ? "+" : ""}{formatPrice(pay.amount)}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="text-xs text-gray-400 italic">No onsite payments recorded yet.</p>
                 )}
+
+                {(() => {
+                  const folio = getBookingFolio(selectedBooking);
+                  return (
+                    <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-xs font-semibold">
+                      <span className="text-gray-600">Outstanding folio balance</span>
+                      <span className={folio.balance > 0 ? "text-red-600" : "text-emerald-700"}>{formatPrice(Math.max(0, folio.balance))}</span>
+                    </div>
+                  );
+                })()}
 
                 {/* Inline form to record payments */}
                 <form onSubmit={handleAddPaymentSubmit} className="rounded-lg border border-gray-150 p-4 space-y-3 bg-white">
@@ -2856,6 +3066,30 @@ export function BookingsPage() {
                     </button>
                   </div>
                 </form>
+
+                {currentUser?.role === "admin" && selectedBookingPayments.some((payment) => payment.amount > 0) && (
+                  <form onSubmit={handleRefundSubmit} className="rounded-lg border border-red-100 bg-red-50/40 p-4 space-y-3">
+                    <div>
+                      <p className="text-xs font-bold text-red-800">Record Refund</p>
+                      <p className="mt-1 text-[10px] text-red-700">Creates an immutable negative payment entry. Refunds cannot exceed net collected funds.</p>
+                    </div>
+                    <label className="block text-[10px] font-semibold text-gray-600">
+                      Refund amount
+                      <input type="number" min="0.01" step="0.01" required value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-red-100 bg-white px-3 text-xs" />
+                    </label>
+                    <label className="block text-[10px] font-semibold text-gray-600">
+                      Refund method
+                      <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-red-100 bg-white px-3 text-xs">
+                        {onsitePaymentMethodOptions.map((method) => <option key={method.method} value={method.method}>{method.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="block text-[10px] font-semibold text-gray-600">
+                      Reason
+                      <textarea required maxLength={500} rows={2} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Required approval and audit context" className="mt-1 w-full rounded-lg border border-red-100 bg-white p-3 text-xs" />
+                    </label>
+                    <button type="submit" disabled={isRefunding} className="min-h-[44px] w-full rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">{isRefunding ? "Recording refund..." : "Approve and record refund"}</button>
+                  </form>
+                )}
               </div>
             </div>
 
@@ -3096,6 +3330,88 @@ export function BookingsPage() {
               </div>
             </div>
 
+            {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (
+              <div className="space-y-3">
+                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                  <FileText size={14} className="text-primary" />
+                  Incidental Charge Ledger
+                </h3>
+                <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+                  {selectedBookingCharges.length === 0 ? (
+                    <p className="text-xs italic text-gray-400">No incidental charges recorded.</p>
+                  ) : (
+                    <div className="divide-y divide-gray-100 rounded-lg border border-gray-150">
+                      {selectedBookingCharges.map((charge) => (
+                        <div key={charge.id} className="flex items-center justify-between gap-3 p-3 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-800">{charge.label}</p>
+                            <p className="mt-0.5 text-[10px] text-gray-500 capitalize">
+                              {charge.category.replace(/-/g, " ")} · {charge.addedAt ? charge.addedAt.slice(0, 10) : "Pending timestamp"}
+                              {charge.voidOf ? " · reversal" : ""}
+                            </p>
+                            {charge.note ? <p className="mt-1 text-[10px] text-gray-500">{charge.note}</p> : null}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className={`font-bold ${charge.amount < 0 ? "text-red-600" : "text-gray-900"}`}>{formatPrice(charge.amount)}</span>
+                            {!charge.voidOf && charge.amount > 0 && !selectedBookingCharges.some((entry) => entry.voidOf === charge.id) && selectedBooking.status !== "checked-out" ? (
+                              <button type="button" onClick={() => setChargeToVoid(charge)} className="min-h-[44px] rounded-lg px-3 text-[10px] font-bold text-red-600 hover:bg-red-50">Void</button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedBooking.status !== "checked-out" && (
+                    <form onSubmit={handleAddChargeSubmit} className="space-y-3 rounded-lg bg-gray-50 p-3">
+                      <p className="text-xs font-bold text-gray-750">Add charge</p>
+                      <label className="block text-[10px] font-semibold text-gray-600">
+                        Category
+                        <select value={chargeCategory} onChange={(e) => setChargeCategory(e.target.value as IncidentalChargeCategory)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs">
+                          <option value="late-checkout">Late checkout</option>
+                          <option value="early-checkin">Early check-in</option>
+                          <option value="extra-person">Extra person / bed</option>
+                          <option value="damage">Damage</option>
+                          <option value="laundry">Laundry</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </label>
+                      <label className="block text-[10px] font-semibold text-gray-600">
+                        Label
+                        <input required maxLength={120} value={chargeLabel} onChange={(e) => setChargeLabel(e.target.value)} placeholder="e.g. Late checkout until 2 PM" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
+                      </label>
+                      <label className="block text-[10px] font-semibold text-gray-600">
+                        Amount ({config.currencySymbol})
+                        <input required type="number" min="0.01" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
+                      </label>
+                      <label className="block text-[10px] font-semibold text-gray-600">
+                        Note (optional)
+                        <input maxLength={300} value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} placeholder="Operational context for the audit trail" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
+                      </label>
+                      <button type="submit" disabled={isSavingCharge} className="min-h-[44px] w-full rounded-lg bg-primary px-4 text-xs font-bold text-white disabled:opacity-60">
+                        {isSavingCharge ? "Adding charge..." : "Add to folio"}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {chargeToVoid ? (
+              <ConfirmForm
+                title="Void incidental charge?"
+                message={<>A negative reversal for <strong>{chargeToVoid.label}</strong> ({formatPrice(chargeToVoid.amount)}) will be appended. The original entry will remain in the audit trail.</>}
+                reasonLabel="Void reason"
+                reasonPlaceholder="Required audit note"
+                confirmLabel="Add reversal"
+                cancelLabel="Keep charge"
+                variant="danger"
+                reasonRequired
+                onConfirm={(reason) => void handleVoidCharge(reason)}
+                onCancel={() => setChargeToVoid(null)}
+              />
+            ) : null}
+
             {/* Checkout folio */}
             {(selectedBooking.status === "checked-in" || selectedBooking.status === "checked-out") && (
               <div className="space-y-3">
@@ -3126,6 +3442,21 @@ export function BookingsPage() {
                           <div className="flex justify-between text-gray-400">
                             <span>No delivered store charges billed yet</span>
                             <span>{formatPrice(0)}</span>
+                          </div>
+                        )}
+                        {folio.charges.length > 0 && (
+                          <div className="space-y-1 border-t border-gray-100 pt-2">
+                            <p className="font-bold text-gray-700">Incidental charges</p>
+                            {folio.charges.map((charge) => (
+                              <div key={charge.id} className="flex justify-between text-gray-500">
+                                <span>{charge.label}</span>
+                                <span>{formatPrice(charge.amount)}</span>
+                              </div>
+                            ))}
+                            <div className="flex justify-between font-semibold text-gray-700">
+                              <span>Incidental subtotal</span>
+                              <span>{formatPrice(folio.chargesTotal)}</span>
+                            </div>
                           </div>
                         )}
                         <div className="flex justify-between border-t border-gray-150 pt-2 font-bold text-gray-950">
@@ -3685,6 +4016,21 @@ export function BookingsPage() {
               <option value="card">Onsite Card Reader</option>
             </select>
           </label>
+
+          <>
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+              Government Discount
+              <select value={walkinDiscountType} onChange={(e) => setWalkinDiscountType(e.target.value as "" | "senior" | "pwd")} className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
+                <option value="">None</option>
+                <option value="senior">Senior Citizen (20%)</option>
+                <option value="pwd">PWD (20%)</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+              Voucher Code
+              <input value={walkinVoucherCode} onChange={(e) => setWalkinVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional" className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
+            </label>
+          </>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Manual Price Override (Optional)

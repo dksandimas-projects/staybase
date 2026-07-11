@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth } from "./lib/firebase-admin";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount, handleRescheduleBooking, handleResolveEarlyCheckin } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleRejectDiscount, handleRescheduleBooking, handleResolveEarlyCheckin } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -426,6 +426,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleAddPayment(req, res);
   }
 
+  if (domain === "bookings" && action === "add-refund" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleAddRefund(req, res);
+  }
+
   if (domain === "bookings" && action === "reject-discount" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
@@ -434,6 +443,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
     
     return await handleRejectDiscount(req, res);
+  }
+
+  if (domain === "bookings" && action === "apply-discount" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleApplyBookingDiscount(req, res);
   }
 
   if (domain === "bookings" && action === "confirm" && req.method === "POST") {

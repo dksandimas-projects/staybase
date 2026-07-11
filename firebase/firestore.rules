@@ -46,7 +46,33 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /payments/{paymentId} {
-        allow read, create: if isStaff();
+        allow read: if isStaff();
+        allow create: if false; // Server-authoritative payment/refund APIs only.
+        allow update, delete: if false;
+      }
+
+      match /charges/{chargeId} {
+        allow read: if isStaff();
+        allow create: if isStaff()
+          && request.resource.data.keys().hasOnly(["label", "amount", "category", "note", "addedBy", "addedAt", "voidOf"])
+          && request.resource.data.label is string
+          && request.resource.data.label.size() > 0
+          && request.resource.data.label.size() <= 120
+          && request.resource.data.amount is number
+          && request.resource.data.amount != 0
+          && request.resource.data.category in ["late-checkout", "early-checkin", "extra-person", "damage", "laundry", "other"]
+          && request.resource.data.note is string
+          && request.resource.data.note.size() <= 300
+          && request.resource.data.addedBy == request.auth.uid
+          && request.resource.data.addedAt == request.time
+          && (
+            (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
+            || (
+              request.resource.data.amount < 0
+              && request.resource.data.voidOf is string
+              && get(/databases/$(database)/documents/bookings/$(bookingId)/charges/$(request.resource.data.voidOf)).data.amount == -request.resource.data.amount
+            )
+          );
         allow update, delete: if false;
       }
     }
@@ -95,9 +121,46 @@ service cloud.firestore {
       allow create: if isStaff();
     }
 
+    match /corporateInvoices/{invoiceId} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["companyName", "bookingIds", "bookingRefs", "amount", "status", "issuedAt", "issuedBy", "paidAt", "paidBy"])
+        && request.resource.data.companyName is string
+        && request.resource.data.bookingIds is list
+        && request.resource.data.bookingRefs is list
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.status == "issued"
+        && request.resource.data.issuedAt == request.time
+        && request.resource.data.issuedBy == request.auth.uid
+        && request.resource.data.paidAt == null
+        && request.resource.data.paidBy == null;
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "paidAt", "paidBy"])
+        && resource.data.status == "issued"
+        && request.resource.data.status == "paid"
+        && request.resource.data.paidAt == request.time
+        && request.resource.data.paidBy == request.auth.uid;
+      allow delete: if false;
+    }
+
     match /contactInquiries/{inquiryId} {
       allow read, update, delete: if isStaff();
       allow create: if isStaff();
+    }
+
+    match /dailyCloses/{dateStr} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["dateStr", "closedAt", "closedBy", "recordedNet", "countedNet", "variance", "notes"])
+        && request.resource.data.dateStr == dateStr
+        && request.resource.data.closedAt == request.time
+        && request.resource.data.closedBy is string
+        && request.resource.data.recordedNet is map
+        && request.resource.data.countedNet is map
+        && request.resource.data.variance is map
+        && request.resource.data.notes is string;
+      allow update, delete: if false;
     }
 
     // Per BI-08 (booking-intercom audit 2026-07-06): the
