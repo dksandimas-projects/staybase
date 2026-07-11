@@ -1092,8 +1092,8 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **FIN-14 — Incidental charge ledger** — `bookings/{id}/charges` append-only subcollection + drawer "Add charge" form + folio/receipt/report/export wiring; build before or with FIN-01 so the billed side of the reconciliation is complete (full item under Phase 12 list above; spec in `BOOKINGS-MANAGEMENT.md`)
 
 **SEV-4 (polish):**
-- ⬜ **FIN-09 — Revenue recognition quirks** — whole booking attributed to check-in month (no proration); future-dated confirmed bookings in a custom range counted as earned revenue
-- ⬜ **FIN-10 — Occupancy night-clipping** — occupancy % counts nights outside the selected range and misses overlapping stays that started before it (`ReportsPage.tsx:651`)
+- ✅ **FIN-09 — Revenue recognition quirks** — whole booking check-in bias resolved via overlap proration; unpaid future bookings excluded
+- ✅ **FIN-10 — Occupancy night-clipping** — occupancy night count clipped to range boundaries; overlapping stays resolved
 - ⬜ **FIN-11 — Hotel finance KPIs** — ADR, RevPAR, revenue by room type (all derivable today; build after FIN-10)
 - ⬜ **FIN-12 — Prior-period comparison** — vs-previous-period deltas on revenue KPI cards
 
@@ -1158,10 +1158,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
-| Finance & Reports Audit (July 11) | 14 | 9 | 5 (FIN-09..FIN-12 open; FIN-01..FIN-08/FIN-13/FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
+| Finance & Reports Audit (July 11) | 14 | 11 | 3 (FIN-11, FIN-12 open; FIN-01..FIN-10/FIN-13/FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **363** | **334** | **~129** |
+| **Total** | **363** | **336** | **~127** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 

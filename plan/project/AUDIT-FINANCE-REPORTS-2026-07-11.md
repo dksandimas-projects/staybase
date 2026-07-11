@@ -26,8 +26,8 @@
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
 | **SEV-3 (minor)** | 0 | 6 | **6** |
-| **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **4** | **10** | **14** |
+| **SEV-4 (nit / polish)** | 2 | 2 | **4** |
+| **Total** | **2** | **12** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -304,7 +304,7 @@ Charges (Folio Charge Ledger)`.
 
 ## SEV-4 — Nit / Polish
 
-### FIN-09 — Revenue recognition quirks · `Open`
+### FIN-09 — Revenue recognition quirks · `Fixed 2026-07-12`
 
 **Where:** `ReportsPage.tsx:150-153` (`rangeBookings` filter), `:211-219` (`monthlyRevenue`)
 
@@ -317,7 +317,7 @@ check-ins as "upcoming/unearned" or excluding them with a toggle.
 
 ---
 
-### FIN-10 — Occupancy % counts nights outside the selected range · `Open`
+### FIN-10 — Occupancy % counts nights outside the selected range · `Fixed 2026-07-12`
 
 **Where:** `ReportsPage.tsx:651-657` (`totalRoomNights` / `avgOccupancyPct`)
 

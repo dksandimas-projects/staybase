@@ -101,6 +101,36 @@ function toDate(value: string | Date | null | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+const getOverlapNights = (
+  checkIn: any,
+  checkOut: any,
+  rangeStart: Date,
+  rangeEnd: Date
+): number => {
+  const cInParsed = toDate(checkIn);
+  const cOutParsed = toDate(checkOut);
+  if (!cInParsed || !cOutParsed) return 0;
+
+  const cIn = new Date(cInParsed);
+  cIn.setHours(0, 0, 0, 0);
+  const cOut = new Date(cOutParsed);
+  cOut.setHours(0, 0, 0, 0);
+
+  const rStart = new Date(rangeStart);
+  rStart.setHours(0, 0, 0, 0);
+  const rEnd = new Date(rangeEnd);
+  rEnd.setHours(0, 0, 0, 0);
+  const rEndCheckoutLimit = new Date(rEnd.getTime() + 86_400_000);
+
+  const overlapStart = new Date(Math.max(cIn.getTime(), rStart.getTime()));
+  const overlapEnd = new Date(Math.min(cOut.getTime(), rEndCheckoutLimit.getTime()));
+
+  if (overlapEnd.getTime() <= overlapStart.getTime()) {
+    return 0;
+  }
+  return Math.round((overlapEnd.getTime() - overlapStart.getTime()) / 86_400_000);
+};
+
 const PAYMENT_LABELS: Record<string, string> = {
   gcash: "GCash",
   "pay-at-hotel": "Pay at Hotel",
@@ -310,10 +340,34 @@ export function ReportsPage() {
     [bookings]
   );
 
-  const rangeBookings = useMemo(
-    () => revenueBookings.filter(b => isWithinSelectedRange(b.checkIn)),
-    [revenueBookings, periodStart, periodEnd]
-  );
+  const rangeBookings = useMemo(() => {
+    return revenueBookings.filter(b => {
+      const cIn = toDate(b.checkIn);
+      const cOut = toDate(b.checkOut);
+      if (!cIn || !cOut) return false;
+
+      // 1. Must overlap with the selected range
+      const overlaps = cIn < periodEnd && cOut > periodStart;
+      if (!overlaps) return false;
+
+      // 2. Exclude past confirmed bookings (entirely in the past and never checked in / no-show)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (b.status === "confirmed" && cOut <= today) {
+        return false;
+      }
+
+      // 3. Exclude future confirmed bookings that have no payments recorded
+      if (b.status === "confirmed" && cIn > today) {
+        const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
+        if (collected <= 0) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [revenueBookings, periodStart, periodEnd, payments]);
 
   const rangeStoreOrders = useMemo(
     () => storeOrders.filter(o => isWithinSelectedRange(o.createdAt)),
@@ -326,23 +380,25 @@ export function ReportsPage() {
   );
 
   // ── Summary KPIs ──
-  const roomRevenue = useMemo(
-    () => rangeBookings.reduce((sum, b) => sum + (b.totalPrice || 0), 0),
-    [rangeBookings]
-  );
+  const roomRevenue = useMemo(() => {
+    return rangeBookings.reduce((sum, b) => {
+      const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
+      const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+      return sum + (b.totalPrice || 0) * fraction;
+    }, 0);
+  }, [rangeBookings, periodStart, periodEnd]);
 
   const breakfastBookingsInRange = useMemo(
     () => rangeBookings.filter(b => b.hasBreakfast),
     [rangeBookings]
   );
 
-  const breakfastRevenue = useMemo(
-    () => breakfastBookingsInRange.reduce(
-      (sum, b) => sum + (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0),
-      0
-    ),
-    [breakfastBookingsInRange]
-  );
+  const breakfastRevenue = useMemo(() => {
+    return breakfastBookingsInRange.reduce((sum, b) => {
+      const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
+      return sum + (b.breakfastRate || 0) * (b.numGuests || 0) * overlapNights;
+    }, 0);
+  }, [breakfastBookingsInRange, periodStart, periodEnd]);
 
   const storeRevenue = useMemo(
     () => deliveredStoreOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0),
@@ -716,15 +772,21 @@ export function ReportsPage() {
   }, [rangeBookings, chartColors]);
 
   // ── Occupancy by room type (Performance) ──
-  const roomTypeOccupancy = useMemo(() =>
-    roomTypes.map(rt => {
-      const totalRoomsOfType = rooms.filter(r => r.type === rt.value).length;
-      const occupiedOfType = rooms.filter(r => r.type === rt.value && r.status === "occupied").length;
-      const ratio = totalRoomsOfType > 0 ? Math.round((occupiedOfType / totalRoomsOfType) * 100) : 0;
-      return { name: rt.label, occupied: occupiedOfType, total: totalRoomsOfType, occupancyRate: ratio };
-    }),
-    [roomTypes, rooms]
-  );
+  const roomTypeOccupancy = useMemo(() => {
+    const days = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / 86_400_000));
+    return roomTypes.map(rt => {
+      const totalRoomsOfType = rooms.filter(r => r.type === rt.value && r.isActive).length;
+      const possibleNights = totalRoomsOfType * days;
+
+      // Sum overlapping nights for bookings in this room type
+      const occupiedNights = rangeBookings
+        .filter(b => b.roomType === rt.value)
+        .reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
+
+      const ratio = possibleNights > 0 ? Math.round((occupiedNights / possibleNights) * 100) : 0;
+      return { name: rt.label, occupied: occupiedNights, total: possibleNights, occupancyRate: ratio };
+    });
+  }, [roomTypes, rooms, rangeBookings, periodStart, periodEnd]);
 
   // ── Store: top-selling items ──
   const topStoreItems = useMemo(() => {
@@ -1281,7 +1343,7 @@ export function ReportsPage() {
     : 0;
 
   // Per W3.5: Avg. Occupancy + Busiest Room Type (replaces Avg. Length of Stay).
-  const totalRoomNights = rangeBookings.reduce((sum, b) => sum + b.numNights, 0);
+  const totalRoomNights = rangeBookings.reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
   const daysInRange = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / 86_400_000));
   const totalActiveRooms = rooms.filter(r => r.isActive).length;
   const possibleRoomNights = totalActiveRooms * daysInRange;
