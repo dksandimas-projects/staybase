@@ -1462,7 +1462,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           },
           paymentMethod: booking.paymentMethod,
           status: booking.status,
-          totalPriceOverride: booking.totalPriceOverride
+          totalPriceOverride: booking.totalPriceOverride,
+          discountType: booking.discountType,
+          voucherCode: booking.voucherCode
         })
       });
       const data = await res.json();
