@@ -183,7 +183,7 @@ describe("Phase 11.6 Batch 18 — Wave 3 batch 1 (settings + reports)", () => {
 
     it("avgOccupancyPct = totalRoomNights / (active rooms × days in range)", () => {
       expect(reportsPageSrc).toMatch(
-        /totalRoomNights\s*=\s*rangeBookings\.reduce\(\(sum,\s*b\)\s*=>\s*sum\s*\+\s*b\.numNights,\s*0\)/
+        /totalRoomNights\s*=\s*rangeBookings\.reduce\(\(sum,\s*b\)\s*=>\s*sum\s*\+\s*(?:b\.numNights|getOverlapNights\(b\.checkIn,\s*b\.checkOut,\s*periodStart,\s*periodEnd\)),\s*0\)/
       );
       expect(reportsPageSrc).toMatch(
         /const\s+possibleRoomNights\s*=\s*totalActiveRooms\s*\*\s*daysInRange/
