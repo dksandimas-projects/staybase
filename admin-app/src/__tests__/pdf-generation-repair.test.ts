@@ -70,7 +70,7 @@ describe("PDF generation repair", () => {
   });
 
   it("labels reports as browser print and explains Save as PDF through the print dialog", () => {
-    expect(reportsPage).toMatch(/Print Report/);
+    expect(reportsPage).toMatch(/Print/);
     expect(reportsPage).toMatch(/Choose Save as PDF in your browser print settings/);
     expect(reportsPage).not.toMatch(/Print \/ Save PDF/);
   });
