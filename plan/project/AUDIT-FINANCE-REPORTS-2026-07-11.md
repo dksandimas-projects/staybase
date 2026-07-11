@@ -25,9 +25,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
-| **SEV-3 (minor)** | 5 | 1 | **6** |
+| **SEV-3 (minor)** | 3 | 3 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **9** | **5** | **14** |
+| **Total** | **7** | **7** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -178,7 +178,7 @@ charge-back bookings.
 
 ## SEV-3 — Minor
 
-### FIN-05 — No gross-to-net discounts & adjustments report · `Open`
+### FIN-05 — No gross-to-net discounts & adjustments report · `Fixed 2026-07-11`
 
 **Where:** per-booking fields exist (`originalTotalPrice`, `discountType`,
 `discountPct`, `voucherDiscount`, `pointsRedeemed`, `pointsRedeemedValue`
@@ -229,7 +229,7 @@ almost for free from the FIN-01 collections query.
 
 ---
 
-### FIN-08 — Export column gaps and inconsistencies · `Open`
+### FIN-08 — Export column gaps and inconsistencies · `Fixed 2026-07-11`
 
 **Where:**
 - Sales XLSX Bookings sheet (`ReportsPage.tsx:600-612`) omits the Breakfast, Discount, and Voucher columns the spec requires (`plan/features/REPORTS.md §Bookings sub-table`)

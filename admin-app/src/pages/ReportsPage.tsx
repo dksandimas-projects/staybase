@@ -499,6 +499,59 @@ export function ReportsPage() {
     return Array.from(groups.values()).sort((a, b) => b.total - a.total);
   }, [receivables]);
 
+  const discountsSummary = useMemo(() => {
+    let grossRoomAndBreakfast = 0;
+    let seniorPwdDiscounts = 0;
+    let voucherDiscounts = 0;
+    let memberDiscounts = 0;
+    let pointsRedeemedValue = 0;
+    let netBookings = 0;
+
+    rangeBookings.forEach((b) => {
+      const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
+      const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+      const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
+
+      const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
+      const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+      const afterSenior = subtotal - seniorDiscount;
+
+      const vchDiscount = b.voucherDiscount || 0;
+      const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+
+      const memDiscountPct = b.memberDiscountPct || 0;
+      const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+
+      const ptsRedeemedVal = b.pointsRedeemedValue || 0;
+
+      grossRoomAndBreakfast += subtotal;
+      seniorPwdDiscounts += seniorDiscount;
+      voucherDiscounts += vchDiscount;
+      memberDiscounts += memDiscount;
+      pointsRedeemedValue += ptsRedeemedVal;
+      netBookings += b.totalPrice;
+    });
+
+    return {
+      grossRoomAndBreakfast,
+      seniorPwdDiscounts,
+      voucherDiscounts,
+      memberDiscounts,
+      pointsRedeemedValue,
+      netBookings
+    };
+  }, [rangeBookings]);
+
+  const loyaltyLiability = useMemo(() => {
+    const totalPoints = members.reduce((sum, m) => sum + (m.rewardsPoints || 0), 0);
+    const redemptionRate = rewardsConfig?.pointsRedemptionRate || 100;
+    const liability = Math.max((totalPoints / 100) * redemptionRate, 0);
+    return {
+      totalPoints,
+      liability
+    };
+  }, [members, rewardsConfig]);
+
   const handleIssueCorporateInvoice = async (companyName: string) => {
     const rows = receivables.filter((row) => row.isCorporate && (row.companyName || "Unassigned corporate account") === companyName);
     if (rows.length === 0 || invoiceAction) return;
@@ -1062,23 +1115,68 @@ export function ReportsPage() {
       ["Total Store Orders (delivered)", deliveredStoreOrders.length],
       ["Total Transactions", totalTransactions],
       [],
+      ["Discounts & Adjustments", "Value (₱)"],
+      ["Gross Bookings (Room + Breakfast)", discountsSummary.grossRoomAndBreakfast],
+      ["Senior Citizen & PWD Deductions", discountsSummary.seniorPwdDiscounts],
+      ["Promo Voucher Deductions", discountsSummary.voucherDiscounts],
+      ["Spark Rewards Member Discounts", discountsSummary.memberDiscounts],
+      ["Spark Rewards Points Redeemed", discountsSummary.pointsRedeemedValue],
+      ["Net Bookings Revenue", discountsSummary.netBookings],
+      [],
+      ["Loyalty Program Liability", "Metric / Value"],
+      ["Total Outstanding Points", loyaltyLiability.totalPoints],
+      ["Points Redemption Liability", loyaltyLiability.liability],
+      [],
       ["Payment Method", "Count", "Total (₱)"],
       ...combinedPaymentMethods.map(m => [m.name, m.count, m.total])
     ];
 
     const bookingsHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Check-Out", "Nights",
-      "Guests", "Room Rate", "Total Price", "Payment Method", "Payment Reference Number", "Source", "Status"
+      "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
+      "Discount Type", "Discount %", "Senior/PWD Discount (₱)", "Voucher Code", "Voucher Discount (₱)",
+      "Member Discount (₱)", "Points Redeemed Value (₱)", "Gross Subtotal (₱)", "Net Total Price (₱)",
+      "Total Collected (₱)", "Outstanding Balance (₱)", "Payment Method", "Payment Reference Number", "Source", "Status"
     ];
-    const bookingsRows = filteredBookings.map(b => [
-      b.bookingRef, b.guestName, b.roomNumber,
-      toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
-      toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
-      b.numNights, b.numGuests, b.ratePerNight, b.totalPrice,
-      PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod,
-      b.paymentReferenceNumber || "",
-      b.source, b.status
-    ]);
+    const bookingsRows = filteredBookings.map(b => {
+      const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
+      const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+      const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
+
+      const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
+      const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+      const afterSenior = subtotal - seniorDiscount;
+
+      const vchDiscount = b.voucherDiscount || 0;
+      const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+
+      const memDiscountPct = b.memberDiscountPct || 0;
+      const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+
+      const ptsRedeemedVal = b.pointsRedeemedValue || 0;
+
+      const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
+      const bookingCharges = charges.filter((c) => c.bookingId === b.id).reduce((sum, c) => sum + c.amount, 0);
+      const addToBillTotal = storeOrders
+        .filter((o) => o.bookingId === b.id && o.paymentMethod === "add-to-bill" && o.status === "delivered" && o.isBilled)
+        .reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
+      const billedTotalAmount = b.totalPrice + bookingCharges + addToBillTotal;
+      const outstanding = Math.max(billedTotalAmount - collected, 0);
+
+      return [
+        b.bookingRef, b.guestName, b.roomNumber,
+        toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
+        toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
+        b.numNights, b.numGuests, b.ratePerNight, roomSubtotal,
+        b.hasBreakfast ? "Yes" : "No", b.hasBreakfast ? b.breakfastRate : 0, breakfastTotal,
+        b.discountType || "None", discountPct, seniorDiscount,
+        b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
+        subtotal, b.totalPrice, collected, outstanding,
+        PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod,
+        b.paymentReferenceNumber || "",
+        b.source, b.status
+      ];
+    });
 
     const breakfastHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Nights", "Guests",
@@ -1371,6 +1469,8 @@ export function ReportsPage() {
           toDate={toDate}
           chartColors={chartColors}
           isMobile={isMobile}
+          discountsSummary={discountsSummary}
+          loyaltyLiability={loyaltyLiability}
         />
       )}
 
@@ -1660,6 +1760,18 @@ function SalesTab(props: {
   toDate: (v: any) => Date | null;
   chartColors: string[];
   isMobile: boolean;
+  discountsSummary: {
+    grossRoomAndBreakfast: number;
+    seniorPwdDiscounts: number;
+    voucherDiscounts: number;
+    memberDiscounts: number;
+    pointsRedeemedValue: number;
+    netBookings: number;
+  };
+  loyaltyLiability: {
+    totalPoints: number;
+    liability: number;
+  };
 }) {
   const {
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
@@ -1672,7 +1784,8 @@ function SalesTab(props: {
     deliveredStoreOrders, breakfastConfig, dailyKitchenPrep,
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
-    toDate, chartColors, isMobile
+    toDate, chartColors, isMobile,
+    discountsSummary, loyaltyLiability
   } = props;
 
   const breakfastEnabled = breakfastConfig?.isEnabled;
@@ -1943,6 +2056,67 @@ function SalesTab(props: {
               </table>
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+        <div>
+          <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Discounts & Adjustments</h2>
+          <p className="mt-1 text-[10px] text-gray-500">Gross-to-net bookings revenue bridge and active member loyalty points liability.</p>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Gross-to-Net Revenue Bridge</h3>
+            
+            <div className="rounded-lg border border-gray-150 overflow-hidden text-xs">
+              <div className="flex items-center justify-between bg-gray-50 p-3 font-semibold text-gray-700 border-b border-gray-150">
+                <span>Gross Bookings Subtotal (Room + Breakfast)</span>
+                <span className="font-mono">{formatPrice(discountsSummary.grossRoomAndBreakfast)}</span>
+              </div>
+              <div className="divide-y divide-gray-100 bg-white">
+                <div className="flex items-center justify-between p-3 text-gray-600">
+                  <span>Senior Citizen & PWD Deductions (20% Exemption)</span>
+                  <span className="font-mono text-red-600">-{formatPrice(discountsSummary.seniorPwdDiscounts)}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 text-gray-600">
+                  <span>Promo Voucher Deductions</span>
+                  <span className="font-mono text-red-600">-{formatPrice(discountsSummary.voucherDiscounts)}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 text-gray-600">
+                  <span>Spark Rewards Member Discounts</span>
+                  <span className="font-mono text-red-600">-{formatPrice(discountsSummary.memberDiscounts)}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 text-gray-600">
+                  <span>Spark Rewards Points Redeemed</span>
+                  <span className="font-mono text-red-600">-{formatPrice(discountsSummary.pointsRedeemedValue)}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between bg-primary/5 p-3 font-bold text-gray-950 border-t border-gray-150">
+                <span>Net Bookings Revenue</span>
+                <span className="font-mono">{formatPrice(discountsSummary.netBookings)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Loyalty Program Liability</h3>
+            
+            <div className="rounded-lg border border-gray-150 p-4 bg-gray-50 space-y-4 h-[calc(100%-1.75rem)]">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Outstanding Points</p>
+                <p className="mt-1 text-2xl font-heading text-gray-950">{loyaltyLiability.totalPoints.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-500 mt-1">Accumulated across all registered members.</p>
+              </div>
+              <div className="border-t border-gray-250 pt-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-red-600">Points Redemption Liability</p>
+                <p className="mt-1 text-2xl font-heading text-red-700">{formatPrice(loyaltyLiability.liability)}</p>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Cash equivalent liability calculated at 100 points = {formatPrice(rewardsConfig?.pointsRedemptionRate || 100)}.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -2317,26 +2491,51 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
             <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Room</th>
             <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Check-In</th>
             <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Nights</th>
-            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Total</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Deductions</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right font-semibold text-primary">Total Price</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Method</th>
             <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Status</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {bookings.slice(0, 50).map(b => (
-            <tr key={b.id} className="hover:bg-gray-50/50">
-              <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>
-              <td className="px-3 py-2.5 text-gray-700">{b.guestName}</td>
-              <td className="px-3 py-2.5 text-gray-600">{b.roomNumber}</td>
-              <td className="px-3 py-2.5 text-gray-600">{toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}</td>
-              <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numNights}</td>
-              <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(b.totalPrice)}</td>
-              <td className="px-3 py-2.5">
-                <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 capitalize">
-                  {b.status.replace(/-/g, " ")}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {bookings.slice(0, 50).map(b => {
+            const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
+            const breakfastTotal = b.hasBreakfast ? (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0) : 0;
+            const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
+
+            const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
+            const seniorDiscount = discountPct > 0 ? Math.round(subtotal * (discountPct / 100)) : 0;
+            const afterSenior = subtotal - seniorDiscount;
+
+            const vchDiscount = b.voucherDiscount || 0;
+            const afterVoucher = Math.max(afterSenior - vchDiscount, 0);
+
+            const memDiscountPct = b.memberDiscountPct || 0;
+            const memDiscount = memDiscountPct > 0 ? Math.round(afterVoucher * (memDiscountPct / 100)) : 0;
+
+            const ptsRedeemedVal = b.pointsRedeemedValue || 0;
+            const deductionsVal = seniorDiscount + vchDiscount + memDiscount + ptsRedeemedVal;
+
+            return (
+              <tr key={b.id} className="hover:bg-gray-50/50">
+                <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>
+                <td className="px-3 py-2.5 text-gray-700">{b.guestName}</td>
+                <td className="px-3 py-2.5 text-gray-600">{b.roomNumber}</td>
+                <td className="px-3 py-2.5 text-gray-600">{toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numNights}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-red-650">
+                  {deductionsVal > 0 ? `-${formatPrice(deductionsVal)}` : "—"}
+                </td>
+                <td className="px-3 py-2.5 text-right font-bold text-primary-dark font-mono">{formatPrice(b.totalPrice)}</td>
+                <td className="px-3 py-2.5 text-gray-600 uppercase">{PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod}</td>
+                <td className="px-3 py-2.5">
+                  <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700 capitalize">
+                    {b.status.replace(/-/g, " ")}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {bookings.length > 50 && (
