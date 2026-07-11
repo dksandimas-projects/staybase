@@ -433,7 +433,8 @@ export interface AdminContextType {
   // time the `websiteContent` case fires in the settings
   // `onSnapshot` listener below.
   websiteContentLoading: boolean;
-  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig", data: any) => Promise<boolean>;
+  seoSettings: import("@spark-inn/shared").SeoSettings;
+  updateSettings: (section: "hotelConfig" | "websiteContent" | "rewardsConfig" | "breakfastConfig" | "storeConfig" | "seo", data: any) => Promise<boolean>;
 
   // Staff Accounts
   staff: StaffMember[];
@@ -3173,6 +3174,15 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     useBookingPaymentMethods: false
   });
 
+  const [seoSettings, setSeoSettings] = useState<import("@spark-inn/shared").SeoSettings>({
+    draft: {
+      metaDescription: config.metaDescription,
+      priceRange: config.priceRange,
+      ogImage: config.ogImage,
+      twitterHandle: config.twitterHandle
+    }
+  });
+
   // Subscribe to all settings documents from Firestore
   useEffect(() => {
     if (!currentUser) {
@@ -3206,6 +3216,9 @@ export function AdminProvider({ children }: { children: ReactNode }) {
               break;
             case "storeConfig":
               setStoreConfig((prev) => ({ ...prev, ...(data as Partial<typeof storeConfig>) }));
+              break;
+            case "seo":
+              setSeoSettings((prev) => ({ ...prev, ...(data as import("@spark-inn/shared").SeoSettings) }));
               break;
           }
         });
@@ -4209,6 +4222,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         rewardsConfig,
         breakfastConfig,
         storeConfig,
+        seoSettings,
         updateSettings,
         roomTypes,
         addRoomType,

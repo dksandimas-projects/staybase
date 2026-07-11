@@ -187022,7 +187022,7 @@ var config = {
     icon: "ICON LOGO.png",
     wordmark: "TEXT LOGO.png"
   },
-  favicon: "ICON LOGO.png",
+  favicon: "favicon/favicon.ico",
   currency: "PHP",
   currencySymbol: "\u20B1",
   locale: "en-PH",
@@ -187845,6 +187845,24 @@ var WebsiteContentSchema = external_exports.object({
   cancellationPolicy: external_exports.string().optional(),
   houseRules: external_exports.string().optional(),
   privacyPolicyLastUpdated: external_exports.string().optional()
+});
+
+// ../shared/schemas/seo.ts
+var optionalUrl = external_exports.string().trim().max(500).refine(
+  (value) => value === "" || /^https:\/\//i.test(value),
+  "Enter a secure URL beginning with https://"
+);
+var SeoPublishSchema = external_exports.object({
+  metaDescription: external_exports.string().trim().min(50).max(160),
+  priceRange: external_exports.string().trim().min(1).max(20),
+  ogImage: optionalUrl,
+  twitterHandle: external_exports.string().trim().max(50).regex(/^@?[A-Za-z0-9_]*$/, "Enter a valid X handle"),
+  address: external_exports.string().trim().min(5).max(300),
+  frontDeskPhone: external_exports.string().trim().min(5).max(50),
+  facebookUrl: optionalUrl,
+  instagramUrl: optionalUrl,
+  checkInTime: external_exports.string().trim().min(1).max(30),
+  checkOutTime: external_exports.string().trim().min(1).max(30)
 });
 
 // ../shared/utils/bookingDates.ts
@@ -193486,6 +193504,50 @@ async function handleH2BackfillStatus(req, res) {
   });
 }
 
+// server/handlers/seo.ts
+async function handlePublishSeo(req, res) {
+  const deployHookUrl = process.env.VERCEL_DEPLOY_HOOK_URL?.trim();
+  if (!deployHookUrl) {
+    return res.status(503).json({
+      success: false,
+      error: "SEO publishing is not configured. Add VERCEL_DEPLOY_HOOK_URL to the guest app environment."
+    });
+  }
+  const parsed = SeoPublishSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: parsed.error.issues[0]?.message || "Review the SEO fields and try again."
+    });
+  }
+  const staff = req.staff;
+  await adminDb.doc("settings/seo").set({
+    draft: {
+      metaDescription: parsed.data.metaDescription,
+      priceRange: parsed.data.priceRange,
+      ogImage: parsed.data.ogImage,
+      twitterHandle: parsed.data.twitterHandle
+    },
+    published: parsed.data,
+    publishedAt: FieldValue.serverTimestamp(),
+    publishedBy: staff?.uid || staff?.email || "admin"
+  }, { merge: true });
+  try {
+    const hookResponse = await fetch(deployHookUrl, { method: "POST" });
+    if (!hookResponse.ok) throw new Error(`Deploy hook returned ${hookResponse.status}`);
+  } catch (error) {
+    console.error("SEO deploy hook failed:", error);
+    return res.status(502).json({
+      success: false,
+      error: "The SEO snapshot was saved, but the website rebuild could not be started. Please try publishing again."
+    });
+  }
+  return res.status(202).json({
+    success: true,
+    message: "SEO changes were published and the website rebuild has started."
+  });
+}
+
 // server/apiRouter.ts
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
@@ -194053,6 +194115,20 @@ async function handler(req, res) {
       fromEmail: process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail,
       adminEmail: process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail
     });
+  }
+  if (domain === "admin" && action === "publish-seo" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-publish-seo:${ip}`, 5, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many publish requests. Please wait a minute and try again." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can publish SEO changes." });
+    }
+    req.staff = authResult;
+    return await handlePublishSeo(req, res);
   }
   if (domain === "admin" && action === "create-staff" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-create-staff:${ip}`, 5, 6e4)) {
