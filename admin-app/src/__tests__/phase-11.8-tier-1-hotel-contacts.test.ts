@@ -54,8 +54,8 @@ const backendDocSrc = readFileSync(
 
 describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
   describe("usePublicSiteContent — PublicContactContent interface + chain", () => {
-    it("exports a PublicContactContent interface with all 6 contact fields", () => {
-      expect(hookSrc).toMatch(/export\s+interface\s+PublicContactContent\s*\{[^}]*address:\s*string;[^}]*frontDeskPhone:\s*string;[^}]*supportEmail:\s*string;[^}]*dpoEmail:\s*string;[^}]*facebookUrl:\s*string;[^}]*instagramUrl:\s*string;/s);
+    it("exports a PublicContactContent interface with contact and social fields", () => {
+      expect(hookSrc).toMatch(/export\s+interface\s+PublicContactContent\s*\{[^}]*address:\s*string;[^}]*frontDeskPhone:\s*string;[^}]*supportEmail:\s*string;[^}]*dpoEmail:\s*string;[^}]*facebookUrl:\s*string;[^}]*instagramUrl:\s*string;[^}]*twitterHandle:\s*string;/s);
     });
 
     it("PublicSiteContent exposes a contact section", () => {
@@ -75,13 +75,14 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
       expect(hookSrc).toMatch(/instagramUrl:\s*config\.instagramUrl/);
     });
 
-    it("hook reads the 6 contact fields via pickString from hotelConfig", () => {
+    it("preserves explicit blank social fields while other contact fields use non-empty fallbacks", () => {
       expect(hookSrc).toMatch(/address:\s*pickString\(hc,\s*["']address["'],\s*fb\.contact\.address\)/);
       expect(hookSrc).toMatch(/frontDeskPhone:\s*pickString\(hc,\s*["']frontDeskPhone["'],\s*fb\.contact\.frontDeskPhone\)/);
       expect(hookSrc).toMatch(/supportEmail:\s*pickString\(hc,\s*["']supportEmail["'],\s*fb\.contact\.supportEmail\)/);
       expect(hookSrc).toMatch(/dpoEmail:\s*pickString\(hc,\s*["']dpoEmail["'],\s*fb\.contact\.dpoEmail\)/);
-      expect(hookSrc).toMatch(/facebookUrl:\s*pickString\(hc,\s*["']facebookUrl["'],\s*fb\.contact\.facebookUrl\)/);
-      expect(hookSrc).toMatch(/instagramUrl:\s*pickString\(hc,\s*["']instagramUrl["'],\s*fb\.contact\.instagramUrl\)/);
+      expect(hookSrc).toMatch(/facebookUrl:\s*pickOptionalString\(hc,\s*["']facebookUrl["'],\s*fb\.contact\.facebookUrl\)/);
+      expect(hookSrc).toMatch(/instagramUrl:\s*pickOptionalString\(hc,\s*["']instagramUrl["'],\s*fb\.contact\.instagramUrl\)/);
+      expect(hookSrc).toMatch(/twitterHandle:\s*pickOptionalString\(hc,\s*["']twitterHandle["'],\s*fb\.contact\.twitterHandle\)/);
     });
   });
 
@@ -90,16 +91,13 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
       expect(footerSrc).toMatch(/const\s*\{\s*branding,\s*contact\s*\}\s*=\s*usePublicSiteContent\(\)/);
     });
 
-    it("renders address / phone / email / facebook / instagram from the hook with config.* fallback", () => {
-      // Each of the 5 contact reads must use the `||` fallback to
-      // the deploy-time config value when the hook returns "". The
-      // `?.` is optional chaining added as defense-in-depth against
-      // a stale localStorage cache missing the `contact` key.
+    it("falls back required contact fields but preserves blank social values", () => {
       expect(footerSrc).toMatch(/contact\??\.address\s*\|\|/);
       expect(footerSrc).toMatch(/contact\??\.frontDeskPhone\s*\|\|/);
       expect(footerSrc).toMatch(/contact\??\.supportEmail\s*\|\|/);
-      expect(footerSrc).toMatch(/contact\??\.facebookUrl\s*\|\|/);
-      expect(footerSrc).toMatch(/contact\??\.instagramUrl\s*\|\|/);
+      expect(footerSrc).toMatch(/contact\??\.facebookUrl\s*\?\?/);
+      expect(footerSrc).toMatch(/contact\??\.instagramUrl\s*\?\?/);
+      expect(footerSrc).toMatch(/contact\??\.twitterHandle\s*\?\?/);
     });
   });
 
@@ -108,12 +106,12 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
       expect(contactSrc).toMatch(/const\s*\{\s*contact\s*\}\s*=\s*usePublicSiteContent\(\)/);
     });
 
-    it("renders address / phone / email / facebook / instagram from the hook with config.* fallback", () => {
+    it("falls back required contact fields but preserves blank social values", () => {
       expect(contactSrc).toMatch(/contact\??\.address\s*\|\|/);
       expect(contactSrc).toMatch(/contact\??\.frontDeskPhone\s*\|\|/);
       expect(contactSrc).toMatch(/contact\??\.supportEmail\s*\|\|/);
-      expect(contactSrc).toMatch(/contact\??\.facebookUrl\s*\|\|/);
-      expect(contactSrc).toMatch(/contact\??\.instagramUrl\s*\|\|/);
+      expect(contactSrc).toMatch(/contact\??\.facebookUrl\s*\?\?/);
+      expect(contactSrc).toMatch(/contact\??\.instagramUrl\s*\?\?/);
     });
   });
 
@@ -131,35 +129,37 @@ describe("Phase 11.8 PR 3 — Tier 1 hotel contact editability", () => {
     });
   });
 
-  describe("Settings → Hotel Info — 7 new form inputs + handleSaveHotel", () => {
-    it("initializes state for the 6 new contact fields from hotelConfig", () => {
+  describe("Settings → Hotel Info — canonical contact fields", () => {
+    it("initializes state for the canonical contact fields from hotelConfig", () => {
       expect(settingsSrc).toMatch(/const\s*\[address,\s*setAddress\]\s*=\s*useState\(hotelConfig\.address\)/);
       expect(settingsSrc).toMatch(/const\s*\[frontDeskPhone,\s*setFrontDeskPhone\]\s*=\s*useState\(hotelConfig\.frontDeskPhone\)/);
       expect(settingsSrc).toMatch(/const\s*\[supportEmail,\s*setSupportEmail\]\s*=\s*useState\(hotelConfig\.supportEmail\)/);
       expect(settingsSrc).toMatch(/const\s*\[dpoEmail,\s*setDpoEmail\]\s*=\s*useState\(hotelConfig\.dpoEmail\)/);
       expect(settingsSrc).toMatch(/const\s*\[facebookUrl,\s*setFacebookUrl\]\s*=\s*useState\(hotelConfig\.facebookUrl\)/);
       expect(settingsSrc).toMatch(/const\s*\[instagramUrl,\s*setInstagramUrl\]\s*=\s*useState\(hotelConfig\.instagramUrl\)/);
+      expect(settingsSrc).toMatch(/const\s*\[twitterHandle,\s*setTwitterHandle\]\s*=\s*useState\(hotelConfig\.twitterHandle/);
     });
 
-    it("initializes visionStatement state (already read by the hook — was missing from the form)", () => {
-      expect(settingsSrc).toMatch(/const\s*\[visionStatement,\s*setVisionStatement\]\s*=\s*useState\(hotelConfig\.visionStatement\)/);
+    it("does not duplicate About copy in Hotel Settings", () => {
+      expect(settingsSrc).not.toMatch(/const\s*\[visionStatement,\s*setVisionStatement\]/);
+      expect(settingsSrc).not.toMatch(/const\s*\[missionStatement,\s*setMissionStatement\]/);
+      expect(settingsSrc).not.toMatch(/const\s*\[hotelStory,\s*setHotelStory\]/);
     });
 
-    it("exposes 7 new form inputs in the JSX", () => {
-      // The 6 contact inputs + 1 visionStatement textarea.
+    it("exposes the canonical contact inputs in the JSX", () => {
       expect(settingsSrc).toMatch(/value=\{address\}/);
       expect(settingsSrc).toMatch(/value=\{frontDeskPhone\}/);
       expect(settingsSrc).toMatch(/value=\{supportEmail\}/);
       expect(settingsSrc).toMatch(/value=\{dpoEmail\}/);
       expect(settingsSrc).toMatch(/value=\{facebookUrl\}/);
       expect(settingsSrc).toMatch(/value=\{instagramUrl\}/);
-      expect(settingsSrc).toMatch(/value=\{visionStatement\}/);
+      expect(settingsSrc).toMatch(/value=\{twitterHandle\}/);
     });
 
-    it("handleSaveHotel writes all 7 new fields to settings/hotelConfig", () => {
-      // Single handleSaveHotel call, all 7 new fields included
-      // alongside the existing fields.
-      expect(settingsSrc).toMatch(/handleSaveHotel\s*=\s*async[\s\S]*?updateSettings\(\s*["']hotelConfig["'],\s*\{[\s\S]*?address,[\s\S]*?frontDeskPhone,[\s\S]*?supportEmail,[\s\S]*?dpoEmail,[\s\S]*?facebookUrl,[\s\S]*?instagramUrl,[\s\S]*?visionStatement,[\s\S]*?hotelStory[\s\S]*?\}\)/);
+    it("handleSaveHotel writes only canonical fields to settings/hotelConfig", () => {
+      expect(settingsSrc).toMatch(/handleSaveHotel\s*=\s*async[\s\S]*?updateSettings\(\s*["']hotelConfig["'],\s*\{[\s\S]*?address,[\s\S]*?frontDeskPhone,[\s\S]*?supportEmail,[\s\S]*?dpoEmail,[\s\S]*?facebookUrl,[\s\S]*?instagramUrl,[\s\S]*?twitterHandle,[\s\S]*?checkInTime,[\s\S]*?checkOutTime[\s\S]*?\}\)/);
+      const hotelSave = settingsSrc.match(/handleSaveHotel\s*=\s*async[\s\S]*?\}\);\n  \};/)?.[0] || "";
+      expect(hotelSave).not.toMatch(/contactEmail|contactPhone|missionStatement|visionStatement|hotelStory/);
     });
   });
 

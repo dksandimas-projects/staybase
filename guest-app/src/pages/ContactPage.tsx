@@ -15,14 +15,14 @@ export function ContactPage() {
   const [searchParams] = useSearchParams();
   // Per Phase 11.8 PR 3: address / phone / email / socials are
   // admin-editable from Settings → Hotel Info. The hook value
-  // wins when set; the deploy-time `hotel.config.ts` value is
-  // the safe fallback. Mirrors the Footer change.
+  // wins when set. Required values use deploy-time fallbacks, while
+  // explicitly blank social values hide their matching icons.
   const { contact } = usePublicSiteContent();
   const addressString = contact?.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
   const phone = contact?.frontDeskPhone || config.frontDeskPhone;
   const supportEmail = contact?.supportEmail || config.supportEmail;
-  const facebook = contact?.facebookUrl || config.facebookUrl;
-  const instagram = contact?.instagramUrl || config.instagramUrl;
+  const facebook = contact?.facebookUrl ?? config.facebookUrl;
+  const instagram = contact?.instagramUrl ?? config.instagramUrl;
   const mapQuery = encodeURIComponent(addressString);
   const showDisabledMemberMessage = searchParams.get("member") === "disabled";
 
@@ -171,14 +171,14 @@ export function ContactPage() {
                   </div>
 
                   {/* Socials */}
-                  <div className="flex gap-4 items-start pt-4">
+                  {(facebook || instagram) && <div className="flex gap-4 items-start pt-4">
                     <div className="h-9 w-9 rounded-lg bg-primary-light flex items-center justify-center text-primary shrink-0">
                       <Share2 size={18} />
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Follow Us</p>
                       <div className="flex gap-3 mt-2">
-                        <a
+                        {facebook && <a
                           aria-label={`${config.brandName} on Facebook`}
                           href={facebook}
                           target="_blank"
@@ -186,8 +186,8 @@ export function ContactPage() {
                           className="h-8 w-8 rounded-full border border-gray-250 hover:border-primary hover:text-primary flex items-center justify-center text-gray-600 transition"
                         >
                           <Facebook size={14} />
-                        </a>
-                        <a
+                        </a>}
+                        {instagram && <a
                           aria-label={`${config.brandName} on Instagram`}
                           href={instagram}
                           target="_blank"
@@ -195,10 +195,10 @@ export function ContactPage() {
                           className="h-8 w-8 rounded-full border border-gray-250 hover:border-primary hover:text-primary flex items-center justify-center text-gray-600 transition"
                         >
                           <Instagram size={14} />
-                        </a>
+                        </a>}
                       </div>
                     </div>
-                  </div>
+                  </div>}
                 </div>
 
                 {/* FAQ Help box */}

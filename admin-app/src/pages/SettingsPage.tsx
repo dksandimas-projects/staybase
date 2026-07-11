@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
+import { storage } from "../firebase/config";
+import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -50,6 +52,15 @@ const VALID_TAB_IDS: TabId[] = [
   "legal",
   "staff"
 ];
+
+const DEFAULT_OG_IMAGE_URL = config.ogImage.startsWith("http")
+  ? config.ogImage
+  : `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`;
+
+function normalizeSeoImageOverride(value?: string) {
+  if (!value || value === config.ogImage || value === DEFAULT_OG_IMAGE_URL) return "";
+  return value;
+}
 
 // Per `plan/features/SETTINGS.md §Payment Methods`: the booking
 // payment list is a fully dynamic admin-managed array. The schema
@@ -1217,32 +1228,21 @@ export function SettingsPage() {
 
   // Local state form mirrors
   // 1. Hotel Config Form States
-  const [hotelName, setHotelName] = useState(hotelConfig.hotelName);
-  const [contactEmail, setContactEmail] = useState(hotelConfig.contactEmail);
-  const [contactPhone, setContactPhone] = useState(hotelConfig.contactPhone);
   const [checkInTime, setCheckInTime] = useState(hotelConfig.checkInTime);
   const [checkOutTime, setCheckOutTime] = useState(hotelConfig.checkOutTime);
-  const [missionStatement, setMissionStatement] = useState(hotelConfig.missionStatement);
-  const [visionStatement, setVisionStatement] = useState(hotelConfig.visionStatement);
-  const [hotelStory, setHotelStory] = useState(hotelConfig.hotelStory);
   const [seoMetaDescription, setSeoMetaDescription] = useState(seoSettings.draft?.metaDescription || config.metaDescription);
   const [seoPriceRange, setSeoPriceRange] = useState(seoSettings.draft?.priceRange || config.priceRange);
-  const [seoOgImage, setSeoOgImage] = useState(
-    seoSettings.draft?.ogImage || `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`
-  );
-  const [seoTwitterHandle, setSeoTwitterHandle] = useState(seoSettings.draft?.twitterHandle || config.twitterHandle);
+  const [seoOgImage, setSeoOgImage] = useState(normalizeSeoImageOverride(seoSettings.draft?.ogImage));
   const [isPublishingSeo, setIsPublishingSeo] = useState(false);
-  // Phase 11.8 PR 3 — the 6 hotel contact details become admin-
-  // editable runtime overrides. Each falls back to the deploy-time
-  // `hotel.config.ts` value via `pickString` in the public hook
-  // when these state values are empty (i.e. the admin hasn't
-  // overridden yet).
+  // Canonical runtime hotel contact fields. Missing values fall back
+  // to deploy-time config; explicitly blank social values hide icons.
   const [address, setAddress] = useState(hotelConfig.address);
   const [frontDeskPhone, setFrontDeskPhone] = useState(hotelConfig.frontDeskPhone);
   const [supportEmail, setSupportEmail] = useState(hotelConfig.supportEmail);
   const [dpoEmail, setDpoEmail] = useState(hotelConfig.dpoEmail);
   const [facebookUrl, setFacebookUrl] = useState(hotelConfig.facebookUrl);
   const [instagramUrl, setInstagramUrl] = useState(hotelConfig.instagramUrl);
+  const [twitterHandle, setTwitterHandle] = useState(hotelConfig.twitterHandle ?? config.twitterHandle);
 
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
@@ -1319,13 +1319,13 @@ export function SettingsPage() {
   );
 
   const [aboutMissionStatement, setAboutMissionStatement] = useState<string>(
-    websiteContent.about?.missionStatement || hotelConfig.missionStatement || ""
+    websiteContent.about?.missionStatement || ""
   );
   const [aboutVisionStatement, setAboutVisionStatement] = useState<string>(
-    websiteContent.about?.visionStatement || hotelConfig.visionStatement || ""
+    websiteContent.about?.visionStatement || ""
   );
   const [aboutHotelStory, setAboutHotelStory] = useState<string>(
-    websiteContent.about?.hotelStory || hotelConfig.hotelStory || ""
+    websiteContent.about?.hotelStory || ""
   );
 
   // Rooms Catalog, Contact, and Not Found page copy states
@@ -1362,8 +1362,6 @@ export function SettingsPage() {
   const [pointsRedemptionRate, setPointsRedemptionRate] = useState(String(rewardsConfig.pointsRedemptionRate));
   const [memberDiscountEnabled, setMemberDiscountEnabled] = useState(rewardsConfig.memberDiscountEnabled);
   const [memberDiscountPct, setMemberDiscountPct] = useState(String(rewardsConfig.memberDiscountPct));
-  const [rewardsName, setRewardsName] = useState(rewardsConfig.rewardsName);
-  const [rewardsTagline, setRewardsTagline] = useState(rewardsConfig.rewardsTagline);
 
   // 4. Breakfast Config states
   const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
@@ -1476,8 +1474,6 @@ export function SettingsPage() {
     setPointsRedemptionRate(String(rewardsConfig.pointsRedemptionRate ?? 100));
     setMemberDiscountEnabled(rewardsConfig.memberDiscountEnabled !== false);
     setMemberDiscountPct(String(rewardsConfig.memberDiscountPct ?? 10));
-    setRewardsName(rewardsConfig.rewardsName || "Spark Rewards");
-    setRewardsTagline(rewardsConfig.rewardsTagline || "");
     setHomepageHeroEyebrow(websiteContent.homepage?.heroEyebrow || "");
     setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
     setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
@@ -1529,9 +1525,9 @@ export function SettingsPage() {
     setCorporateRetreatCtaLabel(
       websiteContent.corporate?.retreatCtaLabel || DEFAULT_CORPORATE_PAGE_CONTENT.retreat.ctaLabel
     );
-    setAboutMissionStatement(websiteContent.about?.missionStatement || hotelConfig.missionStatement || "");
-    setAboutVisionStatement(websiteContent.about?.visionStatement || hotelConfig.visionStatement || "");
-    setAboutHotelStory(websiteContent.about?.hotelStory || hotelConfig.hotelStory || "");
+    setAboutMissionStatement(websiteContent.about?.missionStatement || "");
+    setAboutVisionStatement(websiteContent.about?.visionStatement || "");
+    setAboutHotelStory(websiteContent.about?.hotelStory || "");
 
     // Sync Rooms Catalog, Contact, and Not Found page copy
     setRoomsCatalogHeroEyebrow(websiteContent.roomsCatalog?.heroEyebrow || "");
@@ -1556,14 +1552,8 @@ export function SettingsPage() {
     setServicesSubtext(websiteContent.homepage?.sectionHeaders?.servicesSubtext || "");
 
     // Sync Hotel Info (Hotel Profile) states
-    setHotelName(hotelConfig.hotelName || "");
-    setContactEmail(hotelConfig.contactEmail || "");
-    setContactPhone(hotelConfig.contactPhone || "");
     setCheckInTime(hotelConfig.checkInTime || "");
     setCheckOutTime(hotelConfig.checkOutTime || "");
-    setMissionStatement(hotelConfig.missionStatement || "");
-    setVisionStatement(hotelConfig.visionStatement || "");
-    setHotelStory(hotelConfig.hotelStory || "");
     setFrontDeskPhone(hotelConfig.frontDeskPhone || "");
     setSupportEmail(hotelConfig.supportEmail || "");
     setDpoEmail(hotelConfig.dpoEmail || "");
@@ -1571,10 +1561,8 @@ export function SettingsPage() {
     setInstagramUrl(hotelConfig.instagramUrl || "");
     setSeoMetaDescription(seoSettings.draft?.metaDescription || config.metaDescription);
     setSeoPriceRange(seoSettings.draft?.priceRange || config.priceRange);
-    setSeoOgImage(
-      seoSettings.draft?.ogImage || `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`
-    );
-    setSeoTwitterHandle(seoSettings.draft?.twitterHandle || config.twitterHandle);
+    setSeoOgImage(normalizeSeoImageOverride(seoSettings.draft?.ogImage));
+    setTwitterHandle(hotelConfig.twitterHandle ?? config.twitterHandle);
 
     // Safely format address: if it's a seeded object, convert to single-line string.
     let addrStr = "";
@@ -1592,29 +1580,58 @@ export function SettingsPage() {
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
     e.preventDefault();
-    await runSettingsSave("hotel", "Hotel profile saved", () => updateSettings("hotelConfig", {
-      hotelName,
-      address,
-      frontDeskPhone,
-      supportEmail,
-      dpoEmail,
-      facebookUrl,
-      instagramUrl,
-      contactEmail,
-      contactPhone,
-      checkInTime,
-      checkOutTime,
-      missionStatement,
-      visionStatement,
-      hotelStory
-    }));
+    const published = seoSettings.published;
+    const sources = getSeoSourceValues();
+    const affectsPublishedSeo = !published
+      || published.address !== sources.address
+      || published.frontDeskPhone !== sources.frontDeskPhone
+      || published.facebookUrl !== sources.facebookUrl
+      || published.instagramUrl !== sources.instagramUrl
+      || published.twitterHandle !== sources.twitterHandle
+      || published.checkInTime !== sources.checkInTime
+      || published.checkOutTime !== sources.checkOutTime;
+    await runSettingsSave(
+      "hotel",
+      "Hotel profile saved",
+      async () => {
+        const saved = await updateSettings("hotelConfig", {
+          address,
+          frontDeskPhone,
+          supportEmail,
+          dpoEmail,
+          facebookUrl,
+          instagramUrl,
+          twitterHandle,
+          checkInTime,
+          checkOutTime
+        });
+        if (!saved) return false;
+
+        if (!affectsPublishedSeo) return true;
+        return updateSettings("seo", { sourceChangesPending: true });
+      },
+      affectsPublishedSeo
+        ? "Public details are live. SEO has changes pending—open SEO & Search and publish when ready."
+        : "Changes saved and are live now."
+    );
   };
 
   const seoDraft = () => ({
     metaDescription: seoMetaDescription.trim(),
     priceRange: seoPriceRange.trim(),
-    ogImage: seoOgImage.trim(),
-    twitterHandle: seoTwitterHandle.trim()
+    ogImage: seoOgImage.trim() || DEFAULT_OG_IMAGE_URL
+  });
+
+  const getSeoSourceValues = () => ({
+    address: typeof address === "string"
+      ? address.trim()
+      : [address?.street, address?.city, address?.region, address?.postalCode].filter(Boolean).join(", "),
+    frontDeskPhone: frontDeskPhone.trim() || config.frontDeskPhone,
+    facebookUrl: facebookUrl.trim(),
+    instagramUrl: instagramUrl.trim(),
+    twitterHandle: twitterHandle.trim(),
+    checkInTime: checkInTime.trim() || config.checkInTime,
+    checkOutTime: checkOutTime.trim() || config.checkOutTime
   });
 
   const handleSaveSeoDraft = async (e: React.FormEvent) => {
@@ -1627,6 +1644,39 @@ export function SettingsPage() {
     );
   };
 
+  const handleUploadSeoImage = async (file: File): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (!file.type.startsWith("image/")) throw new Error("Choose a PNG, JPEG, or WebP image.");
+      const compressed = await compressImageFile(file, { maxWidth: 1200, maxHeight: 630, quality: 0.85 });
+      const safeName = compressed.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileRef = storageRef(storage, `assets/seo/og-image/${Date.now()}-${safeName}`);
+      await uploadBytes(fileRef, compressed.file, { contentType: compressed.file.type });
+      const url = await getDownloadURL(fileRef);
+      const saved = await updateSettings("seo", { draft: { ...seoDraft(), ogImage: url } });
+      if (!saved) throw new Error("The image uploaded, but its SEO draft could not be saved.");
+      setSeoOgImage(url);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : "Image upload failed." };
+    }
+  };
+
+  const handleResetSeoImage = async (): Promise<{ success: boolean; error?: string }> => {
+    const previousUrl = seoOgImage;
+    const saved = await updateSettings("seo", { draft: { ...seoDraft(), ogImage: DEFAULT_OG_IMAGE_URL } });
+    if (!saved) return { success: false, error: "The default image could not be restored." };
+    setSeoOgImage("");
+    if (previousUrl.includes("firebasestorage.googleapis.com")) {
+      try {
+        await deleteObject(storageRef(storage, previousUrl));
+      } catch {
+        // The draft already points at the safe default. An orphaned
+        // object is preferable to rolling back a successful reset.
+      }
+    }
+    return { success: true };
+  };
+
   const handlePublishSeo = async () => {
     if (isPublishingSeo) return;
     setIsPublishingSeo(true);
@@ -1634,19 +1684,9 @@ export function SettingsPage() {
       const token = await auth.currentUser?.getIdToken();
       if (!token) throw new Error("Your session has expired. Sign in again and retry.");
 
-      const addressValue = typeof hotelConfig.address === "string"
-        ? hotelConfig.address
-        : [hotelConfig.address?.street, hotelConfig.address?.city, hotelConfig.address?.region, hotelConfig.address?.postalCode]
-            .filter(Boolean)
-            .join(", ");
       const payload = {
         ...seoDraft(),
-        address: addressValue || `${config.address.street}, ${config.address.city}, ${config.address.region}, ${config.address.postalCode}`,
-        frontDeskPhone: hotelConfig.frontDeskPhone || config.frontDeskPhone,
-        facebookUrl: hotelConfig.facebookUrl || config.facebookUrl,
-        instagramUrl: hotelConfig.instagramUrl || config.instagramUrl,
-        checkInTime: hotelConfig.checkInTime || config.checkInTime,
-        checkOutTime: hotelConfig.checkOutTime || config.checkOutTime
+        ...getSeoSourceValues()
       };
 
       const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/publish-seo`, {
@@ -1784,9 +1824,7 @@ export function SettingsPage() {
       pointsPerHundred: parseFloat(pointsPerHundred) || 0,
       pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
       memberDiscountEnabled,
-      memberDiscountPct: parseFloat(memberDiscountPct) || 0,
-      rewardsName: rewardsName.trim() || "Spark Rewards",
-      rewardsTagline: rewardsTagline.trim()
+      memberDiscountPct: parseFloat(memberDiscountPct) || 0
     }));
   };
 
@@ -2188,7 +2226,7 @@ export function SettingsPage() {
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
     { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
-    { id: "seo" as const, label: "SEO & Search", icon: Eye },
+    { id: "seo" as const, label: seoSettings.sourceChangesPending ? "SEO & Search •" : "SEO & Search", icon: Eye },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
     { id: "store" as const, label: "In-Room Store", icon: ShoppingBag },
@@ -2296,41 +2334,6 @@ export function SettingsPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Hotel Display Name
-                  <input
-                    type="text"
-                    required
-                    value={hotelName}
-                    onChange={(e) => setHotelName(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Reception Contact Phone
-                  <input
-                    type="tel"
-                    required
-                    value={contactPhone}
-                    onChange={(e) => setContactPhone(e.target.value)}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                  />
-                </label>
-              </div>
-
-              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                Contact Support Email
-                <input
-                  type="email"
-                  required
-                  value={contactEmail}
-                  onChange={(e) => setContactEmail(e.target.value)}
-                  className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                />
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Standard Check-in Time
                   <input
                     type="text"
@@ -2353,36 +2356,6 @@ export function SettingsPage() {
                 </label>
               </div>
 
-              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                Hotel Mission Statement
-                <textarea
-                  value={missionStatement}
-                  onChange={(e) => setMissionStatement(e.target.value)}
-                  rows={2}
-                  className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
-                />
-              </label>
-
-              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                Hotel Vision Statement
-                <textarea
-                  value={visionStatement}
-                  onChange={(e) => setVisionStatement(e.target.value)}
-                  rows={2}
-                  className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
-                />
-              </label>
-
-              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                The Spark Story History
-                <textarea
-                  value={hotelStory}
-                  onChange={(e) => setHotelStory(e.target.value)}
-                  rows={3}
-                  className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white"
-                />
-              </label>
-
               {/* Phase 11.8 PR 3 — hotel contact details. Each field
                   is admin-editable from this form; the public hook
                   falls back to the deploy-time `hotel.config.ts`
@@ -2395,7 +2368,7 @@ export function SettingsPage() {
                   Hotel Contact Details
                 </div>
                 <p className="text-[11px] text-gray-500 -mt-2">
-                  Optional runtime overrides of the deploy-time white-label values. Leave a field blank to use the white-label default.
+                  Contact overrides for the public site. Blank social fields hide their footer icons; other blank fields use the white-label default.
                 </p>
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                   Address
@@ -2407,7 +2380,7 @@ export function SettingsPage() {
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
                   />
                 </label>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-3">
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                     Front Desk Phone
                     <input
@@ -2439,7 +2412,7 @@ export function SettingsPage() {
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
                   />
                 </label>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-3">
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
                     Facebook URL
                     <input
@@ -2457,6 +2430,17 @@ export function SettingsPage() {
                       value={instagramUrl}
                       onChange={(e) => setInstagramUrl(e.target.value)}
                       placeholder={config.instagramUrl}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    X Handle
+                    <input
+                      type="text"
+                      value={twitterHandle}
+                      onChange={(e) => setTwitterHandle(e.target.value)}
+                      placeholder="@hotelhandle"
+                      pattern="@?[A-Za-z0-9_]*"
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
                     />
                   </label>
@@ -3358,8 +3342,8 @@ export function SettingsPage() {
                     <span className="text-[10px] font-normal text-gray-500">{seoMetaDescription.length}/160 characters. Aim for 120–160.</span>
                   </label>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                  <div className="grid gap-4 sm:grid-cols-1">
+                    <label className="flex flex-col gap-2 font-semibold text-gray-700 sm:max-w-sm">
                       Price category
                       <input
                         required
@@ -3371,30 +3355,18 @@ export function SettingsPage() {
                         className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
                       />
                     </label>
-                    <label className="flex flex-col gap-2 font-semibold text-gray-700">
-                      X handle
-                      <input
-                        type="text"
-                        maxLength={50}
-                        value={seoTwitterHandle}
-                        onChange={(event) => setSeoTwitterHandle(event.target.value)}
-                        placeholder="@hotelhandle"
-                        className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                      />
-                    </label>
                   </div>
 
-                  <label className="flex flex-col gap-2 font-semibold text-gray-700">
-                    Social preview image URL
-                    <input
-                      type="url"
-                      value={seoOgImage}
-                      onChange={(event) => setSeoOgImage(event.target.value)}
-                      placeholder={`https://${config.domain}/og-image.png`}
-                      className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
-                    />
-                    <span className="text-[10px] font-normal text-gray-500">Use a public HTTPS image sized 1200×630.</span>
-                  </label>
+                  <BrandingAssetRow
+                    label="Social preview image"
+                    helper="Shown when the website is shared. Upload a 1200×630 PNG, JPEG, or WebP image; larger files are compressed automatically."
+                    value={seoOgImage}
+                    fallback={DEFAULT_OG_IMAGE_URL}
+                    fallbackLabel="Default social image"
+                    previewClassName="object-cover"
+                    onUpload={handleUploadSeoImage}
+                    onReset={handleResetSeoImage}
+                  />
                 </div>
 
                 <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-[11px] leading-relaxed text-blue-900">
@@ -3402,8 +3374,12 @@ export function SettingsPage() {
                   <p className="mt-1">
                     Publishing snapshots the current address, front-desk phone, Facebook, Instagram, and check-in/out times. Update Hotel Settings first if any of those are incorrect.
                   </p>
-                  <p className="mt-2 text-blue-700">
-                    {seoSettings.published ? "A published SEO snapshot exists." : "No SEO snapshot has been published yet; deployments use hotel.config.ts defaults."}
+                  <p className={`mt-2 font-semibold ${seoSettings.sourceChangesPending ? "text-amber-700" : "text-blue-700"}`}>
+                    {seoSettings.sourceChangesPending
+                      ? "Hotel Settings changed after the last SEO publish. Publish SEO changes to update crawler-facing details."
+                      : seoSettings.published
+                        ? "Published SEO is synchronized with Hotel Settings."
+                        : "No SEO snapshot has been published yet; deployments use hotel.config.ts defaults."}
                   </p>
                 </div>
 
@@ -3429,37 +3405,8 @@ export function SettingsPage() {
             isAdmin ? (
             <form onSubmit={handleSaveRewards} className="space-y-6 text-xs">
               <div>
-                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">{rewardsName} Modifiers</h3>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">{config.rewardsName} Modifiers</h3>
                 <p className="text-[10px] text-gray-500 mt-0.5">Fine-tune loyalty point distributions, redemption rate, and member discount rules.</p>
-              </div>
-
-              {/* Program Identity */}
-              <div className="space-y-4">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Program Identity</h4>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Program Display Name
-                    <input
-                      type="text"
-                      required
-                      value={rewardsName}
-                      onChange={(e) => setRewardsName(e.target.value)}
-                      placeholder="Spark Rewards"
-                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                    />
-                  </label>
-
-                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Program Tagline
-                    <input
-                      type="text"
-                      value={rewardsTagline}
-                      onChange={(e) => setRewardsTagline(e.target.value)}
-                      placeholder="Earn points on completed stays, unlock member-only perks."
-                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white"
-                    />
-                  </label>
-                </div>
               </div>
 
               {/* Toggles */}
@@ -3597,7 +3544,7 @@ export function SettingsPage() {
             ) : (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
                 <p className="font-semibold">Admin-only section</p>
-                <p className="mt-1 leading-relaxed">The {rewardsName} settings are restricted to admin accounts. Ask a hotel owner to make loyalty changes.</p>
+                <p className="mt-1 leading-relaxed">The {config.rewardsName} settings are restricted to admin accounts. Ask a hotel owner to make loyalty changes.</p>
               </div>
             )
           )}

@@ -26,13 +26,11 @@ Admin-only page at `/settings`. Organized into tabs. Covers hotel information, b
 
 ### 1. Hotel Info
 
-- [ ] Hotel name, address, contact email, contact phone
+- [ ] Address, support email, front-desk phone; hotel/brand name remains deploy-time in `hotel.config.ts`
 - [ ] Check-in time, check-out time
-- [ ] Facebook URL, Instagram URL
-- [ ] Mission statement (textarea)
-- [ ] Vision statement (textarea)
-- [ ] Hotel story (textarea or short rich-text)
-- [ ] **Phase 11.8 PR 3 — Hotel Contact Details card**: address (single-line), front-desk phone, support email, DPO email, Facebook URL, Instagram URL — all admin-editable runtime overrides of the deploy-time `hotel.config.ts` values. Each falls back to the white-label config when the input is empty. Renders on Footer, Contact page, and Privacy page via `usePublicSiteContent.contact.*`.
+- [ ] Facebook URL, Instagram URL, X handle
+- [ ] Mission statement, vision statement, and hotel story are managed only in Website Content → About Us
+- [ ] **Phase 11.8 PR 3 — Hotel Contact Details card**: address (single-line), front-desk phone, support email, DPO email, Facebook URL, Instagram URL, and X handle — all admin-editable runtime values. Missing fields fall back to white-label config; explicitly blank social fields hide their corresponding public icons. Renders through `usePublicSiteContent.contact.*`, including Facebook/Instagram/X in the Footer.
 - [ ] Save button
 - [ ] Source: `settings/hotelConfig` — `updateDoc` on save
 
@@ -238,7 +236,7 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 - [ ] **Mission statement** — text shown in the mission card.
 - [ ] **Vision statement** — text shown in the vision card.
 - [ ] **Hotel story** — long-form body copy shown in the story section. Blank lines split into paragraphs on the public page.
-- [ ] Empty fields fall back to `settings/hotelConfig.{missionStatement,visionStatement,hotelStory}` and then to the deploy-time safe defaults.
+- [ ] Empty fields fall back directly to deploy-time safe defaults; there is no second editable copy in `settings/hotelConfig`.
 - [ ] Source: `settings/websiteContent.about.{missionStatement,visionStatement,hotelStory}`
 
 **Our Rooms / Contact Us:**
@@ -324,9 +322,9 @@ Admin-only tab. Controls all configurable loyalty program settings.
 - [ ] Display note: "Early check-in request is always available to members — not configurable"
 
 **Program Info (visible on guest-facing rewards pages)**
-- [ ] Program name — default "Spark Rewards" (editable)
-- [ ] Tagline — short marketing line for homepage section and `/rewards` page
-- [ ] Source: `settings/websiteContent.homepage.sparkRewards` (heading/description already there) + `settings/rewardsConfig`
+- [ ] Program name — deploy-time `config.rewardsName`, not duplicated in runtime settings
+- [ ] Marketing heading/tagline — managed only in Website Content → Spark Rewards Promo
+- [ ] Source: `hotel.config.ts` for identity; `settings/websiteContent.homepage.sparkRewards` for marketing copy
 
 - [ ] Source: `settings/rewardsConfig` — `updateDoc` on save
 - [ ] Admin-only — front desk cannot access this tab
@@ -345,7 +343,9 @@ Editable by hotel admin — no redeploy required. Changes reflect on guest site 
 
 ### 14. SEO & Search
 
-Admin-only editor for crawler-facing metadata. SEO-only fields can be saved as a draft without changing the public site: default meta description (50–160 characters), relative price category, 1200×630 HTTPS social preview image URL, and optional X handle. Publishing validates the draft, snapshots the current Hotel Settings address, front-desk phone, Facebook/Instagram URLs, and check-in/out times into `settings/seo.published`, then calls the server-side Vercel deploy hook. The rebuilt guest app reads that published snapshot during the Vite build and generates static meta tags and Hotel JSON-LD. If Firestore is unavailable or no published snapshot exists, `hotel.config.ts` remains the safe fallback. The deploy-hook URL is server-only and must never be stored in Firestore or exposed through a `VITE_` variable.
+Admin-only editor for crawler-facing metadata. SEO-only fields can be saved as a draft without changing the public site: default meta description (50–160 characters), relative price category, and a social preview image uploader with live preview, replace, and reset-to-default controls. The X handle is managed with the other social accounts in Hotel Settings. The uploader accepts images, compresses them to fit within 1200×630, stores them under `assets/seo/og-image/`, and saves the public HTTPS download URL in the draft. Publishing validates the draft, snapshots the current Hotel Settings address, front-desk phone, Facebook/Instagram URLs, X handle, and check-in/out times into `settings/seo.published`, then calls the server-side Vercel deploy hook. The rebuilt guest app reads that published snapshot during the Vite build and generates static meta tags and Hotel JSON-LD. If Firestore is unavailable or no published snapshot exists, `hotel.config.ts` remains the safe fallback. The deploy-hook URL is server-only and must never be stored in Firestore or exposed through a `VITE_` variable.
+
+Saving Hotel Settings compares the schema-relevant operational fields with the last published snapshot. When they differ, it sets `settings/seo.sourceChangesPending`, adds a marker to the SEO & Search tab, shows a save notification directing the admin to publish, and keeps a warning in the SEO panel across sessions. A successful deploy-hook request clears the pending marker; a failed request leaves it active.
 
 ---
 

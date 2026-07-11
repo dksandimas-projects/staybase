@@ -83,12 +83,9 @@ export interface PublicAboutContent {
   hotelStory: string;
 }
 
-// Runtime hotel contact details (Phase 11.8 PR 3). Each field
-// falls back to the deploy-time `hotel.config.ts` value via
-// `pickString` so the public site keeps rendering the brand's
-// white-label values until the owner overrides them from
-// Settings → Hotel. Mirrors the safe-default chain the hero
-// fields use.
+// Runtime hotel contact details (Phase 11.8 PR 3). Required contact
+// fields use deploy-time config fallbacks. Social fields preserve an
+// explicitly saved empty string so admins can hide individual icons.
 export interface PublicContactContent {
   address: string;
   frontDeskPhone: string;
@@ -96,6 +93,7 @@ export interface PublicContactContent {
   dpoEmail: string;
   facebookUrl: string;
   instagramUrl: string;
+  twitterHandle: string;
   heroEyebrow: string;
   heroHeading: string;
   heroSubtext: string;
@@ -261,9 +259,8 @@ function buildFallback(): PublicSiteContent {
       // time `hotel.config.ts` values are the safe fallback so the
       // public site never goes blank during the cold-load window
       // before the Firestore `settings/hotelConfig` doc resolves.
-      // The hook returns "" when the doc carries no override, and
-      // the consumer pages (Footer / Contact / Privacy) layer a
-      // `|| config.X` on top of the hook value at render time.
+      // Missing Firestore fields fall back here. Explicitly empty
+      // social fields are preserved later by `pickOptionalString`.
       address: config.address
         ? `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`
         : "",
@@ -272,6 +269,7 @@ function buildFallback(): PublicSiteContent {
       dpoEmail: config.dpoEmail,
       facebookUrl: config.facebookUrl,
       instagramUrl: config.instagramUrl,
+      twitterHandle: config.twitterHandle,
       heroEyebrow: "Get in Touch",
       heroHeading: "contact us",
       heroSubtext: "Have a question about reservations, amenities, or negotiated corporate rates? Our team is here to assist.",
@@ -386,6 +384,7 @@ function buildEmptyState(): PublicSiteContent {
       dpoEmail: "",
       facebookUrl: "",
       instagramUrl: "",
+      twitterHandle: "",
       heroEyebrow: "",
       heroHeading: "",
       heroSubtext: "",
@@ -557,12 +556,14 @@ export function usePublicSiteContent(): PublicSiteContent {
           : [];
 
       const hc = (hotelConfig ?? {}) as Record<string, unknown>;
-      const brandName = typeof hc.hotelName === "string" && hc.hotelName.length > 0 ? hc.hotelName : config.brandName;
+      const brandName = config.brandName;
 
       const pickString = (raw: Record<string, unknown> | null, key: string, fallback: string) =>
         typeof raw?.[key] === "string" && (raw[key] as string).length > 0
           ? (raw[key] as string)
           : fallback;
+      const pickOptionalString = (raw: Record<string, unknown> | null, key: string, fallback: string) =>
+        typeof raw?.[key] === "string" ? (raw[key] as string) : fallback;
 
       const next: PublicSiteContent = {
         loading: false,
@@ -608,39 +609,33 @@ export function usePublicSiteContent(): PublicSiteContent {
           missionStatement: pickString(
             aboutRaw,
             "missionStatement",
-            typeof hc.missionStatement === "string" && hc.missionStatement.length > 0
-              ? hc.missionStatement
-              : FALLBACK_ABOUT_MISSION
+            FALLBACK_ABOUT_MISSION
           ),
           visionStatement: pickString(
             aboutRaw,
             "visionStatement",
-            typeof hc.visionStatement === "string" && hc.visionStatement.length > 0
-              ? hc.visionStatement
-              : FALLBACK_ABOUT_VISION(brandName)
+            FALLBACK_ABOUT_VISION(brandName)
           ),
           hotelStory: pickString(
             aboutRaw,
             "hotelStory",
-            typeof hc.hotelStory === "string" && hc.hotelStory.length > 0
-              ? hc.hotelStory
-              : FALLBACK_ABOUT_STORY(brandName)
+            FALLBACK_ABOUT_STORY(brandName)
           )
         },
         contact: {
-          // Phase 11.8 PR 3 — the 6 hotel contact details live on
+          // Phase 11.8 PR 3 — hotel contact details live on
           // `settings/hotelConfig` (per `TYPES.md §HotelConfig`).
-          // Each falls back to the deploy-time `hotel.config.ts`
-          // value via `fb.contact.*` so the public site never
-          // renders a blank phone / email / URL when the Firestore
-          // doc is partial. The admin writes them from
+          // Required values fall back to deploy-time config. Social
+          // values use `pickOptionalString` so a saved blank hides
+          // the matching public icon. The admin writes them from
           // Settings → Hotel Info.
           address: pickString(hc, "address", fb.contact.address),
           frontDeskPhone: pickString(hc, "frontDeskPhone", fb.contact.frontDeskPhone),
           supportEmail: pickString(hc, "supportEmail", fb.contact.supportEmail),
           dpoEmail: pickString(hc, "dpoEmail", fb.contact.dpoEmail),
-          facebookUrl: pickString(hc, "facebookUrl", fb.contact.facebookUrl),
-          instagramUrl: pickString(hc, "instagramUrl", fb.contact.instagramUrl),
+          facebookUrl: pickOptionalString(hc, "facebookUrl", fb.contact.facebookUrl),
+          instagramUrl: pickOptionalString(hc, "instagramUrl", fb.contact.instagramUrl),
+          twitterHandle: pickOptionalString(hc, "twitterHandle", fb.contact.twitterHandle),
           heroEyebrow: pickString(contactRaw, "heroEyebrow", fb.contact.heroEyebrow),
           heroHeading: pickString(contactRaw, "heroHeading", fb.contact.heroHeading),
           heroSubtext: pickString(contactRaw, "heroSubtext", fb.contact.heroSubtext),
