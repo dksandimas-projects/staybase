@@ -1085,7 +1085,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 
 **SEV-3:**
 - ✅ **FIN-05 — Discounts & adjustments report** — gross→net revenue bridge (senior/PWD for RA 9994/10754 tax deduction claims, vouchers, points) + outstanding-points liability
-- ⬜ **FIN-06 — BIR/VAT scope decision** — no VAT fields, VAT-exempt tracking, or OR numbering anywhere; decide with owner and log in `plan/docs/DECISIONS-FEATURES.md` (+ fields if in scope)
+- ✅ **FIN-06 — BIR/VAT scope decision** — calculated client-side on reports/exports, no OR/invoice printing (BIR manual OR booklets fallback); decision logged in `plan/docs/DECISIONS-FEATURES.md`
 - ⬜ **FIN-07 — Daily Close view** — payments recorded today by method and `recordedBy` for drawer/GCash handover reconciliation (falls out of FIN-01)
 - ✅ **FIN-08 — Export column alignment** — Sales XLSX Bookings sheet missing spec'd Breakfast/Discount/Voucher columns; Total Collected / Outstanding only exist in the admin-only Full Backup, not the date-ranged exports
 - ⬜ **FIN-13 — Drawer count + cash variance in Daily Close** — per-method counted-amount entry (cash drawer, GCash balance) vs recorded payments, persisted as an append-only daily close record with variance line; build together with FIN-07, not after

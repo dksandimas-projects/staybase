@@ -25,9 +25,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
-| **SEV-3 (minor)** | 3 | 3 | **6** |
+| **SEV-3 (minor)** | 2 | 4 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **7** | **7** | **14** |
+| **Total** | **6** | **8** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -196,7 +196,7 @@ redemption rate).
 
 ---
 
-### FIN-06 — No tax/BIR layer; the scope decision is unrecorded · `Open`
+### FIN-06 — No tax/BIR layer; the scope decision is unrecorded · `Fixed 2026-07-11`
 
 **Where:** no VAT/tax fields anywhere in `shared/types/index.ts`; no
 mention in `plan/docs/DECISIONS-FEATURES.md`; jsPDF receipts are not
