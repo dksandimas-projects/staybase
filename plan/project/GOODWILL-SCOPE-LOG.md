@@ -6,7 +6,9 @@
 > qualify as a change request requiring a separate written agreement and
 > additional fees. They were delivered inside the fixed project fee as goodwill.
 >
-> Created: July 12, 2026 · Maintained alongside `ROADMAP.md`
+> Created: July 12, 2026 · Last updated: July 12, 2026 (FIN-05..FIN-13 moved
+> from Queued to §1 Shipped — full finance audit queue delivered 07-11/07-12)
+> · Maintained alongside `ROADMAP.md`
 > Status key: ✅ Shipped | 🔄 In Progress | ⬜ Queued (not yet started)
 
 ---
@@ -48,6 +50,19 @@ accounting-software territory.
 | ✅ | FIN-04 — Receivables & aging report | Aged unpaid balances + corporate charge-back invoice register (2026-07-11) |
 | ✅ | FIN-14 — Incidental charge ledger | Append-only folio charges (late checkout, damage, laundry, …) wired through folio, receipts, reports, exports *(owner request 2026-07-11)* |
 | ✅ | Payments subcollection & recording workflow | Per-booking payment entries with method/staff stamps — prerequisite for all of the above; not in Schedule A |
+| ✅ | FIN-05 — Discounts & adjustments report | Gross→net revenue bridge (Senior/PWD, vouchers, points) + outstanding-points liability (shipped 2026-07-11) |
+| ✅ | FIN-06 — VAT breakdown in reports & exports | 12% VAT / VATable / VAT-exempt (Senior/PWD) calculated client-side for the accountant's filings; no OR/invoice printing — decision #115 in `DECISIONS-FEATURES.md` (2026-07-11) |
+| ✅ | FIN-07 — Daily Close view | Payments recorded today by method and staff for drawer/GCash handover reconciliation (shipped 2026-07-12) |
+| ✅ | FIN-13 — Cash drawer count & variance | Per-method counted-amount entry vs. recorded payments, persisted as append-only daily close record (shipped 2026-07-12) |
+| ✅ | FIN-09 — Revenue proration | Overlap-prorated revenue recognition; unpaid future bookings excluded (shipped 2026-07-12) |
+| ✅ | FIN-10 — Occupancy night-clipping fix | Occupancy nights clipped to range boundaries incl. overlapping stays (shipped 2026-07-12) |
+| ✅ | FIN-11 — Hotel finance KPIs | ADR, RevPAR, revenue-by-room-type split (shipped 2026-07-12) |
+| ✅ | FIN-12 — Prior-period comparison | Vs-previous-period delta badges on revenue and booking KPI cards (shipped 2026-07-12) |
+
+> FIN-08 (export column alignment, shipped 2026-07-11) is deliberately **not**
+> listed here: the missing Breakfast/Discount/Voucher columns were a Schedule A
+> §2.8 conformance fix (contracted scope); only the added Collected/Outstanding
+> columns ride along as goodwill.
 
 ## 2. Front-Desk Operations
 
@@ -110,17 +125,17 @@ confirmed / booking confirmed / cancellation / corporate inquiry).
 
 ## Queued — do NOT absorb silently
 
-These are identified but unbuilt. Per Part 4 they should be **scoped, quoted,
-and approved in writing** (or explicitly logged here as further goodwill by a
-deliberate decision, not by default):
+**Currently empty** (as of July 12, 2026). The entire FIN-05..FIN-13 queue
+from the finance audit was subsequently built and delivered as goodwill on
+July 11–12, 2026 — it is now recorded in §1 above. That absorption happened
+before this log's rules took effect; from here on, any newly identified
+out-of-scope item lands in this table first and per Part 4 must be **scoped,
+quoted, and approved in writing** — or explicitly promoted to §1–§6 as
+goodwill by a deliberate decision, not by default.
 
 | Status | Item | Source |
 |---|---|---|
-| ⬜ | FIN-05 — Discounts & adjustments report (gross→net bridge, points liability) | Finance audit 2026-07-11 |
-| ⬜ | FIN-06 — BIR/VAT scope decision (+ fields if in scope) | Finance audit 2026-07-11 |
-| ⬜ | FIN-07 — Daily Close view | Finance audit 2026-07-11 |
-| ⬜ | FIN-08 — Export column alignment | Finance audit 2026-07-11 — *note: partially a Schedule A §2.8 conformance item (missing spec'd Breakfast/Discount/Voucher columns); the column fix is contracted scope, the collected/outstanding additions are not* |
-| ⬜ | FIN-09..FIN-13 — revenue recognition, occupancy clipping, ADR/RevPAR KPIs, prior-period deltas, drawer variance | Finance audit 2026-07-11 |
+| — | *(none)* | |
 
 ---
 

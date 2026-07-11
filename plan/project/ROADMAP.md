@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 12, 2026 (Goodwill Scope Log created — `plan/project/GOODWILL-SCOPE-LOG.md` itemizes all features delivered beyond Schedule A at no charge, plus rules for handling future extras. Contract Compliance section added — SA-01: Schedule A §2.8 requires the performance report PDF export to use jsPDF, current implementation is `window.print()`; the only letter-of-the-spec deviation found in the signed-contract review. FIN-03 append-only admin-approved refunds shipped. FIN-04 Receivables & Aging with corporate invoice register shipped. FIN-01/FIN-02 Collections reconciliation and actual payment-method reporting shipped. Incidental charge ledger FIN-14 shipped — `bookings/{id}/charges` append-only subcollection, wired through folio/receipts/reports/exports; spec in `BOOKINGS-MANAGEMENT.md`. Post-booking discount & voucher application shipped — staff can grant Senior/PWD or voucher at check-in / walk-in; prerequisite for the Senior/PWD toggle; spec in `BOOKINGS-MANAGEMENT.md`. Senior/PWD discount online-booking toggle shipped — online path only, front-desk path stays mandatory for RA 9994/10754 compliance; Finance & Reports Audit added under Phase 12 — 13 findings FIN-01..FIN-13 from `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`: reports cover billed revenue only; collections/refunds/receivables invisible; FIN-13 drawer variance added + expenses/P&L and day-locking recorded as scoped-out decisions. Previous: Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
+> Last updated: July 12, 2026 (SA-01 jsPDF performance-report export shipped — Schedule A Parts 1–3 coverage now 100%. Full FIN-05..FIN-13 finance queue shipped 07-11/07-12; Goodwill Scope Log updated accordingly — queue empty. Earlier: Goodwill Scope Log created — `plan/project/GOODWILL-SCOPE-LOG.md` itemizes all features delivered beyond Schedule A at no charge, plus rules for handling future extras. Contract Compliance section added — SA-01: Schedule A §2.8 requires the performance report PDF export to use jsPDF; was the only letter-of-the-spec deviation found in the signed-contract review. FIN-03 append-only admin-approved refunds shipped. FIN-04 Receivables & Aging with corporate invoice register shipped. FIN-01/FIN-02 Collections reconciliation and actual payment-method reporting shipped. Incidental charge ledger FIN-14 shipped — `bookings/{id}/charges` append-only subcollection, wired through folio/receipts/reports/exports; spec in `BOOKINGS-MANAGEMENT.md`. Post-booking discount & voucher application shipped — staff can grant Senior/PWD or voucher at check-in / walk-in; prerequisite for the Senior/PWD toggle; spec in `BOOKINGS-MANAGEMENT.md`. Senior/PWD discount online-booking toggle shipped — online path only, front-desk path stays mandatory for RA 9994/10754 compliance; Finance & Reports Audit added under Phase 12 — 13 findings FIN-01..FIN-13 from `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`: reports cover billed revenue only; collections/refunds/receivables invisible; FIN-13 drawer variance added + expenses/P&L and day-locking recorded as scoped-out decisions. Previous: Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1104,15 +1104,16 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 ### Contract Compliance — Schedule A review (2026-07-11)
 
 > Source: review of the signed Software Development Agreement + Schedule A
-> (June 23, 2026) against the codebase. Coverage of Parts 1–3 is otherwise
-> complete; this is the single line item that does not match the letter of
-> the spec. Close before the Final Delivery / acceptance review so the
-> client cannot flag it against the last ₱15,000 milestone.
+> (June 23, 2026) against the codebase. SA-01 was the single line item not
+> matching the letter of the spec; it shipped 2026-07-12, so **Schedule A
+> Parts 1–3 coverage is now 100%** ahead of the Final Delivery / acceptance
+> review.
 >
-> The same review found ~30 features delivered *beyond* Schedule A at no
-> charge — now itemized in `plan/project/GOODWILL-SCOPE-LOG.md` (with
+> The same review found ~40 features delivered *beyond* Schedule A at no
+> charge — itemized in `plan/project/GOODWILL-SCOPE-LOG.md` (with
 > maintenance rules: log new extras there, or quote them as Part 4 change
-> requests; queued FIN-05..FIN-13 must not be absorbed silently).
+> requests). The FIN-05..FIN-13 queue has since shipped (2026-07-11/12) and
+> is recorded there as delivered goodwill; the queue is now empty.
 
 - ✅ **SA-01 — Reports: performance report PDF export must use jsPDF** — jsPDF + html2canvas client-side PDF export implemented on the reports workspace, providing pixel-perfect multi-page report downloads of active tab stat cards and Recharts graphics.
 
