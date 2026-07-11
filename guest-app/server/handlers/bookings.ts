@@ -1959,9 +1959,12 @@ export async function handleAddPayment(req: any, res: any) {
   // then defers the email sends to a single follow-up read.
   const staffUid = req.staff?.uid || "staff";
   const paymentRecord = {
+    type: "payment",
     amount: numericAmount,
     method,
     note: safeNote,
+    reason: null,
+    approvedBy: null,
     recordedBy: staffUid,
     recordedAt: new Date()
   };
@@ -2049,6 +2052,58 @@ export async function handleAddPayment(req: any, res: any) {
     success: true,
     data: { ...paymentRecord, totalPaid }
   });
+}
+
+export async function handleAddRefund(req: any, res: any) {
+  if (req.staff?.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only an administrator can approve refunds." });
+  }
+  const { bookingId, amount, method, reason } = req.body || {};
+  const numericAmount = Number(amount);
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const safeMethod = typeof method === "string" ? method.trim().slice(0, 80) : "";
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 1_000_000) {
+    return res.status(400).json({ success: false, error: "Refund amount must be between 0.01 and 1,000,000." });
+  }
+  if (!safeMethod || !safeReason) {
+    return res.status(400).json({ success: false, error: "Refund method and reason are required." });
+  }
+
+  try {
+    let refundRecord: Record<string, any> = {};
+    let netCollected = 0;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found");
+      const paymentsRef = bookingRef.collection("payments");
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      netCollected = paymentsSnapshot.docs.reduce((sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0), 0);
+      if (numericAmount > netCollected) {
+        throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
+      }
+      const approvedBy = req.staff.uid || "admin";
+      refundRecord = {
+        type: "refund",
+        amount: -numericAmount,
+        method: safeMethod,
+        note: safeReason,
+        reason: safeReason,
+        approvedBy,
+        recordedBy: approvedBy,
+        recordedAt: new Date()
+      };
+      transaction.set(paymentsRef.doc(), refundRecord);
+    });
+    return res.status(200).json({ success: true, data: { ...refundRecord, netCollected: netCollected - numericAmount } });
+  } catch (error: any) {
+    if (error.message === "Booking not found") return res.status(404).json({ success: false, error: "Booking not found." });
+    const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
+    return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
+  }
 }
 
 export async function handleConfirmBooking(req: any, res: any) {

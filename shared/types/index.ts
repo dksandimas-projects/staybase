@@ -261,6 +261,18 @@ export interface IncidentalCharge {
   voidOf: string | null;
 }
 
+export interface PaymentEntry {
+  id: string;
+  type: "payment" | "refund";
+  amount: number;
+  method: string;
+  note: string;
+  reason: string | null;
+  approvedBy: string | null;
+  recordedBy: string;
+  recordedAt: Date;
+}
+
 export interface CorporateInvoice {
   id: string;
   companyName: string;

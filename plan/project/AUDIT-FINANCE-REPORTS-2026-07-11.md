@@ -24,10 +24,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
-| **SEV-2 (major)** | 1 | 3 | **4** |
+| **SEV-2 (major)** | 0 | 4 | **4** |
 | **SEV-3 (minor)** | 5 | 1 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **10** | **4** | **14** |
+| **Total** | **9** | **5** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -129,7 +129,7 @@ Keep the booking-preference view if useful, but label it as such. Split
 
 ---
 
-### FIN-03 — Refunds are not modeled anywhere · `Open`
+### FIN-03 — Refunds are not modeled anywhere · `Fixed 2026-07-11`
 
 **Where:**
 - `shared/types/index.ts` (no refund type; payments have no sign/type convention)
