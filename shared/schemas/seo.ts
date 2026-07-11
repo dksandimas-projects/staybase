@@ -21,8 +21,9 @@ export const SeoPublishSchema = z.object({
 export type SeoPublishValues = z.infer<typeof SeoPublishSchema>;
 
 export interface SeoSettings {
-  draft?: Partial<Pick<SeoPublishValues, "metaDescription" | "priceRange" | "ogImage" | "twitterHandle">>;
+  draft?: Partial<Pick<SeoPublishValues, "metaDescription" | "priceRange" | "ogImage">>;
   published?: SeoPublishValues;
+  sourceChangesPending?: boolean;
   publishedAt?: unknown;
   publishedBy?: string;
 }

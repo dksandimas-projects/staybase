@@ -85,13 +85,14 @@ describe("Phase 11.6 Batch 12 — Rewards tab is wired to settings/rewardsConfig
       expect(settingsSrc).toMatch(/setPointsRedemptionRate\(/);
     });
 
-    it("renders the program name + tagline inputs", () => {
-      expect(settingsSrc).toMatch(/setRewardsName\(/);
-      expect(settingsSrc).toMatch(/setRewardsTagline\(/);
+    it("does not duplicate deploy-time identity or Website Content marketing copy", () => {
+      expect(settingsSrc).not.toMatch(/setRewardsName\(/);
+      expect(settingsSrc).not.toMatch(/setRewardsTagline\(/);
+      expect(settingsSrc).not.toMatch(/Program Display Name|Program Tagline/);
     });
 
-    it("uses the dynamic program name in the tab heading instead of a hard-coded 'Spark Rewards Modifiers'", () => {
-      expect(settingsSrc).toMatch(/\{rewardsName\}\s+Modifiers/);
+    it("uses the canonical deploy-time program name in the tab heading", () => {
+      expect(settingsSrc).toMatch(/\{config\.rewardsName\}\s+Modifiers/);
       expect(settingsSrc).not.toMatch(/>Spark Rewards Modifiers</);
     });
   });
@@ -104,21 +105,21 @@ describe("Phase 11.6 Batch 12 — Rewards tab is wired to settings/rewardsConfig
       // the snapshot value once the component mounted with the default
       // useState.
       const effectMatch = settingsSrc.match(
-        /useEffect\(\s*\(\)\s*=>\s*\{[\s\S]*?setRewardsName\([\s\S]*?\}\s*,\s*\[[^\]]*rewardsConfig[^\]]*\]\s*\)/
+        /useEffect\(\s*\(\)\s*=>\s*\{[\s\S]*?setPointsRedemptionRate\([\s\S]*?\}\s*,\s*\[[^\]]*rewardsConfig[^\]]*\]\s*\)/
       );
-      expect(effectMatch, "expected a useEffect with rewardsName setter and rewardsConfig dep").toBeTruthy();
+      expect(effectMatch, "expected a useEffect with rewards field setters and rewardsConfig dep").toBeTruthy();
     });
 
-    it("the sync useEffect seeds pointsPerBooking, pointsRedemptionRate, rewardsName, and rewardsTagline from the snapshot", () => {
+    it("the sync useEffect seeds operational rewards fields from the snapshot", () => {
       const effectMatch = settingsSrc.match(
-        /useEffect\(\s*\(\)\s*=>\s*\{[\s\S]*?setRewardsTagline\([\s\S]*?\}\s*,\s*\[[^\]]*rewardsConfig[^\]]*\]\s*\)/
+        /useEffect\(\s*\(\)\s*=>\s*\{[\s\S]*?setPointsRedemptionRate\([\s\S]*?\}\s*,\s*\[[^\]]*rewardsConfig[^\]]*\]\s*\)/
       );
       expect(effectMatch).toBeTruthy();
       const body = effectMatch![0];
       expect(body).toMatch(/setPointsPerBooking\(/);
       expect(body).toMatch(/setPointsRedemptionRate\(/);
-      expect(body).toMatch(/setRewardsName\(/);
-      expect(body).toMatch(/setRewardsTagline\(/);
+      expect(body).not.toMatch(/setRewardsName\(/);
+      expect(body).not.toMatch(/setRewardsTagline\(/);
     });
   });
 
@@ -134,14 +135,14 @@ describe("Phase 11.6 Batch 12 — Rewards tab is wired to settings/rewardsConfig
       expect(body).toMatch(/pointsRedemptionRate\s*:/);
     });
 
-    it("posts rewardsName and rewardsTagline to the rewardsConfig doc", () => {
+    it("does not post duplicated identity or marketing fields to rewardsConfig", () => {
       const handleMatch = settingsSrc.match(
         /const\s+handleSaveRewards\s*=\s*async\s*\([\s\S]*?\}\s*;/
       );
       expect(handleMatch).toBeTruthy();
       const body = handleMatch![0];
-      expect(body).toMatch(/rewardsName\s*:/);
-      expect(body).toMatch(/rewardsTagline\s*:/);
+      expect(body).not.toMatch(/rewardsName\s*:/);
+      expect(body).not.toMatch(/rewardsTagline\s*:/);
     });
   });
 

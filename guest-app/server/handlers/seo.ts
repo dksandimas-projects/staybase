@@ -25,8 +25,7 @@ export async function handlePublishSeo(req: VercelRequest, res: VercelResponse) 
     draft: {
       metaDescription: parsed.data.metaDescription,
       priceRange: parsed.data.priceRange,
-      ogImage: parsed.data.ogImage,
-      twitterHandle: parsed.data.twitterHandle
+      ogImage: parsed.data.ogImage
     },
     published: parsed.data,
     publishedAt: FieldValue.serverTimestamp(),
@@ -43,6 +42,8 @@ export async function handlePublishSeo(req: VercelRequest, res: VercelResponse) 
       error: "The SEO snapshot was saved, but the website rebuild could not be started. Please try publishing again."
     });
   }
+
+  await adminDb.doc("settings/seo").set({ sourceChangesPending: false }, { merge: true });
 
   return res.status(202).json({
     success: true,
