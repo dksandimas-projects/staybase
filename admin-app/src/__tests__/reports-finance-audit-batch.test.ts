@@ -83,6 +83,18 @@ describe("ReportsPage finance-audit wiring", () => {
   it("Fix #4 — revenue/billed side includes payment-confirmed bookings", () => {
     expect(reports).toMatch(/b\.status === "payment-confirmed" \|\| b\.status === "confirmed"/);
   });
+
+  it("FR-05 — payment/charge listeners are stable (not re-subscribed on booking changes)", () => {
+    // Listeners store raw rows and no longer depend on `bookings`, so they
+    // stay subscribed once instead of re-reading Firestore on every booking edit.
+    expect(reports).toMatch(/setRawPayments\(snapshot\.docs\.map/);
+    expect(reports).toMatch(/setRawCharges\(snapshot\.docs\.map/);
+    expect(reports).not.toMatch(/\}, \[bookings, toast\]\);/);
+    // Booking display fields are joined in memory instead.
+    expect(reports).toMatch(/const bookingDisplayById = useMemo/);
+    expect(reports).toMatch(/const payments = useMemo<ReportPayment\[\]>/);
+    expect(reports).toMatch(/const charges = useMemo<ReportCharge\[\]>/);
+  });
 });
 
 describe("BookingsPage onsite tender wiring", () => {

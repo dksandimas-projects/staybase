@@ -60,6 +60,11 @@ interface ReportPayment {
   recordedAt: Date | null;
 }
 
+// The ledger rows as stored in Firestore, before the booking-derived display
+// fields (bookingRef / roomNumber / guestName) are joined in.
+type RawReportCharge = Omit<ReportCharge, "bookingRef" | "roomNumber">;
+type RawReportPayment = Omit<ReportPayment, "bookingRef" | "roomNumber" | "guestName">;
+
 interface ReceivableRow {
   bookingId: string;
   bookingRef: string;
@@ -199,8 +204,13 @@ export function ReportsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isFullBackupConfirmOpen, setFullBackupConfirmOpen] = useState(false);
   const [isFullBackupExporting, setFullBackupExporting] = useState(false);
-  const [charges, setCharges] = useState<ReportCharge[]>([]);
-  const [payments, setPayments] = useState<ReportPayment[]>([]);
+  // Raw ledger rows straight from Firestore (no booking-derived fields). The
+  // guest name / ref / room are joined in a memo below so these listeners can
+  // stay subscribed once instead of tearing down and re-reading every payment
+  // and charge each time any booking changes (FR-05 — avoids needless
+  // pay-per-read Firestore traffic).
+  const [rawCharges, setRawCharges] = useState<RawReportCharge[]>([]);
+  const [rawPayments, setRawPayments] = useState<RawReportPayment[]>([]);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
@@ -208,15 +218,12 @@ export function ReportsPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
-      setCharges(snapshot.docs.map((chargeDoc) => {
+      setRawCharges(snapshot.docs.map((chargeDoc) => {
         const data = chargeDoc.data();
         const bookingId = chargeDoc.ref.parent.parent?.id || "";
-        const booking = bookings.find((item) => item.id === bookingId);
         return {
           id: chargeDoc.id,
           bookingId,
-          bookingRef: booking?.bookingRef || bookingId,
-          roomNumber: booking?.roomNumber || "",
           label: String(data.label || "Incidental charge"),
           amount: Number(data.amount || 0),
           category: String(data.category || "other"),
@@ -231,7 +238,7 @@ export function ReportsPage() {
       toast.error("Could not load incidental revenue", "The other reports remain available. Refresh to try again.");
     });
     return unsubscribe;
-  }, [bookings, toast]);
+  }, [toast]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "corporateInvoices"), (snapshot) => {
@@ -259,17 +266,13 @@ export function ReportsPage() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "payments"), (snapshot) => {
-      setPayments(snapshot.docs.map((paymentDoc) => {
+      setRawPayments(snapshot.docs.map((paymentDoc) => {
         const data = paymentDoc.data();
         const bookingId = paymentDoc.ref.parent.parent?.id || "";
-        const booking = bookings.find((item) => item.id === bookingId);
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
           bookingId,
-          bookingRef: booking?.bookingRef || bookingId,
-          roomNumber: booking?.roomNumber || "",
-          guestName: booking?.guestName || "",
           amount: Number(data.amount || 0),
           method: String(data.method || "unknown"),
           note: String(data.note || ""),
@@ -284,7 +287,7 @@ export function ReportsPage() {
       toast.error("Could not load collections", "Billed revenue remains available. Refresh to try again.");
     });
     return unsubscribe;
-  }, [bookings, toast]);
+  }, [toast]);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -302,6 +305,46 @@ export function ReportsPage() {
     );
     return unsubscribe;
   }, []);
+
+  // Join booking-derived display fields (ref / room / guest) onto the raw
+  // ledger rows in memory. This keeps the payments/charges listeners above
+  // stable while the enriched `payments` / `charges` arrays consumed by the
+  // rest of the page still update whenever either the ledger or the bookings
+  // change — without re-reading Firestore (FR-05).
+  const bookingDisplayById = useMemo(() => {
+    const map = new Map<string, { bookingRef: string; roomNumber: string; guestName: string }>();
+    bookings.forEach((b) => map.set(b.id, {
+      bookingRef: b.bookingRef || b.id,
+      roomNumber: b.roomNumber || "",
+      guestName: b.guestName || ""
+    }));
+    return map;
+  }, [bookings]);
+
+  const charges = useMemo<ReportCharge[]>(() =>
+    rawCharges.map((charge) => {
+      const display = bookingDisplayById.get(charge.bookingId);
+      return {
+        ...charge,
+        bookingRef: display?.bookingRef || charge.bookingId,
+        roomNumber: display?.roomNumber || ""
+      };
+    }),
+    [rawCharges, bookingDisplayById]
+  );
+
+  const payments = useMemo<ReportPayment[]>(() =>
+    rawPayments.map((payment) => {
+      const display = bookingDisplayById.get(payment.bookingId);
+      return {
+        ...payment,
+        bookingRef: display?.bookingRef || payment.bookingId,
+        roomNumber: display?.roomNumber || "",
+        guestName: display?.guestName || ""
+      };
+    }),
+    [rawPayments, bookingDisplayById]
+  );
 
   const chartColors = [
     config.colors.primary,
