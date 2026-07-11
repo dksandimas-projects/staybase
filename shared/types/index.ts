@@ -261,6 +261,19 @@ export interface IncidentalCharge {
   voidOf: string | null;
 }
 
+export interface CorporateInvoice {
+  id: string;
+  companyName: string;
+  bookingIds: string[];
+  bookingRefs: string[];
+  amount: number;
+  status: "issued" | "paid";
+  issuedAt: Date;
+  issuedBy: string;
+  paidAt: Date | null;
+  paidBy: string | null;
+}
+
 export type IntercomSender = "guest" | "front-desk";
 
 export interface IntercomMessage {

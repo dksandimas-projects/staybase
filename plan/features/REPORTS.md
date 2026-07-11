@@ -73,6 +73,29 @@ Occupancy and booking patterns. Not revenue-focused.
 
 Consolidated revenue across all payment streams: room bookings, breakfast add-ons, Spark Essentials store orders, and incidental folio charges. This is the primary financial report for the hotel owner.
 
+### Collections Reconciliation *(FIN-01 + FIN-02 shipped 2026-07-11)*
+
+- [x] Subscribe to the append-only `bookings/{id}/payments` collection group and filter by `recordedAt` for the selected period.
+- [x] Show charge-inclusive **Billed**, actual **Collected**, **Outstanding**, and **Over-collected** totals.
+- [x] Group collections by calendar day and `recordedBy` staff UID.
+- [x] Render a searchable payment ledger with booking, guest/room, method, staff, and amount.
+- [x] Drive the payment-method pie and totals from actual payment entries rather than `booking.paymentMethod` preferences.
+- [x] Show delivered Add-to-Bill orders with an unsettled booking folio as **Add to Bill — Uncollected**; settled folios are excluded from that warning slice.
+- [x] Export date-ranged Collections CSV and a Collections sheet in Sales XLSX.
+- [x] Include FIN-14 incidental charge reversals in the billed side of reconciliation.
+
+### Receivables & Aging *(FIN-04 shipped 2026-07-11)*
+
+- [x] Show all active and checked-out bookings whose full folio balance remains unpaid.
+- [x] Full folio includes booking total, net incidental charges, and delivered billed-to-room store orders, less actual payments.
+- [x] Age checked-out balances into Current, 1–30, 31–60, and 60+ day buckets.
+- [x] Separate total, overdue, corporate, and Add-to-Bill receivable exposure.
+- [x] Group corporate receivables by `companyName`; missing names appear under an explicit unassigned corporate account.
+- [x] Issue minimal corporate invoices covering the account's currently outstanding booking refs and amount; persist issuer/date.
+- [x] Mark corporate invoices paid with `paidAt` / `paidBy`; deletion is prohibited and actual cash still requires a payment-ledger entry.
+- [x] Search by booking ref, guest, room, or company.
+- [x] Export an all-time Receivables CSV and Receivables sheet in Sales XLSX.
+
 ### UI Checklist
 
 #### Summary Cards (top of tab)
@@ -87,7 +110,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store / Incidentals
 - [ ] **Revenue trend line** — total combined revenue per month over the selected period
 - [ ] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
-- [ ] **Payment method breakdown** — pie chart across all streams (GCash, Pay at Hotel, CoD, Add to Bill) — combined from bookings + store orders
+- [x] **Payment method breakdown** — pie chart by amount from actual payment-ledger entries, plus a separately labeled uncollected Add-to-Bill slice
 
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
