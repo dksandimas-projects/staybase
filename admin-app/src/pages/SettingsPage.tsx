@@ -31,8 +31,8 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
-type SettingsSaveKey = "hotel" | "branding" | "website" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
+type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
+type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
 const VALID_TAB_IDS: TabId[] = [
@@ -41,6 +41,7 @@ const VALID_TAB_IDS: TabId[] = [
   "roomtypes",
   "branding",
   "website",
+  "seo",
   "rewards",
   "breakfast",
   "store",
@@ -1074,6 +1075,7 @@ export function SettingsPage() {
     rewardsConfig,
     breakfastConfig,
     storeConfig,
+    seoSettings,
     updateSettings,
     roomTypes,
     addRoomType,
@@ -1121,7 +1123,8 @@ export function SettingsPage() {
   const runSettingsSave = async (
     key: SettingsSaveKey,
     toastTitle: string,
-    action: () => Promise<boolean>
+    action: () => Promise<boolean>,
+    successMessage = "Changes saved and are live now."
   ) => {
     const existingTimer = saveStatusTimersRef.current[key];
     if (existingTimer) clearTimeout(existingTimer);
@@ -1131,7 +1134,7 @@ export function SettingsPage() {
       const success = await action();
       if (success) {
         setSaveStatuses((prev) => ({ ...prev, [key]: "saved" }));
-        toast.success(toastTitle, "Changes saved and are live now.");
+        toast.success(toastTitle, successMessage);
         saveStatusTimersRef.current[key] = setTimeout(() => {
           setSaveStatuses((prev) => ({ ...prev, [key]: "idle" }));
         }, 3500);
@@ -1222,6 +1225,13 @@ export function SettingsPage() {
   const [missionStatement, setMissionStatement] = useState(hotelConfig.missionStatement);
   const [visionStatement, setVisionStatement] = useState(hotelConfig.visionStatement);
   const [hotelStory, setHotelStory] = useState(hotelConfig.hotelStory);
+  const [seoMetaDescription, setSeoMetaDescription] = useState(seoSettings.draft?.metaDescription || config.metaDescription);
+  const [seoPriceRange, setSeoPriceRange] = useState(seoSettings.draft?.priceRange || config.priceRange);
+  const [seoOgImage, setSeoOgImage] = useState(
+    seoSettings.draft?.ogImage || `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`
+  );
+  const [seoTwitterHandle, setSeoTwitterHandle] = useState(seoSettings.draft?.twitterHandle || config.twitterHandle);
+  const [isPublishingSeo, setIsPublishingSeo] = useState(false);
   // Phase 11.8 PR 3 — the 6 hotel contact details become admin-
   // editable runtime overrides. Each falls back to the deploy-time
   // `hotel.config.ts` value via `pickString` in the public hook
@@ -1559,6 +1569,12 @@ export function SettingsPage() {
     setDpoEmail(hotelConfig.dpoEmail || "");
     setFacebookUrl(hotelConfig.facebookUrl || "");
     setInstagramUrl(hotelConfig.instagramUrl || "");
+    setSeoMetaDescription(seoSettings.draft?.metaDescription || config.metaDescription);
+    setSeoPriceRange(seoSettings.draft?.priceRange || config.priceRange);
+    setSeoOgImage(
+      seoSettings.draft?.ogImage || `https://${config.domain}/${config.ogImage.replace(/^\/+/, "")}`
+    );
+    setSeoTwitterHandle(seoSettings.draft?.twitterHandle || config.twitterHandle);
 
     // Safely format address: if it's a seeded object, convert to single-line string.
     let addrStr = "";
@@ -1571,7 +1587,7 @@ export function SettingsPage() {
       }
     }
     setAddress(addrStr);
-  }, [storeConfig, hotelConfig, websiteContent, rewardsConfig]);
+  }, [storeConfig, hotelConfig, websiteContent, rewardsConfig, seoSettings]);
 
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
@@ -1592,6 +1608,63 @@ export function SettingsPage() {
       visionStatement,
       hotelStory
     }));
+  };
+
+  const seoDraft = () => ({
+    metaDescription: seoMetaDescription.trim(),
+    priceRange: seoPriceRange.trim(),
+    ogImage: seoOgImage.trim(),
+    twitterHandle: seoTwitterHandle.trim()
+  });
+
+  const handleSaveSeoDraft = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runSettingsSave(
+      "seo",
+      "SEO draft saved",
+      () => updateSettings("seo", { draft: seoDraft() }),
+      "Draft saved. Publish when you are ready to rebuild the public website."
+    );
+  };
+
+  const handlePublishSeo = async () => {
+    if (isPublishingSeo) return;
+    setIsPublishingSeo(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Your session has expired. Sign in again and retry.");
+
+      const addressValue = typeof hotelConfig.address === "string"
+        ? hotelConfig.address
+        : [hotelConfig.address?.street, hotelConfig.address?.city, hotelConfig.address?.region, hotelConfig.address?.postalCode]
+            .filter(Boolean)
+            .join(", ");
+      const payload = {
+        ...seoDraft(),
+        address: addressValue || `${config.address.street}, ${config.address.city}, ${config.address.region}, ${config.address.postalCode}`,
+        frontDeskPhone: hotelConfig.frontDeskPhone || config.frontDeskPhone,
+        facebookUrl: hotelConfig.facebookUrl || config.facebookUrl,
+        instagramUrl: hotelConfig.instagramUrl || config.instagramUrl,
+        checkInTime: hotelConfig.checkInTime || config.checkInTime,
+        checkOutTime: hotelConfig.checkOutTime || config.checkOutTime
+      };
+
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/publish-seo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || "SEO publishing failed.");
+      toast.success("SEO publish started", "The public website is rebuilding with the published search metadata.");
+    } catch (error) {
+      toast.error("Could not publish SEO", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      setIsPublishingSeo(false);
+    }
   };
 
   // The Website Content tab is a stub while the list-based content
@@ -2115,6 +2188,7 @@ export function SettingsPage() {
     { id: "roomtypes" as const, label: "Room Types", icon: BedDouble },
     { id: "branding" as const, label: "Branding", icon: Palette },
     { id: "website" as const, label: "Website Content", icon: Globe },
+    { id: "seo" as const, label: "SEO & Search", icon: Eye },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
     { id: "store" as const, label: "In-Room Store", icon: ShoppingBag },
@@ -3257,6 +3331,97 @@ export function SettingsPage() {
 
               <SaveActionFooter label="Save Content" status={getSaveStatus("website")} />
             </form>
+          )}
+
+          {activeTab === "seo" && (
+            isAdmin ? (
+              <form onSubmit={handleSaveSeoDraft} className="space-y-6 text-xs">
+                <div>
+                  <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">SEO &amp; Search</h3>
+                  <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+                    Save a draft here, then publish to rebuild the crawler-facing HTML, social metadata, and hotel schema.
+                  </p>
+                </div>
+
+                <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-5">
+                  <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                    Default search description
+                    <textarea
+                      required
+                      minLength={50}
+                      maxLength={160}
+                      rows={3}
+                      value={seoMetaDescription}
+                      onChange={(event) => setSeoMetaDescription(event.target.value)}
+                      className="w-full rounded-lg border border-gray-250 bg-white p-3 text-sm font-medium focus:border-primary"
+                    />
+                    <span className="text-[10px] font-normal text-gray-500">{seoMetaDescription.length}/160 characters. Aim for 120–160.</span>
+                  </label>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                      Price category
+                      <input
+                        required
+                        type="text"
+                        maxLength={20}
+                        value={seoPriceRange}
+                        onChange={(event) => setSeoPriceRange(event.target.value)}
+                        placeholder="₱₱"
+                        className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                      X handle
+                      <input
+                        type="text"
+                        maxLength={50}
+                        value={seoTwitterHandle}
+                        onChange={(event) => setSeoTwitterHandle(event.target.value)}
+                        placeholder="@hotelhandle"
+                        className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-2 font-semibold text-gray-700">
+                    Social preview image URL
+                    <input
+                      type="url"
+                      value={seoOgImage}
+                      onChange={(event) => setSeoOgImage(event.target.value)}
+                      placeholder={`https://${config.domain}/og-image.png`}
+                      className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                    />
+                    <span className="text-[10px] font-normal text-gray-500">Use a public HTTPS image sized 1200×630.</span>
+                  </label>
+                </div>
+
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-[11px] leading-relaxed text-blue-900">
+                  <p className="font-bold">Operational details come from Hotel Settings</p>
+                  <p className="mt-1">
+                    Publishing snapshots the current address, front-desk phone, Facebook, Instagram, and check-in/out times. Update Hotel Settings first if any of those are incorrect.
+                  </p>
+                  <p className="mt-2 text-blue-700">
+                    {seoSettings.published ? "A published SEO snapshot exists." : "No SEO snapshot has been published yet; deployments use hotel.config.ts defaults."}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-gray-150 pt-4 sm:flex-row sm:items-center sm:justify-end">
+                  <SaveActionButton label="Save draft" status={getSaveStatus("seo")} />
+                  <button
+                    type="button"
+                    disabled={isPublishingSeo}
+                    onClick={() => void handlePublishSeo()}
+                    className="min-h-[44px] rounded-lg bg-gray-900 px-6 text-xs font-semibold text-white shadow-sm transition hover:bg-gray-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPublishingSeo ? "Starting rebuild..." : "Publish SEO changes"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 text-sm text-gray-600">Only admins can manage SEO publishing.</div>
+            )
           )}
 
           {/* TAB 3: REWARDS CONFIG — admin-only (per W3.2) */}

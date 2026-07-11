@@ -23,6 +23,9 @@ Guest app only. The admin app (`admin.sparkinnbohol.com`) must stay **fully `noi
 | Build-time meta transform from config | `guest-app/vite.config.ts` (`indexHtmlTransformPlugin`) | ✅ substitutes `brandName` / `domain` / `ogImage` |
 | Per-route dynamic meta (title, desc, canonical, robots, OG, Twitter) | `guest-app/src/components/PageMeta.tsx` + `App.tsx` `WithMeta` | ✅ client-side (`useEffect`) |
 | Config knobs (`domain`, `ogImage`, `address`, `locale`, social URLs) | `hotel.config.ts` | ✅ present |
+| Validated SEO editor + controlled publish | `admin-app` Settings → SEO & Search | ✅ runtime draft + build-time published snapshot |
+
+Published SEO values use a hybrid source model: stable white-label identity and domain fields stay in `hotel.config.ts`; SEO copy and operational hotel details are stored as a validated `settings/seo.published` snapshot. Publishing is admin-only and triggers a guest deployment through the existing catch-all API. The Vite build reads the snapshot through Firestore REST and falls back to config when it is absent or unavailable. Raw JSON-LD is never directly editable.
 
 **Why this is not enough:** `PageMeta` mutates the DOM with JavaScript. Social scrapers (Facebook, Messenger, WhatsApp, Viber) and Bing/Yahoo **do not execute JS** — they read the raw `index.html` only. Result: every shared URL yields the **same generic homepage card**, and the per-route meta is never seen. Google renders JS and largely copes, but relies on the missing sitemap/robots to discover routes efficiently.
 
