@@ -42,6 +42,7 @@ interface ReportCharge {
 
 interface ReportPayment {
   id: string;
+  type: "payment" | "refund";
   bookingId: string;
   bookingRef: string;
   roomNumber: string;
@@ -49,6 +50,8 @@ interface ReportPayment {
   amount: number;
   method: string;
   note: string;
+  reason: string | null;
+  approvedBy: string | null;
   recordedBy: string;
   recordedAt: Date | null;
 }
@@ -209,6 +212,7 @@ export function ReportsPage() {
         const booking = bookings.find((item) => item.id === bookingId);
         return {
           id: paymentDoc.id,
+          type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
           bookingId,
           bookingRef: booking?.bookingRef || bookingId,
           roomNumber: booking?.roomNumber || "",
@@ -216,6 +220,8 @@ export function ReportsPage() {
           amount: Number(data.amount || 0),
           method: String(data.method || "unknown"),
           note: String(data.note || ""),
+          reason: data.reason ? String(data.reason) : null,
+          approvedBy: data.approvedBy ? String(data.approvedBy) : null,
           recordedBy: String(data.recordedBy || "staff"),
           recordedAt: toDate(data.recordedAt)
         };
@@ -350,8 +356,37 @@ export function ReportsPage() {
     () => rangePayments.reduce((sum, payment) => sum + payment.amount, 0),
     [rangePayments]
   );
+  const grossCollectionsTotal = useMemo(
+    () => rangePayments.filter((payment) => payment.type === "payment").reduce((sum, payment) => sum + payment.amount, 0),
+    [rangePayments]
+  );
+  const refundsTotal = useMemo(
+    () => Math.abs(rangePayments.filter((payment) => payment.type === "refund").reduce((sum, payment) => sum + payment.amount, 0)),
+    [rangePayments]
+  );
   const outstandingTotal = Math.max(billedTotal - collectedTotal, 0);
   const overCollectedTotal = Math.max(collectedTotal - billedTotal, 0);
+
+  const cancelledWithCollections = useMemo(() => {
+    return bookings
+      .filter((booking) => booking.status === "cancelled")
+      .map((booking) => {
+        const entries = payments.filter((payment) => payment.bookingId === booking.id);
+        const grossPaid = entries.filter((entry) => entry.type === "payment").reduce((sum, entry) => sum + entry.amount, 0);
+        const refunded = Math.abs(entries.filter((entry) => entry.type === "refund").reduce((sum, entry) => sum + entry.amount, 0));
+        return {
+          bookingId: booking.id,
+          bookingRef: booking.bookingRef,
+          guestName: booking.guestName,
+          roomNumber: booking.roomNumber,
+          grossPaid,
+          refunded,
+          retained: Math.max(grossPaid - refunded, 0)
+        };
+      })
+      .filter((row) => row.grossPaid > 0)
+      .sort((a, b) => b.retained - a.retained);
+  }, [bookings, payments]);
 
   const collectionsByDay = useMemo(() => {
     const rows = new Map<string, { date: string; count: number; total: number }>();
@@ -567,6 +602,7 @@ export function ReportsPage() {
     });
 
     const rows = Object.values(counts)
+      .filter((entry) => entry.total > 0)
       .map(c => ({
         name: PAYMENT_LABELS[c.method] || c.method,
         method: c.method,
@@ -731,16 +767,18 @@ export function ReportsPage() {
 
   const handleExportCollectionsCSV = () => {
     const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const headers = ["Date", "Booking Ref", "Guest", "Room", "Amount", "Method", "Recorded By", "Note"];
+    const headers = ["Date", "Booking Ref", "Guest", "Room", "Type", "Amount", "Method", "Recorded By", "Approved By", "Reason / Note"];
     const rows = filteredPayments.map((payment) => [
       payment.recordedAt?.toISOString() || "",
       payment.bookingRef,
       payment.guestName,
       payment.roomNumber,
+      payment.type,
       payment.amount,
       PAYMENT_LABELS[payment.method] || payment.method,
       payment.recordedBy,
-      payment.note
+      payment.approvedBy || "",
+      payment.reason || payment.note
     ]);
     const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
     triggerDownload(
@@ -801,9 +839,12 @@ export function ReportsPage() {
             const payment = paymentDoc.data();
             paymentRows.push({
               "Booking Ref": b.bookingRef,
+              Type: payment.type || (Number(payment.amount || 0) < 0 ? "refund" : "payment"),
               Amount: payment.amount || 0,
               Method: payment.method || "",
               Note: payment.note || "",
+              Reason: payment.reason || "",
+              "Approved By": payment.approvedBy || "",
               "Recorded By": payment.recordedBy || "",
               "Recorded At": toDate(payment.recordedAt)?.toISOString() || ""
             });
@@ -1010,6 +1051,8 @@ export function ReportsPage() {
       ["Incidental Revenue", incidentalRevenue],
       ["Billed Total (charge-inclusive)", billedTotal],
       ["Collected Total (actual payments)", collectedTotal],
+      ["Gross Collections", grossCollectionsTotal],
+      ["Refunds", refundsTotal],
       ["Outstanding", outstandingTotal],
       ["Over-collected", overCollectedTotal],
       ["All-time Receivables", receivablesTotal],
@@ -1072,16 +1115,18 @@ export function ReportsPage() {
       charge.voidOf || ""
     ]);
 
-    const collectionHeaders = ["Date", "Booking Ref", "Guest", "Room", "Amount", "Method", "Recorded By", "Note"];
+    const collectionHeaders = ["Date", "Booking Ref", "Guest", "Room", "Type", "Amount", "Method", "Recorded By", "Approved By", "Reason / Note"];
     const collectionRows = filteredPayments.map((payment) => [
       payment.recordedAt?.toISOString() || "",
       payment.bookingRef,
       payment.guestName,
       payment.roomNumber,
+      payment.type,
       payment.amount,
       PAYMENT_LABELS[payment.method] || payment.method,
       payment.recordedBy,
-      payment.note
+      payment.approvedBy || "",
+      payment.reason || payment.note
     ]);
 
     const receivableHeaders = ["Booking Ref", "Guest", "Room", "Company", "Status", "Check-Out", "Age Days", "Age Bucket", "Billed", "Collected", "Outstanding", "Uncollected Add to Bill"];
@@ -1283,12 +1328,15 @@ export function ReportsPage() {
           incidentalRevenue={incidentalRevenue}
           billedTotal={billedTotal}
           collectedTotal={collectedTotal}
+          grossCollectionsTotal={grossCollectionsTotal}
+          refundsTotal={refundsTotal}
           outstandingTotal={outstandingTotal}
           overCollectedTotal={overCollectedTotal}
           collectionsByDay={collectionsByDay}
           collectionsByStaff={collectionsByStaff}
           filteredPayments={filteredPayments}
           onExportCollectionsCSV={handleExportCollectionsCSV}
+          cancelledWithCollections={cancelledWithCollections}
           receivablesTotal={receivablesTotal}
           overdueReceivablesTotal={overdueReceivablesTotal}
           corporateReceivablesTotal={corporateReceivablesTotal}
@@ -1569,12 +1617,15 @@ function SalesTab(props: {
   incidentalRevenue: number;
   billedTotal: number;
   collectedTotal: number;
+  grossCollectionsTotal: number;
+  refundsTotal: number;
   outstandingTotal: number;
   overCollectedTotal: number;
   collectionsByDay: Array<{ date: string; count: number; total: number }>;
   collectionsByStaff: Array<{ staff: string; count: number; total: number }>;
   filteredPayments: ReportPayment[];
   onExportCollectionsCSV: () => void;
+  cancelledWithCollections: Array<{ bookingId: string; bookingRef: string; guestName: string; roomNumber: string; grossPaid: number; refunded: number; retained: number }>;
   receivablesTotal: number;
   overdueReceivablesTotal: number;
   corporateReceivablesTotal: number;
@@ -1612,8 +1663,8 @@ function SalesTab(props: {
 }) {
   const {
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
-    billedTotal, collectedTotal, outstandingTotal, overCollectedTotal, collectionsByDay, collectionsByStaff,
-    filteredPayments, onExportCollectionsCSV,
+    billedTotal, collectedTotal, grossCollectionsTotal, refundsTotal, outstandingTotal, overCollectedTotal, collectionsByDay, collectionsByStaff,
+    filteredPayments, onExportCollectionsCSV, cancelledWithCollections,
     receivablesTotal, overdueReceivablesTotal, corporateReceivablesTotal, addToBillReceivablesTotal,
     receivablesByAge, corporateReceivables, filteredReceivables, onExportReceivablesCSV,
     corporateInvoices, invoiceAction, onIssueCorporateInvoice, onMarkCorporateInvoicePaid,
@@ -1687,16 +1738,26 @@ function SalesTab(props: {
           </button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <div className="rounded-lg bg-gray-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Billed</p>
             <p className="mt-1 text-xl font-heading text-gray-950">{formatPrice(billedTotal)}</p>
             <p className="mt-1 text-[10px] text-gray-500">Bookings + store + incidentals</p>
           </div>
           <div className="rounded-lg bg-emerald-50 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Collected</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Net Collected</p>
             <p className="mt-1 text-xl font-heading text-emerald-800">{formatPrice(collectedTotal)}</p>
             <p className="mt-1 text-[10px] text-emerald-700">Actual payment entries</p>
+          </div>
+          <div className="rounded-lg bg-emerald-50/60 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Gross Collections</p>
+            <p className="mt-1 text-xl font-heading text-emerald-800">{formatPrice(grossCollectionsTotal)}</p>
+            <p className="mt-1 text-[10px] text-emerald-700">Before refunds</p>
+          </div>
+          <div className="rounded-lg bg-rose-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">Refunds</p>
+            <p className="mt-1 text-xl font-heading text-rose-800">{formatPrice(refundsTotal)}</p>
+            <p className="mt-1 text-[10px] text-rose-700">Approved outflows</p>
           </div>
           <div className="rounded-lg bg-red-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-red-600">Outstanding</p>
@@ -1742,7 +1803,7 @@ function SalesTab(props: {
         <div className="overflow-x-auto rounded-lg border border-gray-150">
           <table className="min-w-full text-xs">
             <thead className="bg-gray-50 text-left">
-              <tr>{["Date", "Booking", "Guest / Room", "Method", "Staff", "Amount"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr>
+              <tr>{["Date", "Booking", "Guest / Room", "Type", "Method", "Staff", "Amount"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredPayments.slice(0, 50).map((payment) => (
@@ -1750,14 +1811,37 @@ function SalesTab(props: {
                   <td className="px-3 py-2 text-gray-600">{payment.recordedAt?.toISOString().slice(0, 10) || "—"}</td>
                   <td className="px-3 py-2 font-semibold text-gray-900">{payment.bookingRef}</td>
                   <td className="px-3 py-2 text-gray-600">{payment.guestName || "—"} · Room {payment.roomNumber || "—"}</td>
+                  <td className={`px-3 py-2 font-semibold capitalize ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{payment.type}</td>
                   <td className="px-3 py-2 text-gray-600">{PAYMENT_LABELS[payment.method] || payment.method}</td>
                   <td className="px-3 py-2 text-gray-600">{payment.recordedBy}</td>
-                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{formatPrice(payment.amount)}</td>
+                  <td className={`px-3 py-2 text-right font-bold ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{formatPrice(payment.amount)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {filteredPayments.length === 0 ? <p className="p-6 text-center text-xs text-gray-400">No collection entries match this range.</p> : null}
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Cancelled bookings with money collected</h3>
+          {cancelledWithCollections.length === 0 ? <p className="text-xs text-gray-400">No cancelled bookings have payment history.</p> : (
+            <div className="overflow-x-auto rounded-lg border border-gray-150">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50 text-left"><tr>{["Booking", "Guest / Room", "Gross Paid", "Refunded", "Still Retained"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {cancelledWithCollections.map((row) => (
+                    <tr key={row.bookingId}>
+                      <td className="px-3 py-2 font-semibold text-gray-900">{row.bookingRef}</td>
+                      <td className="px-3 py-2 text-gray-600">{row.guestName} · Room {row.roomNumber}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">{formatPrice(row.grossPaid)}</td>
+                      <td className="px-3 py-2 text-right text-red-600">{formatPrice(row.refunded)}</td>
+                      <td className={`px-3 py-2 text-right font-bold ${row.retained > 0 ? "text-amber-700" : "text-emerald-700"}`}>{formatPrice(row.retained)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </section>
 

@@ -52,6 +52,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - [ ] Payments list is read-only once saved — no editing, no deletion (audit trail)
   - [ ] When outstanding balance reaches ₱0 — show green "Fully Settled" badge
   - [ ] Walk-in bookings (Pay at Hotel, `status: "confirmed"`) — this panel is how staff confirms cash was received
+- [x] **Refund workflow (FIN-03)** — Admin-only form appends `type: "refund"` with a negative amount, required method/reason, `approvedBy`, and timestamp through authenticated `/api/bookings/add-refund`. Server transaction rejects refunds above the booking's current net collected amount. Refund entries are immutable and rendered in red in the drawer and receipt/payment ledger.
 - [x] Status action buttons in drawer — context-aware, show only valid next transitions
 - [x] Status transitions available per current status (see logic below)
 - [ ] Notes field in drawer — staff can add/edit internal notes, saved to booking
