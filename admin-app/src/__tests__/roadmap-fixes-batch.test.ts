@@ -10,7 +10,7 @@ describe("Roadmap fixes batch tests", () => {
     expect(reportsPageSrc).toMatch(/customStartDate/);
     expect(reportsPageSrc).toMatch(/customEndDate/);
     expect(reportsPageSrc).toMatch(/dateRange === "custom"/);
-    expect(reportsPageSrc).toMatch(/option value="custom"/);
+    expect(reportsPageSrc).toMatch(/"custom".*Custom|Custom.*"custom"/s);
     expect(reportsPageSrc).toMatch(/isRangeValid/);
     expect(reportsPageSrc).toMatch(/Start date cannot be after end date/);
   });

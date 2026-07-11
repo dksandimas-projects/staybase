@@ -15,7 +15,7 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
   TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet,
-  Calendar, Lock, CheckCircle2, Key, BarChart2
+  Calendar, Lock, CheckCircle2, Key, BarChart2, Printer, FileDown, FileText
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
@@ -1572,92 +1572,115 @@ export function ReportsPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="w-34 flex items-center gap-2">
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value)}
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
-              aria-label="Date range"
-            >
-              <option value="7">Last 7 Days</option>
-              <option value="30">Last 30 Days</option>
-              <option value="90">Last Quarter</option>
-              <option value="custom">Custom Range</option>
-            </select>
+        <div className="flex flex-col gap-3 items-end">
+
+          {/* ── Date range pill selector ── */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-xl border border-gray-200 bg-gray-50 p-1 gap-0.5 shadow-sm">
+              {(["1", "7", "30", "90", "custom"] as const).map((v) => {
+                const labels: Record<string, string> = {
+                  "1": "Today", "7": "7 Days", "30": "30 Days", "90": "Quarter", "custom": "Custom"
+                };
+                const isActive = dateRange === v;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setDateRange(v)}
+                    className={[
+                      "h-8 px-3.5 rounded-lg text-xs font-semibold transition-all duration-150",
+                      isActive
+                        ? "bg-white text-gray-900 shadow ring-1 ring-gray-200"
+                        : "text-gray-500 hover:text-gray-800 hover:bg-white/60"
+                    ].join(" ")}
+                    aria-pressed={isActive}
+                    aria-label={labels[v]}
+                  >
+                    {labels[v]}
+                  </button>
+                );
+              })}
+            </div>
+
+            {dateRange === "custom" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="h-9 rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs shadow-sm"
+                  aria-label="Start date"
+                />
+                <span className="text-xs text-gray-400 font-medium">→</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="h-9 rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs shadow-sm"
+                  aria-label="End date"
+                />
+                {!isRangeValid && (
+                  <span className="text-xs text-red-600 font-semibold">Invalid range</span>
+                )}
+              </div>
+            )}
           </div>
 
-          {dateRange === "custom" && (
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="min-h-[44px] rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
-                aria-label="Start date"
-              />
-              <span className="text-xs text-gray-500">to</span>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                className="min-h-[44px] rounded-lg border border-gray-250 bg-white py-2 px-3 text-xs"
-                aria-label="End date"
-              />
-              {!isRangeValid && (
-                <span className="text-xs text-red-650 font-medium">Invalid range</span>
-              )}
-            </div>
-          )}
-
-          <button
-            onClick={handleExportCSV}
-            className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-250 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 shadow-sm transition active:scale-95"
-          >
-            <Download size={14} />
-            Export CSV
-          </button>
-
-          <button
-            onClick={handlePrintReport}
-            className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-gray-250 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-700 shadow-sm transition active:scale-95"
-          >
-            <Download size={14} />
-            Print Report
-          </button>
-
-          {activeTab !== "daily-close" && (
+          {/* ── Action buttons ── */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={handleExportPDF}
-              disabled={isExportingPDF}
-              className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-750 disabled:opacity-60 text-xs font-semibold text-white shadow-sm transition active:scale-95 disabled:cursor-not-allowed"
+              onClick={handleExportCSV}
+              title="Export bookings as CSV"
+              className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-600 shadow-sm transition-all duration-150 active:scale-95"
             >
-              <Download size={14} />
-              {isExportingPDF ? "Generating PDF..." : "Export PDF"}
+              <Download size={13} />
+              CSV
             </button>
-          )}
 
-          {activeTab === "sales" && (
             <button
-              onClick={handleExportSalesXLSX}
-              className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition active:scale-95"
+              onClick={handlePrintReport}
+              title="Print report"
+              className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-xs font-semibold text-gray-600 shadow-sm transition-all duration-150 active:scale-95"
             >
-              <FileSpreadsheet size={14} />
-              Export Sales XLSX
+              <Printer size={13} />
+              Print
             </button>
-          )}
 
-          {currentUser?.role === "admin" && (
-            <button
-              onClick={() => setFullBackupConfirmOpen(true)}
-              disabled={isFullBackupExporting}
-              className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-semibold text-amber-800 shadow-sm transition active:scale-95"
-              title="Download a full backup of every booking, store order, breakfast order, and member — admin only."
-            >
-              <FileSpreadsheet size={14} />
-              {isFullBackupExporting ? "Preparing Backup..." : "Download Full Backup"}
-            </button>
-          )}
+            {activeTab !== "daily-close" && (
+              <button
+                onClick={handleExportPDF}
+                disabled={isExportingPDF}
+                title="Export as PDF"
+                className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg bg-gray-900 hover:bg-gray-700 disabled:opacity-50 text-xs font-semibold text-white shadow-sm transition-all duration-150 active:scale-95 disabled:cursor-not-allowed"
+              >
+                <FileDown size={13} />
+                {isExportingPDF ? "Exporting..." : "PDF"}
+              </button>
+            )}
+
+            {activeTab === "sales" && (
+              <button
+                onClick={handleExportSalesXLSX}
+                title="Export sales as Excel spreadsheet"
+                className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark text-xs font-semibold text-white shadow-sm transition-all duration-150 active:scale-95"
+              >
+                <FileSpreadsheet size={13} />
+                XLSX
+              </button>
+            )}
+
+            {currentUser?.role === "admin" && (
+              <button
+                onClick={() => setFullBackupConfirmOpen(true)}
+                disabled={isFullBackupExporting}
+                title="Download a full data backup — admin only"
+                className="h-9 px-4 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-xs font-semibold text-amber-800 shadow-sm transition-all duration-150 active:scale-95"
+              >
+                <FileText size={13} />
+                {isFullBackupExporting ? "Backing up..." : "Backup"}
+              </button>
+            )}
+          </div>
+        </div>
         </div>
       </header>
 
