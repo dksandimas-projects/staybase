@@ -187022,7 +187022,7 @@ var config = {
     icon: "ICON LOGO.png",
     wordmark: "TEXT LOGO.png"
   },
-  favicon: "ICON LOGO.png",
+  favicon: "favicon/favicon.ico",
   currency: "PHP",
   currencySymbol: "\u20B1",
   locale: "en-PH",
