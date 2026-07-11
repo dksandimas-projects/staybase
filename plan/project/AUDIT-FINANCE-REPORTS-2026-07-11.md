@@ -25,9 +25,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 4 | 0 | **4** |
-| **SEV-3 (minor)** | 5 | 0 | **5** |
+| **SEV-3 (minor)** | 6 | 0 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **13** | **0** | **13** |
+| **Total** | **14** | **0** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -76,7 +76,9 @@ exist in operations but are invisible to every report.
 5. FIN-06 (BIR/VAT decision — needs owner input, log in DECISIONS-FEATURES.md)
 6. FIN-07 + FIN-13 (daily close incl. drawer variance — build together;
    falls out of the FIN-01 collections work)
-7. FIN-08..FIN-12 (SEV-3/4 batch — export columns, recognition quirks, KPIs)
+7. FIN-14 (incidental charge ledger — before or with FIN-01, so the
+   "billed" side of the reconciliation is complete)
+8. FIN-08..FIN-12 (SEV-3/4 batch — export columns, recognition quirks, KPIs)
 
 ---
 
@@ -269,6 +271,37 @@ corrections are a new entry, not an edit.
 
 ---
 
+### FIN-14 — No incidental / ad-hoc charge ledger on the folio · `Open`
+
+**Where:**
+- `admin-app/src/pages/BookingsPage.tsx:1659` (`getBookingFolio` — folio = `booking.totalPrice` + add-to-bill store orders, nothing else)
+- `guest-app/server/handlers/bookings.ts:132` (`rateBreakdown.addOns` only ever holds the breakfast line — display breakdown, not an open ledger)
+
+The folio is a closed list: room + breakfast (locked at creation) plus
+delivered add-to-bill store orders. There is no mechanism to charge
+anything else — late checkout, early check-in fee, extra person/bed,
+damages, lost key, laundry. The only in-system workaround is abusing the
+store (a fake "Damage Fee" catalog item), which pollutes store revenue,
+top-selling-items, and inventory reporting; the realistic outcome is
+staff collecting incidentals outside the system entirely.
+
+**Impact:** the mirror image of the at-desk discount gap — there,
+billed > collected looked normal; here, collected > billed is invisible.
+Incidental income is understated or untracked, and once FIN-01/FIN-13
+land, every off-book incidental collection shows up as an unexplained
+cash *overage*.
+
+**Fix:** `bookings/{id}/charges` subcollection mirroring the payments
+pattern — `{ label, amount, category, note, addedBy, addedAt }`,
+append-only at the rules level (void = reversal entry, never delete),
+"Add charge" form in the drawer folio section, folio `grandTotal`
+extended to include it. Full wiring checklist (folio, receipts, reports,
+exports, FIN-01/03/04 integration):
+`plan/features/BOOKINGS-MANAGEMENT.md §Implementation Plan — Incidental
+Charges (Folio Charge Ledger)`.
+
+---
+
 ## SEV-4 — Nit / Polish
 
 ### FIN-09 — Revenue recognition quirks · `Open`
@@ -365,8 +398,9 @@ once and never updated.
 | 4 | **Discounts & adjustments report** — gross→net bridge, points liability | FIN-05 | S |
 | 5 | **BIR/VAT decision** logged in DECISIONS-FEATURES.md (+ fields if in scope) | FIN-06 | Decision + M if in scope |
 | 6 | **Daily Close view incl. drawer count + variance** | FIN-07, FIN-13 | S–M (after #1) |
-| 7 | **Export/table column alignment** — Collected/Outstanding/Discount/Voucher/Breakfast columns | FIN-08 | S |
-| 8 | **KPI pack** — ADR, RevPAR, revenue by room type, prior-period deltas, occupancy night-clipping | FIN-09..FIN-12 | S |
+| 7 | **Incidental charge ledger** — `bookings/{id}/charges` subcollection, drawer form, folio/receipt/report/export wiring | FIN-14 | M |
+| 8 | **Export/table column alignment** — Collected/Outstanding/Discount/Voucher/Breakfast columns | FIN-08 | S |
+| 9 | **KPI pack** — ADR, RevPAR, revenue by room type, prior-period deltas, occupancy night-clipping | FIN-09..FIN-12 | S |
 
 Out of scope by decision (see §Scope boundaries): expenses/P&L (external
 bookkeeping), night-audit day-locking (deferred at current scale).
