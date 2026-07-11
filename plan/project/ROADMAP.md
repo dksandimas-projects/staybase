@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 11, 2026 (Finance & Reports Audit added under Phase 12 — 12 findings FIN-01..FIN-12 from `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`: reports cover billed revenue only; collections/refunds/receivables invisible. Previous: Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
+> Last updated: July 11, 2026 (Finance & Reports Audit added under Phase 12 — 13 findings FIN-01..FIN-13 from `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`: reports cover billed revenue only; collections/refunds/receivables invisible; FIN-13 drawer variance added + expenses/P&L and day-locking recorded as scoped-out decisions. Previous: Phase 11.9 SEO & Open Graph — Q1/Q3/Q4 resolved; Fix 5 guest-facing price breakdown completed; Manual QA Audit 2026-07-09 low-effort fixes QA-03/06/07 and medium-effort fixes QA-01/02/05/08 completed; Added image preview modal to Phase 12; Shipped Dashboard unread intercom count & real-time audio notifications; Live Bug Reports 2026-07-09 queued — QA-09 through QA-19, including QR download failure, guest-name persistence, input field icon overlapping, and a full Room Transfer & Upgrade spec added to `plan/features/BOOKINGS-MANAGEMENT.md`; XS fixes shipped for QA-14, QA-19, QA-25, QA-26, admin noindex, Phase 11.9 Config/G3/G4/G5/G6, QA-09/QA-11/QA-16/QA-21, and image preview modal)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1085,12 +1085,17 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⬜ **FIN-06 — BIR/VAT scope decision** — no VAT fields, VAT-exempt tracking, or OR numbering anywhere; decide with owner and log in `plan/docs/DECISIONS-FEATURES.md` (+ fields if in scope)
 - ⬜ **FIN-07 — Daily Close view** — payments recorded today by method and `recordedBy` for drawer/GCash handover reconciliation (falls out of FIN-01)
 - ⬜ **FIN-08 — Export column alignment** — Sales XLSX Bookings sheet missing spec'd Breakfast/Discount/Voucher columns; Total Collected / Outstanding only exist in the admin-only Full Backup, not the date-ranged exports
+- ⬜ **FIN-13 — Drawer count + cash variance in Daily Close** — per-method counted-amount entry (cash drawer, GCash balance) vs recorded payments, persisted as an append-only daily close record with variance line; build together with FIN-07, not after
 
 **SEV-4 (polish):**
 - ⬜ **FIN-09 — Revenue recognition quirks** — whole booking attributed to check-in month (no proration); future-dated confirmed bookings in a custom range counted as earned revenue
 - ⬜ **FIN-10 — Occupancy night-clipping** — occupancy % counts nights outside the selected range and misses overlapping stays that started before it (`ReportsPage.tsx:651`)
 - ⬜ **FIN-11 — Hotel finance KPIs** — ADR, RevPAR, revenue by room type (all derivable today; build after FIN-10)
 - ⬜ **FIN-12 — Prior-period comparison** — vs-previous-period deltas on revenue KPI cards
+
+**Scoped out by decision (recorded in the audit doc §Scope boundaries — do not re-open without owner request):**
+- ⏸ Expenses & P&L tracking — out of scope; system is a PMS, not accounting software; exports feed external bookkeeping/BIR
+- ⏸ Day-locking / night-audit snapshots — deferred at 14-room scale; payments are already append-only at the rules level, which covers the cash side; revisit if historical figures drift or staff grows
 
 ### Live Bug Reports — 2026-07-09 (guest Intercom, reported directly by owner on mobile)
 
@@ -1139,7 +1144,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
-| Finance & Reports Audit (July 11) | 12 | 0 | 12 (FIN-01..FIN-12 — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
+| Finance & Reports Audit (July 11) | 13 | 0 | 13 (FIN-01..FIN-13 + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
 | **Total** | **363** | **330** | **~133** |

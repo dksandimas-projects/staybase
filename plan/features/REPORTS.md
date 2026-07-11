@@ -436,7 +436,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 
 ## References
 
-- **Finance & Reports Audit 2026-07-11**: `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md` — 12 open findings (FIN-01..FIN-12): collections/cash-basis report, refund model, receivables, discounts bridge, BIR/VAT decision, export gaps, ADR/RevPAR. Read before extending this feature.
+- **Finance & Reports Audit 2026-07-11**: `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md` — 13 open findings (FIN-01..FIN-13): collections/cash-basis report, refund model, receivables, discounts bridge, BIR/VAT decision, export gaps, ADR/RevPAR, daily-close drawer variance; plus 2 recorded scope decisions (expenses/P&L external, day-locking deferred). Read before extending this feature.
 - Booking schema (source, status, totalPrice): `plan/docs/BACKEND.md §bookings`
 - jsPDF usage: `plan/features/EMAIL-PDF-STORAGE.md`
 - Recharts: already in stack — `plan/docs/DECISIONS-ARCH.md`
