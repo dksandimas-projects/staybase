@@ -343,6 +343,10 @@ Editable by hotel admin — no redeploy required. Changes reflect on guest site 
 - [ ] "Last Updated" date for Privacy Policy — auto-set to current date on save
 - [ ] Note to admin: "Some legal fields (legal name, DPO email, applicable law) are set at deployment and require DK to update."
 
+### 14. SEO & Search
+
+Admin-only editor for crawler-facing metadata. SEO-only fields can be saved as a draft without changing the public site: default meta description (50–160 characters), relative price category, 1200×630 HTTPS social preview image URL, and optional X handle. Publishing validates the draft, snapshots the current Hotel Settings address, front-desk phone, Facebook/Instagram URLs, and check-in/out times into `settings/seo.published`, then calls the server-side Vercel deploy hook. The rebuilt guest app reads that published snapshot during the Vite build and generates static meta tags and Hotel JSON-LD. If Firestore is unavailable or no published snapshot exists, `hotel.config.ts` remains the safe fallback. The deploy-hook URL is server-only and must never be stored in Firestore or exposed through a `VITE_` variable.
+
 ---
 
 ## Data & Logic Checklist
