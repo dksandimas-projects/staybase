@@ -85,9 +85,12 @@ export interface Room {
 
 export interface OnsitePayment {
   id: string;
+  type: "payment" | "refund";
   amount: number;
   method: string;
   note: string;
+  reason: string | null;
+  approvedBy: string | null;
   recordedBy: string;
   recordedAt: string;
 }

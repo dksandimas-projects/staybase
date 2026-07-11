@@ -83,6 +83,9 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] Show delivered Add-to-Bill orders with an unsettled booking folio as **Add to Bill — Uncollected**; settled folios are excluded from that warning slice.
 - [x] Export date-ranged Collections CSV and a Collections sheet in Sales XLSX.
 - [x] Include FIN-14 incidental charge reversals in the billed side of reconciliation.
+- [x] **FIN-03 refunds** — separate gross collections, refunds, and net collected totals; payment-method reporting nets refunds by their actual payout method.
+- [x] Show cancelled bookings with payment history, including gross paid, refunded, and still-retained amounts.
+- [x] Collections CSV, Sales XLSX, and Full Backup carry entry type, refund reason, and approver.
 
 ### Receivables & Aging *(FIN-04 shipped 2026-07-11)*
 
