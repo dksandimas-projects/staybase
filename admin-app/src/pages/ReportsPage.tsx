@@ -175,6 +175,7 @@ export function ReportsPage() {
     storeItems,
     vouchers,
     members,
+    staff,
     corporateInquiries,
     currentUser
   } = useAdmin();
@@ -493,17 +494,24 @@ export function ReportsPage() {
     return Array.from(rows.values()).sort((a, b) => b.date.localeCompare(a.date));
   }, [rangePayments]);
 
+  const staffNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    staff.forEach((s) => map.set(s.uid, s.fullName || s.email || s.uid));
+    return map;
+  }, [staff]);
+
   const collectionsByStaff = useMemo(() => {
     const rows = new Map<string, { staff: string; count: number; total: number }>();
     rangePayments.forEach((payment) => {
-      const key = payment.recordedBy || "staff";
-      const current = rows.get(key) || { staff: key, count: 0, total: 0 };
+      const uid = payment.recordedBy || "staff";
+      const label = staffNameMap.get(uid) || uid;
+      const current = rows.get(uid) || { staff: label, count: 0, total: 0 };
       current.count += 1;
       current.total += payment.amount;
-      rows.set(key, current);
+      rows.set(uid, current);
     });
     return Array.from(rows.values()).sort((a, b) => b.total - a.total);
-  }, [rangePayments]);
+  }, [rangePayments, staffNameMap]);
 
   const uncollectedAddToBill = useMemo(() => {
     return deliveredStoreOrders
