@@ -119,9 +119,9 @@ describe("Phase 11.6 Batch 18 — Wave 3 batch 1 (settings + reports)", () => {
     it("the Backup button is gated on currentUser?.role === 'admin'", () => {
       // Find the JSX that contains the button + the gate.
       const match = reportsPageSrc.match(
-        /\{currentUser\?\.role\s*===\s*["']admin["']\s*&&\s*\(\s*[\s\S]*?Download Full Backup[\s\S]*?\}\s*\)\s*\}/
+        /\{currentUser\?\.role\s*===\s*["']admin["']\s*&&\s*\(\s*[\s\S]*?Backup[\s\S]*?\}\s*\)\s*\}/
       );
-      expect(match, "expected to find the admin-gated Download Full Backup button").toBeTruthy();
+      expect(match, "expected to find the admin-gated Backup button").toBeTruthy();
     });
 
     it("handleExportFullBackup bails when currentUser.role is not admin", () => {

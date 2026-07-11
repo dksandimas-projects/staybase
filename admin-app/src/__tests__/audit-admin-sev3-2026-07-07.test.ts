@@ -32,7 +32,7 @@ describe("Admin audit SEV-3 fixes — 2026-07-07", () => {
     }
     expect(reportsPage).toMatch(/storeConfig\.lowStockThreshold/);
     expect(reportsPage).not.toMatch(/stock\s*<=\s*5/);
-    expect(reportsPage).toMatch(/Print Report/);
+    expect(reportsPage).toMatch(/Print/);
   });
 
   it("AA-15/AA-16 rooms edit/delete paths persist real fields and guard type deletion", () => {

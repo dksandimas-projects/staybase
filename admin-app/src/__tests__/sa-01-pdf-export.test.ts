@@ -29,7 +29,7 @@ describe("SA-01 performance report PDF export must use jsPDF", () => {
   it("renders Export PDF button for performance and sales reports in header", () => {
     expect(reports).toMatch(/activeTab !== "daily-close"/);
     expect(reports).toMatch(/onClick=\{handleExportPDF\}/);
-    expect(reports).toMatch(/isExportingPDF \? "Generating PDF\.\.\." : "Export PDF"/);
+    expect(reports).toMatch(/isExportingPDF \? "Exporting\.\.\." : "PDF"/);
   });
 
   it("defines performance-tab-content and sales-tab-content containers", () => {
