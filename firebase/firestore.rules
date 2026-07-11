@@ -120,6 +120,29 @@ service cloud.firestore {
       allow create: if isStaff();
     }
 
+    match /corporateInvoices/{invoiceId} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["companyName", "bookingIds", "bookingRefs", "amount", "status", "issuedAt", "issuedBy", "paidAt", "paidBy"])
+        && request.resource.data.companyName is string
+        && request.resource.data.bookingIds is list
+        && request.resource.data.bookingRefs is list
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.status == "issued"
+        && request.resource.data.issuedAt == request.time
+        && request.resource.data.issuedBy == request.auth.uid
+        && request.resource.data.paidAt == null
+        && request.resource.data.paidBy == null;
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "paidAt", "paidBy"])
+        && resource.data.status == "issued"
+        && request.resource.data.status == "paid"
+        && request.resource.data.paidAt == request.time
+        && request.resource.data.paidBy == request.auth.uid;
+      allow delete: if false;
+    }
+
     match /contactInquiries/{inquiryId} {
       allow read, update, delete: if isStaff();
       allow create: if isStaff();

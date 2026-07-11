@@ -230,6 +230,19 @@ IncidentalCharge {
   voidOf: string | null
 }
 
+CorporateInvoice {
+  id: string
+  companyName: string
+  bookingIds: string[]
+  bookingRefs: string[]
+  amount: number
+  status: "issued" | "paid"
+  issuedAt: Date
+  issuedBy: string
+  paidAt: Date | null
+  paidBy: string | null
+}
+
 EarlyCheckInDetails {
   status: "requested" | "approved" | "declined"
   requestedTime: string

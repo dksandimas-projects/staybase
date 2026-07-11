@@ -313,6 +313,26 @@ Additional legal/policy fields (editable by hotel admin from Settings):
 
 ---
 
+### `corporateInvoices/{invoiceId}`
+
+Minimal accounts-receivable invoice register for corporate charge-back balances.
+
+| Field | Type | Notes |
+|---|---|---|
+| `companyName` | string | Corporate account label |
+| `bookingIds` | string[] | Bookings covered by the invoice |
+| `bookingRefs` | string[] | Denormalized references for reporting/export |
+| `amount` | number | Outstanding amount at issue time |
+| `status` | string | `issued` or `paid` |
+| `issuedAt` | timestamp | Server timestamp |
+| `issuedBy` | string | Staff UID |
+| `paidAt` | timestamp \| null | Set when marked paid |
+| `paidBy` | string \| null | Staff UID |
+
+Staff can create and update invoice status; deletion is forbidden so the register retains its audit history. Invoice status does not create a payment entry automatically—the actual receipt must still be recorded in the booking payment ledger.
+
+---
+
 ### `corporateInquiries/{inquiryId}`
 
 | Field | Type | Notes |

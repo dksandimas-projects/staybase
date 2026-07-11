@@ -24,10 +24,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
-| **SEV-2 (major)** | 4 | 0 | **4** |
+| **SEV-2 (major)** | 1 | 3 | **4** |
 | **SEV-3 (minor)** | 5 | 1 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **13** | **1** | **14** |
+| **Total** | **10** | **4** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -84,7 +84,7 @@ exist in operations but are invisible to every report.
 
 ## SEV-2 — Major
 
-### FIN-01 — No collections (cash-basis) report · `Open`
+### FIN-01 — No collections (cash-basis) report · `Fixed 2026-07-11`
 
 **Where:**
 - `admin-app/src/pages/ReportsPage.tsx` (Sales tab — all KPIs derive from `totalPrice`)
@@ -109,7 +109,7 @@ against the existing revenue totals.
 
 ---
 
-### FIN-02 — Payment-method breakdown reports billed totals, not payments · `Open`
+### FIN-02 — Payment-method breakdown reports billed totals, not payments · `Fixed 2026-07-11`
 
 **Where:** `admin-app/src/pages/ReportsPage.tsx:234` (`combinedPaymentMethods`)
 
@@ -152,7 +152,7 @@ bookings with money collected" view.
 
 ---
 
-### FIN-04 — No accounts-receivable view; corporate charge-back has no invoicing · `Open`
+### FIN-04 — No accounts-receivable view; corporate charge-back has no invoicing · `Fixed 2026-07-11`
 
 **Where:**
 - Outstanding balance exists only per-booking (drawer) and in Full Backup (`ReportsPage.tsx` `runFullBackupExport`)
