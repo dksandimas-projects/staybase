@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 import { collection, collectionGroup, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { Modal } from "../components/Modal";
@@ -197,6 +199,7 @@ export function ReportsPage() {
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
@@ -971,6 +974,58 @@ export function ReportsPage() {
     window.print();
   };
 
+  const handleExportPDF = async () => {
+    if (!isRangeValid) {
+      toast.error("Invalid range", "Start date cannot be after end date.");
+      return;
+    }
+
+    const elementId = activeTab === "performance" ? "performance-tab-content" : "sales-tab-content";
+    const element = document.getElementById(elementId);
+    if (!element) {
+      toast.error("Export failed", "Could not find tab content to export.");
+      return;
+    }
+
+    setIsExportingPDF(true);
+    toast.info("Generating PDF", "Rendering report charts and stat cards...");
+
+    try {
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: "white"
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      const imgWidth = 210;
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight, undefined, "FAST");
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight, undefined, "FAST");
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`sparkinn_${activeTab}_report_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.pdf`);
+      toast.success("PDF downloaded", "Your report PDF has been downloaded successfully.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Generation failed", "Failed to compile the report charts into a PDF.");
+    } finally {
+      setIsExportingPDF(false);
+    }
+  };
+
   // ── Full Backup (admin only) ──
   const runFullBackupExport = async () => {
     if (currentUser?.role !== "admin") return;
@@ -1562,6 +1617,17 @@ export function ReportsPage() {
             Print Report
           </button>
 
+          {activeTab !== "daily-close" && (
+            <button
+              onClick={handleExportPDF}
+              disabled={isExportingPDF}
+              className="min-h-[44px] px-5 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-750 disabled:opacity-60 text-xs font-semibold text-white shadow-sm transition active:scale-95 disabled:cursor-not-allowed"
+            >
+              <Download size={14} />
+              {isExportingPDF ? "Generating PDF..." : "Export PDF"}
+            </button>
+          )}
+
           {activeTab === "sales" && (
             <button
               onClick={handleExportSalesXLSX}
@@ -1784,7 +1850,7 @@ function PerformanceTab({
     : [];
 
   return (
-    <div className="space-y-8">
+    <div id="performance-tab-content" className="space-y-8 bg-white p-6 rounded-xl border border-gray-100">
       <div className="grid gap-6 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
           <div>
@@ -2120,7 +2186,7 @@ function SalesTab(props: {
   };
 
   return (
-    <div className="space-y-8">
+    <div id="sales-tab-content" className="space-y-8 bg-white p-6 rounded-xl border border-gray-100">
       {/* Summary KPI Cards */}
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
