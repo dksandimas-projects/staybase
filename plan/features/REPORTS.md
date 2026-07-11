@@ -436,7 +436,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 
 ## References
 
-- **Finance & Reports Audit 2026-07-11**: `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md` — 13 open findings (FIN-01..FIN-13): collections/cash-basis report, refund model, receivables, discounts bridge, BIR/VAT decision, export gaps, ADR/RevPAR, daily-close drawer variance; plus 2 recorded scope decisions (expenses/P&L external, day-locking deferred). Read before extending this feature.
+- **Finance & Reports Audit 2026-07-11**: `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md` — 14 open findings (FIN-01..FIN-14): collections/cash-basis report, refund model, receivables, discounts bridge, BIR/VAT decision, export gaps, ADR/RevPAR, daily-close drawer variance, incidental charge ledger; plus 2 recorded scope decisions (expenses/P&L external, day-locking deferred). Read before extending this feature. Note: FIN-14 adds incidentals as a 4th revenue stream to the Sales tab + a "Charges" sheet to the Sales XLSX and Full Backup — update this file's checklists when it ships (wiring list in `plan/features/BOOKINGS-MANAGEMENT.md §Incidental Charges`).
 - Booking schema (source, status, totalPrice): `plan/docs/BACKEND.md §bookings`
 - jsPDF usage: `plan/features/EMAIL-PDF-STORAGE.md`
 - Recharts: already in stack — `plan/docs/DECISIONS-ARCH.md`
