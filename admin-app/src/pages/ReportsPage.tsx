@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
-import { collection, collectionGroup, getDocs, onSnapshot } from "firebase/firestore";
+import { collection, collectionGroup, doc, getDocs, onSnapshot, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -38,6 +38,49 @@ interface ReportCharge {
   addedBy: string;
   addedAt: Date | null;
   voidOf: string | null;
+}
+
+interface ReportPayment {
+  id: string;
+  bookingId: string;
+  bookingRef: string;
+  roomNumber: string;
+  guestName: string;
+  amount: number;
+  method: string;
+  note: string;
+  recordedBy: string;
+  recordedAt: Date | null;
+}
+
+interface ReceivableRow {
+  bookingId: string;
+  bookingRef: string;
+  guestName: string;
+  roomNumber: string;
+  companyName: string;
+  isCorporate: boolean;
+  status: string;
+  checkOut: Date | null;
+  billed: number;
+  collected: number;
+  outstanding: number;
+  ageDays: number;
+  ageBucket: "Current" | "1–30 days" | "31–60 days" | "60+ days";
+  uncollectedAddToBill: number;
+}
+
+interface CorporateInvoice {
+  id: string;
+  companyName: string;
+  bookingIds: string[];
+  bookingRefs: string[];
+  amount: number;
+  status: "issued" | "paid";
+  issuedAt: Date | null;
+  issuedBy: string;
+  paidAt: Date | null;
+  paidBy: string | null;
 }
 
 function formatMonthLabel(date: Date) {
@@ -103,6 +146,9 @@ export function ReportsPage() {
   const [isFullBackupConfirmOpen, setFullBackupConfirmOpen] = useState(false);
   const [isFullBackupExporting, setFullBackupExporting] = useState(false);
   const [charges, setCharges] = useState<ReportCharge[]>([]);
+  const [payments, setPayments] = useState<ReportPayment[]>([]);
+  const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
+  const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
@@ -127,6 +173,56 @@ export function ReportsPage() {
     }, (error) => {
       console.error("Failed to load incidental charges:", error);
       toast.error("Could not load incidental revenue", "The other reports remain available. Refresh to try again.");
+    });
+    return unsubscribe;
+  }, [bookings, toast]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "corporateInvoices"), (snapshot) => {
+      setCorporateInvoices(snapshot.docs.map((invoiceDoc) => {
+        const data = invoiceDoc.data();
+        return {
+          id: invoiceDoc.id,
+          companyName: String(data.companyName || "Unassigned corporate account"),
+          bookingIds: Array.isArray(data.bookingIds) ? data.bookingIds.map(String) : [],
+          bookingRefs: Array.isArray(data.bookingRefs) ? data.bookingRefs.map(String) : [],
+          amount: Number(data.amount || 0),
+          status: (data.status === "paid" ? "paid" : "issued") as CorporateInvoice["status"],
+          issuedAt: toDate(data.issuedAt),
+          issuedBy: String(data.issuedBy || "staff"),
+          paidAt: toDate(data.paidAt),
+          paidBy: data.paidBy ? String(data.paidBy) : null
+        };
+      }).sort((a, b) => (b.issuedAt?.getTime() || 0) - (a.issuedAt?.getTime() || 0)));
+    }, (error) => {
+      console.error("Failed to load corporate invoices:", error);
+      toast.error("Could not load corporate invoices", "Receivable balances remain available.");
+    });
+    return unsubscribe;
+  }, [toast]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "payments"), (snapshot) => {
+      setPayments(snapshot.docs.map((paymentDoc) => {
+        const data = paymentDoc.data();
+        const bookingId = paymentDoc.ref.parent.parent?.id || "";
+        const booking = bookings.find((item) => item.id === bookingId);
+        return {
+          id: paymentDoc.id,
+          bookingId,
+          bookingRef: booking?.bookingRef || bookingId,
+          roomNumber: booking?.roomNumber || "",
+          guestName: booking?.guestName || "",
+          amount: Number(data.amount || 0),
+          method: String(data.method || "unknown"),
+          note: String(data.note || ""),
+          recordedBy: String(data.recordedBy || "staff"),
+          recordedAt: toDate(data.recordedAt)
+        };
+      }));
+    }, (error) => {
+      console.error("Failed to load payment collections:", error);
+      toast.error("Could not load collections", "Billed revenue remains available. Refresh to try again.");
     });
     return unsubscribe;
   }, [bookings, toast]);
@@ -241,6 +337,177 @@ export function ReportsPage() {
   const totalRevenue = roomRevenue + breakfastRevenue + storeRevenue + incidentalRevenue;
   const totalTransactions = rangeBookings.length + deliveredStoreOrders.length + rangeCharges.filter((charge) => charge.amount > 0).length;
 
+  const rangePayments = useMemo(
+    () => payments.filter((payment) => payment.recordedAt && payment.recordedAt >= periodStart && payment.recordedAt <= periodEnd),
+    [payments, periodStart, periodEnd]
+  );
+
+  const billedTotal = useMemo(
+    () => rangeBookings.reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0) + storeRevenue + incidentalRevenue,
+    [rangeBookings, storeRevenue, incidentalRevenue]
+  );
+  const collectedTotal = useMemo(
+    () => rangePayments.reduce((sum, payment) => sum + payment.amount, 0),
+    [rangePayments]
+  );
+  const outstandingTotal = Math.max(billedTotal - collectedTotal, 0);
+  const overCollectedTotal = Math.max(collectedTotal - billedTotal, 0);
+
+  const collectionsByDay = useMemo(() => {
+    const rows = new Map<string, { date: string; count: number; total: number }>();
+    rangePayments.forEach((payment) => {
+      if (!payment.recordedAt) return;
+      const date = payment.recordedAt.toISOString().slice(0, 10);
+      const current = rows.get(date) || { date, count: 0, total: 0 };
+      current.count += 1;
+      current.total += payment.amount;
+      rows.set(date, current);
+    });
+    return Array.from(rows.values()).sort((a, b) => b.date.localeCompare(a.date));
+  }, [rangePayments]);
+
+  const collectionsByStaff = useMemo(() => {
+    const rows = new Map<string, { staff: string; count: number; total: number }>();
+    rangePayments.forEach((payment) => {
+      const key = payment.recordedBy || "staff";
+      const current = rows.get(key) || { staff: key, count: 0, total: 0 };
+      current.count += 1;
+      current.total += payment.amount;
+      rows.set(key, current);
+    });
+    return Array.from(rows.values()).sort((a, b) => b.total - a.total);
+  }, [rangePayments]);
+
+  const uncollectedAddToBill = useMemo(() => {
+    return deliveredStoreOrders
+      .filter((order) => order.paymentMethod === "add-to-bill")
+      .reduce((summary, order) => {
+        const booking = bookings.find((item) => item.id === order.bookingId);
+        if (!booking) return summary;
+        const bookingPayments = payments.filter((payment) => payment.bookingId === booking.id).reduce((sum, payment) => sum + payment.amount, 0);
+        const bookingCharges = charges.filter((charge) => charge.bookingId === booking.id).reduce((sum, charge) => sum + charge.amount, 0);
+        const bookingStoreTotal = storeOrders
+          .filter((storeOrder) => storeOrder.bookingId === booking.id && storeOrder.paymentMethod === "add-to-bill" && storeOrder.status === "delivered" && storeOrder.isBilled)
+          .reduce((sum, storeOrder) => sum + storeOrder.totalAmount, 0);
+        const balance = Math.max(Number(booking.totalPrice || 0) + bookingCharges + bookingStoreTotal - bookingPayments, 0);
+        if (balance <= 0) return summary;
+        summary.count += 1;
+        summary.total += Math.min(Number(order.totalAmount || 0), balance);
+        return summary;
+      }, { count: 0, total: 0 });
+  }, [deliveredStoreOrders, bookings, payments, charges, storeOrders]);
+
+  const receivables = useMemo<ReceivableRow[]>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return bookings
+      .filter((booking) => ["confirmed", "payment-confirmed", "checked-in", "checked-out"].includes(booking.status))
+      .map((booking) => {
+        const bookingCharges = charges.filter((charge) => charge.bookingId === booking.id).reduce((sum, charge) => sum + charge.amount, 0);
+        const addToBillTotal = storeOrders
+          .filter((order) => order.bookingId === booking.id && order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled)
+          .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
+        const collected = payments.filter((payment) => payment.bookingId === booking.id).reduce((sum, payment) => sum + payment.amount, 0);
+        const billed = Number(booking.totalPrice || 0) + bookingCharges + addToBillTotal;
+        const outstanding = Math.max(billed - collected, 0);
+        const checkOut = toDate(booking.checkOut);
+        const ageDays = booking.status === "checked-out" && checkOut
+          ? Math.max(0, Math.floor((today.getTime() - checkOut.getTime()) / 86_400_000))
+          : 0;
+        const ageBucket: ReceivableRow["ageBucket"] = ageDays === 0
+          ? "Current"
+          : ageDays <= 30
+            ? "1–30 days"
+            : ageDays <= 60
+              ? "31–60 days"
+              : "60+ days";
+        return {
+          bookingId: booking.id,
+          bookingRef: booking.bookingRef,
+          guestName: booking.guestName,
+          roomNumber: booking.roomNumber,
+          companyName: booking.companyName || "",
+          isCorporate: Boolean(booking.isCorporate),
+          status: booking.status,
+          checkOut,
+          billed,
+          collected,
+          outstanding,
+          ageDays,
+          ageBucket,
+          uncollectedAddToBill: Math.min(addToBillTotal, outstanding)
+        };
+      })
+      .filter((row) => row.outstanding > 0)
+      .sort((a, b) => b.ageDays - a.ageDays || b.outstanding - a.outstanding);
+  }, [bookings, charges, storeOrders, payments]);
+
+  const receivablesTotal = useMemo(() => receivables.reduce((sum, row) => sum + row.outstanding, 0), [receivables]);
+  const overdueReceivablesTotal = useMemo(() => receivables.filter((row) => row.ageDays > 0).reduce((sum, row) => sum + row.outstanding, 0), [receivables]);
+  const corporateReceivablesTotal = useMemo(() => receivables.filter((row) => row.isCorporate).reduce((sum, row) => sum + row.outstanding, 0), [receivables]);
+  const addToBillReceivablesTotal = useMemo(() => receivables.reduce((sum, row) => sum + row.uncollectedAddToBill, 0), [receivables]);
+  const receivablesByAge = useMemo(() => {
+    const buckets: Record<ReceivableRow["ageBucket"], number> = { Current: 0, "1–30 days": 0, "31–60 days": 0, "60+ days": 0 };
+    receivables.forEach((row) => { buckets[row.ageBucket] += row.outstanding; });
+    return Object.entries(buckets).map(([bucket, total]) => ({ bucket, total }));
+  }, [receivables]);
+
+  const corporateReceivables = useMemo(() => {
+    const groups = new Map<string, { company: string; bookings: number; total: number }>();
+    receivables.filter((row) => row.isCorporate).forEach((row) => {
+      const company = row.companyName || "Unassigned corporate account";
+      const current = groups.get(company) || { company, bookings: 0, total: 0 };
+      current.bookings += 1;
+      current.total += row.outstanding;
+      groups.set(company, current);
+    });
+    return Array.from(groups.values()).sort((a, b) => b.total - a.total);
+  }, [receivables]);
+
+  const handleIssueCorporateInvoice = async (companyName: string) => {
+    const rows = receivables.filter((row) => row.isCorporate && (row.companyName || "Unassigned corporate account") === companyName);
+    if (rows.length === 0 || invoiceAction) return;
+    setInvoiceAction(`issue:${companyName}`);
+    try {
+      const bookingIds = rows.map((row) => row.bookingId).sort();
+      const companyKey = encodeURIComponent(companyName.toLowerCase()).replace(/%/g, "_").slice(0, 120);
+      const invoiceRef = doc(db, "corporateInvoices", `${companyKey}-${bookingIds.join("-")}`);
+      await setDoc(invoiceRef, {
+        companyName,
+        bookingIds,
+        bookingRefs: rows.map((row) => row.bookingRef),
+        amount: rows.reduce((sum, row) => sum + row.outstanding, 0),
+        status: "issued",
+        issuedAt: serverTimestamp(),
+        issuedBy: currentUser?.uid || "staff",
+        paidAt: null,
+        paidBy: null
+      });
+      toast.success("Corporate invoice issued", `${companyName} · ${rows.length} booking${rows.length === 1 ? "" : "s"}`);
+    } catch (error: any) {
+      toast.error("Could not issue invoice", error.message || "Please try again.");
+    } finally {
+      setInvoiceAction(null);
+    }
+  };
+
+  const handleMarkCorporateInvoicePaid = async (invoiceId: string) => {
+    if (invoiceAction) return;
+    setInvoiceAction(`paid:${invoiceId}`);
+    try {
+      await updateDoc(doc(db, "corporateInvoices", invoiceId), {
+        status: "paid",
+        paidAt: serverTimestamp(),
+        paidBy: currentUser?.uid || "staff"
+      });
+      toast.success("Invoice marked paid", "The corporate invoice status was updated.");
+    } catch (error: any) {
+      toast.error("Could not update invoice", error.message || "Please try again.");
+    } finally {
+      setInvoiceAction(null);
+    }
+  };
+
   // ── Monthly revenue by stream (stacked bar) ──
   const monthlyRevenue = useMemo(() => {
     const map = new Map<string, { month: string; room: number; breakfast: number; store: number; incidentals: number; total: number; sortKey: string }>();
@@ -288,34 +555,37 @@ export function ReportsPage() {
       .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
   }, [rangeBookings, deliveredStoreOrders, rangeCharges]);
 
-  // ── Combined payment method breakdown (bookings + store orders) ──
+  // ── Actual payment method breakdown (FIN-02) ──
   const combinedPaymentMethods = useMemo(() => {
     const counts: Record<string, { method: string; count: number; total: number }> = {};
 
-    rangeBookings.forEach(b => {
-      const method = b.paymentMethod || "unknown";
+    rangePayments.forEach(payment => {
+      const method = payment.method || "unknown";
       if (!counts[method]) counts[method] = { method, count: 0, total: 0 };
       counts[method].count += 1;
-      counts[method].total += b.totalPrice || 0;
+      counts[method].total += payment.amount;
     });
 
-    deliveredStoreOrders.forEach(o => {
-      const method = o.paymentMethod || "unknown";
-      if (!counts[method]) counts[method] = { method, count: 0, total: 0 };
-      counts[method].count += 1;
-      counts[method].total += o.totalAmount || 0;
-    });
-
-    return Object.values(counts)
+    const rows = Object.values(counts)
       .map(c => ({
         name: PAYMENT_LABELS[c.method] || c.method,
         method: c.method,
         count: c.count,
         total: c.total,
-        isUncollected: c.method === "add-to-bill"
+        isUncollected: false
       }))
-      .sort((a, b) => b.count - a.count);
-  }, [rangeBookings, deliveredStoreOrders]);
+      .sort((a, b) => b.total - a.total);
+    if (uncollectedAddToBill.total > 0) {
+      rows.push({
+        name: "Add to Bill — Uncollected",
+        method: "add-to-bill-uncollected",
+        count: uncollectedAddToBill.count,
+        total: uncollectedAddToBill.total,
+        isUncollected: true
+      });
+    }
+    return rows;
+  }, [rangePayments, uncollectedAddToBill]);
 
   // ── Acquisition / booking sources (Performance) ──
   const bookingSources = useMemo(() => {
@@ -443,6 +713,53 @@ export function ReportsPage() {
     ),
     [rangeCharges, searchTerm]
   );
+
+  const filteredPayments = useMemo(() =>
+    rangePayments.filter((payment) =>
+      matchesSearch(payment.bookingRef) || matchesSearch(payment.guestName) || matchesSearch(payment.roomNumber)
+      || matchesSearch(payment.method) || matchesSearch(payment.recordedBy)
+    ),
+    [rangePayments, searchTerm]
+  );
+
+  const filteredReceivables = useMemo(() =>
+    receivables.filter((row) =>
+      matchesSearch(row.bookingRef) || matchesSearch(row.guestName) || matchesSearch(row.roomNumber) || matchesSearch(row.companyName)
+    ),
+    [receivables, searchTerm]
+  );
+
+  const handleExportCollectionsCSV = () => {
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const headers = ["Date", "Booking Ref", "Guest", "Room", "Amount", "Method", "Recorded By", "Note"];
+    const rows = filteredPayments.map((payment) => [
+      payment.recordedAt?.toISOString() || "",
+      payment.bookingRef,
+      payment.guestName,
+      payment.roomNumber,
+      payment.amount,
+      PAYMENT_LABELS[payment.method] || payment.method,
+      payment.recordedBy,
+      payment.note
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
+    triggerDownload(
+      new Blob([csv], { type: "text/csv;charset=utf-8;" }),
+      `sparkinn_collections_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.csv`
+    );
+  };
+
+  const handleExportReceivablesCSV = () => {
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const headers = ["Booking Ref", "Guest", "Room", "Company", "Status", "Check-Out", "Age Days", "Age Bucket", "Billed", "Collected", "Outstanding", "Uncollected Add to Bill"];
+    const rows = filteredReceivables.map((row) => [
+      row.bookingRef, row.guestName, row.roomNumber, row.companyName, row.status,
+      row.checkOut?.toISOString().slice(0, 10) || "", row.ageDays, row.ageBucket,
+      row.billed, row.collected, row.outstanding, row.uncollectedAddToBill
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `sparkinn_receivables_${new Date().toISOString().slice(0, 10)}.csv`);
+  };
 
   // ── CSV Export (Performance-style ledger) ──
   const handleExportCSV = () => {
@@ -639,6 +956,17 @@ export function ReportsPage() {
       "Created At": toDate(inq.createdAt)?.toISOString() || ""
     }))), "Corporate Inquiries");
 
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(corporateInvoices.map((invoice) => ({
+        Company: invoice.companyName,
+        "Booking Refs": invoice.bookingRefs.join(", "),
+        Amount: invoice.amount,
+        Status: invoice.status,
+        "Issued At": invoice.issuedAt?.toISOString() || "",
+        "Issued By": invoice.issuedBy,
+        "Paid At": invoice.paidAt?.toISOString() || "",
+        "Paid By": invoice.paidBy || ""
+      }))), "Corporate Invoices");
+
       const wb_out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const blob = new Blob([wb_out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       triggerDownload(blob, `spark-inn-full-backup-${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -680,6 +1008,13 @@ export function ReportsPage() {
       ["Breakfast Revenue", breakfastRevenue],
       ["Store Revenue", storeRevenue],
       ["Incidental Revenue", incidentalRevenue],
+      ["Billed Total (charge-inclusive)", billedTotal],
+      ["Collected Total (actual payments)", collectedTotal],
+      ["Outstanding", outstandingTotal],
+      ["Over-collected", overCollectedTotal],
+      ["All-time Receivables", receivablesTotal],
+      ["Overdue Receivables", overdueReceivablesTotal],
+      ["Corporate Receivables", corporateReceivablesTotal],
       ["Total Bookings", rangeBookings.length],
       ["Total Store Orders (delivered)", deliveredStoreOrders.length],
       ["Total Transactions", totalTransactions],
@@ -737,12 +1072,43 @@ export function ReportsPage() {
       charge.voidOf || ""
     ]);
 
+    const collectionHeaders = ["Date", "Booking Ref", "Guest", "Room", "Amount", "Method", "Recorded By", "Note"];
+    const collectionRows = filteredPayments.map((payment) => [
+      payment.recordedAt?.toISOString() || "",
+      payment.bookingRef,
+      payment.guestName,
+      payment.roomNumber,
+      payment.amount,
+      PAYMENT_LABELS[payment.method] || payment.method,
+      payment.recordedBy,
+      payment.note
+    ]);
+
+    const receivableHeaders = ["Booking Ref", "Guest", "Room", "Company", "Status", "Check-Out", "Age Days", "Age Bucket", "Billed", "Collected", "Outstanding", "Uncollected Add to Bill"];
+    const receivableRows = filteredReceivables.map((row) => [
+      row.bookingRef, row.guestName, row.roomNumber, row.companyName, row.status,
+      row.checkOut?.toISOString().slice(0, 10) || "", row.ageDays, row.ageBucket,
+      row.billed, row.collected, row.outstanding, row.uncollectedAddToBill
+    ]);
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([...summaryRows]), "Summary");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([bookingsHeaders, ...bookingsRows]), "Bookings");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([breakfastHeaders, ...breakfastRows]), "Breakfast");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([storeHeaders, ...storeRows]), "Store Orders");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([chargeHeaders, ...chargeRows]), "Charges");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([collectionHeaders, ...collectionRows]), "Collections");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([receivableHeaders, ...receivableRows]), "Receivables");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(corporateInvoices.map((invoice) => ({
+      Company: invoice.companyName,
+      "Booking Refs": invoice.bookingRefs.join(", "),
+      Amount: invoice.amount,
+      Status: invoice.status,
+      "Issued At": invoice.issuedAt?.toISOString() || "",
+      "Issued By": invoice.issuedBy,
+      "Paid At": invoice.paidAt?.toISOString() || "",
+      "Paid By": invoice.paidBy || ""
+    }))), "Corporate Invoices");
 
     XLSX.writeFile(wb, `spark-inn-sales-${periodStart.toISOString().slice(0, 10)}.xlsx`);
   };
@@ -915,6 +1281,26 @@ export function ReportsPage() {
           breakfastRevenue={breakfastRevenue}
           storeRevenue={storeRevenue}
           incidentalRevenue={incidentalRevenue}
+          billedTotal={billedTotal}
+          collectedTotal={collectedTotal}
+          outstandingTotal={outstandingTotal}
+          overCollectedTotal={overCollectedTotal}
+          collectionsByDay={collectionsByDay}
+          collectionsByStaff={collectionsByStaff}
+          filteredPayments={filteredPayments}
+          onExportCollectionsCSV={handleExportCollectionsCSV}
+          receivablesTotal={receivablesTotal}
+          overdueReceivablesTotal={overdueReceivablesTotal}
+          corporateReceivablesTotal={corporateReceivablesTotal}
+          addToBillReceivablesTotal={addToBillReceivablesTotal}
+          receivablesByAge={receivablesByAge}
+          corporateReceivables={corporateReceivables}
+          filteredReceivables={filteredReceivables}
+          onExportReceivablesCSV={handleExportReceivablesCSV}
+          corporateInvoices={corporateInvoices}
+          invoiceAction={invoiceAction}
+          onIssueCorporateInvoice={handleIssueCorporateInvoice}
+          onMarkCorporateInvoicePaid={handleMarkCorporateInvoicePaid}
           totalTransactions={totalTransactions}
           monthlyRevenue={monthlyRevenue}
           combinedPaymentMethods={combinedPaymentMethods}
@@ -1181,6 +1567,26 @@ function SalesTab(props: {
   breakfastRevenue: number;
   storeRevenue: number;
   incidentalRevenue: number;
+  billedTotal: number;
+  collectedTotal: number;
+  outstandingTotal: number;
+  overCollectedTotal: number;
+  collectionsByDay: Array<{ date: string; count: number; total: number }>;
+  collectionsByStaff: Array<{ staff: string; count: number; total: number }>;
+  filteredPayments: ReportPayment[];
+  onExportCollectionsCSV: () => void;
+  receivablesTotal: number;
+  overdueReceivablesTotal: number;
+  corporateReceivablesTotal: number;
+  addToBillReceivablesTotal: number;
+  receivablesByAge: Array<{ bucket: string; total: number }>;
+  corporateReceivables: Array<{ company: string; bookings: number; total: number }>;
+  filteredReceivables: ReceivableRow[];
+  onExportReceivablesCSV: () => void;
+  corporateInvoices: CorporateInvoice[];
+  invoiceAction: string | null;
+  onIssueCorporateInvoice: (companyName: string) => void;
+  onMarkCorporateInvoicePaid: (invoiceId: string) => void;
   totalTransactions: number;
   monthlyRevenue: Array<{ month: string; room: number; breakfast: number; store: number; incidentals: number; total: number }>;
   combinedPaymentMethods: Array<{ name: string; method: string; count: number; total: number; isUncollected: boolean }>;
@@ -1206,6 +1612,11 @@ function SalesTab(props: {
 }) {
   const {
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
+    billedTotal, collectedTotal, outstandingTotal, overCollectedTotal, collectionsByDay, collectionsByStaff,
+    filteredPayments, onExportCollectionsCSV,
+    receivablesTotal, overdueReceivablesTotal, corporateReceivablesTotal, addToBillReceivablesTotal,
+    receivablesByAge, corporateReceivables, filteredReceivables, onExportReceivablesCSV,
+    corporateInvoices, invoiceAction, onIssueCorporateInvoice, onMarkCorporateInvoicePaid,
     monthlyRevenue, combinedPaymentMethods, topStoreItems, storeOrdersByStatus, lowStockItems,
     deliveredStoreOrders, breakfastConfig, dailyKitchenPrep,
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
@@ -1264,6 +1675,192 @@ function SalesTab(props: {
           <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Bookings + store orders</span>
         </div>
       </div>
+
+      <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Collections Reconciliation</h2>
+            <p className="mt-1 text-[10px] text-gray-500">Actual entries from the append-only payment ledger, compared with charge-inclusive billed totals for this period.</p>
+          </div>
+          <button type="button" onClick={onExportCollectionsCSV} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50">
+            <Download size={14} /> Export Collections CSV
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg bg-gray-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Billed</p>
+            <p className="mt-1 text-xl font-heading text-gray-950">{formatPrice(billedTotal)}</p>
+            <p className="mt-1 text-[10px] text-gray-500">Bookings + store + incidentals</p>
+          </div>
+          <div className="rounded-lg bg-emerald-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Collected</p>
+            <p className="mt-1 text-xl font-heading text-emerald-800">{formatPrice(collectedTotal)}</p>
+            <p className="mt-1 text-[10px] text-emerald-700">Actual payment entries</p>
+          </div>
+          <div className="rounded-lg bg-red-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-red-600">Outstanding</p>
+            <p className="mt-1 text-xl font-heading text-red-700">{formatPrice(outstandingTotal)}</p>
+            <p className="mt-1 text-[10px] text-red-600">Billed less collected</p>
+          </div>
+          <div className="rounded-lg bg-amber-50 p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Over-collected</p>
+            <p className="mt-1 text-xl font-heading text-amber-800">{formatPrice(overCollectedTotal)}</p>
+            <p className="mt-1 text-[10px] text-amber-700">Review for refund or timing mismatch</p>
+          </div>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Collections by day</h3>
+            {collectionsByDay.length === 0 ? <p className="text-xs text-gray-400">No payments recorded in this period.</p> : (
+              <div className="max-h-64 overflow-auto rounded-lg border border-gray-150">
+                {collectionsByDay.map((row) => (
+                  <div key={row.date} className="flex items-center justify-between border-b border-gray-100 p-3 text-xs last:border-0">
+                    <span className="font-semibold text-gray-700">{row.date} · {row.count} payment{row.count === 1 ? "" : "s"}</span>
+                    <span className="font-bold text-gray-950">{formatPrice(row.total)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Collections by staff</h3>
+            {collectionsByStaff.length === 0 ? <p className="text-xs text-gray-400">No staff collection activity in this period.</p> : (
+              <div className="max-h-64 overflow-auto rounded-lg border border-gray-150">
+                {collectionsByStaff.map((row) => (
+                  <div key={row.staff} className="flex items-center justify-between border-b border-gray-100 p-3 text-xs last:border-0">
+                    <span className="font-semibold text-gray-700">{row.staff} · {row.count} payment{row.count === 1 ? "" : "s"}</span>
+                    <span className="font-bold text-gray-950">{formatPrice(row.total)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-gray-150">
+          <table className="min-w-full text-xs">
+            <thead className="bg-gray-50 text-left">
+              <tr>{["Date", "Booking", "Guest / Room", "Method", "Staff", "Amount"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredPayments.slice(0, 50).map((payment) => (
+                <tr key={`${payment.bookingId}-${payment.id}`}>
+                  <td className="px-3 py-2 text-gray-600">{payment.recordedAt?.toISOString().slice(0, 10) || "—"}</td>
+                  <td className="px-3 py-2 font-semibold text-gray-900">{payment.bookingRef}</td>
+                  <td className="px-3 py-2 text-gray-600">{payment.guestName || "—"} · Room {payment.roomNumber || "—"}</td>
+                  <td className="px-3 py-2 text-gray-600">{PAYMENT_LABELS[payment.method] || payment.method}</td>
+                  <td className="px-3 py-2 text-gray-600">{payment.recordedBy}</td>
+                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{formatPrice(payment.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filteredPayments.length === 0 ? <p className="p-6 text-center text-xs text-gray-400">No collection entries match this range.</p> : null}
+        </div>
+      </section>
+
+      <section className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Receivables & Aging</h2>
+            <p className="mt-1 text-[10px] text-gray-500">All active and checked-out bookings with an unpaid, charge-inclusive folio balance. Aging starts from checkout.</p>
+          </div>
+          <button type="button" onClick={onExportReceivablesCSV} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50">
+            <Download size={14} /> Export Receivables CSV
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: "Total Receivables", value: receivablesTotal, tone: "bg-red-50 text-red-700" },
+            { label: "Overdue", value: overdueReceivablesTotal, tone: "bg-amber-50 text-amber-800" },
+            { label: "Corporate AR", value: corporateReceivablesTotal, tone: "bg-blue-50 text-blue-800" },
+            { label: "Add to Bill Unpaid", value: addToBillReceivablesTotal, tone: "bg-gray-100 text-gray-800" }
+          ].map((card) => (
+            <div key={card.label} className={`rounded-lg p-4 ${card.tone}`}>
+              <p className="text-[10px] font-bold uppercase tracking-wider opacity-80">{card.label}</p>
+              <p className="mt-1 text-xl font-heading">{formatPrice(card.value)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Aging buckets</h3>
+            <div className="space-y-2 rounded-lg border border-gray-150 p-3">
+              {receivablesByAge.map((row) => (
+                <div key={row.bucket} className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-gray-600">{row.bucket}</span>
+                  <span className="font-bold text-gray-950">{formatPrice(row.total)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Corporate accounts</h3>
+            {corporateReceivables.length === 0 ? <p className="text-xs text-gray-400">No corporate receivables.</p> : (
+              <div className="max-h-52 overflow-auto rounded-lg border border-gray-150">
+                {corporateReceivables.map((row) => (
+                  <div key={row.company} className="flex items-center justify-between gap-3 border-b border-gray-100 p-3 text-xs last:border-0">
+                    <span className="font-semibold text-gray-700">{row.company} · {row.bookings} booking{row.bookings === 1 ? "" : "s"}<span className="block text-[11px] font-bold text-gray-950">{formatPrice(row.total)}</span></span>
+                    <button type="button" disabled={Boolean(invoiceAction)} onClick={() => void onIssueCorporateInvoice(row.company)} className="min-h-[44px] rounded-lg border border-primary/30 px-3 text-[10px] font-bold text-primary-dark hover:bg-primary-light disabled:opacity-50">
+                      {invoiceAction === `issue:${row.company}` ? "Issuing..." : "Issue invoice"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border border-gray-150">
+          <table className="min-w-full text-xs">
+            <thead className="bg-gray-50 text-left">
+              <tr>{["Booking", "Guest / Company", "Status", "Checkout", "Age", "Billed", "Collected", "Outstanding"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredReceivables.slice(0, 50).map((row) => (
+                <tr key={row.bookingId}>
+                  <td className="px-3 py-2 font-semibold text-gray-900">{row.bookingRef}<span className="block text-[10px] font-normal text-gray-500">Room {row.roomNumber}</span></td>
+                  <td className="px-3 py-2 text-gray-600">{row.guestName}{row.companyName ? <span className="block text-[10px] text-blue-700">{row.companyName}</span> : null}</td>
+                  <td className="px-3 py-2 capitalize text-gray-600">{row.status.replace(/-/g, " ")}</td>
+                  <td className="px-3 py-2 text-gray-600">{row.checkOut?.toISOString().slice(0, 10) || "—"}</td>
+                  <td className="px-3 py-2 text-gray-600">{row.ageBucket}</td>
+                  <td className="px-3 py-2 text-right text-gray-600">{formatPrice(row.billed)}</td>
+                  <td className="px-3 py-2 text-right text-emerald-700">{formatPrice(row.collected)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-red-700">{formatPrice(row.outstanding)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filteredReceivables.length === 0 ? <p className="p-6 text-center text-xs text-gray-400">No unpaid balances match this search.</p> : null}
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Corporate invoice register</h3>
+          {corporateInvoices.length === 0 ? <p className="text-xs text-gray-400">No corporate invoices issued yet.</p> : (
+            <div className="overflow-x-auto rounded-lg border border-gray-150">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50 text-left"><tr>{["Company", "Bookings", "Issued", "Amount", "Status", "Action"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr></thead>
+                <tbody className="divide-y divide-gray-100">
+                  {corporateInvoices.map((invoice) => (
+                    <tr key={invoice.id}>
+                      <td className="px-3 py-2 font-semibold text-gray-900">{invoice.companyName}</td>
+                      <td className="px-3 py-2 text-gray-600">{invoice.bookingRefs.join(", ")}</td>
+                      <td className="px-3 py-2 text-gray-600">{invoice.issuedAt?.toISOString().slice(0, 10) || "Pending"}</td>
+                      <td className="px-3 py-2 text-right font-bold text-gray-950">{formatPrice(invoice.amount)}</td>
+                      <td className="px-3 py-2"><span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase ${invoice.status === "paid" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{invoice.status}</span></td>
+                      <td className="px-3 py-2">{invoice.status === "issued" ? <button type="button" disabled={Boolean(invoiceAction)} onClick={() => void onMarkCorporateInvoicePaid(invoice.id)} className="min-h-[44px] rounded-lg px-3 text-[10px] font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">{invoiceAction === `paid:${invoice.id}` ? "Saving..." : "Mark paid"}</button> : <span className="text-[10px] text-gray-500">{invoice.paidAt?.toISOString().slice(0, 10) || "Paid"}</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Charts Row */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -1358,8 +1955,8 @@ function SalesTab(props: {
 
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
           <div>
-            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Payment Methods</h2>
-            <p className="text-[10px] text-gray-500">Combined across bookings + delivered store orders.</p>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Actual Payment Methods</h2>
+            <p className="text-[10px] text-gray-500">Collected amounts from payment ledger entries, not booking-time preferences.</p>
           </div>
           {combinedPaymentMethods.length === 0 ? (
             <p className="text-xs text-gray-400 py-6">No payment data yet.</p>
@@ -1368,7 +1965,7 @@ function SalesTab(props: {
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={combinedPaymentMethods} dataKey="count" nameKey="name" innerRadius={48} outerRadius={82} paddingAngle={4}>
+                    <Pie data={combinedPaymentMethods} dataKey="total" nameKey="name" innerRadius={48} outerRadius={82} paddingAngle={4}>
                       {combinedPaymentMethods.map((entry, index) => (
                         <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
                       ))}
@@ -1376,7 +1973,7 @@ function SalesTab(props: {
                     <Tooltip
                       contentStyle={tooltipStyle}
                       formatter={(value: any, _name: any, props: any) => [
-                        `${value} txns (${formatPrice(props.payload.total)})`,
+                        `${formatPrice(Number(value))} · ${props.payload.count} payment${props.payload.count === 1 ? "" : "s"}`,
                         props.payload.name
                       ]}
                     />
@@ -1395,7 +1992,7 @@ function SalesTab(props: {
                         </span>
                       )}
                     </span>
-                    <span className="text-gray-500 font-mono">{method.count}</span>
+                    <span className="text-gray-500 font-mono">{formatPrice(method.total)}</span>
                   </li>
                 ))}
               </ul>
