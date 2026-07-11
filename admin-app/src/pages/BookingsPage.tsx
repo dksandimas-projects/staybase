@@ -504,6 +504,11 @@ export function BookingsPage() {
   const [hasBreakfast, setHasBreakfast] = useState(false);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
   const [priceOverride, setPriceOverride] = useState("");
+  const [walkinDiscountType, setWalkinDiscountType] = useState<"" | "senior" | "pwd">("");
+  const [walkinVoucherCode, setWalkinVoucherCode] = useState("");
+  const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
+  const [staffVoucherCode, setStaffVoucherCode] = useState("");
+  const [isApplyingStaffDiscount, setIsApplyingStaffDiscount] = useState(false);
 
   const onsitePaymentMethodOptions = useMemo(() => {
     const configured = paymentMethods.filter((method) => {
@@ -1825,6 +1830,34 @@ export function BookingsPage() {
     }
   };
 
+  const handleApplyStaffDiscount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
+    setIsApplyingStaffDiscount(true);
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+        body: JSON.stringify({
+          bookingId: selectedBooking.id,
+          discountType: staffDiscountType,
+          voucherCode: staffVoucherCode.trim()
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to apply discount.");
+      syncSelectedBooking(payload.data);
+      setStaffDiscountType("");
+      setStaffVoucherCode("");
+      toast.success("Booking repriced", `New total: ${formatPrice(payload.data.totalPrice)}`);
+    } catch (error: any) {
+      toast.error("Could not apply discount", error.message || "Please check the details and try again.");
+    } finally {
+      setIsApplyingStaffDiscount(false);
+    }
+  };
+
   const [isWalkinSubmitting, setIsWalkinSubmitting] = useState(false);
 
   const handleWalkinSubmit = async (e: React.FormEvent) => {
@@ -1852,15 +1885,15 @@ export function BookingsPage() {
         totalPrice: priceOverride !== "" ? Number(priceOverride) : totalPrice,
         totalPriceOverride: priceOverride !== "" ? Number(priceOverride) : undefined,
         originalTotalPrice: totalPrice,
-        discountType: "",
-        discountPct: 0,
+        discountType: walkinDiscountType,
+        discountPct: walkinDiscountType ? 20 : 0,
         discountIdPhotoUrl: null,
         discountVerified: false,
         discountVerifiedBy: null,
         discountRejected: false,
         discountRejectedBy: null,
         discountRejectionReason: "",
-        voucherCode: "",
+        voucherCode: walkinVoucherCode.trim().toUpperCase(),
         voucherDiscount: 0,
         isCorporate: false,
         corporateCode: "",
@@ -1898,6 +1931,8 @@ export function BookingsPage() {
         setRoomNumber("");
         setPriceOverride("");
         setHasBreakfast(false);
+        setWalkinDiscountType("");
+        setWalkinVoucherCode("");
         setIsModalOpen(false);
         toast.success("Walk-in booking created", `Room ${roomNumber} for ${guestName}`);
       } else {
@@ -2584,6 +2619,30 @@ export function BookingsPage() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {!selectedBooking.discountType && !selectedBooking.voucherCode && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
+              <form onSubmit={handleApplyStaffDiscount} className="rounded-card border border-primary/20 bg-primary-light/20 p-4 space-y-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">Apply discount / voucher</h3>
+                  <p className="mt-1 text-[11px] text-gray-600">Use after sighting a valid Senior/PWD ID, or enter a promo code. Pricing is recalculated and audited by the server.</p>
+                </div>
+                <label className="block text-xs font-semibold text-gray-700">
+                  Government discount
+                  <select value={staffDiscountType} onChange={(e) => setStaffDiscountType(e.target.value as "" | "senior" | "pwd")} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
+                    <option value="">None</option>
+                    <option value="senior">Senior Citizen (20%)</option>
+                    <option value="pwd">PWD (20%)</option>
+                  </select>
+                </label>
+                <label className="block text-xs font-semibold text-gray-700">
+                  Voucher code
+                  <input value={staffVoucherCode} onChange={(e) => setStaffVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional promo code" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
+                </label>
+                <button type="submit" disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="min-h-[44px] w-full rounded-lg bg-primary px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                  {isApplyingStaffDiscount ? "Applying..." : "Apply and reprice booking"}
+                </button>
+              </form>
             )}
 
             {/* Government discount verification */}
@@ -3685,6 +3744,21 @@ export function BookingsPage() {
               <option value="card">Onsite Card Reader</option>
             </select>
           </label>
+
+          <>
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+              Government Discount
+              <select value={walkinDiscountType} onChange={(e) => setWalkinDiscountType(e.target.value as "" | "senior" | "pwd")} className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
+                <option value="">None</option>
+                <option value="senior">Senior Citizen (20%)</option>
+                <option value="pwd">PWD (20%)</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+              Voucher Code
+              <input value={walkinVoucherCode} onChange={(e) => setWalkinVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional" className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
+            </label>
+          </>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Manual Price Override (Optional)
