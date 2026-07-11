@@ -15,7 +15,7 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
   TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet,
-  Calendar, Lock, CheckCircle2
+  Calendar, Lock, CheckCircle2, Key, BarChart2
 } from "lucide-react";
 import config from "@config";
 import * as XLSX from "xlsx";
@@ -139,6 +139,19 @@ const PAYMENT_LABELS: Record<string, string> = {
   cod: "Cash on Delivery",
   "add-to-bill": "Add to Bill"
 };
+
+function DeltaBadge({ value }: { value: number }) {
+  if (value === 0) {
+    return <span className="text-[10px] text-gray-400 font-semibold">0% vs prev period</span>;
+  }
+  const isPositive = value > 0;
+  const formatted = Math.abs(value).toFixed(1);
+  return (
+    <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${isPositive ? "text-emerald-600" : "text-rose-600"}`}>
+      {isPositive ? "▲" : "▼"} {formatted}% vs prev period
+    </span>
+  );
+}
 
 const STORE_STATUS_LABELS: Record<string, string> = {
   placed: "Placed",
@@ -1351,6 +1364,124 @@ export function ReportsPage() {
     ? Math.round((totalRoomNights / possibleRoomNights) * 100)
     : 0;
 
+  // ── Previous period for comparison (FIN-12) ──
+  const prevPeriod = useMemo(() => {
+    const durationMs = periodEnd.getTime() - periodStart.getTime();
+    const start = new Date(periodStart.getTime() - durationMs - 1);
+    const end = new Date(periodStart.getTime() - 1);
+    return { start, end };
+  }, [periodStart, periodEnd]);
+
+  const prevRangeBookings = useMemo(() => {
+    return revenueBookings.filter(b => {
+      const cIn = toDate(b.checkIn);
+      const cOut = toDate(b.checkOut);
+      if (!cIn || !cOut) return false;
+
+      const overlaps = cIn < prevPeriod.end && cOut > prevPeriod.start;
+      if (!overlaps) return false;
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (b.status === "confirmed" && cOut <= today) {
+        return false;
+      }
+
+      if (b.status === "confirmed" && cIn > today) {
+        const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
+        if (collected <= 0) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [revenueBookings, prevPeriod, payments]);
+
+  const prevDeliveredStoreOrders = useMemo(() => {
+    const prevRangeStoreOrders = storeOrders.filter(o => {
+      const date = toDate(o.createdAt);
+      return date && date >= prevPeriod.start && date <= prevPeriod.end;
+    });
+    return prevRangeStoreOrders.filter(o => o.status === "delivered");
+  }, [storeOrders, prevPeriod]);
+
+  const prevRangeCharges = useMemo(() => {
+    return charges.filter(c => c.addedAt && c.addedAt >= prevPeriod.start && c.addedAt <= prevPeriod.end);
+  }, [charges, prevPeriod]);
+
+  const prevRoomRevenue = useMemo(() => {
+    return prevRangeBookings.reduce((sum, b) => {
+      const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
+      const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+      return sum + (b.totalPrice || 0) * fraction;
+    }, 0);
+  }, [prevRangeBookings, prevPeriod]);
+
+  const prevBreakfastRevenue = useMemo(() => {
+    return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
+      const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
+      return sum + (b.breakfastRate || 0) * (b.numGuests || 0) * overlapNights;
+    }, 0);
+  }, [prevRangeBookings, prevPeriod]);
+
+  const prevStoreRevenue = useMemo(() => {
+    return prevDeliveredStoreOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  }, [prevDeliveredStoreOrders]);
+
+  const prevIncidentalRevenue = useMemo(() => {
+    return prevRangeCharges.reduce((sum, c) => sum + c.amount, 0);
+  }, [prevRangeCharges]);
+
+  const prevTotalRevenue = prevRoomRevenue + prevBreakfastRevenue + prevStoreRevenue + prevIncidentalRevenue;
+  const prevTotalBookings = prevRangeBookings.length;
+  const prevTotalRoomNights = prevRangeBookings.reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end), 0);
+  const prevDaysInRange = Math.max(1, Math.ceil((prevPeriod.end.getTime() - prevPeriod.start.getTime()) / 86_400_000));
+  const prevPossibleRoomNights = totalActiveRooms * prevDaysInRange;
+  const prevAvgOccupancyPct = prevPossibleRoomNights > 0 ? Math.round((prevTotalRoomNights / prevPossibleRoomNights) * 100) : 0;
+
+  // ADR & RevPAR (FIN-11)
+  const adr = totalRoomNights > 0 ? roomRevenue / totalRoomNights : 0;
+  const revpar = possibleRoomNights > 0 ? roomRevenue / possibleRoomNights : 0;
+
+  const prevAdr = prevTotalRoomNights > 0 ? prevRoomRevenue / prevTotalRoomNights : 0;
+  const prevRevpar = prevPossibleRoomNights > 0 ? prevRoomRevenue / prevPossibleRoomNights : 0;
+
+  const prevTotalTransactions = prevRangeBookings.length + prevDeliveredStoreOrders.length + prevRangeCharges.filter((charge) => charge.amount > 0).length;
+
+  // Comparison deltas (FIN-12)
+  const getDeltaPct = (curr: number, prev: number) => {
+    if (prev === 0) return curr > 0 ? 100 : 0;
+    return ((curr - prev) / prev) * 100;
+  };
+
+  const deltas = {
+    revenue: getDeltaPct(totalRevenue, prevTotalRevenue),
+    bookings: getDeltaPct(totalBookingsInRange, prevTotalBookings),
+    occupancy: getDeltaPct(avgOccupancyPct, prevAvgOccupancyPct),
+    adr: getDeltaPct(adr, prevAdr),
+    revpar: getDeltaPct(revpar, prevRevpar),
+    roomRevenue: getDeltaPct(roomRevenue, prevRoomRevenue),
+    breakfastRevenue: getDeltaPct(breakfastRevenue, prevBreakfastRevenue),
+    storeRevenue: getDeltaPct(storeRevenue, prevStoreRevenue),
+    incidentalRevenue: getDeltaPct(incidentalRevenue, prevIncidentalRevenue),
+    transactions: getDeltaPct(totalTransactions, prevTotalTransactions)
+  };
+
+  // Revenue by room type (FIN-11)
+  const roomTypeRevenue = useMemo(() => {
+    return roomTypes.map(rt => {
+      const revenue = rangeBookings
+        .filter(b => b.roomType === rt.value)
+        .reduce((sum, b) => {
+          const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
+          const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+          return sum + (b.totalPrice || 0) * fraction;
+        }, 0);
+      return { name: rt.label, revenue };
+    });
+  }, [roomTypes, rangeBookings, periodStart, periodEnd]);
+
   const typeCounts = new Map<string, number>();
   rangeBookings.forEach((b: any) => {
     if (!b.roomType) return;
@@ -1506,11 +1637,16 @@ export function ReportsPage() {
           daysInRange={daysInRange}
           busiestRoomType={busiestRoomType}
           busiestCount={busiestCount}
+          adr={adr}
+          revpar={revpar}
+          roomTypeRevenue={roomTypeRevenue}
+          deltas={deltas}
         />
       )}
 
       {activeTab === "sales" && (
         <SalesTab
+          deltas={deltas}
           totalRevenue={totalRevenue}
           roomRevenue={roomRevenue}
           breakfastRevenue={breakfastRevenue}
@@ -1616,7 +1752,7 @@ export function ReportsPage() {
 // ───────────────────── Performance Tab ─────────────────────
 
 function PerformanceTab({
-  totalBookings, totalRevenue, avgNights, monthlyRevenue, roomTypeOccupancy, bookingSources, totalActiveRooms, avgOccupancyPct, totalRoomNights, daysInRange, busiestRoomType, busiestCount
+  totalBookings, totalRevenue, avgNights, monthlyRevenue, roomTypeOccupancy, bookingSources, totalActiveRooms, avgOccupancyPct, totalRoomNights, daysInRange, busiestRoomType, busiestCount, adr, revpar, roomTypeRevenue, deltas
 }: {
   totalBookings: number;
   totalRevenue: number;
@@ -1630,6 +1766,10 @@ function PerformanceTab({
   daysInRange: number;
   busiestRoomType: string;
   busiestCount: number;
+  adr: number;
+  revpar: number;
+  roomTypeRevenue: Array<{ name: string; revenue: number }>;
+  deltas: { revenue: number; bookings: number; occupancy: number; adr: number; revpar: number };
 }) {
   const axisColor = "rgb(107 114 128)";
   const tooltipStyle = {
@@ -1645,57 +1785,96 @@ function PerformanceTab({
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+      <div className="grid gap-6 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
           <div>
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Revenue</span>
-            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{formatPrice(totalRevenue)}</p>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(totalRevenue)}</p>
             <span className="text-[10px] text-gray-500 font-semibold mt-2 block">All streams in period</span>
           </div>
-          <div className="h-12 w-12 rounded-full bg-orange-50 text-primary flex items-center justify-center">
-            <DollarSign size={20} />
+          <div className="mt-3 flex items-center justify-between">
+            <DeltaBadge value={deltas.revenue} />
+            <div className="h-8 w-8 rounded-full bg-orange-50 text-primary flex items-center justify-center">
+              <DollarSign size={14} />
+            </div>
           </div>
         </div>
 
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
           <div>
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Bookings</span>
-            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{totalBookings}</p>
-            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Confirmed, checked-in, checked-out</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{totalBookings}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Confirmed, in, out</span>
           </div>
-          <div className="h-12 w-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
-            <Users size={20} />
+          <div className="mt-3 flex items-center justify-between">
+            <DeltaBadge value={deltas.bookings} />
+            <div className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+              <Users size={14} />
+            </div>
           </div>
         </div>
 
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
           <div>
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Avg. Occupancy</span>
-            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{avgOccupancyPct}%</p>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{avgOccupancyPct}%</p>
             <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
               {totalRoomNights} room-nights / {totalActiveRooms} rooms × {daysInRange} days
             </span>
           </div>
-          <div className="h-12 w-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-            <Home size={20} />
+          <div className="mt-3 flex items-center justify-between">
+            <DeltaBadge value={deltas.occupancy} />
+            <div className="h-8 w-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <Home size={14} />
+            </div>
           </div>
         </div>
 
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex items-center justify-between">
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">ADR</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(adr)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Avg. Room Rate</span>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <DeltaBadge value={deltas.adr} />
+            <div className="h-8 w-8 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <Key size={14} />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">RevPAR</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(revpar)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Rev / Avail Room</span>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <DeltaBadge value={deltas.revpar} />
+            <div className="h-8 w-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+              <BarChart2 size={14} />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
           <div>
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Busiest Room Type</span>
-            <p className="font-heading text-3xl text-gray-950 mt-1.5 leading-none">{busiestRoomType}</p>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none truncate">{busiestRoomType}</p>
             <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
               {busiestCount} bookings in this range
             </span>
           </div>
-          <div className="h-12 w-12 rounded-full bg-violet-50 text-violet-600 flex items-center justify-center">
-            <TrendingUp size={20} />
+          <div className="mt-3 flex items-end justify-end">
+            <div className="h-8 w-8 rounded-full bg-violet-50 text-violet-600 flex items-center justify-center">
+              <TrendingUp size={14} />
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-3">
         <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Revenue Trend</h2>
@@ -1758,6 +1937,33 @@ function PerformanceTab({
             </div>
           )}
         </div>
+
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 space-y-4">
+          <div>
+            <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Revenue by Room Type</h2>
+            <p className="text-[10px] text-gray-500">Prorated room revenue generated per room type.</p>
+          </div>
+          {roomTypeRevenue.length === 0 || roomTypeRevenue.every(r => r.revenue === 0) ? (
+            <div className="h-72 flex items-center justify-center text-xs text-gray-400">
+              No revenue generated in this range.
+            </div>
+          ) : (
+            <div className="h-72 w-full pt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={roomTypeRevenue} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(value: any) => [formatPrice(value), "Revenue"]}
+                  />
+                  <Bar dataKey="revenue" fill={config.colors.primary} radius={[4, 4, 0, 0]} barSize={24} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
@@ -1812,6 +2018,14 @@ function PerformanceTab({
 // ───────────────────── Sales Tab ─────────────────────
 
 function SalesTab(props: {
+  deltas: {
+    revenue: number;
+    roomRevenue: number;
+    breakfastRevenue: number;
+    storeRevenue: number;
+    incidentalRevenue: number;
+    transactions: number;
+  };
   totalRevenue: number;
   roomRevenue: number;
   breakfastRevenue: number;
@@ -1876,6 +2090,7 @@ function SalesTab(props: {
   };
 }) {
   const {
+    deltas,
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
     billedTotal, collectedTotal, grossCollectionsTotal, refundsTotal, outstandingTotal, overCollectedTotal, collectionsByDay, collectionsByStaff,
     filteredPayments, onExportCollectionsCSV, cancelledWithCollections,
@@ -1908,37 +2123,67 @@ function SalesTab(props: {
     <div className="space-y-8">
       {/* Summary KPI Cards */}
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Revenue</span>
-          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(totalRevenue)}</p>
-          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">All streams combined</span>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Revenue</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(totalRevenue)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">All streams combined</span>
+          </div>
+          <div className="mt-2.5">
+            <DeltaBadge value={deltas.revenue} />
+          </div>
         </div>
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Room Revenue</span>
-          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(roomRevenue)}</p>
-          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Net of discounts</span>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Room Revenue</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(roomRevenue)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Net of discounts</span>
+          </div>
+          <div className="mt-2.5">
+            <DeltaBadge value={deltas.roomRevenue} />
+          </div>
         </div>
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Breakfast Revenue</span>
-          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(breakfastRevenue)}</p>
-          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
-            {breakfastEnabled ? `${breakfastBookingsInRange.length} breakfast bookings` : "Service disabled"}
-          </span>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Breakfast Revenue</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(breakfastRevenue)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">
+              {breakfastEnabled ? `${breakfastBookingsInRange.length} breakfast bookings` : "Service disabled"}
+            </span>
+          </div>
+          <div className="mt-2.5">
+            <DeltaBadge value={deltas.breakfastRevenue} />
+          </div>
         </div>
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Store Revenue</span>
-          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(storeRevenue)}</p>
-          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Delivered orders only</span>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Store Revenue</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(storeRevenue)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Delivered orders only</span>
+          </div>
+          <div className="mt-2.5">
+            <DeltaBadge value={deltas.storeRevenue} />
+          </div>
         </div>
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Incidental Revenue</span>
-          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(incidentalRevenue)}</p>
-          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Net of charge reversals</span>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Incidental Revenue</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{formatPrice(incidentalRevenue)}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Net of charge reversals</span>
+          </div>
+          <div className="mt-2.5">
+            <DeltaBadge value={deltas.incidentalRevenue} />
+          </div>
         </div>
-        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Transactions</span>
-          <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{totalTransactions}</p>
-          <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Bookings + store orders</span>
+        <div className="rounded-card bg-white p-6 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Transactions</span>
+            <p className="font-heading text-2xl text-gray-950 mt-1.5 leading-none">{totalTransactions}</p>
+            <span className="text-[10px] text-gray-500 font-semibold mt-2 block">Bookings + store orders</span>
+          </div>
+          <div className="mt-2.5">
+            <DeltaBadge value={deltas.transactions} />
+          </div>
         </div>
       </div>
 
