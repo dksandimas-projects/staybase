@@ -26,8 +26,8 @@
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 0 | 4 | **4** |
 | **SEV-3 (minor)** | 0 | 6 | **6** |
-| **SEV-4 (nit / polish)** | 2 | 2 | **4** |
-| **Total** | **2** | **12** | **14** |
+| **SEV-4 (nit / polish)** | 0 | 4 | **4** |
+| **Total** | **0** | **14** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -331,7 +331,7 @@ the range.
 
 ---
 
-### FIN-11 — Missing standard hotel finance KPIs (ADR, RevPAR, revenue by room type) · `Open`
+### FIN-11 — Missing standard hotel finance KPIs (ADR, RevPAR, revenue by room type) · `Fixed 2026-07-12`
 
 **Where:** `ReportsPage.tsx` Performance/Sales tabs
 
@@ -341,7 +341,7 @@ split by `roomType`. Cheap to add once FIN-10's night-clipping is fixed.
 
 ---
 
-### FIN-12 — No prior-period comparison · `Open`
+### FIN-12 — No prior-period comparison · `Fixed 2026-07-12`
 
 **Where:** `ReportsPage.tsx` (all KPI cards)
 
