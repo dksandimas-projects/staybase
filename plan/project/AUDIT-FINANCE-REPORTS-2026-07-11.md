@@ -25,9 +25,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 0 | **0** |
 | **SEV-2 (major)** | 4 | 0 | **4** |
-| **SEV-3 (minor)** | 6 | 0 | **6** |
+| **SEV-3 (minor)** | 5 | 1 | **6** |
 | **SEV-4 (nit / polish)** | 4 | 0 | **4** |
-| **Total** | **14** | **0** | **14** |
+| **Total** | **13** | **1** | **14** |
 
 Two further gaps were reviewed and deliberately **scoped out** rather than
 opened as findings — see §Scope boundaries (expenses/P&L, day-locking).
@@ -271,7 +271,7 @@ corrections are a new entry, not an edit.
 
 ---
 
-### FIN-14 — No incidental / ad-hoc charge ledger on the folio · `Open`
+### FIN-14 — No incidental / ad-hoc charge ledger on the folio · `Fixed 2026-07-11`
 
 **Where:**
 - `admin-app/src/pages/BookingsPage.tsx:1659` (`getBookingFolio` — folio = `booking.totalPrice` + add-to-bill store orders, nothing else)
