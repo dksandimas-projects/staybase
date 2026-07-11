@@ -221,6 +221,29 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 5. On confirm: booking updates (already built) **and** both rooms' `status` fields sync correctly for in-house guests (new gap to close).
 6. Guest gets the existing `booking-rescheduled` email (already built) with new room details.
 
+## Implementation Plan — Post-Booking Discount & Voucher Application
+
+> Owner request 2026-07-11. Prerequisite for the Senior/PWD online-booking
+> toggle (`plan/features/RATE-MANAGEMENT.md §Discount rules`) — that toggle
+> directs eligible guests to "claim at check-in," which is an empty promise
+> until this flow exists.
+
+### Current State (confirmed in code, 2026-07-11)
+
+- The drawer's **Government Discount Verification** panel only renders when the booking already has a claim (`BookingsPage.tsx:2590` gates the whole section on `selectedBooking.discountType`). Staff can approve/reject an online claim, but there is **no "add discount" action** for a booking that didn't claim one.
+- The **walk-in modal** hardcodes `discountType: ""`, `discountPct: 0`, `voucherDiscount: 0` (`BookingsPage.tsx:1855-1864`) — no discount or voucher entry at all, so even an in-person senior can't be given the discount at creation.
+- Consequence: a senior/PWD guest presenting a valid ID at check-in is *legally entitled* to 20% (RA 9994 / RA 10754), so front desk honors it **off the books** — collected cash diverges from `totalPrice`, which will trip the planned collections/variance reports (FIN-01/FIN-13, `plan/project/AUDIT-FINANCE-REPORTS-2026-07-11.md`) with false shortfalls.
+- The building blocks already exist server-side: `handleRescheduleBooking` re-applies Senior/PWD → voucher → member discounts in canonical stacking order (re-pricing math is proven), and voucher validation (active/expiry/usage cap/room-type scope + atomic `usageCount` increment) exists in `shared/utils/vouchers.ts` + the booking-create transaction.
+
+### Target Workflow (not yet built)
+
+1. **New staff action in the booking drawer: "Apply discount / voucher"** — available while status is `pending` / `payment-*` / `confirmed` / `checked-in`; blocked after checkout.
+2. **Senior/PWD path:** staff selects senior or PWD, sights the physical ID (optional photo upload into `discountIdPhotoUrl`); a new server route (not a raw client `updateDoc`) snapshots `originalTotalPrice`, re-prices with the canonical stacking order, and stamps `discountVerified: true` + `discountVerifiedBy` — same audit trail as the online path. **Must NOT be gated by `seniorPwdOnlineEnabled`** — the front-desk path is the legally mandated one.
+3. **Voucher path:** staff enters a code; the server validates the **same rules as online** (active, not expired, usage cap, room-type scope — never trust client, per Hard Rules) and increments `usageCount` atomically in the same transaction that re-prices.
+4. **Walk-in modal:** add discount-type + voucher-code fields wired to the same server logic, so in-person bookings support both from creation.
+5. **Settlement guardrails:** after re-pricing, if payments already collected exceed the new total, surface "guest is owed ₱X" (refund entry per FIN-03 once built); otherwise the outstanding balance simply shrinks. Offer the updated receipt PDF.
+6. **Reporting:** no report changes needed — `discountPct` / `voucherDiscount` / `originalTotalPrice` are already what exports and the FIN-05 gross-to-net bridge read; this flow just makes them truthful for at-desk grants.
+
 ## References
 
 - Booking schema and status flow: `plan/docs/BACKEND.md §bookings`
