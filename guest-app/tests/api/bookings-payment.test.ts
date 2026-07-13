@@ -141,6 +141,7 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
 
     expect(mockPayments).toHaveLength(1);
     expect(mockPayments[0].amount).toBe(2000);
+    expect(mockBookings["booking_1"].status).toBe("pending");
     expect(sendBookingTrigger).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
   });
@@ -154,6 +155,10 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
     await handleAddPayment(staffReq({ amount: 1500 }), res);
 
     expect(sendBookingTrigger).toHaveBeenCalledTimes(1);
+    expect(mockBookings["booking_1"]).toEqual(expect.objectContaining({
+      status: "payment-confirmed",
+      handledBy: "staff_1"
+    }));
     expect(sendBookingTrigger).toHaveBeenCalledWith(
       "payment-confirmed",
       expect.objectContaining({
@@ -176,8 +181,21 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
     expect(sendBookingTrigger).toHaveBeenCalledTimes(1);
     expect(sendBookingTrigger).toHaveBeenCalledWith(
       "payment-confirmed",
-      expect.objectContaining({ status: "payment-uploaded" })
+      expect.objectContaining({ status: "payment-confirmed" })
     );
+    expect(mockBookings["booking_1"].status).toBe("payment-confirmed");
+  });
+
+  test("uses the committed status transition to prevent duplicate confirmation email", async () => {
+    mockBookings["booking_1"].status = "payment-confirmed";
+    mockPayments.push({ amount: 5000 });
+
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 100 }), res);
+
+    expect(sendBookingTrigger).not.toHaveBeenCalled();
+    expect(mockBookings["booking_1"].status).toBe("payment-confirmed");
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 
   test("does not re-fire payment-confirmed if the booking is already confirmed", async () => {

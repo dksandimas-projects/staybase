@@ -187,6 +187,33 @@ describe("/api/bookings/confirm", () => {
     expect(mockWrites.find((w) => w.path === "bookings/booking_1" && (w.data as any).status === "confirmed")).toBeDefined();
   });
 
+  test("confirms a payment-confirmed booking offered by the admin drawer", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-003",
+      guestName: "Paid Guest",
+      guestEmail: "paid@example.test",
+      status: "payment-confirmed",
+      totalPrice: 5000
+    };
+
+    const res = mockResponse();
+    await handleConfirmBooking(
+      {
+        method: "POST",
+        staff: { uid: "staff_1", email: "staff@sparkinn.com", role: "front-desk" },
+        body: { bookingId: "booking_1" }
+      },
+      res
+    );
+
+    expect(mockBookings["booking_1"].status).toBe("confirmed");
+    expect(sendBookingTrigger).toHaveBeenCalledWith(
+      "booking-confirmed",
+      expect.objectContaining({ status: "confirmed" })
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
   test("rejects confirmation of a checked-in booking", async () => {
     mockBookings["booking_1"] = { status: "checked-in" };
     const res = mockResponse();
