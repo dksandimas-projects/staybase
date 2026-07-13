@@ -374,7 +374,7 @@ export interface AdminContextType {
   bookings: Booking[];
   updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
-  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string }>;
+  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
@@ -1243,7 +1243,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to move booking." };
       }
-      return { success: true };
+      return { success: true, data: data.data };
     } catch (err: any) {
       console.error("rescheduleBooking failed:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };

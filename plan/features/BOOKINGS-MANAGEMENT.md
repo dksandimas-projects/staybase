@@ -111,7 +111,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Status update: direct staff `updateDoc` on `bookings/{bookingId}` for ordinary operational transitions, updating `status` + `updatedAt` + `handledBy`
 - [ ] `confirmed` and `payment-confirmed` status changes trigger corresponding emails via email API route after the staff update succeeds
 - [ ] Cancellation: POST to `/api/bookings/cancel` so owner/staff authorization, status validation, `cancellationReason`, and cancellation email stay server-side
-- [ ] Walk-in booking creation: POST to authenticated `/api/bookings/create-walkin`; API runs the availability-locking transaction, writes `source: "walk-in"`, default `status: "confirmed"` unless immediate check-in is selected, and stores `handledBy` from the verified staff token
+- [x] Walk-in booking creation: POST to authenticated `/api/bookings/create-walkin`; API strictly validates the full request before the availability-locking transaction, caps a finite manual override at 1,000,000, writes `source: "walk-in"`, defaults to `confirmed` unless immediate check-in is selected, and stores `handledBy` from the verified staff token
 - [ ] Walk-in booking ref generated inside the same transaction as booking creation; do not call `/api/reference/generate` separately for walk-ins
 - [ ] Points redemption: POST to `/api/members/redeem-points` — validates member balance, computes `₱ value = pointsRedeemed × (redemptionRate / 100)`, updates booking `totalPrice`, `pointsRedeemed`, `pointsRedeemedValue`; deducts from `members/{uid}.rewardsPoints`; logs to `members/{uid}/pointsHistory` with `type: "redeem"`, `bookingId`, `by: staffUID`
 - [ ] Redemption rate fetched from `settings/rewardsConfig.pointsRedemptionRate` — never hardcoded
@@ -200,8 +200,9 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 - `POST /api/bookings/reschedule` (`handleRescheduleBooking`, `guest-app/server/handlers/bookings.ts`) accepts `{ bookingId, roomId, checkIn, checkOut, reason }` inside a Firestore transaction. `roomId` can point to a room of a **different type**, so this already covers both a same-type room swap and a type upgrade/downgrade, not just a date change.
 - ✅ Capacity check — rejects the move if `booking.numGuests` exceeds the target room type's `maxCapacity`.
 - ✅ Conflict checks — target room can't have an overlapping booking or an active `roomBlocks` window for the new dates.
-- ✅ Full re-pricing — recomputes `roomBreakdown`/`rateBreakdown` against the target room type's base/weekend/seasonal/corporate rate, then re-applies Senior/PWD discount, voucher, and Spark Rewards member discount in the same order as booking creation. Points redemption value is re-subtracted.
+- ✅ Pricing basis — standard/corporate bookings recompute against the target room/date basis, while a locked manual walk-in rate is preserved and rescaled only by the new night count. The move form explicitly identifies that manual basis before confirmation. Discounts, vouchers, member discount, and redeemed points remain in the canonical order.
 - ✅ `deltaTotalPrice` (new total − old total) is computed and stored in a `rescheduleHistory` entry on the booking, so an upgrade's price difference is on record.
+- ✅ `pricingBasis` records whether each move preserved a manual rate or used recalculated pricing; the admin applies the authoritative response breakdown after the move.
 - ✅ Guest notification — fires the `booking-rescheduled` email with the new room/dates after a successful move.
 - ✅ Staff entry point exists today at `/calendar` — the booking drawer's "Move booking" form lists every room across every type (labelled with type), so staff can already pick an upgrade/downgrade target, not just a same-type room.
 

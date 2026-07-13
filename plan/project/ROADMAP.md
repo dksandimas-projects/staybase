@@ -1121,10 +1121,9 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 > vouchers, points → check-in → incidental charges & store billing →
 > checkout → Reports/exports). 20 findings `FL-01`..`FL-20`. Unlike the
 > July-11 FIN audit (missing features), these are arithmetic and
-> state-transition defects *inside* the shipped finance plumbing. Two
-> findings need an owner decision before implementation (FL-05 store
-> tender recording; FL-10/FL-11 early-checkout refund + points-on-unpaid
-> policy) — log outcomes in `DECISIONS-FEATURES.md`.
+> state-transition defects *inside* the shipped finance plumbing. Two policy
+> findings, FL-10/FL-11, still need owner decisions for early-checkout refund and
+> points-on-unpaid policy; log those outcomes in `DECISIONS-FEATURES.md`.
 
 **SEV-1 — wrong money numbers (fix first, small isolated diffs):**
 - ✅ **FL-01 — Total Revenue double-counts breakfast** — fixed with proportional net allocation across disjoint room/breakfast streams; current/previous/monthly figures and ADR/RevPAR now use the split, with unit coverage.
@@ -1134,8 +1133,8 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **FL-03 — Staff apply-discount can zero a legacy booking** — fixed with explicit original → breakdown → stored-total fallback and rejection when no finite pricing basis exists.
 - ✅ **FL-04 — Full payment emails "payment confirmed" but never advances status** — fixed by atomically writing the payment and `payment-confirmed` status; only the committed transition sends the guest email.
 - ✅ **FL-05 — Direct-paid store orders invisible to payments ledger / Daily Close** — resolved with an authenticated atomic delivery transition plus one deterministic store-scoped tender. COD maps to Cash, configured direct methods retain their key, Add to Bill stays on the folio, and store revenue uses delivery time.
-- ⬜ **FL-06 — Reschedule wipes manual walk-in pricing** — room move reprices from standard rates, discarding the `"manual"` front-desk rate line silently (`bookings.ts:2712`).
-- ⬜ **FL-07 — Walk-in body unvalidated server-side** — `totalPriceOverride` NaN survives to `totalPrice` and poisons every report sum; no 1M cap; `guestDetails` un-Zod'd (`bookings.ts:1372`).
+- ✅ **FL-06 — Reschedule wipes manual walk-in pricing** — fixed with a shared exact manual-nightly-basis helper used by server and admin preview; moves rescale by nights, preserve the manual line, explain the basis, and apply the authoritative response.
+- ✅ **FL-07 — Walk-in body unvalidated server-side** — fixed with a strict full-body/nested-guest Zod schema that runs before Firestore and caps finite manual overrides at 1,000,000.
 
 **SEV-3:**
 - ✅ **FL-08 — Points redeem/undo never rebuilds `rateBreakdown`** — fixed with a shared server helper that preserves locked room/add-on lines and atomically rebuilds canonical deductions plus final total on redeem/undo.
@@ -1218,10 +1217,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
-| Finance Lifecycle Audit (July 12) | 20 | 8 | 12 (FL-01..FL-05, FL-08, FL-09, FL-12 fixed — 2 SEV-2, 5 SEV-3, 5 SEV-4 remain; FL-10/FL-11 still need owner policy decisions — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
+| Finance Lifecycle Audit (July 12) | 20 | 10 | 10 (all SEV-1/SEV-2 closed; 5 SEV-3 and 5 SEV-4 remain; FL-10/FL-11 need owner policy decisions — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **383** | **347** | **~136** |
+| **Total** | **383** | **349** | **~134** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 
