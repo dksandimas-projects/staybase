@@ -137,6 +137,13 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 
+When an appended payment brings a `pending` or `payment-uploaded` booking to
+its locked `totalPrice`, the payment record and `payment-confirmed` status are
+written in the same server transaction. The committed status transition is
+the idempotency guard for the guest payment-confirmed email. Staff may then
+transition `payment-confirmed` to `confirmed`, or check in directly when the
+registration gate is otherwise complete.
+
 > **Store charges are not denormalized onto the booking document.** The checkout folio in `admin-app/src/pages/BookingsPage.tsx` (`getBookingStoreCharges`) derives the billed store orders for a booking at read time by filtering the `storeOrders` collection on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. This avoids denormalization drift between the booking and store order lifecycles. `storeOrders.isBilled` and `storeOrders.billedAt` are the source of truth (set by the front desk "Add to Booking Bill" action in the admin Bookings drawer).
 
 > **Fixed 2026-07-02: `GET /api/rooms/availability` was 500ing in production** with a Firestore `FAILED_PRECONDITION: The query requires an index` error on the composite `status` (ASC) + `checkIn` (ASC) query. All 5 composite indexes defined in `firebase/firestore.indexes.json` (4 on `bookings`, 1 on `rooms`) existed in source control but had never actually been deployed to the live project — confirmed via `firestore_list_indexes` that zero indexes existed before the fix. Resolved by creating all 5 directly against the live project (`spark-inn-stg-7a7ad`); all now `READY` and `/api/rooms/availability` returns `200`. **Lesson: `firebase/firestore.indexes.json` being present and correct in the repo does not mean it's deployed** — there is no CI step or pre-deploy hook that runs `firebase deploy --only firestore:indexes` automatically. If a new query needs a composite index, add it to `firestore.indexes.json` **and** deploy it (via `firebase deploy --only firestore:indexes` or the Firebase MCP `firestore_create_index` tool) — don't assume the JSON file alone is sufficient. Separately still worth confirming with whoever owns the Firebase project config: the live `FIREBASE_PROJECT_ID` used by both the Preview and Production Vercel environments is `spark-inn-stg-7a7ad` (a "stg"-named project serving production traffic) — may be intentional (single project, historically named), but flagging since it reads like a staging/production mixup.

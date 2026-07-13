@@ -1958,6 +1958,7 @@ export async function handleAddPayment(req: any, res: any) {
   let totalPrice = 0;
   let isConfirmableStatus = false;
   let fullyPaid = false;
+  let transitionedToPaymentConfirmed = false;
   let hadPaymentProof = false;
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot: any = null;
@@ -1971,6 +1972,7 @@ export async function handleAddPayment(req: any, res: any) {
       }
       const bookingData = bookingDoc.data()!;
       bookingDataSnapshot = bookingData;
+      transitionedToPaymentConfirmed = false;
 
       const paymentsRef = bookingRef.collection("payments");
       // Read existing payments before queuing writes. Firestore
@@ -1990,12 +1992,34 @@ export async function handleAddPayment(req: any, res: any) {
       hadPaymentProof = !!bookingData.paymentProofUrl;
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
 
-      // Mark the staff-new-payment dedup inside the transaction
-      // so a concurrent addPayment call doesn't re-fire the email.
+      const bookingUpdates: Record<string, any> = {};
+
+      // Mark the staff-new-payment dedup inside the transaction so a
+      // concurrent addPayment call doesn't re-fire the staff alert.
       if (hadPaymentProof && staffPaymentMarkerMissing) {
-        transaction.update(bookingRef, {
-          "emailNotificationsSent.staffNewPayment": new Date()
+        bookingUpdates["emailNotificationsSent.staffNewPayment"] = new Date();
+      }
+
+      // Per Decision #77 / FL-04, reaching the locked booking total is the
+      // authoritative transition to payment-confirmed. Keeping this write in
+      // the same transaction as the payment append makes the status itself
+      // the guest-email idempotency guard under concurrent submissions.
+      if (fullyPaid && isConfirmableStatus) {
+        const updatedAt = new Date();
+        Object.assign(bookingUpdates, {
+          status: "payment-confirmed",
+          handledBy: staffUid,
+          updatedAt
         });
+        transitionedToPaymentConfirmed = true;
+        bookingDataSnapshot = {
+          ...bookingData,
+          ...bookingUpdates
+        };
+      }
+
+      if (Object.keys(bookingUpdates).length > 0) {
+        transaction.update(bookingRef, bookingUpdates);
       }
 
       // Append the payment record inside the transaction after
@@ -2015,7 +2039,7 @@ export async function handleAddPayment(req: any, res: any) {
   // external and slow) but the dedup marker is now written
   // transactionally so the duplicate-fire race is closed.
   try {
-    if (fullyPaid && isConfirmableStatus) {
+    if (transitionedToPaymentConfirmed) {
       await sendBookingTrigger("payment-confirmed", bookingDataSnapshot);
     }
     // Per W4.4 / decision #104: notify staff when a guest
@@ -2033,7 +2057,11 @@ export async function handleAddPayment(req: any, res: any) {
 
   return res.status(200).json({
     success: true,
-    data: { ...paymentRecord, totalPaid }
+    data: {
+      ...paymentRecord,
+      totalPaid,
+      status: bookingDataSnapshot?.status || null
+    }
   });
 }
 
@@ -2124,7 +2152,7 @@ export async function handleConfirmBooking(req: any, res: any) {
         return;
       }
 
-      const allowedStatuses = ["pending", "payment-uploaded"];
+      const allowedStatuses = ["pending", "payment-uploaded", "payment-confirmed"];
       if (!allowedStatuses.includes(data.status)) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
