@@ -1585,10 +1585,18 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
       }
 
       const breakdown = booking.rateBreakdown as BookingRateBreakdown | undefined;
-      const subtotal = Number(booking.originalTotalPrice ?? (
-        Number(breakdown?.roomSubtotal || 0)
-        + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0)
-      ) ?? booking.totalPrice);
+      const storedOriginalTotal = Number(booking.originalTotalPrice);
+      const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0)
+        + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      const storedTotalPrice = Number(booking.totalPrice);
+      const subtotal = booking.originalTotalPrice !== null
+        && booking.originalTotalPrice !== undefined
+        && Number.isFinite(storedOriginalTotal)
+        && storedOriginalTotal >= 0
+        ? storedOriginalTotal
+        : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0
+          ? breakdownSubtotal
+          : storedTotalPrice;
       if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
 
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
@@ -1696,12 +1704,32 @@ export async function handleRejectDiscount(req: any, res: any) {
     // Per LR-L2: preserve the booking's existing workflow status
     // and re-apply the Spark Rewards member discount after removing
     // only the rejected Senior/PWD discount. Stacking remains:
-    // subtotal -> voucher -> member discount.
+    // subtotal -> voucher -> member discount -> redeemed points.
     const voucherDiscount = Number(bookingData.voucherDiscount || 0);
     const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
     const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
     const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
-    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount, 0);
+    const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+    const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue)
+      ? Math.max(rawPointsRedeemedValue, 0)
+      : 0;
+    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
+    const existingBreakdown = bookingData.rateBreakdown as BookingRateBreakdown | undefined;
+    const breakfastTotal = (existingBreakdown?.addOns || [])
+      .reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const rateBreakdown = existingBreakdown
+      ? buildRateBreakdown({
+          roomLines: existingBreakdown.roomLines || [],
+          roomSubtotal: Number(existingBreakdown.roomSubtotal || Math.max(originalTotalPrice - breakfastTotal, 0)),
+          breakfastTotal,
+          discountType: "",
+          discountPct: 0,
+          voucherDiscount,
+          memberDiscountPct,
+          pointsRedeemedValue,
+          finalTotal: restoredTotalPrice
+        })
+      : undefined;
 
     // Per BF-15 (booking-flow audit 2026-06-26): the
     // `discountRejectedBy` field is a staff UID per the
@@ -1717,6 +1745,7 @@ export async function handleRejectDiscount(req: any, res: any) {
       discountRejectionReason: reason || "",
       discountPct: 0,
       totalPrice: restoredTotalPrice,
+      ...(rateBreakdown ? { rateBreakdown } : {}),
       updatedAt: new Date()
     };
 

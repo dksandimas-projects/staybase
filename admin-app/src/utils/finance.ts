@@ -34,3 +34,51 @@ export function normalizePaymentMethodBucket(method: string): PaymentBucket {
 export function dateKeyInTimeZone(date: Date, timeZone: string): string {
   return date.toLocaleDateString("en-CA", { timeZone });
 }
+
+type BookingRevenueInput = {
+  totalPrice?: number | null;
+  ratePerNight?: number | null;
+  numNights?: number | null;
+  numGuests?: number | null;
+  hasBreakfast?: boolean | null;
+  breakfastRate?: number | null;
+  rateBreakdown?: {
+    roomSubtotal?: number | null;
+  } | null;
+};
+
+function nonNegativeFinite(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+
+// A booking's totalPrice already contains breakfast and all deductions. Split
+// that net total proportionally across the locked gross room/breakfast amounts
+// so the two report streams are disjoint and always add back to totalPrice.
+// Legacy bookings fall back to ratePerNight × numNights for the room basis.
+export function splitBookingRevenue(booking: BookingRevenueInput): { room: number; breakfast: number } {
+  const total = nonNegativeFinite(booking.totalPrice);
+  const nights = nonNegativeFinite(booking.numNights);
+  const breakfastGross = booking.hasBreakfast
+    ? nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
+    : 0;
+
+  if (total === 0 || breakfastGross === 0) {
+    return { room: total, breakfast: 0 };
+  }
+
+  const lockedRoomSubtotal = nonNegativeFinite(booking.rateBreakdown?.roomSubtotal);
+  const legacyRoomSubtotal = nonNegativeFinite(booking.ratePerNight) * nights;
+  const roomGross = lockedRoomSubtotal > 0 ? lockedRoomSubtotal : legacyRoomSubtotal;
+
+  if (roomGross <= 0) {
+    return { room: total, breakfast: 0 };
+  }
+
+  const grossTotal = roomGross + breakfastGross;
+  const breakfast = Math.round(total * (breakfastGross / grossTotal) * 100) / 100;
+  return {
+    room: Math.round((total - breakfast) * 100) / 100,
+    breakfast
+  };
+}

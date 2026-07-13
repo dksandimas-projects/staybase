@@ -56,13 +56,17 @@ vi.mock("../../server/lib/firebase-admin", () => {
       doc: vi.fn().mockImplementation((path: string) => docRef(path)),
       collection: vi.fn().mockImplementation((collName: string) => ({
         doc: (id: string) => docRef(`${collName}/${id}`)
+      })),
+      runTransaction: vi.fn().mockImplementation(async (callback: any) => callback({
+        get: async (ref: any) => ref.get(),
+        update: async (ref: any, data: any) => ref.update(data)
       }))
     },
     adminAuth: { verifyIdToken: vi.fn() }
   };
 });
 
-import { handleRejectDiscount } from "../../server/handlers/bookings";
+import { handleApplyBookingDiscount, handleRejectDiscount } from "../../server/handlers/bookings";
 
 const mockResponse = () => {
   const res: any = {};
@@ -162,6 +166,40 @@ describe("BF-05 — handleRejectDiscount restores totalPrice to pre-Senior/PWD s
     expect(updateData.totalPrice).toBe(0);
   });
 
+  test("preserves redeemed points and rebuilds the breakdown after rejection", async () => {
+    mockBookings["booking_points"] = {
+      bookingRef: "SI-20260601-005",
+      guestName: "Points Member",
+      guestEmail: "points@example.test",
+      totalPrice: 2_700,
+      originalTotalPrice: 4_000,
+      discountType: "senior",
+      discountPct: 20,
+      voucherDiscount: 0,
+      memberDiscountPct: 10,
+      pointsRedeemedValue: 500,
+      rateBreakdown: {
+        roomSubtotal: 3_500,
+        roomLines: [{ label: "Regular rate", subtotal: 3_500 }],
+        addOns: [{ label: "Breakfast add-on", amount: 500 }],
+        deductions: [],
+        finalTotal: 2_700
+      }
+    };
+
+    const res = mockResponse();
+    await handleRejectDiscount(baseStaffReq({ bookingId: "booking_points" }), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const updateData = updateCalls.find((c) => c.ref === "bookings/booking_points")?.data;
+    expect(updateData.totalPrice).toBe(3_100);
+    expect(updateData.rateBreakdown.finalTotal).toBe(3_100);
+    expect(updateData.rateBreakdown.deductions).toEqual([
+      { label: "Spark Rewards member discount (10%)", amount: 400 },
+      { label: "Spark Rewards points redeemed", amount: 500 }
+    ]);
+  });
+
   test("rejects when originalTotalPrice is null: returns 500 (guard remains)", async () => {
     // Defensive: bookings that pre-date the fix (or somehow have
     // a missing originalTotalPrice) still 500 instead of silently
@@ -186,5 +224,52 @@ describe("BF-05 — handleRejectDiscount restores totalPrice to pre-Senior/PWD s
     expect(jsonArg.error).toBe("Original total price not stored on booking.");
     // No update was written.
     expect(updateCalls.find((c) => c.ref === "bookings/booking_4")).toBeUndefined();
+  });
+});
+
+describe("FL-03 — handleApplyBookingDiscount preserves legacy booking prices", () => {
+  beforeEach(() => {
+    mockBookings = {};
+    updateCalls.length = 0;
+  });
+
+  test("uses totalPrice when a legacy booking has no original total or rate breakdown", async () => {
+    mockBookings["legacy_booking"] = {
+      bookingRef: "SI-LEGACY-001",
+      totalPrice: 4_000,
+      originalTotalPrice: null,
+      rateBreakdown: null,
+      status: "confirmed",
+      discountType: "",
+      voucherCode: "",
+      memberDiscountPct: 0,
+      pointsRedeemedValue: 0
+    };
+
+    const res = mockResponse();
+    await handleApplyBookingDiscount(baseStaffReq({ bookingId: "legacy_booking", discountType: "senior" }), res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const updateData = updateCalls.find((c) => c.ref === "bookings/legacy_booking")?.data;
+    expect(updateData.originalTotalPrice).toBe(4_000);
+    expect(updateData.totalPrice).toBe(3_200);
+  });
+
+  test("rejects instead of writing zero when no legacy pricing basis exists", async () => {
+    mockBookings["invalid_legacy_booking"] = {
+      bookingRef: "SI-LEGACY-002",
+      totalPrice: undefined,
+      originalTotalPrice: null,
+      rateBreakdown: null,
+      status: "confirmed",
+      discountType: "",
+      voucherCode: ""
+    };
+
+    const res = mockResponse();
+    await handleApplyBookingDiscount(baseStaffReq({ bookingId: "invalid_legacy_booking", discountType: "pwd" }), res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(updateCalls.find((c) => c.ref === "bookings/invalid_legacy_booking")).toBeUndefined();
   });
 });
