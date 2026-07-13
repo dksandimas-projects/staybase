@@ -190371,7 +190371,10 @@ async function handleApplyBookingDiscount(req, res) {
         throw new Error("This booking already has a discount or voucher. Existing grants cannot be replaced from this action.");
       }
       const breakdown = booking.rateBreakdown;
-      const subtotal = Number(booking.originalTotalPrice ?? Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0) ?? booking.totalPrice);
+      const storedOriginalTotal = Number(booking.originalTotalPrice);
+      const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      const storedTotalPrice = Number(booking.totalPrice);
+      const subtotal = booking.originalTotalPrice !== null && booking.originalTotalPrice !== void 0 && Number.isFinite(storedOriginalTotal) && storedOriginalTotal >= 0 ? storedOriginalTotal : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0 ? breakdownSubtotal : storedTotalPrice;
       if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
@@ -190469,7 +190472,22 @@ async function handleRejectDiscount(req, res) {
     const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
     const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
     const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
-    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount, 0);
+    const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+    const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
+    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
+    const existingBreakdown = bookingData.rateBreakdown;
+    const breakfastTotal = (existingBreakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const rateBreakdown = existingBreakdown ? buildRateBreakdown({
+      roomLines: existingBreakdown.roomLines || [],
+      roomSubtotal: Number(existingBreakdown.roomSubtotal || Math.max(originalTotalPrice - breakfastTotal, 0)),
+      breakfastTotal,
+      discountType: "",
+      discountPct: 0,
+      voucherDiscount,
+      memberDiscountPct,
+      pointsRedeemedValue,
+      finalTotal: restoredTotalPrice
+    }) : void 0;
     const discountRejectedBy = req.staff?.uid || "staff";
     const updates = {
       discountRejected: true,
@@ -190477,6 +190495,7 @@ async function handleRejectDiscount(req, res) {
       discountRejectionReason: reason || "",
       discountPct: 0,
       totalPrice: restoredTotalPrice,
+      ...rateBreakdown ? { rateBreakdown } : {},
       updatedAt: /* @__PURE__ */ new Date()
     };
     await bookingRef.update(updates);

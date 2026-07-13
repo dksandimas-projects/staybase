@@ -23,7 +23,7 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { collection, collectionGroup, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { normalizePaymentMethodBucket, dateKeyInTimeZone } from "../utils/finance";
+import { normalizePaymentMethodBucket, dateKeyInTimeZone, splitBookingRevenue } from "../utils/finance";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -452,7 +452,7 @@ export function ReportsPage() {
     return rangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + (b.totalPrice || 0) * fraction;
+      return sum + splitBookingRevenue(b).room * fraction;
     }, 0);
   }, [rangeBookings, periodStart, periodEnd]);
 
@@ -464,7 +464,8 @@ export function ReportsPage() {
   const breakfastRevenue = useMemo(() => {
     return breakfastBookingsInRange.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
-      return sum + (b.breakfastRate || 0) * (b.numGuests || 0) * overlapNights;
+      const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+      return sum + splitBookingRevenue(b).breakfast * fraction;
     }, 0);
   }, [breakfastBookingsInRange, periodStart, periodEnd]);
 
@@ -772,10 +773,9 @@ export function ReportsPage() {
       const checkIn = toDate(b.checkIn);
       if (!checkIn) return;
       const slot = ensureMonth(checkIn);
-      slot.room += b.totalPrice || 0;
-      if (b.hasBreakfast) {
-        slot.breakfast += (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
-      }
+      const bookingRevenue = splitBookingRevenue(b);
+      slot.room += bookingRevenue.room;
+      slot.breakfast += bookingRevenue.breakfast;
     });
 
     deliveredStoreOrders.forEach(o => {
@@ -1530,14 +1530,15 @@ export function ReportsPage() {
     return prevRangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + (b.totalPrice || 0) * fraction;
+      return sum + splitBookingRevenue(b).room * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
   const prevBreakfastRevenue = useMemo(() => {
     return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
-      return sum + (b.breakfastRate || 0) * (b.numGuests || 0) * overlapNights;
+      const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+      return sum + splitBookingRevenue(b).breakfast * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
@@ -1592,7 +1593,7 @@ export function ReportsPage() {
         .reduce((sum, b) => {
           const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
           const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-          return sum + (b.totalPrice || 0) * fraction;
+          return sum + splitBookingRevenue(b).room * fraction;
         }, 0);
       return { name: rt.label, revenue };
     });
