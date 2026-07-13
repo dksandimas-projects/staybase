@@ -35,6 +35,115 @@ export function dateKeyInTimeZone(date: Date, timeZone: string): string {
   return date.toLocaleDateString("en-CA", { timeZone });
 }
 
+export function shiftDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return shifted.toISOString().slice(0, 10);
+}
+
+function timeZoneOffsetMs(date: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const representedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+  const instantWithoutMilliseconds = Math.floor(date.getTime() / 1000) * 1000;
+  return representedAsUtc - instantWithoutMilliseconds;
+}
+
+function startOfDateKeyInTimeZone(dateKey: string, timeZone: string): Date {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const targetWallClock = Date.UTC(year, month - 1, day);
+  let instant = targetWallClock;
+
+  // Re-evaluate the offset at the resolved instant so this also behaves
+  // correctly for white-label hotels in daylight-saving timezones.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const next = targetWallClock - timeZoneOffsetMs(new Date(instant), timeZone);
+    if (next === instant) break;
+    instant = next;
+  }
+  return new Date(instant);
+}
+
+// Inclusive UTC instants for hotel-calendar date keys. Report membership must
+// use these boundaries rather than the browser's local midnight.
+export function getTimeZoneDayRange(startDateKey: string, endDateKey: string, timeZone: string): { start: Date; end: Date } {
+  const start = startOfDateKeyInTimeZone(startDateKey, timeZone);
+  const nextDayStart = startOfDateKeyInTimeZone(shiftDateKey(endDateKey, 1), timeZone);
+  return { start, end: new Date(nextDayStart.getTime() - 1) };
+}
+
+type FolioBooking = { id: string; totalPrice?: number | null };
+type FolioPayment = {
+  source: "booking" | "store-order";
+  sourceId: string;
+  bookingId: string;
+  amount: number;
+};
+type FolioCharge = { bookingId: string; amount: number };
+type FolioStoreOrder = {
+  id: string;
+  bookingId?: string | null;
+  paymentMethod?: string | null;
+  status?: string | null;
+  isBilled?: boolean | null;
+  totalAmount?: number | null;
+};
+
+// Snapshot selected booking folios and direct-paid store orders on the same
+// to-date basis. This makes Billed, Collected, Outstanding, and Over-collected
+// comparable even when a deposit was recorded before the selected stay range.
+export function summarizeFolioSnapshot(input: {
+  bookings: FolioBooking[];
+  bookingIds: Iterable<string>;
+  payments: FolioPayment[];
+  charges: FolioCharge[];
+  storeOrders: FolioStoreOrder[];
+  directStoreOrderIds: Iterable<string>;
+}): { billed: number; collected: number } {
+  const bookingIds = new Set(input.bookingIds);
+  const directStoreOrderIds = new Set(input.directStoreOrderIds);
+
+  const bookingTotals = input.bookings
+    .filter((booking) => bookingIds.has(booking.id))
+    .reduce((sum, booking) => sum + nonNegativeFinite(booking.totalPrice), 0);
+  const incidentalTotals = input.charges
+    .filter((charge) => bookingIds.has(charge.bookingId))
+    .reduce((sum, charge) => sum + (Number.isFinite(Number(charge.amount)) ? Number(charge.amount) : 0), 0);
+  const addToBillTotals = input.storeOrders
+    .filter((order) => order.bookingId && bookingIds.has(order.bookingId)
+      && order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled)
+    .reduce((sum, order) => sum + nonNegativeFinite(order.totalAmount), 0);
+  const directStoreTotals = input.storeOrders
+    .filter((order) => directStoreOrderIds.has(order.id))
+    .reduce((sum, order) => sum + nonNegativeFinite(order.totalAmount), 0);
+  const collected = input.payments
+    .filter((payment) => payment.source === "booking"
+      ? bookingIds.has(payment.bookingId)
+      : directStoreOrderIds.has(payment.sourceId))
+    .reduce((sum, payment) => sum + (Number.isFinite(Number(payment.amount)) ? Number(payment.amount) : 0), 0);
+
+  return {
+    billed: bookingTotals + incidentalTotals + addToBillTotals + directStoreTotals,
+    collected
+  };
+}
+
 type BookingRevenueInput = {
   totalPrice?: number | null;
   ratePerNight?: number | null;
