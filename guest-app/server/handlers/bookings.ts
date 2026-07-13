@@ -13,9 +13,10 @@ import {
   generateLookupToken,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
 } from "@spark-inn/shared";
-import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
+import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
+import { buildRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
@@ -116,47 +117,6 @@ async function hasActiveRoomBlockConflict(
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
-}
-
-function buildRateBreakdown(input: {
-  roomLines: BookingRateLine[];
-  roomSubtotal: number;
-  breakfastTotal: number;
-  discountType: string;
-  discountPct: number;
-  voucherDiscount: number;
-  memberDiscountPct: number;
-  pointsRedeemedValue?: number;
-  finalTotal: number;
-}): BookingRateBreakdown {
-  const addOns = input.breakfastTotal > 0
-    ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
-    : [];
-  const subtotal = input.roomSubtotal + input.breakfastTotal;
-  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
-  const afterSeniorPwd = subtotal - seniorPwdDiscount;
-  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
-  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
-  const pointsRedeemedValue = Math.max(0, Number(input.pointsRedeemedValue) || 0);
-  const deductions = [
-    ...(seniorPwdDiscount > 0
-      ? [{
-          label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
-          amount: seniorPwdDiscount
-        }]
-      : []),
-    ...(input.voucherDiscount > 0 ? [{ label: "Voucher discount", amount: input.voucherDiscount }] : []),
-    ...(memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }] : []),
-    ...(pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : [])
-  ];
-
-  return {
-    roomSubtotal: input.roomSubtotal,
-    roomLines: input.roomLines,
-    addOns,
-    deductions,
-    finalTotal: input.finalTotal
-  };
 }
 
 // Per BF-21 (booking-flow audit 2026-06-26): the public
@@ -1714,22 +1674,16 @@ export async function handleRejectDiscount(req: any, res: any) {
       ? Math.max(rawPointsRedeemedValue, 0)
       : 0;
     const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
-    const existingBreakdown = bookingData.rateBreakdown as BookingRateBreakdown | undefined;
-    const breakfastTotal = (existingBreakdown?.addOns || [])
-      .reduce((sum, line) => sum + Number(line.amount || 0), 0);
-    const rateBreakdown = existingBreakdown
-      ? buildRateBreakdown({
-          roomLines: existingBreakdown.roomLines || [],
-          roomSubtotal: Number(existingBreakdown.roomSubtotal || Math.max(originalTotalPrice - breakfastTotal, 0)),
-          breakfastTotal,
-          discountType: "",
-          discountPct: 0,
-          voucherDiscount,
-          memberDiscountPct,
-          pointsRedeemedValue,
-          finalTotal: restoredTotalPrice
-        })
-      : undefined;
+    const rateBreakdown = rebuildRateBreakdown({
+      ...bookingData,
+      discountType: "",
+      discountPct: 0,
+      pointsRedeemedValue,
+      totalPrice: restoredTotalPrice
+    }, {
+      pointsRedeemedValue,
+      finalTotal: restoredTotalPrice
+    });
 
     // Per BF-15 (booking-flow audit 2026-06-26): the
     // `discountRejectedBy` field is a staff UID per the
