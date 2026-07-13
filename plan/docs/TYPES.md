@@ -260,7 +260,7 @@ EarlyCheckInDetails {
 
 ### BookingRateBreakdown
 
-Locked, guest-safe explanation of booking price at creation time. Used by booking review, confirmation, lookup, emails, and admin receipts. Existing bookings may omit it and must render with the legacy `ratePerNight × numNights` fallback.
+Locked, guest-safe explanation of booking price at creation time. Used by booking review, confirmation, lookup, emails, and admin receipts. Server-side money mutations must rebuild its deduction lines and final total in the same transaction as `totalPrice`. Existing bookings may omit it and must render with the legacy `ratePerNight × numNights` fallback.
 
 Required shape:
 

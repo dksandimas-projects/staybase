@@ -98,7 +98,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `checkOut` | timestamp | |
 | `numNights` | number | Computed at booking time |
 | `ratePerNight` | number | Rate locked at booking time |
-| `rateBreakdown` | object \| null | Locked itemized price explanation for mixed regular/weekend/seasonal rates, add-ons, and deductions. New bookings should persist it; legacy bookings may be null and fall back to `ratePerNight × numNights`. |
+| `rateBreakdown` | object \| null | Locked itemized price explanation for mixed regular/weekend/seasonal rates, add-ons, and deductions. New bookings should persist it; later money mutations such as points redeem/undo rebuild it atomically with `totalPrice`. Legacy bookings may be null and fall back to `ratePerNight × numNights`. |
 | `totalPrice` | number | Computed at booking time |
 | `discountType` | string | `""` \| `"senior"` \| `"pwd"` |
 | `discountPct` | number | `0` \| `20` |

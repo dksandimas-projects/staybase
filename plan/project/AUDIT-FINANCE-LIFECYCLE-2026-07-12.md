@@ -29,9 +29,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 2 | **2** |
 | **SEV-2 (major)** | 4 | 1 | **5** |
-| **SEV-3 (minor)** | 8 | 0 | **8** |
+| **SEV-3 (minor)** | 7 | 1 | **8** |
 | **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **17** | **3** | **20** |
+| **Total** | **16** | **4** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -80,10 +80,9 @@ guaranteed to show a variance on any day with store cash sales (FL-05).
    payment inside the existing `handleAddPayment` transaction, and fix the
    dead `payment-confirmed → confirmed` transition (widen the server allow
    list or drop the button).
-3. **FL-08 + FL-10** — extract a shared `rebuildRateBreakdown(booking)`
-   helper and call it from points-redeem/undo, reject-discount, and
-   early-checkout truncation so `rateBreakdown` can never drift from
-   `totalPrice` again.
+3. 🔄 **FL-08 + FL-10** — shared `rebuildRateBreakdown(booking)` helper
+   shipped with FL-08 on 2026-07-13 and now serves points redeem/undo plus
+   reject-discount. FL-10 early-checkout integration remains policy-blocked.
 4. **FL-05** — needs a design decision first (record store tenders as
    ledger entries vs. exclude direct-paid store revenue from the billed
    side): log the decision in `DECISIONS-FEATURES.md`, then implement.
@@ -324,7 +323,7 @@ and reject NaN before the transaction.
 
 ## SEV-3 — Minor
 
-### FL-08 — Points redemption doesn't rebuild `rateBreakdown` · `Open`
+### FL-08 — Points redemption doesn't rebuild `rateBreakdown` · `Fixed 2026-07-13`
 
 **Where:** `guest-app/server/handlers/members.ts:348-356` (redeem), `:444-451` (undo)
 
@@ -341,6 +340,15 @@ internally inconsistent math; staff can't explain the gap to a guest.
 
 **Fix:** rebuild the breakdown in both transactions (shared helper — see
 Fix order #3).
+
+**Remediation:** extracted shared server-side breakdown build/rebuild
+helpers. Points redemption now adds the points deduction and corrected final
+total inside the existing booking/member/history transaction; undo removes
+that deduction and restores the final total in the same transaction. The
+helper preserves locked room lines and all add-on labels, rebuilds every
+deduction in canonical order, and leaves legacy no-breakdown bookings on
+their documented fallback path. Transaction and pure-helper regressions
+cover redeem, undo, discount stacking, and legacy behavior.
 
 ### FL-09 — Dead "Confirm Booking" button at `payment-confirmed` · `Open`
 

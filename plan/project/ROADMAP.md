@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 13, 2026 (Finance Lifecycle Audit batch 1 shipped on `fix/finance-lifecycle-batch-1`: FL-01 disjoint room/breakfast revenue streams, FL-02 points-preserving discount rejection with rebuilt breakdown, and FL-03 safe legacy pricing fallback. 17 of 20 findings remain; FL-05/FL-10/FL-11 need owner policy decisions. Earlier: Finance Lifecycle Audit queued — 20 findings FL-01..FL-20 from `plan/project/AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`; Reports reconciliation hardening FR-01..FR-05 shipped; Schedule A Parts 1–3 coverage reached 100%; FIN-01..FIN-14 finance queue shipped.)
+> Last updated: July 13, 2026 (Finance Lifecycle Audit FL-08 shipped on `fix/finance-lifecycle-fl08`: points redeem/undo now atomically rebuild the locked rate breakdown through a shared helper also used by discount rejection. 4 of 20 findings fixed, 16 remain; FL-05/FL-10/FL-11 need owner policy decisions. Earlier: batch 1 shipped FL-01 disjoint room/breakfast revenue, FL-02 points-preserving discount rejection, and FL-03 safe legacy pricing fallback; Reports reconciliation hardening FR-01..FR-05 shipped; Schedule A Parts 1–3 coverage reached 100%; FIN-01..FIN-14 shipped.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1138,7 +1138,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⬜ **FL-07 — Walk-in body unvalidated server-side** — `totalPriceOverride` NaN survives to `totalPrice` and poisons every report sum; no 1M cap; `guestDetails` un-Zod'd (`bookings.ts:1372`).
 
 **SEV-3:**
-- ⬜ **FL-08 — Points redeem/undo never rebuilds `rateBreakdown`** — receipt line items don't sum to Booking Total (`members.ts:348`); build shared `rebuildRateBreakdown` helper (also serves FL-02/FL-10).
+- ✅ **FL-08 — Points redeem/undo never rebuilds `rateBreakdown`** — fixed with a shared server helper that preserves locked room/add-on lines and atomically rebuilds canonical deductions plus final total on redeem/undo.
 - ⬜ **FL-09 — Dead "Confirm Booking" button at `payment-confirmed`** — UI offers the transition (`BookingsPage.tsx:3542`), server allow-list rejects it (`bookings.ts:2144`); errors 100% of the time.
 - ⬜ **FL-10 — Early checkout truncates stay but keeps full price** *(policy decision)* — `numNights`/`checkOut` rewritten, `totalPrice`/breakdown untouched → ADR/RevPAR inflate retroactively, receipt describes old date range (`bookings.ts:2350`).
 - ⬜ **FL-11 — Points awarded regardless of payment; balance gate client-only** *(policy decision)* — checkout API has no balance awareness and leaves no unpaid-checkout marker (`bookings.ts:2291`).
@@ -1218,10 +1218,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
-| Finance Lifecycle Audit (July 12) | 20 | 3 | 17 (FL-01..FL-03 fixed — 4 SEV-2, 8 SEV-3, 5 SEV-4 remain; 3 need owner policy decisions — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
+| Finance Lifecycle Audit (July 12) | 20 | 4 | 16 (FL-01..FL-03 + FL-08 fixed — 4 SEV-2, 7 SEV-3, 5 SEV-4 remain; 3 need owner policy decisions — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **383** | **342** | **~141** |
+| **Total** | **383** | **343** | **~140** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 
