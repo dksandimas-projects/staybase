@@ -28,10 +28,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 2 | **2** |
-| **SEV-2 (major)** | 2 | 3 | **5** |
+| **SEV-2 (major)** | 0 | 5 | **5** |
 | **SEV-3 (minor)** | 5 | 3 | **8** |
 | **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **12** | **8** | **20** |
+| **Total** | **10** | **10** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -45,10 +45,14 @@ could write a wrong `totalPrice` to the booking doc (FL-02, FL-03); all three
 were fixed in the first remediation batch on 2026-07-13. The booking status
 pipeline and Dashboard revenue basis were aligned in the status-consistency
 batch later that day (FL-04, FL-09, FL-12). The direct-paid store blind spot
-was closed on 2026-07-13: delivery now
-atomically records a store-scoped tender, so billed store revenue,
+was closed on 2026-07-13: delivery now atomically records a store-scoped tender,
+so billed store revenue,
 Collections Reconciliation, and Daily Close share the same settlement event
 without reducing the linked booking folio (FL-05).
+The final SEV-2 batch then made negotiated walk-in rates durable across
+reschedules and moved strict request validation ahead of every walk-in
+transaction (FL-06, FL-07). All Finance Lifecycle SEV-1 and SEV-2 findings
+are now closed.
 
 ### What's already solid
 
@@ -85,8 +89,9 @@ without reducing the linked booking folio (FL-05).
 4. ✅ **FL-05** — direct-paid store tenders join the shared ledger on
    delivery; COD maps to Cash, Add to Bill remains a folio charge, and the
    decision is recorded in `DECISIONS-FEATURES.md`.
-5. **FL-06 + FL-07** — walk-in/reschedule hardening (preserve manual
-   rates on move; Zod-validate the walk-in body incl. `totalPriceOverride`).
+5. ✅ **FL-06 + FL-07** — walk-in/reschedule hardening shipped: preserve
+   manual rates on move and strict-Zod validate the full walk-in request,
+   including the capped finite `totalPriceOverride`, before Firestore work.
 6. **FL-11 (policy) + FL-13 + FL-14 + FL-15** — remaining SEV-3 batch;
    FL-10/FL-11 policy questions (early-checkout refunds, points on unpaid
    folio) need owner input — log outcomes in `DECISIONS-FEATURES.md`.
@@ -297,7 +302,7 @@ inclusion, folio isolation, and delivery-date recognition.
 
 ---
 
-### FL-06 — Rescheduling wipes a walk-in's manual price · `Open`
+### FL-06 — Rescheduling wipes a walk-in's manual price · `Fixed 2026-07-13`
 
 **Where:** `guest-app/server/handlers/bookings.ts:2712-2810` (`handleRescheduleBooking` pricing recalculation)
 
@@ -317,9 +322,17 @@ operation (room move, QA-18 flow).
 (rescale by new `numNights`) or require an explicit new override; surface
 a confirmation in the Move Room form when the price basis changes.
 
+**Remediation:** added one shared helper that derives the exact locked manual
+nightly basis from the original room-line subtotal and night count. Both the
+server reschedule transaction and admin move preview use it. The new manual
+room line is rescaled only for the requested night count, retains its manual
+source, suppresses a duplicate breakfast add-on, and records `pricingBasis`
+in reschedule history. The move form explicitly explains the preserved rate,
+and the drawer applies the authoritative server breakdown after success.
+
 ---
 
-### FL-07 — Walk-in creation trusts unvalidated input (`totalPriceOverride`, `guestDetails`) · `Open`
+### FL-07 — Walk-in creation trusts unvalidated input (`totalPriceOverride`, `guestDetails`) · `Fixed 2026-07-13`
 
 **Where:** `guest-app/server/handlers/bookings.ts:1209-1253, 1372-1374, 1453` (`handleCreateWalkin`)
 
@@ -337,6 +350,15 @@ the Reports page; no server-side sanity cap on manual pricing.
 **Fix:** Zod-validate the walk-in body (mirror `guestDetailsSchema`;
 `totalPriceOverride: z.coerce.number().finite().min(0).max(1_000_000).optional()`),
 and reject NaN before the transaction.
+
+**Remediation:** `WalkinBookingSchema` now strictly validates the complete
+top-level request plus strict nested guest details before any transaction is
+opened. It normalizes strings/email, coerces guest count and the optional
+override, rejects unknown fields, and enforces finite, non-negative manual
+pricing capped at 1,000,000. Schema regressions cover valid normalization,
+NaN/non-numeric input, negative and oversized overrides, malformed guest
+details, and unknown fields; handler ordering coverage proves validation runs
+before Firestore.
 
 ---
 

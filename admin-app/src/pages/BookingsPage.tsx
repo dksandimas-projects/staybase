@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -81,8 +81,11 @@ function estimateNewTotalPrice(
   const checkInDate = new Date(`${checkInStr}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOutStr}T00:00:00Z`);
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
+  const manualNightlyRate = getLockedManualNightlyRate(booking.rateBreakdown);
 
-  const roomBreakdown = booking.isCorporate
+  const roomBreakdown = manualNightlyRate !== null
+    ? { roomSubtotal: Math.round(manualNightlyRate * numNights) }
+    : booking.isCorporate
     ? {
         roomSubtotal: baseRate * numNights,
       }
@@ -98,7 +101,7 @@ function estimateNewTotalPrice(
   const roomTotal = roomBreakdown.roomSubtotal;
 
   const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-  const breakfastTotal = booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
+  const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
   const subtotal = roomTotal + breakfastTotal;
 
   let discountPct = booking.discountPct || 0;
@@ -1848,6 +1851,11 @@ export function BookingsPage() {
     }
   }, [selectedBooking, showMoveForm, moveRoomId, moveCheckIn, moveCheckOut, rooms, roomTypes, seasonalRateOverrides, corporateCodes, rewardsConfig, breakfastConfig, vouchers]);
 
+  const lockedManualMoveRate = useMemo(
+    () => getLockedManualNightlyRate(selectedBooking?.rateBreakdown),
+    [selectedBooking?.rateBreakdown]
+  );
+
   const handleMoveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBooking || !moveRoomId || !moveCheckIn || !moveCheckOut) return;
@@ -1870,9 +1878,21 @@ export function BookingsPage() {
           roomType: targetRoom ? targetRoom.type : selectedBooking.roomType,
           checkIn: moveCheckIn,
           checkOut: moveCheckOut,
-          totalPrice: selectedBooking.totalPrice + movePriceDelta
+          numNights: Math.max(
+            Math.round((new Date(`${moveCheckOut}T00:00:00Z`).getTime() - new Date(`${moveCheckIn}T00:00:00Z`).getTime()) / 86400000),
+            1
+          ),
+          ratePerNight: result.data?.ratePerNight ?? selectedBooking.ratePerNight,
+          totalPrice: result.data?.totalPrice ?? selectedBooking.totalPrice + movePriceDelta,
+          rateBreakdown: result.data?.rateBreakdown ?? selectedBooking.rateBreakdown,
+          originalTotalPrice: result.data?.originalTotalPrice ?? selectedBooking.originalTotalPrice,
+          voucherDiscount: result.data?.voucherDiscount ?? selectedBooking.voucherDiscount
         };
-        syncSelectedBooking(updatedFields);
+        // The reschedule API already committed the authoritative Firestore
+        // update with Timestamp dates. Update only the open drawer here; using
+        // syncSelectedBooking would write the display strings back over those
+        // server timestamps.
+        setSelectedBooking((previous) => previous ? { ...previous, ...updatedFields } : null);
         setShowMoveForm(false);
       } else {
         toast.error("Failed to move booking", result.error || "Please choose another room or date range.");
@@ -2658,6 +2678,15 @@ export function BookingsPage() {
                   </label>
 
                   {/* Price Delta block */}
+                  {lockedManualMoveRate !== null && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-[10px] leading-relaxed text-blue-800">
+                      <p className="font-bold">Locked manual rate will be preserved</p>
+                      <p className="mt-1">
+                        This booking keeps its agreed front-desk rate of {formatPrice(lockedManualMoveRate)} per night. The total will be rescaled only for the new number of nights; the target room's standard rate will not replace it.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="rounded-lg border border-gray-150 bg-gray-50/50 p-3 space-y-1.5">
                     <p className="font-semibold text-gray-700">Estimated Price Delta</p>
                     <div className="flex items-center justify-between text-xs">
