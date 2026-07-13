@@ -8,12 +8,13 @@ describe("FIN-01 and FIN-02 collections reporting", () => {
   it("loads actual append-only payment entries and filters by recorded date", () => {
     expect(reports).toMatch(/onSnapshot\(collectionGroup\(db, "payments"\)/);
     expect(reports).toMatch(/payment\.recordedAt >= periodStart && payment\.recordedAt <= periodEnd/);
-    expect(reports).toMatch(/rangePayments\.reduce\(\(sum, payment\) => sum \+ payment\.amount, 0\)/);
+    expect(reports).toMatch(/rangePayments\.filter\(\(payment\) => payment\.type === "payment"\)/);
+    expect(reports).toMatch(/const collectedTotal = folioSnapshot\.collected/);
   });
 
   it("reconciles charge-inclusive billed totals against collections", () => {
-    expect(reports).toMatch(/billedTotal = useMemo/);
-    expect(reports).toMatch(/storeRevenue \+ incidentalRevenue/);
+    expect(reports).toMatch(/summarizeFolioSnapshot/);
+    expect(reports).toMatch(/const billedTotal = folioSnapshot\.billed/);
     expect(reports).toMatch(/outstandingTotal = Math\.max\(billedTotal - collectedTotal, 0\)/);
     expect(reports).toMatch(/Collections Reconciliation/);
   });

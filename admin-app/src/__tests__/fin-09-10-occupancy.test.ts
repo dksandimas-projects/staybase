@@ -7,18 +7,18 @@ const reports = readFileSync(resolve(__dirname, "../pages/ReportsPage.tsx"), "ut
 describe("FIN-09 & FIN-10 occupancy clipping and revenue proration", () => {
   it("defines getOverlapNights helper function", () => {
     expect(reports).toMatch(/const getOverlapNights =/);
-    expect(reports).toMatch(/overlapStart = new Date\(Math\.max\(/);
-    expect(reports).toMatch(/overlapEnd = new Date\(Math\.min\(/);
+    expect(reports).toMatch(/overlapStart = Math\.max\(dateKeyDayNumber/);
+    expect(reports).toMatch(/overlapEnd = Math\.min\(dateKeyDayNumber/);
   });
 
   it("filters rangeBookings to include overlapping stays", () => {
-    expect(reports).toMatch(/overlaps = cIn < periodEnd && cOut > periodStart/);
+    expect(reports).toMatch(/overlaps = checkInKey <= periodEndKey && checkOutKey > periodStartKey/);
     expect(reports).toMatch(/if \(!overlaps\) return false;/);
   });
 
   it("excludes unpaid future confirmed bookings and past confirmed no-shows", () => {
-    expect(reports).toMatch(/b\.status === "confirmed" && cOut <= today/);
-    expect(reports).toMatch(/b\.status === "confirmed" && cIn > today/);
+    expect(reports).toMatch(/b\.status === "confirmed" && checkOutKey <= hotelTodayKey/);
+    expect(reports).toMatch(/b\.status === "confirmed" && checkInKey > hotelTodayKey/);
     expect(reports).toMatch(/collected <= 0/);
   });
 
