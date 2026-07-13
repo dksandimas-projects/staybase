@@ -486,6 +486,7 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `paymentProofUrl` | string | Firebase Storage URL (required for any non-`cod`/non-`add-to-bill` method) |
 | `status` | string | `"placed"` \| `"confirmed"` \| `"out-for-delivery"` \| `"delivered"` \| `"cancelled"` |
 | `stockRestoredAt` | timestamp \| null | Set once when reserved stock is restored after a placed order cancellation |
+| `deliveredAt` | timestamp \| null | Set by the staff delivery API; revenue-recognition and direct-tender timestamp |
 | `isBilled` | boolean | `true` if added to booking bill |
 | `billedAt` | timestamp \| null | When billed |
 | `cancellationReason` | string | Optional |
@@ -493,6 +494,8 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `notes` | string | Internal staff notes |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+Direct-paid orders carry an append-only `payments/delivery-tender` record created atomically with the delivery transition. Its shape matches the shared payment ledger and adds store source metadata (`source`, source/order identifiers, room, and guest display fields). COD is normalized to the Cash tender. Add to Bill does not create this record because settlement occurs through the linked booking folio. The deterministic document ID makes retries idempotent, and keeping the tender under the order prevents it from reducing the booking's room balance.
 
 ---
 
@@ -569,8 +572,9 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
-| `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; Update = Staff/Admin; guest cancellation via API only |
+| `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; ordinary updates = Staff/Admin; delivery + direct tender = staff API; guest cancellation via API only |
 | `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment`; no updates or deletes |
+| `storeOrders/{id}/payments` | Staff/Admin only through the collection-group read rule | Create = Admin SDK via `/api/store/deliver-order`; no updates or deletes |
 | `settings/rewardsConfig` | Public via `settings/{documentId}` rule; non-sensitive booking/member display config | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |

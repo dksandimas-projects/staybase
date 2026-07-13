@@ -193154,6 +193154,88 @@ var MAX_GUEST_NAME_LENGTH = 120;
 var MAX_ROOM_NUMBER_LENGTH = 12;
 var MAX_ORDER_REF_LENGTH = 40;
 var MAX_REASON_LENGTH = 500;
+async function handleDeliverStoreOrder(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const body = req.body || {};
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "A valid store order ID is required." });
+  }
+  try {
+    let responseData = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRef = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+      const order = orderDoc.data();
+      if (order.status === "delivered") {
+        responseData = {
+          orderId,
+          status: "delivered",
+          tenderRecorded: order.paymentMethod !== "add-to-bill"
+        };
+        return;
+      }
+      if (order.status !== "out-for-delivery") {
+        throw new Error("ORDER_NOT_DELIVERABLE");
+      }
+      const totalAmount = Number(order.totalAmount);
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 1e6) {
+        throw new Error("INVALID_ORDER_TOTAL");
+      }
+      const deliveredAt = /* @__PURE__ */ new Date();
+      const staffUid = req.staff?.uid || "staff";
+      const isDirectPaid = order.paymentMethod !== "add-to-bill";
+      transaction.update(orderRef, {
+        status: "delivered",
+        deliveredAt,
+        updatedAt: deliveredAt,
+        handledBy: staffUid
+      });
+      if (isDirectPaid) {
+        const tenderRef = orderRef.collection("payments").doc("delivery-tender");
+        transaction.set(tenderRef, {
+          type: "payment",
+          amount: totalAmount,
+          method: order.paymentMethod === "cod" ? "cash" : String(order.paymentMethod || "unknown"),
+          note: `Direct store payment for ${String(order.orderRef || orderId)}`.slice(0, 500),
+          reason: null,
+          approvedBy: null,
+          recordedBy: staffUid,
+          recordedAt: deliveredAt,
+          source: "store-order",
+          sourceId: orderId,
+          orderRef: String(order.orderRef || orderId),
+          bookingId: order.bookingId || null,
+          roomNumber: String(order.roomNumber || ""),
+          guestName: String(order.guestName || "")
+        });
+      }
+      responseData = {
+        orderId,
+        status: "delivered",
+        tenderRecorded: isDirectPaid
+      };
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    const knownErrors = {
+      ORDER_NOT_FOUND: { status: 404, message: "Store order was not found." },
+      ORDER_NOT_DELIVERABLE: { status: 409, message: "Only an order out for delivery can be marked delivered." },
+      INVALID_ORDER_TOTAL: { status: 409, message: "The store order total is invalid and cannot be recorded." }
+    };
+    const mapped = knownErrors[error.message];
+    if (!mapped) console.error("Store order delivery failed:", error);
+    return res.status(mapped?.status || 500).json({
+      success: false,
+      error: mapped?.message || "Unable to mark the store order delivered."
+    });
+  }
+}
 async function handleCreateStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -194478,6 +194560,14 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many store status requests. Please try again in a minute." });
     }
     return await handleGetStoreOrderStatus(req, res);
+  }
+  if (domain === "store" && action === "deliver-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleDeliverStoreOrder(req, res);
   }
   if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-verify:${ip}`, 20, 6e4)) {

@@ -340,6 +340,7 @@ export interface StoreOrder {
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
   stockRestoredAt: string | null;
   stockDecrementedAt: string | null;
+  deliveredAt: string | null;
   isBilled: boolean;
   billedAt: string | null;
   cancellationReason: string;
@@ -2618,6 +2619,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             status: data.status || "placed",
             stockRestoredAt: data.stockRestoredAt ? formatStoreDate(data.stockRestoredAt) : null,
             stockDecrementedAt: data.stockDecrementedAt ? formatStoreDate(data.stockDecrementedAt) : null,
+            deliveredAt: data.deliveredAt ? formatStoreDate(data.deliveredAt) : null,
             isBilled: !!data.isBilled,
             billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
             cancellationReason: data.cancellationReason || "",
@@ -2636,6 +2638,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [currentUser]);
 
   const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
+    if (status === "delivered") {
+      const token = await auth.currentUser?.getIdToken(true);
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/store/deliver-order`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ orderId })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to mark store order delivered.");
+      }
+      return;
+    }
+
     if (status === "cancelled" || status === "confirmed") {
       await runTransaction(db, async (transaction) => {
         const orderRef = doc(db, "storeOrders", orderId);
