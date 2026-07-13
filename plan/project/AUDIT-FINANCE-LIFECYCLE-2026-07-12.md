@@ -28,10 +28,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 2 | **2** |
-| **SEV-2 (major)** | 3 | 2 | **5** |
+| **SEV-2 (major)** | 2 | 3 | **5** |
 | **SEV-3 (minor)** | 5 | 3 | **8** |
 | **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **13** | **7** | **20** |
+| **Total** | **12** | **8** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -44,11 +44,11 @@ Total Revenue KPI double-counted breakfast (FL-01), and two server paths
 could write a wrong `totalPrice` to the booking doc (FL-02, FL-03); all three
 were fixed in the first remediation batch on 2026-07-13. The booking status
 pipeline and Dashboard revenue basis were aligned in the status-consistency
-batch later that day (FL-04, FL-09, FL-12). One
-structural blind spot remains: store orders paid directly (GCash / COD
-cash) are billed revenue with no tender record anywhere, so the
-reconciliation shows phantom Outstanding and the Daily Close cash drawer is
-guaranteed to show a variance on any day with store cash sales (FL-05).
+batch later that day (FL-04, FL-09, FL-12). The direct-paid store blind spot
+was closed on 2026-07-13: delivery now
+atomically records a store-scoped tender, so billed store revenue,
+Collections Reconciliation, and Daily Close share the same settlement event
+without reducing the linked booking folio (FL-05).
 
 ### What's already solid
 
@@ -82,9 +82,9 @@ guaranteed to show a variance on any day with store cash sales (FL-05).
 3. 🔄 **FL-08 + FL-10** — shared `rebuildRateBreakdown(booking)` helper
    shipped with FL-08 on 2026-07-13 and now serves points redeem/undo plus
    reject-discount. FL-10 early-checkout integration remains policy-blocked.
-4. **FL-05** — needs a design decision first (record store tenders as
-   ledger entries vs. exclude direct-paid store revenue from the billed
-   side): log the decision in `DECISIONS-FEATURES.md`, then implement.
+4. ✅ **FL-05** — direct-paid store tenders join the shared ledger on
+   delivery; COD maps to Cash, Add to Bill remains a folio charge, and the
+   decision is recorded in `DECISIONS-FEATURES.md`.
 5. **FL-06 + FL-07** — walk-in/reschedule hardening (preserve manual
    rates on move; Zod-validate the walk-in body incl. `totalPriceOverride`).
 6. **FL-11 (policy) + FL-13 + FL-14 + FL-15** — remaining SEV-3 batch;
@@ -254,7 +254,7 @@ status has already advanced.
 
 ---
 
-### FL-05 — Store orders paid directly (GCash / COD cash) never enter any payment ledger · `Open`
+### FL-05 — Store orders paid directly (GCash / COD cash) never enter any payment ledger · `Fixed 2026-07-13`
 
 **Where:**
 - `admin-app/src/context/AdminContext.tsx:2638-2721` (`updateStoreOrderStatus` — no tender recording on any transition)
@@ -282,6 +282,18 @@ variances, which defeats the variance control.
 (b) exclude direct-paid store orders from `billedTotal` and report store
 cash as its own reconciliation line. Half-measures (fixing only the KPI)
 leave the Daily Close wrong.
+
+**Remediation:** decision #116 adopts option (a). The admin delivery action
+now calls a staff-authenticated server route that atomically writes
+`deliveredAt` and one deterministic `delivery-tender` record beneath the
+store order. COD is normalized to Cash; configured direct methods retain
+their tender key; Add to Bill creates no tender. Reports consumes these
+records through the existing payments collection-group listener, while a
+store-specific source identity keeps them out of booking-folio settlement.
+Store revenue uses the delivery timestamp (falling back to creation time for
+legacy rows). Handler tests cover direct methods, Add to Bill, invalid state,
+and idempotent retries; report wiring tests cover authentication, shared-ledger
+inclusion, folio isolation, and delivery-date recognition.
 
 ---
 

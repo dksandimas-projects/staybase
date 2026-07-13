@@ -10,7 +10,7 @@ import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
-import { handleCancelStoreOrder, handleCreateStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
@@ -911,6 +911,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     
     return await handleGetStoreOrderStatus(req, res);
+  }
+
+  if (domain === "store" && action === "deliver-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleDeliverStoreOrder(req, res);
   }
 
   if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {

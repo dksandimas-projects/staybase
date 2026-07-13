@@ -36,6 +36,10 @@ interface StoreOrderStatusBody {
   orderRef: string;
 }
 
+interface DeliverStoreOrderBody {
+  orderId: string;
+}
+
 // Per H4 (hardening batch 2026-06-26): bounded lengths on
 // every free-form string the store-order endpoints accept.
 // A 100KB body used to land in the order doc as-is. Values
@@ -46,6 +50,101 @@ const MAX_NOTES_LENGTH = 500;
 const MAX_ROOM_NUMBER_LENGTH = 12;
 const MAX_ORDER_REF_LENGTH = 40;
 const MAX_REASON_LENGTH = 500;
+
+export async function handleDeliverStoreOrder(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const body = (req.body || {}) as DeliverStoreOrderBody;
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "A valid store order ID is required." });
+  }
+
+  try {
+    let responseData: Record<string, unknown> = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRef = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+
+      const order = orderDoc.data()!;
+      if (order.status === "delivered") {
+        responseData = {
+          orderId,
+          status: "delivered",
+          tenderRecorded: order.paymentMethod !== "add-to-bill"
+        };
+        return;
+      }
+      if (order.status !== "out-for-delivery") {
+        throw new Error("ORDER_NOT_DELIVERABLE");
+      }
+
+      const totalAmount = Number(order.totalAmount);
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 1_000_000) {
+        throw new Error("INVALID_ORDER_TOTAL");
+      }
+
+      const deliveredAt = new Date();
+      const staffUid = req.staff?.uid || "staff";
+      const isDirectPaid = order.paymentMethod !== "add-to-bill";
+
+      transaction.update(orderRef, {
+        status: "delivered",
+        deliveredAt,
+        updatedAt: deliveredAt,
+        handledBy: staffUid
+      });
+
+      if (isDirectPaid) {
+        // A deterministic document id makes retries idempotent. Store tenders
+        // live under the order (not the linked booking), so they participate in
+        // the collection-group reconciliation without reducing the room folio.
+        const tenderRef = orderRef.collection("payments").doc("delivery-tender");
+        transaction.set(tenderRef, {
+          type: "payment",
+          amount: totalAmount,
+          method: order.paymentMethod === "cod" ? "cash" : String(order.paymentMethod || "unknown"),
+          note: `Direct store payment for ${String(order.orderRef || orderId)}`.slice(0, 500),
+          reason: null,
+          approvedBy: null,
+          recordedBy: staffUid,
+          recordedAt: deliveredAt,
+          source: "store-order",
+          sourceId: orderId,
+          orderRef: String(order.orderRef || orderId),
+          bookingId: order.bookingId || null,
+          roomNumber: String(order.roomNumber || ""),
+          guestName: String(order.guestName || "")
+        });
+      }
+
+      responseData = {
+        orderId,
+        status: "delivered",
+        tenderRecorded: isDirectPaid
+      };
+    });
+
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error: any) {
+    const knownErrors: Record<string, { status: number; message: string }> = {
+      ORDER_NOT_FOUND: { status: 404, message: "Store order was not found." },
+      ORDER_NOT_DELIVERABLE: { status: 409, message: "Only an order out for delivery can be marked delivered." },
+      INVALID_ORDER_TOTAL: { status: 409, message: "The store order total is invalid and cannot be recorded." }
+    };
+    const mapped = knownErrors[error.message];
+    if (!mapped) console.error("Store order delivery failed:", error);
+    return res.status(mapped?.status || 500).json({
+      success: false,
+      error: mapped?.message || "Unable to mark the store order delivered."
+    });
+  }
+}
 
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5

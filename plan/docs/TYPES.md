@@ -645,6 +645,7 @@ StoreOrder {
   paymentProofUrl: string
   status: StoreOrderStatus
   stockRestoredAt: Date | null
+  deliveredAt: Date | null
   isBilled: boolean
   billedAt: Date | null
   cancellationReason: string
