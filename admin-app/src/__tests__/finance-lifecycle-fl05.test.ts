@@ -19,7 +19,8 @@ describe("FL-05 direct-paid store reconciliation", () => {
   it("includes store tenders in the shared collection-group ledger", () => {
     expect(reports).toMatch(/data\.source === "store-order"/);
     expect(reports).toMatch(/bookingId: isStoreTender \? `store:\$\{sourceId\}` : parentDocumentId/);
-    expect(reports).toMatch(/rangePayments\.reduce\(\(sum, payment\) => sum \+ payment\.amount, 0\)/);
+    expect(reports).toMatch(/summarizeFolioSnapshot/);
+    expect(reports).toMatch(/directStoreOrderIds: deliveredStoreOrders/);
   });
 
   it("keeps direct store tenders outside booking folio payment sums", () => {

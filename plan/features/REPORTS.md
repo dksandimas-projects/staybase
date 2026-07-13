@@ -86,6 +86,9 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] **FIN-03 refunds** — separate gross collections, refunds, and net collected totals; payment-method reporting nets refunds by their actual payout method.
 - [x] Show cancelled bookings with payment history, including gross paid, refunded, and still-retained amounts.
 - [x] Collections CSV, Sales XLSX, and Full Backup carry entry type, refund reason, and approver.
+- [x] **FL-13 reconciliation basis** — Billed and Collected are comparable to-date snapshots for booking folios touching the selected hotel-date range plus direct-paid store orders delivered in range. Billed includes full booking totals, all net incidentals, and delivered billed-to-room orders; Collected includes every matching payment/refund even when recorded before the selected range. Gross Collections and Refunds remain period cash-flow totals.
+- [x] **FL-14 retained no-show money** — the retained-payments table includes both cancelled bookings and past `confirmed` no-shows, with an explicit status plus gross paid, refunded, and still-retained totals.
+- [x] **FL-15 hotel-day windows** — preset/custom report membership, booking overlap/proration, no-show cutoffs, and export date labels use `config.timezone` calendar days rather than browser-local midnight or UTC slicing.
 
 ### Receivables & Aging *(FIN-04 shipped 2026-07-11)*
 

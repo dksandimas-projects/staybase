@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 13, 2026 (Finance Lifecycle status-consistency batch shipped on `fix/finance-lifecycle-status-consistency`: FL-04 atomic full-payment transition/email guard, FL-09 working payment-confirmed confirmation, and FL-12 Dashboard revenue alignment. 7 of 20 findings fixed, 13 remain; FL-05/FL-10/FL-11 need owner policy decisions. Earlier: FL-08 shared breakdown rebuild shipped; batch 1 shipped FL-01..FL-03; Reports reconciliation FR-01..FR-05 and FIN-01..FIN-14 shipped; Schedule A Parts 1–3 coverage reached 100%.)
+> Last updated: July 13, 2026 (Finance Lifecycle reporting-period batch shipped on `fix/finance-lifecycle-report-periods`: FL-13 comparable to-date folio reconciliation, FL-14 retained no-show deposits, and FL-15 hotel-timezone report windows. 13 of 20 findings fixed, 7 remain; only policy-blocked FL-10/FL-11 remain in SEV-3 before the FL-16..FL-20 polish batch. Earlier: FL-06/FL-07 walk-in hardening, FL-05 store tenders, FL-04/FL-09/FL-12 status consistency, FL-08 breakdown rebuild, and FL-01..FL-03 arithmetic fixes shipped.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1142,9 +1142,9 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ⬜ **FL-10 — Early checkout truncates stay but keeps full price** *(policy decision)* — `numNights`/`checkOut` rewritten, `totalPrice`/breakdown untouched → ADR/RevPAR inflate retroactively, receipt describes old date range (`bookings.ts:2350`).
 - ⬜ **FL-11 — Points awarded regardless of payment; balance gate client-only** *(policy decision)* — checkout API has no balance awareness and leaves no unpaid-checkout marker (`bookings.ts:2291`).
 - ✅ **FL-12 — Dashboard revenue excludes `payment-confirmed`** — fixed by aligning the Dashboard status filter and help text with Reports.
-- ⬜ **FL-13 — Billed vs Collected period-basis mismatch** — full `totalPrice` for range-overlapping bookings vs in-range payments only; Outstanding/Over-collected KPIs distorted at range edges (`ReportsPage.tsx:494`).
-- ⬜ **FL-14 — No-shows with deposits invisible** — past `confirmed` bookings excluded from revenue but their payments count in collections; no retained-payments surface like cancelled bookings have.
-- ⬜ **FL-15 — Reports period boundaries browser-local** — FR-01 fixed day *grouping* to Manila; the period window itself still uses browser midnight (`ReportsPage.tsx:370`).
+- ✅ **FL-13 — Billed vs Collected period-basis mismatch** — fixed with a shared to-date folio snapshot: selected booking folios and direct store orders use matching billed and collected populations, including pre-period deposits/refunds.
+- ✅ **FL-14 — No-shows with deposits invisible** — fixed by extending the retained-money surface to past `confirmed` no-shows with explicit status, gross, refund, and retained totals.
+- ✅ **FL-15 — Reports period boundaries browser-local** — fixed by deriving inclusive report instants, booking overlap/proration, no-show cutoffs, and export labels from `config.timezone` calendar keys.
 
 **SEV-4 (polish batch):**
 - ⬜ **FL-16 — `originalTotalPrice` conventions differ across writers** — document one convention in `TYPES.md`; root cause of FL-03.
@@ -1217,10 +1217,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
-| Finance Lifecycle Audit (July 12) | 20 | 10 | 10 (all SEV-1/SEV-2 closed; 5 SEV-3 and 5 SEV-4 remain; FL-10/FL-11 need owner policy decisions — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
+| Finance Lifecycle Audit (July 12) | 20 | 13 | 7 (all SEV-1/SEV-2 and non-policy SEV-3 closed; FL-10/FL-11 need owner policy decisions, then 5 SEV-4 remain — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **383** | **349** | **~134** |
+| **Total** | **383** | **352** | **~131** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 
