@@ -11,7 +11,9 @@ import {
   getManilaDateInfo,
   BOOKING_REF_REGEX,
   generateLookupToken,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  getLockedManualNightlyRate,
+  WalkinBookingSchema
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { z } from "zod";
@@ -1167,9 +1169,12 @@ export async function handleCreateBooking(req: any, res: any) {
 }
 
 export async function handleCreateWalkin(req: any, res: any) {
-  const body = req.body;
-  if (!body) {
-    return res.status(400).json({ success: false, error: "Invalid request body." });
+  const parsedWalkin = WalkinBookingSchema.safeParse(req.body || {});
+  if (!parsedWalkin.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the walk-in details — a required field is missing or invalid."
+    });
   }
 
   const {
@@ -1187,14 +1192,7 @@ export async function handleCreateWalkin(req: any, res: any) {
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
     linkedInquiryId
-  } = body;
-
-  if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
-    return res.status(400).json({ success: false, error: "Missing required booking fields." });
-  }
-  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
-    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
-  }
+  } = parsedWalkin.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -2721,6 +2719,9 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       // PF-03: Pricing recalculation
+      const manualNightlyRate = getLockedManualNightlyRate(
+        booking.rateBreakdown as BookingRateBreakdown | null | undefined
+      );
       let activeRoomRate = typeEntry.pricePerNight || 0;
       if (booking.isCorporate) {
         let typeCorporateRate = typeEntry.corporateRate || 0;
@@ -2739,7 +2740,20 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const roomBreakdown = booking.isCorporate
+      const roomBreakdown = manualNightlyRate !== null
+        ? {
+            roomSubtotal: Math.round(manualNightlyRate * numNights),
+            roomLines: [{
+              source: "manual" as const,
+              label: "Manual front-desk rate",
+              startDate: checkIn,
+              endDate: checkOut,
+              nights: numNights,
+              nightlyRate: manualNightlyRate,
+              subtotal: Math.round(manualNightlyRate * numNights)
+            }]
+          }
+        : booking.isCorporate
         ? {
             roomSubtotal: activeRoomRate * numNights,
             roomLines: [{
@@ -2763,7 +2777,12 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const roomTotal = roomBreakdown.roomSubtotal;
 
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      // A walk-in manual override is the complete staff-agreed pricing basis;
+      // its original breakdown intentionally carries no separate breakfast
+      // line. Preserve that convention instead of adding breakfast on move.
+      const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast
+        ? breakfastRate * (booking.numGuests || 1) * numNights
+        : 0;
       const subtotal = roomTotal + breakfastTotal;
 
       let discountPct = 0;
@@ -2832,6 +2851,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
         reason: typeof reason === "string" ? reason.slice(0, 500) : "",
         by: req.staff?.uid || req.staff?.email || "staff",
         at: new Date().toISOString(),
+        pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
         deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
       };
 
@@ -2842,7 +2862,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        ratePerNight: activeRoomRate,
+        ratePerNight: manualNightlyRate ?? activeRoomRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
         originalTotalPrice,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { calculateBookingTotal } from "../utils/pricing";
+import { calculateBookingTotal, getLockedManualNightlyRate } from "../utils/pricing";
 
 describe("pricing utilities", () => {
   test("calculates room total only when no options are selected", () => {
@@ -101,5 +101,27 @@ describe("pricing utilities", () => {
     });
     // subtotal = 4500, senior discount 20% = 900, total = 3600
     expect(total).toBe(3600);
+  });
+
+  test("derives the exact locked manual rate from subtotal and nights", () => {
+    expect(getLockedManualNightlyRate({
+      roomSubtotal: 5000,
+      roomLines: [{
+        source: "manual",
+        label: "Manual front-desk rate",
+        startDate: "2026-07-13",
+        endDate: "2026-07-16",
+        nights: 3,
+        nightlyRate: 1667,
+        subtotal: 5000
+      }],
+      addOns: [],
+      deductions: [],
+      finalTotal: 5000
+    })).toBeCloseTo(5000 / 3);
+  });
+
+  test("returns null when no valid manual line exists", () => {
+    expect(getLockedManualNightlyRate(null)).toBeNull();
   });
 });

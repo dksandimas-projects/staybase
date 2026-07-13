@@ -31,6 +31,33 @@ export const PaymentReviewSchema = z.object({
   _hp: z.string().optional()
 });
 
+export const WalkinGuestDetailsSchema = z.object({
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+  email: z.string().trim().toLowerCase().email().max(160),
+  phone: z.string().trim().min(2).max(32),
+  requests: z.string().trim().max(1000).optional().default(""),
+  consent: z.boolean().optional()
+}).strict();
+
+export const WalkinBookingSchema = z.object({
+  bookingId: z.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
+  roomId: z.string().trim().min(1).max(64),
+  checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  guests: z.coerce.number().int().min(1).max(100),
+  hasBreakfast: z.boolean(),
+  guestDetails: WalkinGuestDetailsSchema,
+  paymentMethod: z.string().trim().min(1).max(80),
+  paymentReferenceNumber: z.string().trim().max(120).nullable().optional(),
+  status: z.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
+  totalPriceOverride: z.coerce.number().finite().min(0).max(1_000_000).optional(),
+  discountType: z.enum(["", "senior", "pwd"]).optional().default(""),
+  voucherCode: z.string().trim().max(40).optional().default(""),
+  linkedInquiryId: z.string().trim().max(64).nullable().optional()
+}).strict();
+
 export type BookingDatesInput = z.infer<typeof BookingDatesSchema>;
 export type GuestDetailsInput = z.infer<typeof GuestDetailsSchema>;
 export type PaymentReviewInput = z.infer<typeof PaymentReviewSchema>;
+export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;

@@ -1,3 +1,5 @@
+import type { BookingRateBreakdown } from "../types";
+
 export interface PriceInput {
   ratePerNight: number;
   numNights: number;
@@ -40,4 +42,20 @@ export function calculateBookingTotal(input: PriceInput) {
   const total = afterVoucher - memberDiscount;
 
   return Math.max(total, 0);
+}
+
+export function getLockedManualNightlyRate(
+  breakdown: BookingRateBreakdown | null | undefined
+): number | null {
+  const manualLine = breakdown?.roomLines?.find((line) => line.source === "manual");
+  if (!manualLine) return null;
+
+  const nights = Number(manualLine.nights);
+  const subtotal = Number(manualLine.subtotal);
+  if (Number.isFinite(nights) && nights > 0 && Number.isFinite(subtotal) && subtotal >= 0) {
+    return subtotal / nights;
+  }
+
+  const nightlyRate = Number(manualLine.nightlyRate);
+  return Number.isFinite(nightlyRate) && nightlyRate >= 0 ? nightlyRate : null;
 }

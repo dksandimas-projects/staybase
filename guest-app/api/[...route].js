@@ -187690,6 +187690,30 @@ var PaymentReviewSchema = external_exports.object({
   turnstileToken: external_exports.string().optional(),
   _hp: external_exports.string().optional()
 });
+var WalkinGuestDetailsSchema = external_exports.object({
+  firstName: external_exports.string().trim().min(1).max(80),
+  lastName: external_exports.string().trim().min(1).max(80),
+  email: external_exports.string().trim().toLowerCase().email().max(160),
+  phone: external_exports.string().trim().min(2).max(32),
+  requests: external_exports.string().trim().max(1e3).optional().default(""),
+  consent: external_exports.boolean().optional()
+}).strict();
+var WalkinBookingSchema = external_exports.object({
+  bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
+  roomId: external_exports.string().trim().min(1).max(64),
+  checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  guests: external_exports.coerce.number().int().min(1).max(100),
+  hasBreakfast: external_exports.boolean(),
+  guestDetails: WalkinGuestDetailsSchema,
+  paymentMethod: external_exports.string().trim().min(1).max(80),
+  paymentReferenceNumber: external_exports.string().trim().max(120).nullable().optional(),
+  status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
+  totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
+  discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
+  voucherCode: external_exports.string().trim().max(40).optional().default(""),
+  linkedInquiryId: external_exports.string().trim().max(64).nullable().optional()
+}).strict();
 
 // ../shared/schemas/paymentMethod.ts
 var PaymentMethodConfigSchema = external_exports.object({
@@ -187993,6 +188017,19 @@ function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedempt
     value: calculatePointsRedemptionValue(pointsToRedeem, pointsRedemptionRate),
     error: ""
   };
+}
+
+// ../shared/utils/pricing.ts
+function getLockedManualNightlyRate(breakdown) {
+  const manualLine = breakdown?.roomLines?.find((line) => line.source === "manual");
+  if (!manualLine) return null;
+  const nights = Number(manualLine.nights);
+  const subtotal = Number(manualLine.subtotal);
+  if (Number.isFinite(nights) && nights > 0 && Number.isFinite(subtotal) && subtotal >= 0) {
+    return subtotal / nights;
+  }
+  const nightlyRate = Number(manualLine.nightlyRate);
+  return Number.isFinite(nightlyRate) && nightlyRate >= 0 ? nightlyRate : null;
 }
 
 // ../shared/utils/references.ts
@@ -190101,9 +190138,12 @@ async function handleCreateBooking(req, res) {
   }
 }
 async function handleCreateWalkin(req, res) {
-  const body = req.body;
-  if (!body) {
-    return res.status(400).json({ success: false, error: "Invalid request body." });
+  const parsedWalkin = WalkinBookingSchema.safeParse(req.body || {});
+  if (!parsedWalkin.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the walk-in details \u2014 a required field is missing or invalid."
+    });
   }
   const {
     bookingId,
@@ -190120,13 +190160,7 @@ async function handleCreateWalkin(req, res) {
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
     linkedInquiryId
-  } = body;
-  if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
-    return res.status(400).json({ success: false, error: "Missing required booking fields." });
-  }
-  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
-    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
-  }
+  } = parsedWalkin.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -191277,6 +191311,9 @@ async function handleRescheduleBooking(req, res) {
       if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
         throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
       }
+      const manualNightlyRate = getLockedManualNightlyRate(
+        booking.rateBreakdown
+      );
       let activeRoomRate = typeEntry.pricePerNight || 0;
       if (booking.isCorporate) {
         let typeCorporateRate = typeEntry.corporateRate || 0;
@@ -191293,7 +191330,18 @@ async function handleRescheduleBooking(req, res) {
         }
       }
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const roomBreakdown = booking.isCorporate ? {
+      const roomBreakdown = manualNightlyRate !== null ? {
+        roomSubtotal: Math.round(manualNightlyRate * numNights),
+        roomLines: [{
+          source: "manual",
+          label: "Manual front-desk rate",
+          startDate: checkIn,
+          endDate: checkOut,
+          nights: numNights,
+          nightlyRate: manualNightlyRate,
+          subtotal: Math.round(manualNightlyRate * numNights)
+        }]
+      } : booking.isCorporate ? {
         roomSubtotal: activeRoomRate * numNights,
         roomLines: [{
           source: "corporate",
@@ -191314,7 +191362,7 @@ async function handleRescheduleBooking(req, res) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
       let discountPct = 0;
       if (booking.discountType === "senior" || booking.discountType === "pwd") {
@@ -191378,6 +191426,7 @@ async function handleRescheduleBooking(req, res) {
         reason: typeof reason === "string" ? reason.slice(0, 500) : "",
         by: req.staff?.uid || req.staff?.email || "staff",
         at: (/* @__PURE__ */ new Date()).toISOString(),
+        pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
         deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
       };
       updatedBooking = {
@@ -191387,7 +191436,7 @@ async function handleRescheduleBooking(req, res) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        ratePerNight: activeRoomRate,
+        ratePerNight: manualNightlyRate ?? activeRoomRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
         originalTotalPrice,
