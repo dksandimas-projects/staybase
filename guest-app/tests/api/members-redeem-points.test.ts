@@ -76,7 +76,22 @@ describe("/api/members/redeem-points", () => {
       status: "confirmed",
       totalPrice: 5000,
       pointsRedeemed: 0,
-      pointsRedeemedValue: 0
+      pointsRedeemedValue: 0,
+      rateBreakdown: {
+        roomSubtotal: 4500,
+        roomLines: [{
+          source: "regular",
+          label: "Regular rate",
+          startDate: "2026-06-15",
+          endDate: "2026-06-17",
+          nights: 2,
+          nightlyRate: 2250,
+          subtotal: 4500
+        }],
+        addOns: [{ label: "Breakfast add-on", amount: 500 }],
+        deductions: [],
+        finalTotal: 5000
+      }
     });
     mockMemberDoc.data.mockReturnValue({
       isMember: true,
@@ -118,7 +133,13 @@ describe("/api/members/redeem-points", () => {
       totalPrice: 4500,
       pointsRedeemed: 500,
       pointsRedeemedValue: 500,
-      pointsRedeemedBy: "staff_1"
+      pointsRedeemedBy: "staff_1",
+      rateBreakdown: expect.objectContaining({
+        roomSubtotal: 4500,
+        addOns: [{ label: "Breakfast add-on", amount: 500 }],
+        deductions: [{ label: "Spark Rewards points redeemed", amount: 500 }],
+        finalTotal: 4500
+      })
     }));
     expect(mockUpdate).toHaveBeenCalledWith({ path: "members/member_1" }, expect.objectContaining({
       rewardsPoints: 500
@@ -172,7 +193,22 @@ describe("/api/members/redeem-points", () => {
       status: "confirmed",
       totalPrice: 4500,
       pointsRedeemed: 500,
-      pointsRedeemedValue: 500
+      pointsRedeemedValue: 500,
+      rateBreakdown: {
+        roomSubtotal: 4500,
+        roomLines: [{
+          source: "regular",
+          label: "Regular rate",
+          startDate: "2026-06-15",
+          endDate: "2026-06-17",
+          nights: 2,
+          nightlyRate: 2250,
+          subtotal: 4500
+        }],
+        addOns: [{ label: "Breakfast add-on", amount: 500 }],
+        deductions: [{ label: "Spark Rewards points redeemed", amount: 500 }],
+        finalTotal: 4500
+      }
     });
     mockMemberDoc.data.mockReturnValue({
       rewardsPoints: 500
@@ -186,7 +222,13 @@ describe("/api/members/redeem-points", () => {
       pointsRedeemed: 0,
       pointsRedeemedValue: 0,
       pointsRedeemedBy: null,
-      pointsRedeemedAt: null
+      pointsRedeemedAt: null,
+      rateBreakdown: expect.objectContaining({
+        roomSubtotal: 4500,
+        addOns: [{ label: "Breakfast add-on", amount: 500 }],
+        deductions: [],
+        finalTotal: 5000
+      })
     }));
     expect(mockUpdate).toHaveBeenCalledWith({ path: "members/member_1" }, expect.objectContaining({
       rewardsPoints: 1000

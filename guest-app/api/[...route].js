@@ -189351,6 +189351,68 @@ async function handleEmailPreview(req, res) {
   }
 }
 
+// server/lib/rate-breakdown.ts
+function nonNegativeFinite(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+function composeRateBreakdown(input) {
+  const roomSubtotal = nonNegativeFinite(input.roomSubtotal);
+  const addOns = input.addOns.map((line) => ({
+    ...line,
+    amount: nonNegativeFinite(line.amount)
+  }));
+  const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const discountPct = nonNegativeFinite(input.discountPct);
+  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+  const afterSeniorPwd = Math.max(subtotal - seniorPwdDiscount, 0);
+  const voucherDiscount = nonNegativeFinite(input.voucherDiscount);
+  const afterVoucher = Math.max(afterSeniorPwd - voucherDiscount, 0);
+  const memberDiscountPct = nonNegativeFinite(input.memberDiscountPct);
+  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const pointsRedeemedValue = nonNegativeFinite(input.pointsRedeemedValue);
+  const deductions = [
+    ...seniorPwdDiscount > 0 ? [{
+      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${discountPct}%)`,
+      amount: seniorPwdDiscount
+    }] : [],
+    ...voucherDiscount > 0 ? [{ label: "Voucher discount", amount: voucherDiscount }] : [],
+    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${memberDiscountPct}%)`, amount: memberDiscount }] : [],
+    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
+  ];
+  return {
+    roomSubtotal,
+    roomLines: input.roomLines,
+    addOns,
+    deductions,
+    finalTotal: nonNegativeFinite(input.finalTotal)
+  };
+}
+function buildRateBreakdown(input) {
+  return composeRateBreakdown({
+    ...input,
+    addOns: input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [],
+    pointsRedeemedValue: input.pointsRedeemedValue || 0
+  });
+}
+function rebuildRateBreakdown(booking, overrides = {}) {
+  const existing = booking.rateBreakdown;
+  if (!existing) return void 0;
+  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite(booking.pointsRedeemedValue) : nonNegativeFinite(overrides.pointsRedeemedValue);
+  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite(booking.totalPrice) : nonNegativeFinite(overrides.finalTotal);
+  return composeRateBreakdown({
+    roomLines: existing.roomLines || [],
+    roomSubtotal: existing.roomSubtotal,
+    addOns: existing.addOns || [],
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite(booking.discountPct),
+    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    pointsRedeemedValue,
+    finalTotal
+  });
+}
+
 // server/handlers/bookings.ts
 function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
@@ -189417,31 +189479,6 @@ async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, chec
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
-}
-function buildRateBreakdown(input) {
-  const addOns = input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [];
-  const subtotal = input.roomSubtotal + input.breakfastTotal;
-  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
-  const afterSeniorPwd = subtotal - seniorPwdDiscount;
-  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
-  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
-  const pointsRedeemedValue = Math.max(0, Number(input.pointsRedeemedValue) || 0);
-  const deductions = [
-    ...seniorPwdDiscount > 0 ? [{
-      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
-      amount: seniorPwdDiscount
-    }] : [],
-    ...input.voucherDiscount > 0 ? [{ label: "Voucher discount", amount: input.voucherDiscount }] : [],
-    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }] : [],
-    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
-  ];
-  return {
-    roomSubtotal: input.roomSubtotal,
-    roomLines: input.roomLines,
-    addOns,
-    deductions,
-    finalTotal: input.finalTotal
-  };
 }
 var lookupSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
@@ -190475,19 +190512,16 @@ async function handleRejectDiscount(req, res) {
     const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
     const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
-    const existingBreakdown = bookingData.rateBreakdown;
-    const breakfastTotal = (existingBreakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-    const rateBreakdown = existingBreakdown ? buildRateBreakdown({
-      roomLines: existingBreakdown.roomLines || [],
-      roomSubtotal: Number(existingBreakdown.roomSubtotal || Math.max(originalTotalPrice - breakfastTotal, 0)),
-      breakfastTotal,
+    const rateBreakdown = rebuildRateBreakdown({
+      ...bookingData,
       discountType: "",
       discountPct: 0,
-      voucherDiscount,
-      memberDiscountPct,
+      pointsRedeemedValue,
+      totalPrice: restoredTotalPrice
+    }, {
       pointsRedeemedValue,
       finalTotal: restoredTotalPrice
-    }) : void 0;
+    });
     const discountRejectedBy = req.staff?.uid || "staff";
     const updates = {
       discountRejected: true,
@@ -192484,6 +192518,10 @@ async function handleRedeemMemberPoints(req, res) {
         throw new Error("Points redemption value exceeds the booking total.");
       }
       const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+      const rateBreakdown = rebuildRateBreakdown(booking, {
+        pointsRedeemedValue: redemptionValue,
+        finalTotal: nextTotalPrice
+      });
       const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
       transaction.update(bookingRef, {
         memberId,
@@ -192492,6 +192530,7 @@ async function handleRedeemMemberPoints(req, res) {
         pointsRedeemedValue: redemptionValue,
         pointsRedeemedBy: staff.uid,
         pointsRedeemedAt: now,
+        ...rateBreakdown ? { rateBreakdown } : {},
         updatedAt: now
       });
       transaction.update(memberRef, {
@@ -192568,6 +192607,10 @@ async function handleUndoMemberPointsRedemption(req, res) {
       const restoredPoints = Number(booking.pointsRedeemed || 0);
       const restoredValue = Number(booking.pointsRedeemedValue || 0);
       const nextTotalPrice = Number(booking.totalPrice || 0) + restoredValue;
+      const rateBreakdown = rebuildRateBreakdown(booking, {
+        pointsRedeemedValue: 0,
+        finalTotal: nextTotalPrice
+      });
       const nextRewardsPoints = Number(member.rewardsPoints || 0) + restoredPoints;
       const historyRef = adminDb.collection(`members/${booking.memberId}/pointsHistory`).doc();
       transaction.update(bookingRef, {
@@ -192576,6 +192619,7 @@ async function handleUndoMemberPointsRedemption(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
+        ...rateBreakdown ? { rateBreakdown } : {},
         updatedAt: now
       });
       transaction.update(memberRef, {
