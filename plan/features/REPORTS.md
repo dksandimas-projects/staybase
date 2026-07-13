@@ -114,6 +114,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [ ] **Revenue trend line** — total combined revenue per month over the selected period
 - [ ] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
 - [x] **Payment method breakdown** — pie chart by amount from actual payment-ledger entries, plus a separately labeled uncollected Add-to-Bill slice
+- [x] **Direct-paid store collections** — delivery appends a store-scoped tender consumed by the same collection-group ledger and Daily Close; store tenders never reduce the linked room folio
 
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**

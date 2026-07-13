@@ -3830,9 +3830,18 @@ export function BookingsPage() {
 
               {selectedOrder.status === "out-for-delivery" && (
                 <button
-                  onClick={() => {
-                    void updateStoreOrderStatus(selectedOrder.id, "delivered");
-                    setSelectedOrder((prev: any) => prev ? { ...prev, status: "delivered" } : null);
+                  onClick={async () => {
+                    try {
+                      await updateStoreOrderStatus(selectedOrder.id, "delivered");
+                      setSelectedOrder((prev: any) => prev ? {
+                        ...prev,
+                        status: "delivered",
+                        deliveredAt: new Date().toISOString()
+                      } : null);
+                      toast.success("Order delivered", "The delivery and direct-payment tender were recorded together.");
+                    } catch (error) {
+                      toast.error("Could not complete delivery", error instanceof Error ? error.message : String(error));
+                    }
                   }}
                   className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-gray-900 hover:bg-black text-xs font-bold text-white shadow-sm transition active:scale-95"
                 >
