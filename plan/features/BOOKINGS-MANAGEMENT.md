@@ -119,7 +119,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Receipt PDF generated client-side with jsPDF — see `plan/features/EMAIL-PDF-STORAGE.md`
 - [ ] Payment proof image viewable in drawer from Firebase Storage URL
 - [ ] **Reference Number field** (owner request 2026-07-09) — editable text field in the drawer next to the payment proof thumbnail, showing `booking.paymentReferenceNumber`. Always editable by staff, **independent of** the payment method's `requireReferenceNumber` setting (`plan/features/SETTINGS.md §2 Payment Methods`) — that setting only controls whether the *guest* was required to submit one during booking; staff can always add, correct, or fill it in later (e.g. when confirming payment for a method the guest wasn't asked to supply a reference for, or correcting a typo the guest made). Saved via `updateDoc` on `bookings/{bookingId}`, same pattern as the Notes field above.
-- [ ] Additional payments: POST to `/api/bookings/add-payment` — API appends `{ amount, method, note, recordedBy: staffUID, recordedAt: timestamp }` to `bookings/{bookingId}/payments`
+- [ ] Additional payments: POST to `/api/bookings/add-payment` — API appends the payment audit record and atomically advances `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the status transition gates the one-time guest email
 - [ ] `onSnapshot` on `bookings/{bookingId}/payments` in drawer — real-time list updates
 - [ ] Outstanding balance computed client-side: `booking.totalPrice − sum(payments[].amount)`
 - [ ] Discount verification: `updateDoc` on `bookings/{bookingId}` — set `discountVerified: true` + `discountVerifiedBy: staffUID`

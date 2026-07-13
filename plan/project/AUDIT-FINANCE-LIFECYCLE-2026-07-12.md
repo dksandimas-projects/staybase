@@ -28,10 +28,10 @@
 | Severity | Open | Fixed | **Total** |
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 2 | **2** |
-| **SEV-2 (major)** | 4 | 1 | **5** |
-| **SEV-3 (minor)** | 7 | 1 | **8** |
+| **SEV-2 (major)** | 3 | 2 | **5** |
+| **SEV-3 (minor)** | 5 | 3 | **8** |
 | **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **16** | **4** | **20** |
+| **Total** | **13** | **7** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -43,8 +43,8 @@ state-transition defects inside that plumbing.** At audit time, the headline
 Total Revenue KPI double-counted breakfast (FL-01), and two server paths
 could write a wrong `totalPrice` to the booking doc (FL-02, FL-03); all three
 were fixed in the first remediation batch on 2026-07-13. The booking status
-pipeline that the reports key on still has a gap where a fully-paid booking
-never advances and a UI transition always errors (FL-04, FL-09). One
+pipeline and Dashboard revenue basis were aligned in the status-consistency
+batch later that day (FL-04, FL-09, FL-12). One
 structural blind spot remains: store orders paid directly (GCash / COD
 cash) are billed revenue with no tender record anywhere, so the
 reconciliation shows phantom Outstanding and the Daily Close cash drawer is
@@ -76,10 +76,9 @@ guaranteed to show a variance on any day with store cash sales (FL-05).
 
 1. ✅ **FL-01 + FL-02 + FL-03** — wrong-number batch shipped 2026-07-13
    with unit/API regressions and synchronized reporting/booking docs.
-2. **FL-04 + FL-09** — status-pipeline batch: advance status on full
-   payment inside the existing `handleAddPayment` transaction, and fix the
-   dead `payment-confirmed → confirmed` transition (widen the server allow
-   list or drop the button).
+2. ✅ **FL-04 + FL-09 + FL-12** — status-consistency batch shipped
+   2026-07-13: atomic full-payment transition, working
+   `payment-confirmed → confirmed`, and aligned Dashboard revenue.
 3. 🔄 **FL-08 + FL-10** — shared `rebuildRateBreakdown(booking)` helper
    shipped with FL-08 on 2026-07-13 and now serves points redeem/undo plus
    reject-discount. FL-10 early-checkout integration remains policy-blocked.
@@ -88,7 +87,7 @@ guaranteed to show a variance on any day with store cash sales (FL-05).
    side): log the decision in `DECISIONS-FEATURES.md`, then implement.
 5. **FL-06 + FL-07** — walk-in/reschedule hardening (preserve manual
    rates on move; Zod-validate the walk-in body incl. `totalPriceOverride`).
-6. **FL-11 (policy) + FL-12 + FL-13 + FL-14 + FL-15** — SEV-3 batch;
+6. **FL-11 (policy) + FL-13 + FL-14 + FL-15** — remaining SEV-3 batch;
    FL-10/FL-11 policy questions (early-checkout refunds, points on unpaid
    folio) need owner input — log outcomes in `DECISIONS-FEATURES.md`.
 7. **FL-16..FL-20** — SEV-4 polish batch.
@@ -214,7 +213,7 @@ no-pricing rejection path.
 
 ---
 
-### FL-04 — Full payment fires the "payment confirmed" email but never advances status · `Open`
+### FL-04 — Full payment fires the "payment confirmed" email but never advances status · `Fixed 2026-07-13`
 
 **Where:**
 - `guest-app/server/handlers/bookings.ts:2004-2046` (`handleAddPayment` — `fullyPaid` → `sendBookingTrigger("payment-confirmed", …)`, no status write)
@@ -244,6 +243,14 @@ every fully-paid booking.
 `fullyPaid && isConfirmableStatus`, also update `status:
 "payment-confirmed"` (+ `updatedAt`), keeping the email dedup marker
 pattern. Alternatively gate the email on the status write succeeding.
+
+**Remediation:** the payment append and `payment-confirmed` status update
+now commit in the same Firestore transaction. Only the transaction that
+actually transitions `pending`/`payment-uploaded` sends the guest email, so
+the committed status is the concurrency-safe idempotency guard. The update
+also stamps the existing `handledBy`/`updatedAt` audit fields. Tests cover
+partial payment, both eligible source statuses, and no re-fire after the
+status has already advanced.
 
 ---
 
@@ -350,7 +357,7 @@ deduction in canonical order, and leaves legacy no-breakdown bookings on
 their documented fallback path. Transaction and pure-helper regressions
 cover redeem, undo, discount stacking, and legacy behavior.
 
-### FL-09 — Dead "Confirm Booking" button at `payment-confirmed` · `Open`
+### FL-09 — Dead "Confirm Booking" button at `payment-confirmed` · `Fixed 2026-07-13`
 
 **Where:** `admin-app/src/pages/BookingsPage.tsx:3542-3548` (button) vs `guest-app/server/handlers/bookings.ts:2144` (`allowedStatuses = ["pending", "payment-uploaded"]`)
 
@@ -363,6 +370,11 @@ status pipeline errors 100% of the time.
 
 **Fix:** either add `payment-confirmed` to the server allow list (and skip
 the duplicate booking-confirmed email if undesired) or remove the button.
+
+**Remediation:** added `payment-confirmed` to the transactional confirmation
+allow-list, matching the existing drawer action and documented state machine.
+The transition fires the distinct booking-confirmed email once; direct
+check-in from `payment-confirmed` remains supported.
 
 ### FL-10 — Early checkout truncates the stay but keeps the full price · `Open`
 
@@ -396,7 +408,7 @@ spend — likely intended ("per-spend" on the room bill) but unconfirmed.
 → `DECISIONS-FEATURES.md`; at minimum stamp `checkedOutWithBalance:
 <amount>` on the booking during checkout so the audit trail is explicit.
 
-### FL-12 — Dashboard revenue and Reports disagree on `payment-confirmed` · `Open`
+### FL-12 — Dashboard revenue and Reports disagree on `payment-confirmed` · `Fixed 2026-07-13`
 
 **Where:** `admin-app/src/pages/DashboardPage.tsx:98-100` vs `admin-app/src/pages/ReportsPage.tsx:404-409`
 
@@ -408,6 +420,10 @@ numbers won't tie out.
 
 **Fix:** include `payment-confirmed` in the dashboard filter (align with
 FR-04) and update the help text.
+
+**Remediation:** Dashboard monthly revenue and its help text now include
+`payment-confirmed`, matching the Reports revenue-eligible status basis.
+Source-level regression coverage locks the filter and explanation together.
 
 ### FL-13 — Billed vs Collected use different period bases · `Open`
 

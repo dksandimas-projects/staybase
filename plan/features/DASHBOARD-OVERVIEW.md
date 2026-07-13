@@ -41,7 +41,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 
 ## Data & Logic Checklist
 
-- [ ] Stat cards computed from Firestore queries — occupancy from room statuses, revenue from confirmed bookings this month
+- [ ] Stat cards computed from Firestore queries — occupancy from room statuses; revenue from `payment-confirmed`, `confirmed`, `checked-in`, and `checked-out` bookings checking in this month, matching the Reports revenue basis
 - [ ] Room grid: `onSnapshot` on `rooms` collection — all rooms always shown regardless of status
 - [ ] Housekeeping toggle: `updateDoc` on `rooms/{roomId}` — update `housekeepingStatus` field
 - [ ] Pending payments: query `bookings` where `status == "payment-uploaded"`, ordered by `createdAt`
