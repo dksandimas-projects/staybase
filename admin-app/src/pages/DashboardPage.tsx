@@ -96,11 +96,11 @@ export function DashboardPage() {
 
   const monthlyBookingsCount = bookings.filter((b) => b.createdAt?.startsWith(monthKey)).length;
   const monthlyRevenue = bookings
-    .filter((b) => b.checkIn?.startsWith(monthKey) && ["confirmed", "checked-in", "checked-out"].includes(b.status))
+    .filter((b) => b.checkIn?.startsWith(monthKey) && ["payment-confirmed", "confirmed", "checked-in", "checked-out"].includes(b.status))
     .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
   const occupancyHelpText = "Occupancy is based on rooms currently marked occupied divided by all rooms in the room list.";
   const bookingsHelpText = "Bookings counts reservations created during the current month, based on each booking's createdAt month.";
-  const revenueHelpText = "Revenue is the sum of totalPrice for bookings checking in this month with confirmed, checked-in, or checked-out status. It is booking value, not cash collected.";
+  const revenueHelpText = "Revenue is the sum of totalPrice for bookings checking in this month with payment-confirmed, confirmed, checked-in, or checked-out status. It is booking value, not cash collected.";
   const corporateHelpText = "This alert only shows corporate inquiries still marked new, so fresh leads stay visible until staff moves them forward in the pipeline.";
   const pendingPayments = bookings.filter(b => b.status === "payment-uploaded");
   const newCorporateInquiries = corporateInquiries.filter(inquiry => inquiry.status === "new");

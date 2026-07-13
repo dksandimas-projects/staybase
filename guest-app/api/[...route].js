@@ -190700,6 +190700,7 @@ async function handleAddPayment(req, res) {
   let totalPrice = 0;
   let isConfirmableStatus = false;
   let fullyPaid = false;
+  let transitionedToPaymentConfirmed = false;
   let hadPaymentProof = false;
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot = null;
@@ -190712,6 +190713,7 @@ async function handleAddPayment(req, res) {
       }
       const bookingData = bookingDoc.data();
       bookingDataSnapshot = bookingData;
+      transitionedToPaymentConfirmed = false;
       const paymentsRef = bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
@@ -190724,10 +190726,25 @@ async function handleAddPayment(req, res) {
       isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
       hadPaymentProof = !!bookingData.paymentProofUrl;
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
+      const bookingUpdates = {};
       if (hadPaymentProof && staffPaymentMarkerMissing) {
-        transaction.update(bookingRef, {
-          "emailNotificationsSent.staffNewPayment": /* @__PURE__ */ new Date()
+        bookingUpdates["emailNotificationsSent.staffNewPayment"] = /* @__PURE__ */ new Date();
+      }
+      if (fullyPaid && isConfirmableStatus) {
+        const updatedAt = /* @__PURE__ */ new Date();
+        Object.assign(bookingUpdates, {
+          status: "payment-confirmed",
+          handledBy: staffUid,
+          updatedAt
         });
+        transitionedToPaymentConfirmed = true;
+        bookingDataSnapshot = {
+          ...bookingData,
+          ...bookingUpdates
+        };
+      }
+      if (Object.keys(bookingUpdates).length > 0) {
+        transaction.update(bookingRef, bookingUpdates);
       }
       const newPaymentRef = paymentsRef.doc();
       transaction.set(newPaymentRef, paymentRecord);
@@ -190740,7 +190757,7 @@ async function handleAddPayment(req, res) {
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
   try {
-    if (fullyPaid && isConfirmableStatus) {
+    if (transitionedToPaymentConfirmed) {
       await sendBookingTrigger("payment-confirmed", bookingDataSnapshot);
     }
     if (hadPaymentProof && staffPaymentMarkerMissing) {
@@ -190754,7 +190771,11 @@ async function handleAddPayment(req, res) {
   }
   return res.status(200).json({
     success: true,
-    data: { ...paymentRecord, totalPaid }
+    data: {
+      ...paymentRecord,
+      totalPaid,
+      status: bookingDataSnapshot?.status || null
+    }
   });
 }
 async function handleAddRefund(req, res) {
@@ -190828,7 +190849,7 @@ async function handleConfirmBooking(req, res) {
         alreadyConfirmed = true;
         return;
       }
-      const allowedStatuses = ["pending", "payment-uploaded"];
+      const allowedStatuses = ["pending", "payment-uploaded", "payment-confirmed"];
       if (!allowedStatuses.includes(data.status)) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
