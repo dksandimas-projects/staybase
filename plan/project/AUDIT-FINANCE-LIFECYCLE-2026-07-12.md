@@ -29,9 +29,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 2 | **2** |
 | **SEV-2 (major)** | 0 | 5 | **5** |
-| **SEV-3 (minor)** | 5 | 3 | **8** |
+| **SEV-3 (minor)** | 2 | 6 | **8** |
 | **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **10** | **10** | **20** |
+| **Total** | **7** | **13** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -53,6 +53,10 @@ The final SEV-2 batch then made negotiated walk-in rates durable across
 reschedules and moved strict request validation ahead of every walk-in
 transaction (FL-06, FL-07). All Finance Lifecycle SEV-1 and SEV-2 findings
 are now closed.
+The non-policy reporting batch then aligned Billed and Collected on a
+to-date folio snapshot, surfaced retained no-show deposits, and moved report
+windows plus stay-overlap calculations onto hotel-timezone calendar days
+(FL-13, FL-14, FL-15).
 
 ### What's already solid
 
@@ -92,9 +96,11 @@ are now closed.
 5. ✅ **FL-06 + FL-07** — walk-in/reschedule hardening shipped: preserve
    manual rates on move and strict-Zod validate the full walk-in request,
    including the capped finite `totalPriceOverride`, before Firestore work.
-6. **FL-11 (policy) + FL-13 + FL-14 + FL-15** — remaining SEV-3 batch;
-   FL-10/FL-11 policy questions (early-checkout refunds, points on unpaid
-   folio) need owner input — log outcomes in `DECISIONS-FEATURES.md`.
+6. ✅ **FL-13 + FL-14 + FL-15** — reporting-period batch shipped:
+   comparable to-date folio snapshots, retained no-show deposits, and
+   hotel-timezone report boundaries. FL-10/FL-11 remain policy-blocked
+   (early-checkout refunds, points on unpaid folio); log owner outcomes in
+   `DECISIONS-FEATURES.md`.
 7. **FL-16..FL-20** — SEV-4 polish batch.
 
 ---
@@ -459,7 +465,7 @@ FR-04) and update the help text.
 `payment-confirmed`, matching the Reports revenue-eligible status basis.
 Source-level regression coverage locks the filter and explanation together.
 
-### FL-13 — Billed vs Collected use different period bases · `Open`
+### FL-13 — Billed vs Collected use different period bases · `Fixed 2026-07-13`
 
 **Where:** `admin-app/src/pages/ReportsPage.tsx:494-511`
 
@@ -475,7 +481,16 @@ the period KPI is an unlabeled approximation.
 KPI as period cash-flow ("billed in period vs received in period") — and
 say which in `REPORTS.md`.
 
-### FL-14 — No-shows with collected money are invisible · `Open`
+**Remediation:** Collections Reconciliation now snapshots both sides on the
+same to-date basis for booking folios touching the selected range and
+direct-paid store orders delivered in it. Billed includes the booking total,
+all net incidental charges, delivered billed-to-room orders, and direct store
+sales; Collected includes all matching ledger entries, including deposits
+recorded before the range and refunds. Gross Collections and Refunds remain
+explicitly labeled period cash-flow measures. Pure-helper regressions cover
+pre-period deposits, refunds, charges, Add to Bill, and direct store tenders.
+
+### FL-14 — No-shows with collected money are invisible · `Fixed 2026-07-13`
 
 **Where:** `admin-app/src/pages/ReportsPage.tsx:421-434` (past `confirmed` exclusion) vs `:513-532` (`cancelledWithCollections`)
 
@@ -489,7 +504,12 @@ over-collection.
 bookings (past `confirmed`, never checked in, payments > 0), or fold
 no-shows into an explicit status.
 
-### FL-15 — Reports period boundaries use the browser's timezone · `Open`
+**Remediation:** the retained-money table now includes both cancelled
+bookings and past `confirmed` bookings that never checked in. Each row is
+explicitly labeled Cancelled or No-show and shows gross paid, refunded, and
+still retained amounts; the no-show cutoff uses the hotel calendar day.
+
+### FL-15 — Reports period boundaries use the browser's timezone · `Fixed 2026-07-13`
 
 **Where:** `admin-app/src/pages/ReportsPage.tsx:370-397` (`periodStart`/`periodEnd`/`isWithinSelectedRange`)
 
@@ -500,6 +520,13 @@ the Manila-keyed Daily Close.
 
 **Fix:** derive `periodStart`/`periodEnd` from Manila calendar days
 (reuse `dateKeyInTimeZone`/`getManilaDateInfo`).
+
+**Remediation:** preset and custom ranges now resolve inclusive UTC instants
+from `config.timezone` calendar keys, and exports use those same keys rather
+than UTC slicing. Booking overlap, no-show classification, and room-night
+proration also compare hotel calendar days, eliminating browser-local
+midnight arithmetic. Tests lock the Manila boundary instants and leap-day
+calendar shifting.
 
 ---
 
