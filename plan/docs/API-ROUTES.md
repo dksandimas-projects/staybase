@@ -144,13 +144,15 @@ Both routes return the discount/rate details on success. Never expose full vouch
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/store/create-order` | POST | None | Create store order with server-side stock check, stock decrement, active booking lookup, and order ref generation |
+| `/api/store/create-order` | POST | None | Create store order with server-side stock check, active booking lookup, and order ref generation; stock decrements on staff confirmation |
 | `/api/store/cancel-order` | POST | None (room + order ref match) | Cancel a placed store order from the guest intercom and restore reserved stock once |
 | `/api/store/order-status` | POST | None (room + order ref match) | Return the latest guest-safe order status for the intercom tracker |
+| `/api/store/deliver-order` | POST | Staff | Atomically mark an out-for-delivery order delivered and append one deterministic direct-payment tender; Add to Bill creates no tender |
 
 Store order creation MUST use a Firestore transaction to prevent overselling.
 Store order cancellation MUST only allow `placed` orders and MUST use a transaction so stock restore is idempotent.
 Store order status MUST return only guest-safe metadata (`status`, `updatedAt`) and never expose `paymentProofUrl`, internal notes, or full order records.
+Store order delivery MUST use the authenticated server route. Direct-paid tenders are written under the store order so collection-group reports and Daily Close include them without settling the linked booking folio.
 
 ---
 

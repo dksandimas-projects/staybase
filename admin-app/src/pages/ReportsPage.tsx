@@ -47,6 +47,8 @@ interface ReportCharge {
 interface ReportPayment {
   id: string;
   type: "payment" | "refund";
+  source: "booking" | "store-order";
+  sourceId: string;
   bookingId: string;
   bookingRef: string;
   roomNumber: string;
@@ -60,10 +62,10 @@ interface ReportPayment {
   recordedAt: Date | null;
 }
 
-// The ledger rows as stored in Firestore, before the booking-derived display
-// fields (bookingRef / roomNumber / guestName) are joined in.
+// Booking ledger rows receive display fields from the booking snapshot below;
+// store-order tenders already carry their own order/room display fields.
 type RawReportCharge = Omit<ReportCharge, "bookingRef" | "roomNumber">;
-type RawReportPayment = Omit<ReportPayment, "bookingRef" | "roomNumber" | "guestName">;
+type RawReportPayment = ReportPayment;
 
 interface ReceivableRow {
   bookingId: string;
@@ -268,11 +270,20 @@ export function ReportsPage() {
     const unsubscribe = onSnapshot(collectionGroup(db, "payments"), (snapshot) => {
       setRawPayments(snapshot.docs.map((paymentDoc) => {
         const data = paymentDoc.data();
-        const bookingId = paymentDoc.ref.parent.parent?.id || "";
+        const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
+        const isStoreTender = data.source === "store-order";
+        const sourceId = isStoreTender ? String(data.sourceId || parentDocumentId) : parentDocumentId;
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
-          bookingId,
+          source: isStoreTender ? "store-order" : "booking",
+          sourceId,
+          // Keep store tenders outside booking-folio sums. They reconcile the
+          // direct-paid store charge but must not settle the guest's room bill.
+          bookingId: isStoreTender ? `store:${sourceId}` : parentDocumentId,
+          bookingRef: isStoreTender ? String(data.orderRef || sourceId) : "",
+          roomNumber: isStoreTender ? String(data.roomNumber || "") : "",
+          guestName: isStoreTender ? String(data.guestName || "") : "",
           amount: Number(data.amount || 0),
           method: String(data.method || "unknown"),
           note: String(data.note || ""),
@@ -335,6 +346,9 @@ export function ReportsPage() {
 
   const payments = useMemo<ReportPayment[]>(() =>
     rawPayments.map((payment) => {
+      if (payment.source === "store-order") {
+        return payment;
+      }
       const display = bookingDisplayById.get(payment.bookingId);
       return {
         ...payment,
@@ -438,7 +452,7 @@ export function ReportsPage() {
   }, [revenueBookings, periodStart, periodEnd, payments]);
 
   const rangeStoreOrders = useMemo(
-    () => storeOrders.filter(o => isWithinSelectedRange(o.createdAt)),
+    () => storeOrders.filter(o => isWithinSelectedRange(o.status === "delivered" ? (o.deliveredAt || o.createdAt) : o.createdAt)),
     [storeOrders, periodStart, periodEnd]
   );
 
@@ -779,9 +793,9 @@ export function ReportsPage() {
     });
 
     deliveredStoreOrders.forEach(o => {
-      const created = toDate(o.createdAt);
-      if (!created) return;
-      const slot = ensureMonth(created);
+      const delivered = toDate(o.deliveredAt || o.createdAt);
+      if (!delivered) return;
+      const slot = ensureMonth(delivered);
       slot.store += o.totalAmount || 0;
     });
 
@@ -1516,7 +1530,7 @@ export function ReportsPage() {
 
   const prevDeliveredStoreOrders = useMemo(() => {
     const prevRangeStoreOrders = storeOrders.filter(o => {
-      const date = toDate(o.createdAt);
+      const date = toDate(o.deliveredAt || o.createdAt);
       return date && date >= prevPeriod.start && date <= prevPeriod.end;
     });
     return prevRangeStoreOrders.filter(o => o.status === "delivered");
