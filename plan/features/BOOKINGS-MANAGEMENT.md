@@ -123,7 +123,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] `onSnapshot` on `bookings/{bookingId}/payments` in drawer — real-time list updates
 - [ ] Outstanding balance computed client-side: `booking.totalPrice − sum(payments[].amount)`
 - [ ] Discount verification: `updateDoc` on `bookings/{bookingId}` — set `discountVerified: true` + `discountVerifiedBy: staffUID`
-- [ ] Discount rejection: POST to `/api/bookings/reject-discount` — sets `discountRejected: true`, `discountVerified: false`, `discountRejectedBy`, `discountRejectionReason`; restores `totalPrice` to pre-discount amount; triggers `/api/email/discount-rejected`; staff role required
+- [ ] Discount rejection: POST to `/api/bookings/reject-discount` — sets `discountRejected: true`, `discountVerified: false`, `discountRejectedBy`, `discountRejectionReason`; removes only the rejected Senior/PWD deduction while preserving voucher, member, and redeemed-points deductions; rebuilds the stored rate breakdown; triggers `/api/email/discount-rejected`; staff role required
 
 ## Edge Cases & States
 
