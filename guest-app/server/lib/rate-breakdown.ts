@@ -24,6 +24,12 @@ type RebuildableBooking = {
   memberDiscountPct?: unknown;
   pointsRedeemedValue?: unknown;
   totalPrice?: unknown;
+  numNights?: unknown;
+  numGuests?: unknown;
+  ratePerNight?: unknown;
+  breakfastRate?: unknown;
+  hasBreakfast?: unknown;
+  checkIn?: unknown;
 };
 
 type RebuildOverrides = {
@@ -120,4 +126,107 @@ export function rebuildRateBreakdown(
     pointsRedeemedValue,
     finalTotal
   });
+}
+
+function shiftDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function dateKeyFromUnknown(value: unknown): string {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const date = value instanceof Date
+    ? value
+    : value && typeof (value as any).toDate === "function"
+      ? (value as any).toDate()
+      : new Date(value as any);
+  return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
+}
+
+// Early departure keeps the contracted total, but the receipt must describe
+// the shortened stay. Rebuild the consumed room/add-on lines, preserve the
+// canonical booking deductions, then expose the retained balance as its own
+// positive adjustment instead of hiding it in the room rate.
+export function rebuildEarlyCheckoutRateBreakdown(
+  booking: RebuildableBooking,
+  newNights: number
+): BookingRateBreakdown {
+  const nights = Math.max(Math.floor(nonNegativeFinite(newNights)), 1);
+  const originalNights = Math.max(Math.floor(nonNegativeFinite(booking.numNights)), nights);
+  const finalTotal = nonNegativeFinite(booking.totalPrice);
+  const existing = booking.rateBreakdown;
+
+  let remainingNights = nights;
+  const roomLines: BookingRateLine[] = (existing?.roomLines || []).flatMap((line) => {
+    if (remainingNights <= 0) return [];
+    const lineNights = Math.max(Math.floor(nonNegativeFinite(line.nights)), 0);
+    const consumedNights = Math.min(lineNights, remainingNights);
+    if (consumedNights <= 0) return [];
+    remainingNights -= consumedNights;
+    return [{
+      ...line,
+      endDate: shiftDateKey(line.startDate, consumedNights),
+      nights: consumedNights,
+      subtotal: nonNegativeFinite(line.nightlyRate) * consumedNights
+    }];
+  });
+
+  if (roomLines.length === 0) {
+    const startDate = dateKeyFromUnknown(booking.checkIn);
+    const nightlyRate = nonNegativeFinite(booking.ratePerNight);
+    roomLines.push({
+      source: "manual",
+      label: "Locked room rate",
+      startDate,
+      endDate: shiftDateKey(startDate, nights),
+      nights,
+      nightlyRate,
+      subtotal: nightlyRate * nights
+    });
+  }
+
+  const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
+  const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
+  const addOns = existing
+    ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 }))
+    : booking.hasBreakfast
+      ? [{
+          label: "Breakfast add-on",
+          amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
+        }]
+      : [];
+
+  const originalRoomSubtotal = existing?.roomSubtotal
+    ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
+  const originalAddOns = existing?.addOns
+    ?? (booking.hasBreakfast
+      ? [{
+          label: "Breakfast add-on",
+          amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * originalNights
+        }]
+      : []);
+  const originalPricing = composeRateBreakdown({
+    roomLines: existing?.roomLines || roomLines,
+    roomSubtotal: originalRoomSubtotal,
+    addOns: originalAddOns,
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite(booking.discountPct),
+    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    pointsRedeemedValue: nonNegativeFinite(booking.pointsRedeemedValue),
+    finalTotal
+  });
+  const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
+  const consumedGross = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const retainedAmount = Math.max(Math.round((finalTotal + deductionTotal - consumedGross) * 100) / 100, 0);
+
+  return {
+    roomSubtotal,
+    roomLines,
+    addOns: retainedAmount > 0
+      ? [...addOns, { label: "Early departure — original total retained", amount: retainedAmount }]
+      : addOns,
+    deductions: originalPricing.deductions,
+    finalTotal
+  };
 }

@@ -128,6 +128,14 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `pointsRedeemedValue` | number | ₱ value of redeemed points deducted from `totalPrice` (0 if none) |
 | `pointsRedeemedBy` | string \| null | Staff UID who applied the redemption |
 | `pointsRedeemedAt` | timestamp \| null | When redemption was applied |
+| `pointsAwarded` | number | Checkout points actually credited to the member; `0` while a qualifying award is pending payment |
+| `pendingLoyaltyPoints` | number | Locked checkout award waiting for final folio settlement; cleared atomically when awarded |
+| `loyaltyAwardStatus` | string | `pending-payment`, `awarded`, or `ineligible`; transaction/idempotency state for checkout earnings |
+| `pointsAwardedAt` | timestamp \| null | When checkout earnings were credited; null while pending/ineligible |
+| `checkedOutWithBalance` | number | Immutable charge-inclusive outstanding balance stamped at checkout; remains the audit record even after later settlement |
+| `checkedOutFolioTotal` | number | Checkout snapshot of booking total + net incidentals + delivered billed-to-room store orders |
+| `checkedOutCollectedTotal` | number | Net payment-ledger total at checkout, including refunds |
+| `earlyCheckoutOriginalCheckOut` | timestamp \| null | Original departure timestamp retained when early checkout shortens the operational stay |
 | `hasBreakfast` | boolean | `true` if breakfast add-on purchased |
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
 | `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
@@ -143,6 +151,12 @@ written in the same server transaction. The committed status transition is
 the idempotency guard for the guest payment-confirmed email. Staff may then
 transition `payment-confirmed` to `confirmed`, or check in directly when the
 registration gate is otherwise complete.
+
+Checkout does not hard-block an unsettled folio. It records the charge-inclusive
+balance for audit/receivables and defers any eligible Spark Rewards award until
+the final payment. Points are based only on net `totalPrice` (room/breakfast),
+not incidentals or store orders. Early departure retains the contracted total
+and adds a guest-visible retained-total line to the rebuilt rate breakdown.
 
 > **Store charges are not denormalized onto the booking document.** The checkout folio in `admin-app/src/pages/BookingsPage.tsx` (`getBookingStoreCharges`) derives the billed store orders for a booking at read time by filtering the `storeOrders` collection on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. This avoids denormalization drift between the booking and store order lifecycles. `storeOrders.isBilled` and `storeOrders.billedAt` are the source of truth (set by the front desk "Add to Booking Bill" action in the admin Bookings drawer).
 

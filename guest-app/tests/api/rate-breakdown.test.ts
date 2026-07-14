@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { rebuildRateBreakdown } from "../../server/lib/rate-breakdown";
+import { rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../../server/lib/rate-breakdown";
 
 const lockedBreakdown = {
   roomSubtotal: 5_000,
@@ -75,5 +75,53 @@ describe("rebuildRateBreakdown", () => {
       pointsRedeemedValue: 500,
       finalTotal: 1_500
     })).toBeUndefined();
+  });
+});
+
+describe("rebuildEarlyCheckoutRateBreakdown", () => {
+  test("shortens the stay while explaining the retained contracted total", () => {
+    const rebuilt = rebuildEarlyCheckoutRateBreakdown({
+      rateBreakdown: lockedBreakdown,
+      numNights: 2,
+      totalPrice: 4_050,
+      discountType: "senior",
+      discountPct: 20,
+      voucherDiscount: 300,
+      memberDiscountPct: 10,
+      pointsRedeemedValue: 0
+    }, 1);
+
+    expect(rebuilt.roomLines).toEqual([expect.objectContaining({
+      startDate: "2026-07-20",
+      endDate: "2026-07-21",
+      nights: 1,
+      subtotal: 2_500
+    })]);
+    expect(rebuilt.addOns).toContainEqual({ label: "Breakfast add-on", amount: 500 });
+    expect(rebuilt.addOns).toContainEqual(expect.objectContaining({
+      label: "Early departure — original total retained",
+      amount: expect.any(Number)
+    }));
+    const visibleTotal = rebuilt.roomSubtotal
+      + rebuilt.addOns.reduce((sum, line) => sum + line.amount, 0)
+      - rebuilt.deductions.reduce((sum, line) => sum + line.amount, 0);
+    expect(visibleTotal).toBe(rebuilt.finalTotal);
+    expect(rebuilt.finalTotal).toBe(4_050);
+  });
+
+  test("creates a transparent breakdown for legacy bookings", () => {
+    const rebuilt = rebuildEarlyCheckoutRateBreakdown({
+      checkIn: "2026-07-20",
+      numNights: 3,
+      ratePerNight: 2_000,
+      totalPrice: 6_000
+    }, 1);
+
+    expect(rebuilt.roomLines[0]).toMatchObject({ nights: 1, subtotal: 2_000 });
+    expect(rebuilt.addOns).toContainEqual({
+      label: "Early departure — original total retained",
+      amount: 4_000
+    });
+    expect(rebuilt.finalTotal).toBe(6_000);
   });
 });
