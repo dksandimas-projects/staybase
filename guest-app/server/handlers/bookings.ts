@@ -1737,7 +1737,7 @@ export async function handleRejectDiscount(req: any, res: any) {
       console.error("Failed to send discount rejection email:", emailErr);
     }
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, data: updates });
   } catch (error: any) {
     console.error("Discount rejection handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -2198,6 +2198,66 @@ export async function handleAddRefund(req: any, res: any) {
     if (error.message === "Booking not found") return res.status(404).json({ success: false, error: "Booking not found." });
     const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
     return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
+  }
+}
+
+export async function handleMarkPaymentConfirmed(req: any, res: any) {
+  const { bookingId } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const handledBy = req.staff?.uid || "staff";
+    let bookingData: any = null;
+    let alreadyConfirmed = false;
+
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
+      const data = bookingDoc.data()!;
+      bookingData = data;
+
+      if (data.status === "payment-confirmed") {
+        alreadyConfirmed = true;
+        return;
+      }
+      if (data.status !== "payment-uploaded") {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+
+      transaction.update(bookingRef, {
+        status: "payment-confirmed",
+        handledBy,
+        paymentConfirmedAt: new Date(),
+        updatedAt: new Date()
+      });
+    });
+
+    if (alreadyConfirmed) {
+      return res.status(200).json({ success: true, data: { status: "payment-confirmed", alreadyConfirmed: true } });
+    }
+
+    try {
+      await sendBookingTrigger("payment-confirmed", { ...bookingData, status: "payment-confirmed" });
+    } catch (emailErr) {
+      console.error("Failed to send payment-confirmed email:", emailErr);
+    }
+
+    return res.status(200).json({ success: true, data: { status: "payment-confirmed" } });
+  } catch (error: any) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment cannot be confirmed because the booking status is already ${error.message.split(":")[1]}.`
+      });
+    }
+    console.error("Mark payment confirmed handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Unable to confirm payment." });
   }
 }
 

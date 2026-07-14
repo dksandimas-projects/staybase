@@ -959,16 +959,7 @@ export function BookingsPage() {
         throw new Error(data.error || "Failed to reject discount");
       }
 
-      const updatedFields = {
-        discountRejected: true,
-        discountRejectedBy: currentUser?.email || "staff",
-        discountRejectionReason: reason,
-        discountVerified: false,
-        discountPct: 0,
-        totalPrice: selectedBooking.originalTotalPrice ?? selectedBooking.totalPrice
-      };
-
-      syncSelectedBooking(updatedFields);
+      if (data.data) syncSelectedBooking(data.data);
       toast.success("Discount rejected", "Full rate restored. Guest notified by email.");
       setShowDiscountRejectForm(false);
     } catch (err: any) {
@@ -1769,8 +1760,13 @@ export function BookingsPage() {
 
   const syncSelectedBooking = (updates: Partial<Booking>) => {
     if (!selectedBooking) return;
-    updateBookingStatus(selectedBooking.id, selectedBooking.status, updates);
     setSelectedBooking(prev => prev ? { ...prev, ...updates } : null);
+  };
+
+  const persistSelectedBooking = (updates: Partial<Booking>) => {
+    if (!selectedBooking) return;
+    void updateBookingStatus(selectedBooking.id, selectedBooking.status, updates);
+    syncSelectedBooking(updates);
   };
 
   const handleGuestIdUpload = async (file: File | undefined) => {
@@ -1784,7 +1780,7 @@ export function BookingsPage() {
       const fileRef = storageRef(storage, `bookings/${selectedBooking.id}/guest-id/${Date.now()}-${safeName}`);
       await uploadBytes(fileRef, image.file);
       const url = await getDownloadURL(fileRef);
-      syncSelectedBooking({ guestIdPhotoUrl: url });
+      persistSelectedBooking({ guestIdPhotoUrl: url });
       setGuestIdUploadStatus(`ID image uploaded: ${Math.max(1, Math.round(image.compressedSize / 1024))} KB.`);
     } catch (error) {
       setGuestIdUploadStatus(error instanceof Error ? error.message : "Unable to process guest ID image.");
@@ -1794,7 +1790,7 @@ export function BookingsPage() {
   const handleRegistrationSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    syncSelectedBooking({
+    persistSelectedBooking({
       guestRegistration: {
         nationality: String(formData.get("nationality") || "").trim(),
         address: String(formData.get("address") || "").trim(),
@@ -1815,7 +1811,7 @@ export function BookingsPage() {
       ...(selectedBooking.breakfastSelections || {}),
       [key]: value
     };
-    syncSelectedBooking({ breakfastSelections: selections });
+    persistSelectedBooking({ breakfastSelections: selections });
   };
 
   const sortedRooms = useMemo(() => {
@@ -2404,10 +2400,7 @@ export function BookingsPage() {
                         value={selectedBooking.paymentReferenceNumber || ""}
                         onChange={(e) => {
                           const val = e.target.value;
-                          void updateBookingStatus(selectedBooking.id, selectedBooking.status, {
-                            paymentReferenceNumber: val || null
-                          });
-                          syncSelectedBooking({ paymentReferenceNumber: val || null });
+                          persistSelectedBooking({ paymentReferenceNumber: val || null });
                         }}
                         placeholder="e.g. GCash Ref # or Bank Trace #"
                         className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800 font-medium"

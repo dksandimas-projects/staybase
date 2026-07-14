@@ -106,7 +106,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
   };
 });
 
-import { handleConfirmBooking, handleCreateWalkin } from "../../server/handlers/bookings";
+import { handleConfirmBooking, handleCreateWalkin, handleMarkPaymentConfirmed } from "../../server/handlers/bookings";
 
 const mockResponse = () => {
   const res: any = {};
@@ -277,6 +277,68 @@ describe("/api/bookings/confirm", () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe("/api/bookings/mark-payment-confirmed", () => {
+  beforeEach(() => {
+    Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
+    mockWrites.length = 0;
+    sendBookingTrigger.mockClear();
+  });
+
+  test("moves payment-uploaded to payment-confirmed and sends the email once", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-004",
+      guestEmail: "paid@example.test",
+      status: "payment-uploaded",
+      totalPrice: 5000
+    };
+    const res = mockResponse();
+
+    await handleMarkPaymentConfirmed({
+      staff: { uid: "staff_1", role: "front-desk" },
+      body: { bookingId: "booking_1" }
+    }, res);
+
+    expect(mockBookings["booking_1"]).toMatchObject({
+      status: "payment-confirmed",
+      handledBy: "staff_1"
+    });
+    expect(sendBookingTrigger).toHaveBeenCalledWith(
+      "payment-confirmed",
+      expect.objectContaining({ status: "payment-confirmed" })
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test("is idempotent when payment is already confirmed", async () => {
+    mockBookings["booking_1"] = { status: "payment-confirmed" };
+    const res = mockResponse();
+
+    await handleMarkPaymentConfirmed({
+      staff: { uid: "staff_1", role: "front-desk" },
+      body: { bookingId: "booking_1" }
+    }, res);
+
+    expect(sendBookingTrigger).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { status: "payment-confirmed", alreadyConfirmed: true }
+    });
+  });
+
+  test("rejects payment confirmation from any other state", async () => {
+    mockBookings["booking_1"] = { status: "pending" };
+    const res = mockResponse();
+
+    await handleMarkPaymentConfirmed({
+      staff: { uid: "staff_1", role: "front-desk" },
+      body: { bookingId: "booking_1" }
+    }, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(sendBookingTrigger).not.toHaveBeenCalled();
   });
 });
 

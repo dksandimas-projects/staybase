@@ -657,9 +657,9 @@ discount as a separate deduction using the canonical stacking base.
 > These are follow-ups the remediation deliberately did not cover — the
 > fixes are forward-only and two structural risks remain outside the FL
 > scope. Numbered `FLR-<n>`; tracked in `ROADMAP.md §Finance Lifecycle
-> Recommendations`. Status is `Open` until closed here with verification.
+> Recommendations`. Status is tracked here with implementation and verification.
 
-### FLR-01 — Historical finance data repair (one-off integrity scan) · `Open`
+### FLR-01 — Historical finance data repair (one-off integrity scan) · `In review`
 
 **Why:** every FL fix protects writes from 2026-07-13 onward; documents
 corrupted *before* the fixes still carry wrong money. Three cohorts:
@@ -680,7 +680,18 @@ totals, and delivered direct-paid orders without a tender doc. Output a
 review CSV first; corrective writes only after staff sign-off (append-only
 where the ledger is involved — correcting entries, never edits).
 
-### FLR-02 — `bookings` update rule needs a field allowlist · `Open`
+**Implemented 2026-07-14:** the scanner now produces a review-first CSV
+(`approved=NO` by default), refuses to overwrite an existing report, and has a
+separately guarded apply mode that revalidates every approved row inside a
+transaction. Booking repairs are limited to a still-current canonical
+`rateBreakdown.finalTotal`; historical store settlement is append-only via the
+deterministic `delivery-tender` record. Every applied repair also creates an
+Admin-only `financeIntegrityRepairs` audit document. The read-only live scan of
+the configured project reviewed 6 bookings and 1 store order and found one
+pre-FL-05 tender gap. No Firestore writes were made; FLR-01 remains open pending
+staff review/sign-off of that row.
+
+### FLR-02 — `bookings` update rule needs a field allowlist · `Fixed 2026-07-14`
 
 **Why:** `firebase/firestore.rules` still has `allow update: if isStaff()`
 on `bookings/{bookingId}` with no field restriction. All FL money
@@ -699,6 +710,17 @@ enforce `request.resource.data.diff(resource.data).affectedKeys().hasOnly([...])
 the remaining client-side status write behind an API first (mirroring
 confirm/checkout) so the allowlist can exclude `status` and all pricing
 fields entirely.
+
+**Remediation:** `bookings/{bookingId}` staff updates now use an exact
+`affectedKeys().hasOnly(...)` allowlist limited to operational fields. `status`,
+pricing/rate breakdowns, and rewards fields are excluded. The last direct status
+mutation (`payment-uploaded` → `payment-confirmed`) moved behind authenticated
+`POST /api/bookings/mark-payment-confirmed`, whose transaction validates the
+transition and gates its email idempotently. Admin booking state syncing was
+also split so server-returned pricing payloads update local UI state without
+being written back through Firestore client rules. Regression tests pin the
+rule allowlist, forbidden fields, route usage, transition validation, and
+idempotence.
 
 ### FLR-03 — Bound the Reports ledger listeners before the data outgrows them · `Open`
 
