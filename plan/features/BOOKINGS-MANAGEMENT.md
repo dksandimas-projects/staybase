@@ -122,7 +122,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Receipt PDF generated client-side with jsPDF — see `plan/features/EMAIL-PDF-STORAGE.md`
 - [ ] Payment proof image viewable in drawer from Firebase Storage URL
 - [ ] **Reference Number field** (owner request 2026-07-09) — editable text field in the drawer next to the payment proof thumbnail, showing `booking.paymentReferenceNumber`. Always editable by staff, **independent of** the payment method's `requireReferenceNumber` setting (`plan/features/SETTINGS.md §2 Payment Methods`) — that setting only controls whether the *guest* was required to submit one during booking; staff can always add, correct, or fill it in later (e.g. when confirming payment for a method the guest wasn't asked to supply a reference for, or correcting a typo the guest made). Saved via `updateDoc` on `bookings/{bookingId}`, same pattern as the Notes field above.
-- [ ] Additional payments: POST to `/api/bookings/add-payment` — API appends the payment audit record and atomically advances `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the status transition gates the one-time guest email
+- [ ] Additional payments: POST to `/api/bookings/add-payment` with a client-preallocated `paymentId` — API creates that exact immutable payment document, safely replays exact retries, and atomically advances `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the status transition gates the one-time guest email
 - [ ] `onSnapshot` on `bookings/{bookingId}/payments` in drawer — real-time list updates
 - [ ] Outstanding balance computed client-side: `booking.totalPrice − sum(payments[].amount)`
 - [ ] Discount verification: `updateDoc` on `bookings/{bookingId}` — set `discountVerified: true` + `discountVerifiedBy: staffUID`
@@ -272,7 +272,7 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
   - `note` (string, optional)
   - `addedBy` (staff UID), `addedAt` (timestamp)
   - `voidOf` (chargeId | null) — set on a reversal entry pointing at the charge it cancels
-- **Append-only, same as payments:** `firebase/firestore.rules` — `allow read, create: if isStaff(); allow update, delete: if false;`. Voiding = create a negative reversal entry with `voidOf`, never edit/delete. Corrections stay auditable.
+- **Append-only, same as payments:** `firebase/firestore.rules` — `allow read, create: if isStaff(); allow update, delete: if false;`. Positive charges and negative reversals are capped at 1,000,000 absolute value. Voiding requires the deterministic document ID `void-{voidOf}`, so the rules enforce one reversal per charge; never edit/delete. Corrections stay auditable.
 - Types added to `shared/types/index.ts` + documented in `plan/docs/TYPES.md` and `plan/docs/BACKEND.md §bookings`.
 
 ### Shipped Workflow

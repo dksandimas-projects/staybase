@@ -60,6 +60,8 @@ service cloud.firestore {
           && request.resource.data.label.size() <= 120
           && request.resource.data.amount is number
           && request.resource.data.amount != 0
+          && request.resource.data.amount <= 1000000
+          && request.resource.data.amount >= -1000000
           && request.resource.data.category in ["late-checkout", "early-checkin", "extra-person", "damage", "laundry", "other"]
           && request.resource.data.note is string
           && request.resource.data.note.size() <= 300
@@ -70,6 +72,7 @@ service cloud.firestore {
             || (
               request.resource.data.amount < 0
               && request.resource.data.voidOf is string
+              && chargeId == "void-" + request.resource.data.voidOf
               && get(/databases/$(database)/documents/bookings/$(bookingId)/charges/$(request.resource.data.voidOf)).data.amount == -request.resource.data.amount
             )
           );

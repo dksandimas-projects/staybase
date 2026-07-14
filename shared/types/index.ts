@@ -183,6 +183,7 @@ export interface Booking {
   ratePerNight: number;
   totalPrice: number;
   rateBreakdown?: BookingRateBreakdown | null;
+  /** Pre-discount room/add-on subtotal. New writers always set it; null is legacy-only. */
   originalTotalPrice: number | null;
   discountType: DiscountType;
   discountPct: number;
