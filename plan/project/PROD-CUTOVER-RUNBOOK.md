@@ -129,19 +129,19 @@ full admin over production. Staging keeps its existing (separate) key.
 - [x] Assign `stg.sparkinnbohol.com` → guest project `dev` branch and
   `stg-admin.sparkinnbohol.com` → admin project `dev` branch (DNS records
   + Vercel domain-to-branch assignment) *(done 2026-07-14)*
-- [ ] Staging Firebase (`spark-inn-stg-7a7ad`) Auth authorized domains:
-  add `stg.sparkinnbohol.com`, `stg-admin.sparkinnbohol.com`
-- [ ] Turnstile: add `stg.sparkinnbohol.com` to the widget's allowed
-  domains (or issue separate staging keys in the Preview scope)
+- [x] Staging Firebase (`spark-inn-stg-7a7ad`) Auth authorized domains:
+  add `stg.sparkinnbohol.com`, `stg-admin.sparkinnbohol.com` *(done 2026-07-14)*
+- [x] Turnstile: add `stg.sparkinnbohol.com` to the widget's allowed
+  domains (or issue separate staging keys in the Preview scope) *(done 2026-07-14)*
 - [x] **Email isolation:** Preview-scope `RESEND_FROM_EMAIL` /
   `ADMIN_NOTIFICATION_EMAIL` point at an internal/staging address so a
   staging booking can never email a real guest *(done 2026-07-14)*
-- [ ] Note: Vercel **cron fires on Production deployments only** — the
+- [x] Note: Vercel **cron fires on Production deployments only** — the
   check-in reminder will run against prod only; staging never exercises
-  it (expected)
-- [ ] Verify staging end-to-end at the `stg.` domains against the current
+  it (expected) *(done 2026-07-14)*
+- [x] Verify staging end-to-end at the `stg.` domains against the current
   database **before** the cutover (this also satisfies the FLR-05
-  isolated-staging walkthrough environment requirement)
+  isolated-staging walkthrough environment requirement) *(done 2026-07-14)*
 
 ## PC-05 — Archive + data carry-over
 
