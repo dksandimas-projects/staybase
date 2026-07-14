@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 14, 2026 (Finance Lifecycle Recommendations FLR-01/FLR-02/FLR-04 closed. FLR-05 handover is prepared: the pre-FL-05 Daily Close convention is documented and accountant/owner staging sign-off checklists are ready, but the external confirmations remain pending. FLR-03 remains deliberately deferred. Earlier: all 20 Finance Lifecycle findings were fixed.)
+> Last updated: July 14, 2026 (Production Environment Split queued — PC-01..PC-06 from `plan/project/PROD-CUTOVER-RUNBOOK.md`: demote `spark-inn-stg-7a7ad` to staging behind `stg.`/`stg-admin.sparkinnbohol.com` on the `dev` branch, cut production over to the clean-slate `spark-inn-prod` project. PC-02 in progress (project + web app + service-account key created); one open decision blocks PC-05 (active/future bookings carry-over). Earlier: Finance Lifecycle Recommendations FLR-01/FLR-02/FLR-04 closed. FLR-05 handover is prepared: the pre-FL-05 Daily Close convention is documented and accountant/owner staging sign-off checklists are ready, but the external confirmations remain pending. FLR-03 remains deliberately deferred. Earlier: all 20 Finance Lifecycle findings were fixed.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1169,6 +1169,27 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **FLR-04 — Shared finance invariant assertions in tests** — fixed 2026-07-14. `assertBookingFinanceInvariant` rejects non-finite values and reconciles room lines → room subtotal → add-ons/deductions → `finalTotal` → `totalPrice`; `assertRevenueFinanceInvariant` reconciles all four report revenue categories and rejects ledger IDs shared across revenue/tender/receivable streams. Behavioral pricing-writer and Reports fixture tests now call the shared assertions, with dedicated failure-case coverage for every drift class.
 - 🔄 **FLR-05 — Operational handover items** *(owner-facing, no code)* — handover prepared in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. The historical Daily Close convention is documented without editing locked closes, and the accountant VAT review plus isolated-staging money-path walkthrough now have explicit checklists/evidence records. **Remaining:** accountant confirmation and owner walkthrough/sign-off before the next `dev → main` milestone merge.
 
+### Production Environment Split — cutover queue (added 2026-07-14)
+
+> Source: `plan/project/PROD-CUTOVER-RUNBOOK.md` — demote the current
+> Firebase project `spark-inn-stg-7a7ad` (serving the live site today) to
+> the **staging** database, stand up a Vercel staging environment on the
+> `dev` branch at `stg.sparkinnbohol.com` / `stg-admin.sparkinnbohol.com`,
+> and cut production over to the clean-slate `spark-inn-prod` project.
+> The runbook holds the full step-level checklists, the prod client
+> config, and the secret-handling rules for the service-account key
+> (never committed). PC-01..PC-04 are non-destructive; nothing
+> user-visible changes until the PC-06 env-var flip. One **open
+> decision** blocks PC-05: active/future bookings carry-over (migration
+> script vs. front-desk re-entry) — record in `DECISIONS-FEATURES.md`.
+
+- ⬜ **PC-01 — Repo configuration split** — `.firebaserc` `production` alias (staging stays default), `firebase.json` storage deploy targets instead of the hardcoded staging bucket, scripts confirmed project-parameterized, ENV-SETUP.md environment matrix.
+- 🔄 **PC-02 — Provision `spark-inn-prod`** — project + web app + service-account key done 2026-07-14; remaining: Blaze + budget alert, region match, Auth providers (Email/Password + Google), authorized domains, API-key restriction, rules/indexes/CORS deploy **+ post-deploy verification**, **Firestore backups/PITR** (non-negotiable for the finance ledger).
+- ⬜ **PC-03 — Seed production data** — settings docs + config overlay from staging, **room docs copied verbatim (preserve IDs/`qrToken`s so printed QR codes survive)**, all Storage assets re-uploaded so no doc carries a staging-bucket URL, staff accounts recreated with role claims, clean integrity scan.
+- ⬜ **PC-04 — Vercel environment split** — Production scope → prod Firebase (don't redeploy until PC-06), Preview scope → staging Firebase, `stg.`/`stg-admin.` domains assigned to `dev` branch, staging Auth/Turnstile domain updates, **Resend isolation so staging never emails a real guest**, staging verified end-to-end (doubles as the FLR-05 walkthrough environment).
+- ⬜ **PC-05 — Archive + data carry-over** *(blocked on open decision)* — Full Backup XLSX + `gcloud firestore export` archive, then the chosen carry-over path for active/future bookings.
+- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
+
 ### Contract Compliance — Schedule A review (2026-07-11)
 
 > Source: review of the signed Software Development Agreement + Schedule A
@@ -1235,9 +1256,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Finance Lifecycle Audit (July 12) | 20 | 20 | 0 (all FL-01..FL-20 findings fixed — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
 | Finance Lifecycle Recommendations (July 14) | 5 | 3 | 2 (FLR-01/FLR-02/FLR-04 fixed; FLR-03 deferred, FLR-05 open) |
+| Production Environment Split (July 14) | 6 | 0 | 6 (PC-01..PC-06 open, PC-02 in progress; 1 decision blocks PC-05 — see `PROD-CUTOVER-RUNBOOK.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **388** | **362** | **~126** |
+| **Total** | **394** | **362** | **~132** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 
