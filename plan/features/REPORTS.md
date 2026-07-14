@@ -269,10 +269,10 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 Client-requested feature: one-click full data backup to a single multi-sheet Excel file. Admin-only. Covers all operational data — not filtered by date range.
 
 ### UI
-- [ ] **"Download Full Backup"** button — in Reports page, clearly separated from the filtered chart exports; admin-only (front desk cannot see this button)
-- [ ] Confirmation prompt before export: "This will export all hotel data. This may take a moment." with Cancel / Download buttons
-- [ ] Loading state while all Firestore queries resolve — disable button, show spinner + "Preparing backup..."
-- [ ] On complete: file auto-downloads; show success toast "Backup downloaded successfully"
+- [x] **"Download Full Backup"** button — in Reports page, clearly separated from the filtered chart exports; admin-only (front desk cannot see this button)
+- [x] Confirmation prompt before export: "This will export all hotel data. This may take a moment." with Cancel / Download buttons
+- [x] Loading state while all Firestore queries resolve — disable button, show spinner + "Preparing backup..."
+- [x] On complete: file auto-downloads; show success toast "Backup downloaded successfully"
 
 ### Sheets
 
@@ -442,31 +442,31 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 ---
 
 ### Implementation Notes
-- [ ] Use SheetJS (`xlsx` npm package) — client-side, no API route needed
-- [ ] All 8 Firestore queries run in parallel via `Promise.all()` — do not run sequentially
-- [ ] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId
-- [ ] Filename: `spark-inn-full-backup-{YYYY-MM-DD}.xlsx`
-- [ ] Sheet tab names match the names in the Sheets table above exactly
-- [ ] First row of each sheet is a bold header row
-- [ ] Empty sheets still included with header row — e.g. if no store orders yet, sheet exists with headers only
-- [ ] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
-- [ ] Boolean fields exported as "Yes" / "No" — not TRUE/FALSE
-- [ ] Admin-only: verify role before rendering the button; API is not needed since this is read-only Firestore, but check role client-side
+- [x] Use SheetJS (`xlsx` npm package) — client-side, no API route needed
+- [x] All 8 Firestore queries run in parallel via `Promise.all()` — do not run sequentially
+- [x] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId
+- [x] Filename: `spark-inn-full-backup-{YYYY-MM-DD}.xlsx`
+- [x] Sheet tab names match the names in the Sheets table above exactly
+- [x] First row of each sheet is a bold header row
+- [x] Empty sheets still included with header row — e.g. if no store orders yet, sheet exists with headers only
+- [x] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
+- [x] Boolean fields exported as "Yes" / "No" — not TRUE/FALSE
+- [x] Admin-only: verify role before rendering the button; API is not needed since this is read-only Firestore, but check role client-side
 
 ---
 
 ## Manual QA — Data Backup
 
-- [ ] "Download Full Backup" button only visible to admin role — hidden for front desk
-- [ ] Confirmation prompt appears before download begins
-- [ ] All 8 sheets present in downloaded file with correct tab names
-- [ ] Bookings sheet row count matches total bookings in Bookings Management
-- [ ] Members sheet row count matches total members in Member Management
-- [ ] Payments sheet rows correctly joined to booking refs
-- [ ] Empty sheets still present with header rows (e.g. if no corporate inquiries yet)
-- [ ] Boolean columns show "Yes"/"No" not TRUE/FALSE
-- [ ] Dates readable as strings — not numeric Excel serial values
-- [ ] File opens correctly in Microsoft Excel and LibreOffice Calc
+- [x] "Download Full Backup" button only visible to admin role — hidden for front desk
+- [x] Confirmation prompt appears before download begins
+- [x] All 8 sheets present in downloaded file with correct tab names
+- [x] Bookings sheet row count matches total bookings in Bookings Management
+- [x] Members sheet row count matches total members in Member Management
+- [x] Payments sheet rows correctly joined to booking refs
+- [x] Empty sheets still present with header rows (e.g. if no corporate inquiries yet)
+- [x] Boolean columns show "Yes"/"No" not TRUE/FALSE
+- [x] Dates readable as strings — not numeric Excel serial values
+- [x] File opens correctly in Microsoft Excel and LibreOffice Calc
 
 ---
 
