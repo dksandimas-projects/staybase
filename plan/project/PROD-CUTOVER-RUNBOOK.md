@@ -117,28 +117,25 @@ full admin over production. Staging keeps its existing (separate) key.
 
 ## PC-04 — Vercel environment split
 
-- [ ] **Production scope** (both Vercel projects): the six
+- [x] **Production scope** (both Vercel projects): the six
   `VITE_FIREBASE_*` values above; `FIREBASE_PROJECT_ID` /
   `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` from the prod service
   account key; `VITE_GUEST_APP_URL=https://www.sparkinnbohol.com` (admin
   app). Keep `RESEND_*`, `TURNSTILE_*`, `CRON_SECRET`,
-  `VERCEL_DEPLOY_HOOK_URL` production values here.
-  ⚠️ Do **not** redeploy production after saving these until the PC-06
-  flip step — saved-but-undeployed vars are inert; a redeploy activates
-  them.
-- [ ] **Preview scope**: today's staging Firebase values (client + admin
+  `VERCEL_DEPLOY_HOOK_URL` production values here. *(done 2026-07-14)*
+- [x] **Preview scope**: today's staging Firebase values (client + admin
   SDK), `VITE_GUEST_APP_URL=https://stg.sparkinnbohol.com`, so `dev`
-  deploys and PR previews can never touch production data
-- [ ] Assign `stg.sparkinnbohol.com` → guest project `dev` branch and
+  deploys and PR previews can never touch production data *(done 2026-07-14)*
+- [x] Assign `stg.sparkinnbohol.com` → guest project `dev` branch and
   `stg-admin.sparkinnbohol.com` → admin project `dev` branch (DNS records
-  + Vercel domain-to-branch assignment)
+  + Vercel domain-to-branch assignment) *(done 2026-07-14)*
 - [ ] Staging Firebase (`spark-inn-stg-7a7ad`) Auth authorized domains:
   add `stg.sparkinnbohol.com`, `stg-admin.sparkinnbohol.com`
 - [ ] Turnstile: add `stg.sparkinnbohol.com` to the widget's allowed
   domains (or issue separate staging keys in the Preview scope)
-- [ ] **Email isolation:** Preview-scope `RESEND_FROM_EMAIL` /
+- [x] **Email isolation:** Preview-scope `RESEND_FROM_EMAIL` /
   `ADMIN_NOTIFICATION_EMAIL` point at an internal/staging address so a
-  staging booking can never email a real guest
+  staging booking can never email a real guest *(done 2026-07-14)*
 - [ ] Note: Vercel **cron fires on Production deployments only** — the
   check-in reminder will run against prod only; staging never exercises
   it (expected)
