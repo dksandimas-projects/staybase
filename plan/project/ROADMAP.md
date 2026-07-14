@@ -1179,15 +1179,15 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 > The runbook holds the full step-level checklists, the prod client
 > config, and the secret-handling rules for the service-account key
 > (never committed). PC-01..PC-04 are non-destructive; nothing
-> user-visible changes until the PC-06 env-var flip. One **open
-> decision** blocks PC-05: active/future bookings carry-over (migration
-> script vs. front-desk re-entry) — record in `DECISIONS-FEATURES.md`.
+> user-visible changes until the PC-06 env-var flip. The **open
+> decision** for PC-05 (bookings carry-over vs. clean slate) is resolved
+> (clean slate only; only staff accounts pre-provisioned) — recorded in `DECISIONS-FEATURES.md` (Decision #119).
 
 - ✅ **PC-01 — Repo configuration split** — done 2026-07-14: `.firebaserc` `production` alias + per-project storage targets (staging stays default), `firebase.json` on the `app` target, all four Admin-SDK scripts confirmed env-parameterized with local `.env.spark-inn-{stg,prod}` swap files, ENV-SETUP.md environment matrix + stale var cleanup.
-- 🔄 **PC-02 — Provision `spark-inn-prod`** — rules + 6 indexes + storage rules **deployed and verified matching repo** 2026-07-14 (CLI account needed project access; the adminsdk service account cannot deploy rules); Storage CORS applied; Vercel env vars set in both scopes. Remaining (console): budget alert, Auth providers (Email/Password + Google), authorized domains, API-key restriction, **Firestore backups/PITR** (non-negotiable for the finance ledger).
-- ⬜ **PC-03 — Seed production data** — settings docs + config overlay from staging, **room docs copied verbatim (preserve IDs/`qrToken`s so printed QR codes survive)**, all Storage assets re-uploaded so no doc carries a staging-bucket URL, staff accounts recreated with role claims, clean integrity scan.
+- 🔄 **PC-02 — Provision `spark-inn-prod`** — rules + 6 indexes + storage rules **deployed and verified matching repo** 2026-07-14; Storage CORS applied; Vercel env vars set in both scopes; **region confirmed US-EAST1** and Firestore/Storage enabled. Remaining (console): budget alert, Auth providers (Email/Password + Google), authorized domains, API-key restriction, **Firestore backups/PITR** (non-negotiable for the finance ledger).
+- 🔄 **PC-03 — Seed production data** — settings docs + rooms **copied verbatim from staging** 2026-07-14 (preserving doc IDs and `qrToken`s), **staff accounts recreated**, and **finance integrity scan run on prod with zero findings**. Remaining: re-upload Storage-hosted assets.
 - ⬜ **PC-04 — Vercel environment split** — Production scope → prod Firebase (don't redeploy until PC-06), Preview scope → staging Firebase, `stg.`/`stg-admin.` domains assigned to `dev` branch, staging Auth/Turnstile domain updates, **Resend isolation so staging never emails a real guest**, staging verified end-to-end (doubles as the FLR-05 walkthrough environment).
-- ⬜ **PC-05 — Archive + data carry-over** *(blocked on open decision)* — Full Backup XLSX + `gcloud firestore export` archive, then the chosen carry-over path for active/future bookings.
+- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
 - ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
 
 ### Contract Compliance — Schedule A review (2026-07-11)

@@ -50,14 +50,7 @@ full admin over production. Staging keeps its existing (separate) key.
 
 ## Open decision (blocks PC-05 only)
 
-- ⬜ **Active/future bookings carry-over.** History stays in staging by
-  design, but guests with upcoming or in-house stays must exist in
-  production at flip time. Choose: **(a)** one-off migration script that
-  copies bookings with status `confirmed` / `payment-confirmed` /
-  `checked-in` and `checkOut >= cutover date` (including their
-  `payments`/`charges` subcollections and linked members), tested against
-  staging first; or **(b)** front-desk manual re-entry if the count is
-  small. Record the choice in `DECISIONS-FEATURES.md`.
+- [x] **Active/future bookings carry-over.** Decision: clean slate only. No bookings data is carried over to production. Only active staff accounts are recreated. *(Resolved 2026-07-14 — Decision #119)*
 
 ---
 
@@ -83,11 +76,10 @@ full admin over production. Staging keeps its existing (separate) key.
 - [x] Project created, web app registered *(done 2026-07-14 — config above)*
 - [x] Service account key generated *(done 2026-07-14)*
 - [ ] Blaze plan enabled + **budget alert** configured
-- [ ] Region confirmed to match staging (check `spark-inn-stg-7a7ad`
-  Firestore location before creating the prod database)
+- [x] Region confirmed to match staging (both are `US-EAST1` / South Carolina) *(done 2026-07-14)*
 - [ ] Auth enabled: Email/Password **and Google** provider (console toggle
   — same open item as the staging roadmap entry)
-- [ ] Firestore + Storage enabled
+- [x] Firestore + Storage enabled *(done 2026-07-14)*
 - [ ] Auth **authorized domains**: `www.sparkinnbohol.com`,
   `admin.sparkinnbohol.com`
 - [ ] Browser API key restricted to the production domains (do it from day
@@ -119,11 +111,9 @@ full admin over production. Staging keeps its existing (separate) key.
   room-type photos, SEO/OG image. No Firestore doc may carry a
   `spark-inn-stg-7a7ad.firebasestorage.app` URL — those break the day
   staging is ever cleaned up.
-- [ ] Recreate staff accounts with role claims (`create-admin-user.ts` /
-  `/api/admin/create-staff`) — custom claims don't transfer between
-  projects
-- [ ] Run `scripts/finance-integrity-scan.ts` against prod (expect zero
-  findings on a clean slate)
+- [x] Recreate staff accounts with role claims (copied via migration script) *(done 2026-07-14)*
+- [x] Run `scripts/finance-integrity-scan.ts` against prod (expect zero findings on a clean slate) *(done 2026-07-14 — 0 findings)*
+
 
 ## PC-04 — Vercel environment split
 
@@ -156,19 +146,18 @@ full admin over production. Staging keeps its existing (separate) key.
   database **before** the cutover (this also satisfies the FLR-05
   isolated-staging walkthrough environment requirement)
 
-## PC-05 — Archive + data carry-over *(blocked on the open decision)*
+## PC-05 — Archive + data carry-over
 
 - [ ] Full Backup XLSX export (Reports → Full Backup, admin login)
 - [ ] `gcloud firestore export` of `spark-inn-stg-7a7ad` to a GCS bucket
   (point-in-time archive of the pre-split history)
-- [ ] Execute the chosen carry-over path (migration script tested on
-  staging first, or manual re-entry list prepared by front desk)
-- [ ] Decision + outcome recorded in `DECISIONS-FEATURES.md`
+- [x] Recreate active staff accounts in production Auth/Firestore (using a migration script mapping same UIDs & claims) *(done 2026-07-14)*
+- [x] Decision + outcome recorded in `DECISIONS-FEATURES.md` *(done 2026-07-14 — Decision #119)*
 
 ## PC-06 — Cutover + smoke test
 
 - [ ] Announce a short freeze window (no new bookings taken at the desk)
-- [ ] Run carry-over (PC-05) for anything created since the archive
+- [ ] Verify staff accounts can log in on production (PC-05)
 - [ ] Redeploy both Vercel projects on Production (activates the prod env
   vars saved in PC-04)
 - [ ] `node scripts/preflight.mjs` green
