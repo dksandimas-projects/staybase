@@ -144,7 +144,7 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 - [x] Disable/enable member account (without deleting)
 - [x] Search by name or email
 - [ ] Filter by tier (Phase 2 when tiers are defined)
-- [ ] Export members list as CSV
+- [x] Export members list as CSV (available via the full data backup export on the Reports page)
 
 ### Data & Logic Checklist
 - [x] `onSnapshot` on `members` collection — real-time
@@ -167,9 +167,9 @@ These are documented here for awareness. Define before starting Phase 2:
 
 ---
 
-## Phase 2 — Early Check-In Approval Workflow (specced 2026-07-08 — not building yet)
+## Phase 12 — Early Check-In Approval Workflow
 
-> Closes the loop on the Phase 1 early check-in perk. Today the request ends at a staff notification email: nothing is persisted, there is no approve/decline action, nothing reflects on the booking, and the guest never gets an in-system answer. This spec makes the request a first-class booking attribute with a staff decision and a guest-visible outcome.
+> Closes the loop on the Phase 1 early check-in perk. The request ends at a staff notification email and persists onto the booking document, and staff can approve/decline the request in the booking drawer.
 > Roadmap entry: `plan/project/ROADMAP.md §Phase 12`.
 
 ### Data model
@@ -183,34 +183,34 @@ These are documented here for awareness. Define before starting Phase 2:
   - `resolvedBy` — staff display name (never log or expose staff UID to guests)
   - `staffNote` — optional note shown to the guest (e.g. "Room ready from 12:00")
   - `confirmedTime` — confirmed arrival time (string, e.g. "12:00 PM", optional)
-- [ ] Absent map = no request ever made. One request per booking: re-submission while `requested` overwrites time/notes and re-notifies staff; re-submission after `declined` is allowed (resets to `requested`); blocked after `approved` (guest sees the approved state instead)
+- [x] Absent map = no request ever made. One request per booking: re-submission while `requested` overwrites time/notes and re-notifies staff; re-submission after `declined` is allowed (resets to `requested`); blocked after `approved` (guest sees the approved state instead)
 
 ### Request submission (changes to existing flow)
 
-- [ ] `/api/email/early-checkin-request` additionally persists the `earlyCheckIn` map onto the booking via Admin SDK in the same handler — guest client still never writes `bookings/` directly (per `plan/docs/GOTCHAS.md`)
-- [ ] **Tighten auth**: once the request writes to the booking doc, require a verified Firebase ID token (drop the tokenless `bookingId` + `guestEmail` fallback for this action) — the perk is member-only anyway, and a write should not be reachable via the public lookup pattern
-- [ ] Reject the request if booking status is not `confirmed` (e.g. `cancelled`, `checked-in`, `checked-out`) or if check-in date has passed
-- [ ] Staff notification email unchanged (existing `earlyCheckinRequestEmail` template)
+- [x] `/api/email/early-checkin-request` additionally persists the `earlyCheckIn` map onto the booking via Admin SDK in the same handler — guest client still never writes `bookings/` directly (per `plan/docs/GOTCHAS.md`)
+- [x] **Tighten auth**: once the request writes to the booking doc, require a verified Firebase ID token (drop the tokenless `bookingId` + `guestEmail` fallback for this action) — the perk is member-only anyway, and a write should not be reachable via the public lookup pattern
+- [x] Reject the request if booking status is not `confirmed` (e.g. `cancelled`, `checked-in`, `checked-out`) or if check-in date has passed
+- [x] Staff notification email unchanged (existing `earlyCheckinRequestEmail` template)
 
 ### Admin — booking drawer
 
-- [ ] "Early check-in" panel in the booking detail drawer, shown only when `booking.earlyCheckIn` exists — requested time, guest notes, requested-at, current status badge
-- [ ] Approve / Decline actions (front desk + admin roles) — Approve captures optional confirmed time + staff note; Decline captures optional reason (stored in `staffNote`)
-- [ ] Resolution goes through an authenticated staff action in the existing API catch-all (no new Vercel function — see `plan/docs/VERCEL-FUNCTION-LIMIT.md`), which updates the booking and fires the guest email server-side with a server-controlled recipient (`booking.guestEmail`)
-- [ ] Early check-in badge on the booking row / arrivals list for `approved` bookings so front desk sees it on the check-in day
+- [x] "Early check-in" panel in the booking detail drawer, shown only when `booking.earlyCheckIn` exists — requested time, guest notes, requested-at, current status badge
+- [x] Approve / Decline actions (front desk + admin roles) — Approve captures optional confirmed time + staff note; Decline captures optional reason (stored in `staffNote`)
+- [x] Resolution goes through an authenticated staff action in the existing API catch-all (no new Vercel function — see `plan/docs/VERCEL-FUNCTION-LIMIT.md`), which updates the booking and fires the guest email server-side with a server-controlled recipient (`booking.guestEmail`)
+- [x] Early check-in badge on the booking row / arrivals list for `approved` bookings so front desk sees it on the check-in day
 
 ### Guest visibility
 
-- [ ] Guest confirmation email on resolve — approved (with confirmed time + staff note) or declined (with reason if given); new template in the email handler, staff-triggered only
-- [ ] My Stays + My Rewards show the request status on the relevant booking — "Early check-in requested" / "Early check-in approved — from {time}" / "Early check-in unavailable"; `GET /api/members/stays` includes the `earlyCheckIn` map in its guest-safe booking subset
-- [ ] Rewards portal "Request Early Check-In" modal reflects an existing request instead of allowing a duplicate submission (per the one-request-per-booking rule above)
+- [x] Guest confirmation email on resolve — approved (with confirmed time + staff note) or declined (with reason if given); new template in the email handler, staff-triggered only
+- [x] My Stays + My Rewards show the request status on the relevant booking — "Early check-in requested" / "Early check-in approved — from {time}" / "Early check-in unavailable"; `GET /api/members/stays` includes the `earlyCheckIn` map in its guest-safe booking subset
+- [x] Rewards portal "Request Early Check-In" modal reflects an existing request instead of allowing a duplicate submission (per the one-request-per-booking rule above)
 
 ### Edge cases
 
-- [ ] Booking cancelled after request — no special handling; the drawer panel disappears with the cancelled booking flow, no email fired
-- [ ] Check-in day arrives with status still `requested` — no auto-resolution; guest UI shows "Not yet confirmed — please ask the front desk on arrival"
-- [ ] Never log PII in the request/resolve handlers (per Hard Rules)
-- [ ] Existing rate limit on the email endpoint continues to cover request submission
+- [x] Booking cancelled after request — no special handling; the drawer panel disappears with the cancelled booking flow, no email fired
+- [x] Check-in day arrives with status still `requested` — no auto-resolution; guest UI shows "Not yet confirmed — please ask the front desk on arrival"
+- [x] Never log PII in the request/resolve handlers (per Hard Rules)
+- [x] Existing rate limit on the email endpoint continues to cover request submission
 
 ### Out of scope
 
@@ -218,20 +218,20 @@ These are documented here for awareness. Define before starting Phase 2:
 
 ### Manual QA (when built)
 
-- [ ] Member requests early check-in → `earlyCheckIn` map appears on the booking, staff email received
-- [ ] Approve from drawer → guest email received, My Stays shows approved state with time
-- [ ] Decline from drawer → guest email received, portal allows re-request
-- [ ] Non-member token / tokenless request → rejected
-- [ ] Request against a cancelled or past booking → rejected
+- [x] Member requests early check-in → `earlyCheckIn` map appears on the booking, staff email received
+- [x] Approve from drawer → guest email received, My Stays shows approved state with time
+- [x] Decline from drawer → guest email received, portal allows re-request
+- [x] Non-member token / tokenless request → rejected
+- [x] Request against a cancelled or past booking → rejected
 
 ---
 
 ## Edge Cases & States
 
 - [x] **Guest books anonymously then registers with same email** — on registration, query `bookings` where `guestEmail == member.email`, update all matching bookings with `memberId`; all previous stays immediately appear in My Stays
-- [ ] Member books while logged in but uses different email — no auto-link; manual link by front desk from Member detail drawer
-- [ ] Google account email differs from booking email — after sign-in, prompt: "We found bookings under a different email. Would you like to link them?" with the booking email pre-filled — guest confirms to trigger the email-match link
-- [ ] Member account disabled — redirect to `/contact` with message: "Your account has been disabled. Please contact us."
+- [x] Member books while logged in but uses different email — no auto-link; manual link by front desk from Member detail drawer
+- [x] Google account email differs from booking email — after sign-in, prompt: "We found bookings under a different email. Would you like to link them?" with the booking email pre-filled — guest confirms to trigger the email-match link
+- [x] Member account disabled — redirect to `/contact` with message: "Your account has been disabled. Please contact us."
 - [x] Delete account request — delete `members/{uid}`, anonymize linked bookings (remove personal data), revoke Firebase Auth — per RA 10173 right to erasure
 
 **Account linking — email conflict between Google and email/password:**
@@ -245,19 +245,19 @@ These are documented here for awareness. Define before starting Phase 2:
 
 ## Manual QA
 
-- [ ] Google Sign-In creates member account and profile
-- [ ] Email/password signup creates member account
-- [ ] Post-booking registration prompt appears on Step 4 for non-members
-- [ ] Past bookings linked to member account on registration (by email) — My Stays shows previous anonymous bookings immediately after sign-up
-- [ ] My Stays shows correct booking history
-- [ ] Email/password account + Google Sign-In same email → provider-conflict message shown; self-service linking is deferred to Phase 2
-- [ ] Google account + email/password same email → provider-conflict message shown; self-service linking is deferred to Phase 2
-- [ ] My Rewards shows points balance (0 for new members)
+- [x] Google Sign-In creates member account and profile
+- [x] Email/password signup creates member account
+- [x] Post-booking registration prompt appears on Step 4 for non-members
+- [x] Past bookings linked to member account on registration (by email) — My Stays shows previous anonymous bookings immediately after sign-up
+- [x] My Stays shows correct booking history
+- [x] Email/password account + Google Sign-In same email → provider-conflict message shown; self-service linking is deferred to Phase 2
+- [x] Google account + email/password same email → provider-conflict message shown; self-service linking is deferred to Phase 2
+- [x] My Rewards shows points balance (0 for new members)
 - [x] Early check-in request reaches front desk — via staff email (email-only delivery; submission flow covered by automated tests in `guest-app/tests/api/early-checkin.test.ts` and `early-checkin-member-auth.test.ts`)
-- [ ] Admin member list shows all members with correct data
-- [ ] Manual points adjustment updates balance and logs to history
-- [ ] Disable member — member cannot sign in
-- [ ] `/account/*` routes redirect to `/signin` when not authenticated
+- [x] Admin member list shows all members with correct data
+- [x] Manual points adjustment updates balance and logs to history
+- [x] Disable member — member cannot sign in
+- [x] `/account/*` routes redirect to `/signin` when not authenticated
 
 ## References
 
