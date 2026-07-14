@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
 import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
@@ -464,6 +464,8 @@ export function BookingsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const paymentSubmissionIdRef = useRef<string | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundMethod, setRefundMethod] = useState("cash");
   const [refundReason, setRefundReason] = useState("");
@@ -1538,15 +1540,20 @@ export function BookingsPage() {
               ? "PWD Discount"
               : "Discount";
           const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-          const discountAmount = Math.max(
-            0,
-            Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
-          );
+          const discountAmount = Math.max(0, Math.round(storedDiscountBase * (b.discountPct / 100)));
           drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
         }
 
         if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
           drawAmountRow(`Voucher (${b.voucherCode})`, `-${formatAmount(b.voucherDiscount)}`, { muted: true });
+        }
+
+        if (b.memberDiscountPct && b.memberDiscountPct > 0) {
+          const discountBase = b.originalTotalPrice ?? subtotal;
+          const seniorPwdAmount = b.discountPct ? Math.round(discountBase * (b.discountPct / 100)) : 0;
+          const memberBase = Math.max(discountBase - seniorPwdAmount - (b.voucherDiscount || 0), 0);
+          const memberDiscountAmount = Math.max(0, Math.round(memberBase * (b.memberDiscountPct / 100)));
+          drawAmountRow(`Member Discount (${b.memberDiscountPct}%)`, `-${formatAmount(memberDiscountAmount)}`, { muted: true });
         }
 
         if (b.pointsRedeemed && b.pointsRedeemed > 0) {
@@ -1909,9 +1916,15 @@ export function BookingsPage() {
     e.preventDefault();
     if (selectedBooking && paymentAmount) {
       const amount = parseFloat(paymentAmount);
+      const paymentId = paymentSubmissionIdRef.current
+        || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+      paymentSubmissionIdRef.current = paymentId;
+      setIsRecordingPayment(true);
+      let paymentCompleted = false;
       try {
-        const result = await addOnsitePayment(selectedBooking.id, amount, paymentMethod, paymentNote);
+        const result = await addOnsitePayment(selectedBooking.id, paymentId, amount, paymentMethod, paymentNote);
         if (result.success) {
+          paymentCompleted = true;
           setPaymentAmount("");
           setPaymentNote("");
           toast.success("Payment recorded", `${formatPrice(amount)} via ${getOnsitePaymentMethodLabel(paymentMethod)}`);
@@ -1920,6 +1933,12 @@ export function BookingsPage() {
         }
       } catch (err: any) {
         toast.error("Failed to record payment", err.message);
+      } finally {
+        // Keep the same ID after an uncertain/network failure. A manual
+        // retry then replays the original server commit instead of creating
+        // a second ledger entry. Successful submissions mint a fresh ID.
+        if (paymentCompleted) paymentSubmissionIdRef.current = null;
+        setIsRecordingPayment(false);
       }
     }
   };
@@ -1956,8 +1975,8 @@ export function BookingsPage() {
     e.preventDefault();
     if (!selectedBooking) return;
     const amount = Number(chargeAmount);
-    if (!chargeLabel.trim() || !Number.isFinite(amount) || amount <= 0) {
-      toast.warning("Check charge details", "Enter a label and an amount greater than zero.");
+    if (!chargeLabel.trim() || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+      toast.warning("Check charge details", "Enter a label and an amount between 0.01 and 1,000,000.");
       return;
     }
     setIsSavingCharge(true);
@@ -3101,9 +3120,10 @@ export function BookingsPage() {
                   
                     <button
                       type="submit"
-                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                      disabled={isRecordingPayment}
+                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark disabled:opacity-60"
                     >
-                      Log Payment
+                      {isRecordingPayment ? "Recording..." : "Record payment"}
                     </button>
                   </div>
                 </form>
@@ -3423,7 +3443,7 @@ export function BookingsPage() {
                       </label>
                       <label className="block text-[10px] font-semibold text-gray-600">
                         Amount ({config.currencySymbol})
-                        <input required type="number" min="0.01" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
+                        <input required type="number" min="0.01" max="1000000" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
                       </label>
                       <label className="block text-[10px] font-semibold text-gray-600">
                         Note (optional)

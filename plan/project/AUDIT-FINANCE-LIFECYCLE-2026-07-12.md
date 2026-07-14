@@ -30,8 +30,8 @@
 | **SEV-1 (critical)** | 0 | 2 | **2** |
 | **SEV-2 (major)** | 0 | 5 | **5** |
 | **SEV-3 (minor)** | 0 | 8 | **8** |
-| **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **5** | **15** | **20** |
+| **SEV-4 (nit / polish)** | 0 | 5 | **5** |
+| **Total** | **0** | **20** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -60,7 +60,10 @@ windows plus stay-overlap calculations onto hotel-timezone calendar days
 The owner-policy batch closed the remaining SEV-3 items: early departures
 retain the contracted total with a transparent adjustment, while loyalty
 earnings are locked at checkout and credited only after the full folio is
-settled (FL-10, FL-11). All SEV-1 through SEV-3 findings are now closed.
+settled (FL-10, FL-11). The final polish batch standardized pre-discount
+pricing, enforced charge reversal/cap invariants in Firestore rules, made
+onsite payments idempotent, and separated government/member discounts on
+legacy receipt fallbacks (FL-16..FL-20). All findings are now closed.
 
 ### What's already solid
 
@@ -105,7 +108,7 @@ settled (FL-10, FL-11). All SEV-1 through SEV-3 findings are now closed.
 7. ✅ **FL-10 + FL-11** — policy batch shipped: retained-total early
    departure breakdowns plus settled-folio loyalty awards and unpaid-checkout
    audit stamps. Decisions recorded as #117 and #118.
-8. **FL-16..FL-20** — SEV-4 polish batch.
+8. ✅ **FL-16..FL-20** — SEV-4 polish batch shipped 2026-07-14.
 
 ---
 
@@ -552,7 +555,7 @@ calendar shifting.
 
 ## SEV-4 — Nit / Polish
 
-### FL-16 — `originalTotalPrice` semantics are inconsistent across writers · `Open`
+### FL-16 — `originalTotalPrice` semantics are inconsistent across writers · `Fixed 2026-07-14`
 
 **Where:** `bookings.ts:927` (online: `null` unless discount), `:1470` (walk-in: always set), `:1647` (apply-discount: overwritten)
 
@@ -563,7 +566,12 @@ is fragile — FL-03 is the first bug this ambiguity produced.
 **Fix:** document one convention in `TYPES.md` (recommend: always set at
 create = pre-discount subtotal) and backfill on write paths.
 
-### FL-17 — Rules allow duplicate void reversals for one charge · `Open`
+**Remediation:** online creation and rescheduling now always persist the
+calculated pre-discount room/add-on subtotal; walk-ins persist the standard
+or staff-agreed manual pricing basis. Discount application preserves that
+same convention, and the nullable type is documented as legacy-only.
+
+### FL-17 — Rules allow duplicate void reversals for one charge · `Fixed 2026-07-14`
 
 **Where:** `firebase/firestore.rules:54-77`
 
@@ -575,7 +583,11 @@ charge. The client is safe (deterministic `void-{id}` doc id,
 **Fix:** require the reversal doc id to equal `void-` + `voidOf` in the
 rules so create-once semantics hold at the enforcement layer.
 
-### FL-18 — Incidental charges have no upper bound · `Open`
+**Remediation:** the charge create rule now requires negative reversals to
+use `void-{voidOf}`. Because charge documents are create-only, a second void
+for the same original charge is rejected at the enforcement layer.
+
+### FL-18 — Incidental charges have no upper bound · `Fixed 2026-07-14`
 
 **Where:** `firebase/firestore.rules:61-62` (`amount != 0` only), `BookingsPage.tsx:1938-1942`
 
@@ -584,7 +596,11 @@ charge is accepted and skews receivables/billed totals.
 
 **Fix:** mirror the 1M cap in the rules (`amount <= 1000000`) and the form.
 
-### FL-19 — `add-payment` has no idempotency key · `Open`
+**Remediation:** Firestore rules cap both positive charges and negative
+reversals at an absolute 1,000,000; the admin form applies the same maximum
+in HTML validation and submit-time validation.
+
+### FL-19 — `add-payment` has no idempotency key · `Fixed 2026-07-14`
 
 **Where:** `guest-app/server/handlers/bookings.ts:1925-2055`
 
@@ -596,7 +612,12 @@ state mitigates but doesn't prevent network-level retries.
 `PREALLOCATED_BOOKING_ID_REGEX` pattern) and `create()` instead of
 `set()` on a fresh doc.
 
-### FL-20 — Receipt fallback folds the member discount into the Senior/PWD line · `Open`
+**Remediation:** the admin client preallocates one Firestore payment ID per
+submission and sends it with the request. The transaction creates that exact
+document; matching retries return the existing outcome without another
+ledger entry, while reuse for different payment details returns a conflict.
+
+### FL-20 — Receipt fallback folds the member discount into the Senior/PWD line · `Fixed 2026-07-14`
 
 **Where:** `admin-app/src/pages/BookingsPage.tsx:1537-1541`
 
@@ -607,6 +628,10 @@ attribution on a document a guest may use for RA 9994/10754 purposes.
 
 **Fix:** compute the Senior/PWD amount as `round(base × discountPct/100)`
 and let any residual show as a separate "Member discount" line.
+
+**Remediation:** the legacy receipt fallback now calculates the government
+discount directly from its statutory percentage and renders the member
+discount as a separate deduction using the canonical stacking base.
 
 ---
 

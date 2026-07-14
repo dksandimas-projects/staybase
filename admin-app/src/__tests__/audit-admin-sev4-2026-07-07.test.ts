@@ -52,7 +52,8 @@ describe("Admin audit SEV-4 fixes — 2026-07-07", () => {
     expect(bookingsPage).toMatch(/pdf\.setFont\("helvetica", "normal"\)/);
     expect(bookingsPage).not.toMatch(/addFileToVFS\("APOLLO\.otf"/);
     expect(bookingsPage).not.toMatch(/Inter-Regular\.ttf/);
-    expect(bookingsPage).toMatch(/storedDiscountBase - b\.totalPrice - \(b\.voucherDiscount \|\| 0\) - \(b\.pointsRedeemedValue \|\| 0\)/);
+    expect(bookingsPage).toMatch(/storedDiscountBase \* \(b\.discountPct \/ 100\)/);
+    expect(bookingsPage).toMatch(/Member Discount \(\$\{b\.memberDiscountPct\}%\)/);
     expect(bookingsPage).not.toMatch(/subtotal \* \(b\.discountPct \/ 100\)/);
   });
 

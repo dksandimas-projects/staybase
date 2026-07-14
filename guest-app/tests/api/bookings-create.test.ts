@@ -702,6 +702,7 @@ describe("/api/bookings/create", () => {
       expect(["room_101", "room_102"]).toContain(created.roomId);
       expect(created.roomType).toBe("standard-double");
       expect(created.roomNumber).toBeTruthy();
+      expect(created.originalTotalPrice).toBe(created.totalPrice);
     });
 
     test("skips a candidate room with an overlapping booking and assigns the next free one of the same type", async () => {
@@ -1124,7 +1125,7 @@ describe("/api/bookings/create", () => {
       const createdWalkin = setCalls.find(call => call.path === "bookings/walkin12345")?.data;
       expect(createdWalkin).toBeDefined();
       expect(createdWalkin.totalPrice).toBe(5000);
-      expect(createdWalkin.originalTotalPrice).toBe(6000); // standard: 2000 per night * 3 nights = 6000
+      expect(createdWalkin.originalTotalPrice).toBe(5000); // staff-agreed manual override is the pre-discount pricing basis
       expect(createdWalkin.source).toBe("walk-in");
     });
 
@@ -1207,6 +1208,7 @@ describe("/api/bookings/create", () => {
 
       const paymentBody = {
         bookingId: "booking_to_pay",
+        paymentId: "paymentRequest001",
         amount: 2500,
         method: "cash",
         note: "Folio deposit"
