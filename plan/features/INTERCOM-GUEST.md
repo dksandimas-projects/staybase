@@ -13,12 +13,12 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 
@@ -32,7 +32,7 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 - [x] Quick request chip tap — sends a styled badge message in the thread (visually distinct from typed messages)
 - [x] Text input + Send button — guests can type freely alongside or instead of quick requests
 - [x] Message timestamps
-- [ ] Unread indicator — subtle pulse when new front desk message arrives while the guest is not viewing the Chat tab (Phase 10 polish; not launch-blocking for Phase 8 because visible replies auto-scroll and mark read immediately)
+- [x] Unread indicator — red dot with count on the Chat tab when front desk messages arrive while the guest is on the Shop tab; messages marked read only when the guest switches back to Chat (shipped in Phase 10 polish)
 - [x] Mobile-first layout — full-screen chat on mobile (375px)
 - [x] "spark inn" branding in chat header — warm, not clinical
 - [x] "Shop" tab alongside chat — tab label is `config.storeName`; switches to store panel (see `plan/features/STORE-GUEST.md`)
@@ -107,8 +107,8 @@ calls/{roomId}/iceCandidates/{id}
 - [x] No quick request items configured — hide quick request panel entirely, show text input only
 - [x] Front desk offline / no response — no typing indicator, no "online" status shown — keep it calm
 - [x] Network disconnected — show "You're offline. Reconnecting..." banner
-- [ ] Long message thread — virtualize or paginate after launch if real usage produces large room threads (Phase 10 polish; current launch scope keeps the full active stay thread in one real-time list)
-- [ ] Guest refreshes page — name prompt shown again (local state only)
+- [x] Long message thread — paginated: initial load limited to 50 messages, "Load earlier messages" button fetches 30 more per tap (shipped in Phase 10 polish)
+- [x] Guest refreshes page — guest verification is cached in `localStorage` (`intercomVerified:{roomNumber}`), so a verified guest skips the name prompt on refresh; the prompt reappears only when the cache is missing or invalid
 
 ## Manual QA
 

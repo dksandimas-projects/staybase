@@ -15,12 +15,12 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 

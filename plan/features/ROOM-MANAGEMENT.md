@@ -13,63 +13,61 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Drawers save without full page reload — optimistic update, toast on success
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Destructive actions have a single confirmation step — not buried in menus
-- [ ] Empty states explain why data is missing and what to do
+- [x] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [x] Loading state uses skeleton, not spinner
+- [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Destructive actions have a single confirmation step — not buried in menus
+- [x] Empty states explain why data is missing and what to do
 
 ---
 
 ## UI Checklist
 
-- [ ] **Add Room** button — full-width orange on mobile (below the subtitle), inline right-aligned on tablet+. Opens a Modal with the create form.
-- [ ] Room list — card grid of all rooms with name, type, status badge, housekeeping badge, active/inactive toggle, and an "active bookings" count
-- [ ] Edit room — click/tap opens edit drawer
-- [ ] **Create room form** — Modal with fields: display name, room number, type (dropdown), initial status, initial housekeeping status, internal remarks, visible-on-guest-site checkbox. Public room fields write to `rooms/{roomId}`; internal remarks write to staff-only `roomPrivate/{roomId}`. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type. Per W3.7, `bedDefinition`, `description`, and `amenities` also live on the room type. All of these are managed in **Settings → Room Types** and inherited automatically. A short pointer in the create modal points staff to that section. Photos are added later via the type's Photos modal.
-- [ ] Room edit form fields: name, type (dropdown), status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). Public fields update `rooms/{roomId}`; staff-only `remarks` and `blockReason` update `roomPrivate/{roomId}`. Bed description, full description, amenities, `maxCapacity`, and the rate matrix all live on the room type and are edited in **Settings → Room Types** (W3.6 + W3.7). The drawer shows the inherited bed description and amenities in a read-only "Bed Setup (inherited from type)" block, sourced from the joined `roomTypes` entry.
-- [ ] Block reason selector — shown only when status = Blocked: Maintenance / Hold / Other
-- [ ] Active/inactive toggle — inactive = hidden from guest site
-- [ ] Save button — explicit save, not auto-save
-- [ ] Housekeeping status shown per room (read-only here — toggled from dashboard)
-- [ ] **Photo management** — **not** on this screen. Per `plan/features/SETTINGS.md §Room Type Photos`, all rooms of a type share the same gallery managed in Settings → Room Types. The create modal links to that section.
-- [ ] **Delete Room** — destructive action in the edit drawer footer (red outlined button). Disabled when active bookings > 0. Opens a confirmation Modal with a required reason field and clear "cannot be undone" copy.
-- [ ] **Delete blocked** state — when the room has active bookings, the confirmation Modal swaps to an informational ConfirmForm that explains how many bookings need to be resolved first.
+- [x] **Add Room** button — full-width orange on mobile (below the subtitle), inline right-aligned on tablet+. Opens a Modal with the create form.
+- [x] Room list — card grid of all rooms with name, type, status badge, housekeeping badge, active/inactive toggle, and an "active bookings" count
+- [x] Edit room — click/tap opens edit drawer
+- [x] **Create room form** — Modal with fields: display name, room number, type (dropdown), initial status, initial housekeeping status, internal remarks, visible-on-guest-site checkbox. Public room fields write to `rooms/{roomId}`; internal remarks write to staff-only `roomPrivate/{roomId}`. Per W3.6, `maxCapacity` and the rate matrix (`pricePerNight` / `weekendRate` / `corporateRate`) live on the room type. Per W3.7, `bedDefinition`, `description`, and `amenities` also live on the room type. All of these are managed in **Settings → Room Types** and inherited automatically. A short pointer in the create modal points staff to that section. Photos are added later via the type's Photos modal.
+- [x] Room edit form fields: name, type (dropdown), status (Available/Occupied/Blocked), block reason (if Blocked), remarks (internal notes). Public fields update `rooms/{roomId}`; staff-only `remarks` and `blockReason` update `roomPrivate/{roomId}`. Bed description, full description, amenities, `maxCapacity`, and the rate matrix all live on the room type and are edited in **Settings → Room Types** (W3.6 + W3.7). The drawer shows the inherited bed description and amenities in a read-only "Bed Setup (inherited from type)" block, sourced from the joined `roomTypes` entry.
+- [x] Block reason selector — shown only when status = Blocked: Maintenance / Hold / Other
+- [x] Active/inactive toggle — inactive = hidden from guest site
+- [x] Save button — explicit save, not auto-save
+- [x] Housekeeping status shown per room (read-only here — toggled from dashboard)
+- [x] **Photo management** — **not** on this screen. Per `plan/features/SETTINGS.md §Room Type Photos`, all rooms of a type share the same gallery managed in Settings → Room Types. The create modal links to that section.
+- [x] **Delete Room** — destructive action in the edit drawer footer (red outlined button). Disabled when active bookings > 0. Opens a confirmation Modal with a required reason field and clear "cannot be undone" copy.
+- [x] **Delete blocked** state — when the room has active bookings, the confirmation Modal swaps to an informational ConfirmForm that explains how many bookings need to be resolved first.
 
 ## Data & Logic Checklist
 
-- [ ] `onSnapshot` on `rooms` collection — all rooms real-time
-- [ ] **Create room**: `addDoc(collection(db, "rooms"), { ... })` with `serverTimestamp()` for `createdAt`/`updatedAt`. Reject if `roomNumber` already exists (case-insensitive trim compare). Form validation via `CreateRoomSchema` (Zod) in `@spark-inn/shared/schemas/room`.
-- [ ] Room edit: `updateDoc` on `rooms/{roomId}` for public fields + `updatedAt`; `setDoc(..., { merge: true })` on `roomPrivate/{roomId}` for staff-only `remarks` / `blockReason`
-- [ ] Photo upload: `uploadBytes` to Firebase Storage at `rooms/{roomId}/{filename}`, then `getDownloadURL`, then `updateDoc` to append URL to `imageUrls[]`
-- [ ] Photo delete: remove URL from `imageUrls[]` via `updateDoc`, optionally delete from Storage
-- [ ] Active toggle: `updateDoc` sets `isActive: true/false`
-- [ ] Status change to Blocked: require `blockReason` — do not allow save without it
-- [ ] **Block a room for a date range**: write `blockedFrom: Timestamp`, `blockedTo: Timestamp` to the public room doc and `blockReason: string` to staff-only `roomPrivate/{roomId}` *(updates `DECISIONS-FEATURES.md #78` for GA-06)*. The booking creation transaction iterates the room's active block ranges and rejects any booking whose dates overlap. The previous lossy approach (string-encoding the date range into `blockReason`) is replaced.
-- [ ] **Delete room (admin-only)**: hard delete `rooms/{roomId}` plus cascade cleanup of:
+- [x] `onSnapshot` on `rooms` collection — all rooms real-time
+- [x] **Create room**: `addDoc(collection(db, "rooms"), { ... })` with `serverTimestamp()` for `createdAt`/`updatedAt`. Reject if `roomNumber` already exists (case-insensitive trim compare). Form validation via `CreateRoomSchema` (Zod) in `@spark-inn/shared/schemas/room`.
+- [x] Room edit: `updateDoc` on `rooms/{roomId}` for public fields + `updatedAt`; `setDoc(..., { merge: true })` on `roomPrivate/{roomId}` for staff-only `remarks` / `blockReason`
+- [x] ~~Per-room photo upload/delete~~ — superseded by `plan/features/SETTINGS.md §Room Type Photos`: photos live on the room TYPE (`roomTypes[].imageUrls[]`) and are managed from Settings → Room Types; this page only links there
+- [x] Active toggle: `updateDoc` sets `isActive: true/false`
+- [x] Status change to Blocked: require `blockReason` — do not allow save without it
+- [x] **Block a room for a date range**: write `blockedFrom: Timestamp`, `blockedTo: Timestamp` to the public room doc and `blockReason: string` to staff-only `roomPrivate/{roomId}` *(updates `DECISIONS-FEATURES.md #78` for GA-06)*. The booking creation transaction iterates the room's active block ranges and rejects any booking whose dates overlap. The previous lossy approach (string-encoding the date range into `blockReason`) is replaced.
+- [x] **Delete room (admin-only)**: hard delete `rooms/{roomId}` plus cascade cleanup of:
   - `roomPrivate/{roomId}` staff-only notes (best-effort)
   - `rooms/{roomId}/*` photos in Storage (best-effort, `listAll` + `deleteObject` each)
   - `intercoms/{roomNumber}` thread document
   - `intercoms/{roomNumber}/messages/*` subcollection (via `getDocs` + `deleteDoc` each)
   - `calls/{roomNumber}` document
   - `calls/{roomNumber}/iceCandidates/*` subcollection
-- [ ] **Active-booking guard**: a room with any booking in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, or `checked-in` status cannot be deleted. The UI surfaces the count and the user must cancel or check out the bookings first.
-- [ ] **Firestore security**: room delete is admin-only (`allow delete: if isAdmin()`). Front-desk and admin can still create, update, and toggle public rooms. `roomPrivate/{roomId}` is staff-read/write and admin-delete only; guests never receive internal `remarks` or `blockReason`.
-- [ ] **Historical booking integrity**: bookings keep their denormalized `roomNumber` / `roomType` after a room is deleted. The `roomId` pointer becomes orphaned but the human-readable fields survive for receipts and audit logs.
+- [x] **Active-booking guard**: a room with any booking in `pending`, `payment-uploaded`, `payment-confirmed`, `confirmed`, or `checked-in` status cannot be deleted. The UI surfaces the count and the user must cancel or check out the bookings first.
+- [x] **Firestore security**: room delete is admin-only (`allow delete: if isAdmin()`). Front-desk and admin can still create, update, and toggle public rooms. `roomPrivate/{roomId}` is staff-read/write and admin-delete only; guests never receive internal `remarks` or `blockReason`.
+- [x] **Historical booking integrity**: bookings keep their denormalized `roomNumber` / `roomType` after a room is deleted. The `roomId` pointer becomes orphaned but the human-readable fields survive for receipts and audit logs.
 
 ## Edge Cases & States
 
-- [ ] Loading state — skeleton for room list
-- [ ] Photo upload failure — show error per image, allow retry
-- [ ] Unsaved changes — warn staff before navigating away ("You have unsaved changes")
-- [ ] Room with active bookings being blocked — allow block but note active bookings may be affected (do not auto-cancel)
-- [ ] Image reorder: optimistic UI update, sync to Firestore on save
-- [ ] Max photos per room: set a reasonable limit (e.g. 10) — enforce in upload UI
-- [ ] **Create room — duplicate room number** — show inline error on the room-number field; do not write to Firestore.
-- [ ] **Create room — invalid Zod payload** — surface per-field error messages, focus the first invalid field.
-- [ ] **Delete — partial cascade failure** — Storage or subcollection cleanup errors are logged and surfaced via a warning toast, but the room document is still removed (the live record is the source of truth).
-- [ ] **Delete — concurrent booking** — if a booking flips to an active status between the guard check and the `deleteDoc`, the next listener snapshot reveals the orphan. A future enhancement may add a transaction-based check; not required for Phase 11.8.
+- [x] Loading state — skeleton for room list
+- [x] Photo upload failure — handled in the Settings → Room Types gallery (photos moved off this screen per §Room Type Photos)
+- [ ] Unsaved changes — warn staff before navigating away ("You have unsaved changes") — NOT implemented; edit drawer relies on explicit Save
+- [x] Room with active bookings being blocked — allow block but note active bookings may be affected (do not auto-cancel)
+- [x] ~~Image reorder / max photos per room~~ — superseded: gallery lives in Settings → Room Types (see `plan/features/SETTINGS.md §Room Type Photos`)
+- [x] **Create room — duplicate room number** — show inline error on the room-number field; do not write to Firestore.
+- [x] **Create room — invalid Zod payload** — surface per-field error messages, focus the first invalid field.
+- [x] **Delete — partial cascade failure** — Storage or subcollection cleanup errors are logged and surfaced via a warning toast, but the room document is still removed (the live record is the source of truth).
+- [x] **Delete — concurrent booking** — if a booking flips to an active status between the guard check and the `deleteDoc`, the next listener snapshot reveals the orphan. A future enhancement may add a transaction-based check; not required for Phase 11.8.
 
 ## Manual QA
 

@@ -13,63 +13,63 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 
 ## Step 1 — Select Dates & Room
 
 ### UI Checklist
-- [ ] Check-in / check-out date pickers — blocks past dates, min 1 night enforced
-- [ ] Guest count input — validated against the chosen room type's `maxCapacity`
-- [ ] **Available room types grid** — one card per room type defined in `settings/hotelConfig.roomTypes[]` (falling back to `DEFAULT_ROOM_TYPES`). Cards are grouped by type, not per physical room — see "Room type booking" below.
-- [ ] Each type card shows "X of Y available for your dates" so guests see live capacity without exposing specific room numbers
-- [ ] Each type card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
-  - [ ] **Room Only** — standard rate per night
-  - [ ] **Room + Breakfast** — combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` per night
-- [ ] Breakfast rate shown as combined nightly total — not broken out separately on the card
-- [ ] If breakfast is disabled (`breakfastConfig.isEnabled: false`) — Room Only shown, no breakfast option
-- [ ] Rate per night + computed total displayed on each card
+- [x] Check-in / check-out date pickers — blocks past dates, min 1 night enforced
+- [x] Guest count input — validated against the chosen room type's `maxCapacity`
+- [x] **Available room types grid** — one card per room type defined in `settings/hotelConfig.roomTypes[]` (falling back to `DEFAULT_ROOM_TYPES`). Cards are grouped by type, not per physical room — see "Room type booking" below.
+- [x] Each type card shows "X of Y available for your dates" so guests see live capacity without exposing specific room numbers
+- [x] Each type card shows two options (if breakfast is enabled in `settings/breakfastConfig`):
+  - [x] **Room Only** — standard rate per night
+  - [x] **Room + Breakfast** — combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` per night
+- [x] Breakfast rate shown as combined nightly total — not broken out separately on the card
+- [x] If breakfast is disabled (`breakfastConfig.isEnabled: false`) — Room Only shown, no breakfast option
+- [x] Rate per night + computed total displayed on each card
 - [x] If selected dates include mixed pricing, show a compact total breakdown so guests can see which nights used regular, weekend, or holiday/seasonal rates before they continue.
-- [ ] Pre-populated if navigating from Homepage checker or Rooms page CTA
-- [ ] Step indicator showing current step (1 of 4)
-- [ ] "No room types available for these dates" empty state with "try fewer guests or different dates" nudge
+- [x] Pre-populated if navigating from Homepage checker or Rooms page CTA
+- [x] Step indicator showing current step (1 of 4)
+- [x] "No room types available for these dates" empty state with "try fewer guests or different dates" nudge
 
 ### Data & Logic Checklist
-- [ ] **Room type booking** — per the `feature/booking-by-room-type` refactor: the client posts `roomType` (not `roomId`). The server's transaction reads the type entry from `settings/hotelConfig.roomTypes[]`, queries all active physical rooms of that type, and auto-assigns the first non-conflicting one. `Booking.roomId` is still a real `rooms/{id}` reference; the assigned room is server-derived and surfaced to the client via the `/api/bookings/create` response payload.
-- [ ] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings. Per W4.7: client calls `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` (rate-limited, 30/IP/min) which returns PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`). Client joins with the type catalog to compute "X of Y available" per type. The actual double-booking safety is the Firestore transaction in `/api/bookings/create` — see `plan/features/AVAILABILITY-LOCKING.md`.
-- [ ] Weekend rate applied automatically when stay includes Saturday or Sunday nights
+- [x] **Room type booking** — per the `feature/booking-by-room-type` refactor: the client posts `roomType` (not `roomId`). The server's transaction reads the type entry from `settings/hotelConfig.roomTypes[]`, queries all active physical rooms of that type, and auto-assigns the first non-conflicting one. `Booking.roomId` is still a real `rooms/{id}` reference; the assigned room is server-derived and surfaced to the client via the `/api/bookings/create` response payload.
+- [x] Query available rooms for selected date range — exclude rooms with overlapping confirmed/checked-in bookings. Per W4.7: client calls `GET /api/rooms/availability?checkIn=YYYY-MM-DD&checkOut=YYYY-MM-DD` (rate-limited, 30/IP/min) which returns PII-stripped booked date ranges (`{ roomId, checkIn, checkOut, status }`). Client joins with the type catalog to compute "X of Y available" per type. The actual double-booking safety is the Firestore transaction in `/api/bookings/create` — see `plan/features/AVAILABILITY-LOCKING.md`.
+- [x] Weekend rate applied automatically when stay includes Saturday or Sunday nights
 - [x] Holiday/seasonal rate overrides applied per night before weekend/base rates, using the shared seasonal-aware pricing utility.
 - [x] Price breakdown model derived from the same nightly-rate calculation as the booking total; never maintain a separate client-only formula.
-- [ ] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
-- [ ] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
-- [ ] Selected room type, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
-- [ ] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
+- [x] Fetch `settings/breakfastConfig` on load — show breakfast option only if `isEnabled: true`
+- [x] Breakfast combined rate: `pricePerNight + (breakfastRatePerPerson × numGuests)` — recompute when guest count changes
+- [x] Selected room type, dates, guest count, and breakfast choice (`hasBreakfast: boolean`) persisted in booking context/state
+- [x] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
 
 ---
 
 ## Step 2 — Guest Details
 
 ### UI Checklist
-- [ ] First name, last name (required)
-- [ ] Email (required, validated)
-- [ ] Phone number (required)
-- [ ] Number of guests (required, max = room capacity)
-- [ ] Special requests (optional, textarea)
-- [ ] Corporate fields (shown only on `/corporate/book` flow): company name (required), designation, company address, number of rooms, purpose of stay, preferred billing arrangement
-- [ ] Privacy and terms consent checkbox — "I agree to the [Privacy Policy] and [Terms of Service] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` and `/terms` in new tabs
-- [ ] Back button to Step 1, Next button to Step 3
-- [ ] Inline Zod validation — errors shown per field on blur
-- [ ] Next button disabled until consent checkbox is checked
+- [x] First name, last name (required)
+- [x] Email (required, validated)
+- [x] Phone number (required)
+- [x] Number of guests (required, max = room capacity)
+- [x] Special requests (optional, textarea)
+- [x] Corporate fields (shown only on `/corporate/book` flow): company name (required), designation, company address, number of rooms, purpose of stay, preferred billing arrangement
+- [x] Privacy and terms consent checkbox — "I agree to the [Privacy Policy] and [Terms of Service] and consent to the collection of my personal data for booking purposes." — required, links to `/privacy` and `/terms` in new tabs
+- [x] Back button to Step 1, Next button to Step 3
+- [x] Inline Zod validation — errors shown per field on blur
+- [x] Next button disabled until consent checkbox is checked
 
 ### Data & Logic Checklist
-- [ ] Validate all required fields before allowing Step 3
-- [ ] Guest details persisted in booking context/state
+- [x] Validate all required fields before allowing Step 3
+- [x] Guest details persisted in booking context/state
 
 ---
 
@@ -85,81 +85,81 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
   - [x] Shows breakfast as a separate line when selected: guests × nights × breakfast rate.
   - [x] Shows discount/voucher/member/points deductions as separate negative lines after the subtotal.
   - [x] Shows final total with the same value that will be submitted to `/api/bookings/create`.
-- [ ] Discount selector — Senior Citizen (20%) / PWD (20%) / None
-- [ ] Discount ID upload — shown immediately when Senior Citizen or PWD is selected; hidden when None
-  - [ ] Label: "Upload your OSCA Card" (Senior) or "Upload your PWD ID" (PWD)
-  - [ ] Helper text: "A photo or scan of your valid ID. Our team will verify before confirming your discount."
-  - [ ] Accepts jpg/png/webp, max 5MB
-  - [ ] Required if a discount is selected — Confirm button disabled until uploaded
-  - [ ] Thumbnail preview shown after upload
-  - [ ] If guest switches back to "None" — upload cleared and field hidden
-- [ ] Voucher code input — text field + Apply button
-- [ ] Voucher feedback — valid (show discount), expired, usage limit reached, invalid code, room type mismatch
-- [ ] Updated total after discount/voucher applied
-- [ ] Payment method selector — Pay at Hotel / GCash / PayPal / other enabled methods (from `settings/hotelConfig`)
-- [ ] Payment screenshot upload — shown only for non-pay-at-hotel methods
-- [ ] Screenshot upload: accepts image files only, max 5MB
-- [ ] **Reference number field** (owner request 2026-07-09) — shown alongside the screenshot upload only when the selected payment method's `requireReferenceNumber` is `true` (default; see `plan/features/SETTINGS.md §2 Payment Methods`). Required text field when shown; Confirm button follows the same "disabled until required fields complete" pattern as the discount ID upload above. Hidden entirely for methods with `requireReferenceNumber: false` (e.g. an admin who wants Pay at Hotel/COD-style methods to skip it).
-- [ ] Payment method QR code or account info displayed based on selection
-- [ ] Cancellation policy — collapsible section showing `settings/websiteContent.cancellationPolicy`
-- [ ] Terms & conditions checkbox (required)
-- [ ] Cloudflare Turnstile widget — invisible, renders before Confirm button
-- [ ] Honeypot field — hidden from users via CSS (`position: absolute; opacity: 0; pointer-events: none`), never `display: none`
-- [ ] Confirm Booking button (Spark Orange) — disabled until terms checked and Turnstile token received
-- [ ] Micro-copy beneath CTA: "Your booking is not confirmed until payment is verified by our team."
+- [x] Discount selector — Senior Citizen (20%) / PWD (20%) / None
+- [x] Discount ID upload — shown immediately when Senior Citizen or PWD is selected; hidden when None
+  - [x] Label: "Upload your OSCA Card" (Senior) or "Upload your PWD ID" (PWD)
+  - [x] Helper text: "A photo or scan of your valid ID. Our team will verify before confirming your discount."
+  - [x] Accepts jpg/png/webp, max 5MB
+  - [x] Required if a discount is selected — Confirm button disabled until uploaded
+  - [x] Thumbnail preview shown after upload
+  - [x] If guest switches back to "None" — upload cleared and field hidden
+- [x] Voucher code input — text field + Apply button
+- [x] Voucher feedback — valid (show discount), expired, usage limit reached, invalid code, room type mismatch
+- [x] Updated total after discount/voucher applied
+- [x] Payment method selector — Pay at Hotel / GCash / PayPal / other enabled methods (from `settings/hotelConfig`)
+- [x] Payment screenshot upload — shown only for non-pay-at-hotel methods
+- [x] Screenshot upload: accepts image files only, max 5MB
+- [x] **Reference number field** (owner request 2026-07-09) — shown alongside the screenshot upload only when the selected payment method's `requireReferenceNumber` is `true` (default; see `plan/features/SETTINGS.md §2 Payment Methods`). Required text field when shown; Confirm button follows the same "disabled until required fields complete" pattern as the discount ID upload above. Hidden entirely for methods with `requireReferenceNumber: false` (e.g. an admin who wants Pay at Hotel/COD-style methods to skip it).
+- [x] Payment method QR code or account info displayed based on selection
+- [x] Cancellation policy — collapsible section showing `settings/websiteContent.cancellationPolicy`
+- [x] Terms & conditions checkbox (required)
+- [x] Cloudflare Turnstile widget — invisible, renders before Confirm button
+- [x] Honeypot field — hidden from users via CSS (`position: absolute; opacity: 0; pointer-events: none`), never `display: none`
+- [x] Confirm Booking button (Spark Orange) — disabled until terms checked and Turnstile token received
+- [x] Review-pending expectation copy — surfaced on Step 4 for online payments ("Booking submitted for review" heading + "Our team is verifying your payment and will send an official confirmation shortly") and in the acknowledgment email, rather than as micro-copy beneath the Step 3 CTA
 
 ### Data & Logic Checklist
-- [ ] Voucher validation calls `/api/validate/voucher` — server-side only
-- [ ] Discount and voucher calculations happen client-side for display, server-side for storage
-- [ ] The breakdown shown in Step 3 is recomputed server-side during booking creation; client-provided totals or breakdown lines are advisory only and must not be trusted.
-- [ ] Server response returns the persisted breakdown so Step 4 can show the authoritative explanation for the final total.
-- [ ] Booking flow preallocates a Firestore booking document ID before Step 3 uploads; `/api/bookings/create` must create the booking document at that same ID
-- [ ] Payment screenshot uploaded to Firebase Storage before booking creation using the preallocated booking ID path
-- [ ] `paymentProofUrl` stored in booking document
-- [ ] `paymentReferenceNumber` stored on booking document when collected; server-side, `/api/bookings/create` re-checks the selected method's `requireReferenceNumber` (never trusts a client-side-only skip) and rejects creation if required but missing — mirrors the existing discount ID server-side re-check pattern. `requireReferenceNumber` only gates whether the **guest** is asked/required to provide it at booking time — it does not limit staff. Staff can always view, add, or edit `paymentReferenceNumber` from the admin booking drawer regardless of that setting (see `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`), since front desk may need to add one manually when confirming a payment even for a method the guest wasn't asked to supply it for.
-- [ ] Pay at Hotel: no upload required, `paymentMethod = "pay-at-hotel"`
-- [ ] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) using the preallocated booking ID path; `discountIdPhotoUrl` stored on booking document
-- [ ] Discount ID upload is required client-side but also validated server-side — if `discountType != ""` and `discountIdPhotoUrl` is null, booking creation is rejected
+- [x] Voucher validation calls `/api/validate/voucher` — server-side only
+- [x] Discount and voucher calculations happen client-side for display, server-side for storage
+- [x] The breakdown shown in Step 3 is recomputed server-side during booking creation; client-provided totals or breakdown lines are advisory only and must not be trusted.
+- [x] Server response returns the persisted breakdown so Step 4 can show the authoritative explanation for the final total.
+- [x] Booking flow preallocates a Firestore booking document ID before Step 3 uploads; `/api/bookings/create` must create the booking document at that same ID
+- [x] Payment screenshot uploaded to Firebase Storage before booking creation using the preallocated booking ID path
+- [x] `paymentProofUrl` stored in booking document
+- [x] `paymentReferenceNumber` stored on booking document when collected; server-side, `/api/bookings/create` re-checks the selected method's `requireReferenceNumber` (never trusts a client-side-only skip) and rejects creation if required but missing — mirrors the existing discount ID server-side re-check pattern. `requireReferenceNumber` only gates whether the **guest** is asked/required to provide it at booking time — it does not limit staff. Staff can always view, add, or edit `paymentReferenceNumber` from the admin booking drawer regardless of that setting (see `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`), since front desk may need to add one manually when confirming a payment even for a method the guest wasn't asked to supply it for.
+- [x] Pay at Hotel: no upload required, `paymentMethod = "pay-at-hotel"`
+- [x] Discount ID photo uploaded to Firebase Storage before booking creation (when discount is selected) using the preallocated booking ID path; `discountIdPhotoUrl` stored on booking document
+- [x] Discount ID upload is required client-side but also validated server-side — if `discountType != ""` and `discountIdPhotoUrl` is null, booking creation is rejected
 
 ---
 
 ## Step 4 — Booking Confirmation
 
 ### UI Checklist
-- [ ] Booking reference number displayed prominently (Apollo heading)
-- [ ] Full booking summary with authoritative price breakdown returned by `/api/bookings/create`
-- [ ] Add to Calendar button (ICS file download or Google Calendar deep link)
-- [ ] Payment instructions based on selected payment method
-- [ ] Pay at Hotel: "Present this confirmation at check-in. Payment is due upon arrival."
-- [ ] Online payment: "Your payment is under review. You will receive a confirmation email within 24 hours."
-- [ ] Celebratory design treatment — Peak-End Rule, positive final impression
+- [x] Booking reference number displayed prominently (Apollo heading)
+- [x] Full booking summary with authoritative price breakdown returned by `/api/bookings/create`
+- [x] Add to Calendar button (ICS file download or Google Calendar deep link)
+- [x] Payment instructions based on selected payment method
+- [x] Pay at Hotel: "Present this confirmation at check-in. Payment is due upon arrival."
+- [x] Online payment: "Your payment is under review. You will receive a confirmation email within 24 hours."
+- [x] Celebratory design treatment — Peak-End Rule, positive final impression
 - [ ] Link to `/my-booking` to check status anytime
-- [ ] Spark Rewards prompt — shown only to logged-out guests or non-members:
-  - [ ] Heading: "Join Spark Rewards and earn points on this stay!"
-  - [ ] Perks list — same items as homepage section, pulled from `settings/websiteContent.homepage.sparkRewards.perks`; displayed as icon + perk name chips to entice sign-up
-  - [ ] Google Sign-In button + "Sign up with email" link inline
-  - [ ] Hidden for logged-in members — no prompt shown
+- [x] Spark Rewards prompt — shown only to logged-out guests or non-members:
+  - [x] Heading: "Join Spark Rewards and earn points on this stay!"
+  - [x] Perks chips — two static icon + name chips ("Earn Points", "Member Discounts"); NOT settings-driven (the settings-driven perks list lives on the homepage section only)
+  - [x] "Sign up with email" CTA → `/signup` + "Learn more" → `/rewards` (no inline Google Sign-In button — Google auth lives on the sign-in/sign-up pages)
+  - [x] Hidden for logged-in members — no prompt shown
 
 ### Data & Logic Checklist
-- [ ] Booking creation via `/api/bookings/create` using Firestore transaction — see `plan/features/AVAILABILITY-LOCKING.md`
-- [ ] Booking document ID is preallocated client-side for Storage uploads; booking reference generated server-side: `{config.bookingRefPrefix}-YYYYMMDD-NNN`
-- [ ] Rate locked at booking creation time — stored in `ratePerNight`
+- [x] Booking creation via `/api/bookings/create` using Firestore transaction — see `plan/features/AVAILABILITY-LOCKING.md`
+- [x] Booking document ID is preallocated client-side for Storage uploads; booking reference generated server-side: `{config.bookingRefPrefix}-YYYYMMDD-NNN`
+- [x] Rate locked at booking creation time — stored in `ratePerNight`
 - [x] Rate breakdown locked at booking creation time — stored in `rateBreakdown` so later guest lookup, admin drawer, emails, and receipts explain the same total even if rates change.
-- [ ] Email triggered via `/api/email/booking-submitted` after successful creation — acts as an acknowledgment/receipt submission warning the guest that their booking/payment is under review and that an official confirmation will follow once verified
-- [ ] `isCorporate`, `corporateCode`, `companyName` set server-side — never trusted from client
-- [ ] Initial status: `"pending"` (or `"payment-uploaded"` if screenshot provided)
+- [x] Email triggered via `/api/email/booking-submitted` after successful creation — acts as an acknowledgment/receipt submission warning the guest that their booking/payment is under review and that an official confirmation will follow once verified
+- [x] `isCorporate`, `corporateCode`, `companyName` set server-side — never trusted from client
+- [x] Initial status: `"pending"` (or `"payment-uploaded"` if screenshot provided)
 
 ---
 
 ## Edge Cases & States
 
-- [ ] Loading state during booking creation — disable Confirm button, show spinner
-- [ ] Room becomes unavailable between Step 1 and Step 3 — show conflict error, redirect back to Step 1
-- [ ] Voucher expired between validation and submission — re-validate server-side at creation
-- [ ] Screenshot upload fails — show error, allow retry before submission
-- [ ] Network error on booking creation — show error, do not create duplicate booking
-- [ ] Invalid booking reference format caught server-side
-- [ ] Back navigation between steps preserves form state
+- [x] Loading state during booking creation — disable Confirm button, show spinner
+- [x] Room becomes unavailable between Step 1 and Step 3 — show conflict error, redirect back to Step 1
+- [x] Voucher expired between validation and submission — re-validate server-side at creation
+- [x] Screenshot upload fails — show error, allow retry before submission
+- [x] Network error on booking creation — show error, do not create duplicate booking
+- [x] Invalid booking reference format caught server-side
+- [x] Back navigation between steps preserves form state
 
 ## Manual QA
 

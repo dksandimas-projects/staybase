@@ -13,43 +13,43 @@ The `/my-booking` page lets guests retrieve their booking using their booking re
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 
 ## UI Checklist
 
-- [ ] Lookup form — booking reference input + email input + Find My Booking button
-- [ ] Booking result card — booking ref, room name, check-in / check-out dates, number of nights, number of guests, total amount, payment method, current status badge
-- [ ] Status timeline — visual step indicator showing booking status flow (Pending → ... → Checked Out)
-- [ ] Cancel booking button — shown only when status allows cancellation (see logic below)
-- [ ] Cancellation confirmation modal — "Are you sure?" + optional cancellation reason input
-- [ ] Resend confirmation email button — always shown on found booking
-- [ ] "Back to search" link after finding booking
+- [x] Lookup form — booking reference input + email input + Find My Booking button
+- [x] Booking result card — booking ref, room name, check-in / check-out dates, number of nights, number of guests, total amount, payment method, current status badge
+- [x] Status timeline — visual step indicator showing booking status flow (Pending → ... → Checked Out)
+- [x] Cancel booking button — shown only when status allows cancellation (see logic below)
+- [x] Cancellation confirmation modal — "Are you sure?" + optional cancellation reason input
+- [x] Resend confirmation email button — always shown on found booking
+- [x] "Back to search" link after finding booking
 
 ## Data & Logic Checklist
 
-- [ ] Query `bookings` collection where `bookingRef == input` AND `guestEmail == input` — one-time fetch (`getDoc` / `getDocs`)
-- [ ] Never return booking details if email does not match — security by obscurity for anonymous guests
-- [ ] Cancellation allowed only when status is `"pending"` or `"payment-uploaded"` — not after payment confirmed
-- [ ] Cancel action calls `/api/bookings/cancel` with `bookingRef` + `guestEmail` for server-side auth
-- [ ] Cancellation sets status to `"cancelled"`, records `cancellationReason`, triggers `/api/email/booking-cancelled`
-- [ ] Resend email calls `/api/email/booking-submitted` with existing booking data
-- [ ] Rate and total display the values stored on the booking document — never recomputed
+- [x] Lookup goes through `POST /api/bookings/lookup` (ref + email verified server-side, PII-safe response, rate-limited) — the guest client never queries the `bookings` collection directly (Firestore rules deny guest reads; see `plan/docs/GOTCHAS.md`)
+- [x] Never return booking details if email does not match — security by obscurity for anonymous guests
+- [x] Cancellation allowed only when status is `"pending"` or `"payment-uploaded"` — not after payment confirmed
+- [x] Cancel action calls `/api/bookings/cancel` with `bookingRef` + `guestEmail` for server-side auth
+- [x] Cancellation sets status to `"cancelled"`, records `cancellationReason`, triggers `/api/email/booking-cancelled`
+- [x] Resend email calls `/api/email/booking-submitted` for `pending`/`payment-uploaded` bookings or `/api/email/booking-confirmed` for confirmed/checked-in bookings, with a 60s client cooldown + server-side rate limit (3/ref/hour)
+- [x] Rate and total display the values stored on the booking document — never recomputed
 
 ## Edge Cases & States
 
-- [ ] Loading state — spinner while querying
-- [ ] Not found — "We couldn't find a booking with those details. Please check your reference number and email."
-- [ ] Already cancelled — show booking with cancelled status, hide cancel button
-- [ ] Checked-out booking — show booking history, no actions available
-- [ ] Cancellation fails server-side — show error, booking status unchanged
-- [ ] Email resend rate-limited — show "Email already resent recently, please wait"
+- [x] Loading state — spinner while querying
+- [x] Not found — "We couldn't find a booking with those details. Please check your reference number and email."
+- [x] Already cancelled — show booking with cancelled status, hide cancel button
+- [x] Checked-out booking — show booking history, no actions available
+- [x] Cancellation fails server-side — show error, booking status unchanged
+- [x] Email resend rate-limited — show "Email already resent recently, please wait"
 
 ## Manual QA
 
