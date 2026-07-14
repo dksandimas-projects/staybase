@@ -64,13 +64,13 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
 
 ## Manual QA
 
-- [ ] Submit inquiry from guest Corporate page — appears in New column
-- [ ] Move inquiry through all stages
-- [ ] Add timestamped note — appears in notes log with correct staff name and time
-- [ ] Generate access code with custom rates — code document created in Firestore
-- [ ] Generated code works on `/corporate/book` guest flow
-- [ ] Convert inquiry to booking — booking appears in Bookings Management
-- [ ] New inquiry badge count updates in sidebar
+- [x] Submit inquiry from guest Corporate page — appears in New column
+- [x] Move inquiry through all stages
+- [x] Add timestamped note — appears in notes log with correct staff name and time
+- [x] Generate access code with custom rates — code document created in Firestore
+- [x] Generated code works on `/corporate/book` guest flow
+- [x] Convert inquiry to booking — booking appears in Bookings Management
+- [x] New inquiry alerting on Dashboard (sidebar badge is intercom-only per design decision)
 
 ## References
 
