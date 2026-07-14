@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { assertBookingFinanceInvariant } from "@spark-inn/shared";
 
 // Per BF-05 (booking-flow audit 2026-06-26): the
 // `originalTotalPrice` stored on the booking at creation time
@@ -180,7 +181,15 @@ describe("BF-05 — handleRejectDiscount restores totalPrice to pre-Senior/PWD s
       pointsRedeemedValue: 500,
       rateBreakdown: {
         roomSubtotal: 3_500,
-        roomLines: [{ label: "Regular rate", subtotal: 3_500 }],
+        roomLines: [{
+          source: "regular",
+          label: "Regular rate",
+          startDate: "2026-06-01",
+          endDate: "2026-06-02",
+          nights: 1,
+          nightlyRate: 3_500,
+          subtotal: 3_500
+        }],
         addOns: [{ label: "Breakfast add-on", amount: 500 }],
         deductions: [],
         finalTotal: 2_700
@@ -198,6 +207,7 @@ describe("BF-05 — handleRejectDiscount restores totalPrice to pre-Senior/PWD s
       { label: "Spark Rewards member discount (10%)", amount: 400 },
       { label: "Spark Rewards points redeemed", amount: 500 }
     ]);
+    assertBookingFinanceInvariant(updateData);
   });
 
   test("rejects when originalTotalPrice is null: returns 500 (guard remains)", async () => {
