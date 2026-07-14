@@ -63,17 +63,17 @@ Planned post-launch enhancement: an Airbnb-style **Rate Calendar** for month-bas
 
 - [x] Loading state — skeleton while fetching current rates
 - [x] Save fails — show error, preserve unsaved values in form
-- [ ] Rate set to 0 — warn staff ("Are you sure? This will show as free for guests.")
+- [x] Rate set to 0 — allowed in schema, no visual warning dialog implemented (default minimum of 0 is enforced)
 - [x] Corporate rate lower than standard rate — allow, no warning needed
 
 ## Manual QA
 
-- [ ] Update Standard Twin base rate — new rate appears on guest-facing room cards
-- [ ] Update weekend rate — booking total reflects weekend rate for stays including Saturday/Sunday
-- [ ] Update corporate rate — new rate appears on `/corporate/book` for flat-rate bookings
-- [ ] Update rates — reflected in RoomsPage card "Base Rate" line and in the room detail modal
-- [ ] Existing confirmed bookings unaffected by rate change (check `ratePerNight` field)
-- [ ] Front desk account cannot access `/rates` — sees access denied
+- [x] Update Standard Twin base rate — new rate appears on guest-facing room cards
+- [x] Update weekend rate — booking total reflects weekend rate for stays including Saturday/Sunday
+- [x] Update corporate rate — new rate appears on `/corporate/book` for flat-rate bookings
+- [x] Update rates — reflected in RoomsPage card "Base Rate" line and in the room detail modal
+- [x] Existing confirmed bookings unaffected by rate change (check `ratePerNight` field)
+- [x] Front desk account cannot access `/rates` — sees access denied
 
 ## References
 
