@@ -227,6 +227,14 @@ export interface Booking {
   pointsRedeemedValue: number;
   pointsRedeemedBy: string | null;
   pointsRedeemedAt: Date | null;
+  pointsAwarded?: number;
+  pendingLoyaltyPoints?: number;
+  loyaltyAwardStatus?: "pending-payment" | "awarded" | "ineligible";
+  pointsAwardedAt?: Date | null;
+  checkedOutWithBalance?: number;
+  checkedOutFolioTotal?: number;
+  checkedOutCollectedTotal?: number;
+  earlyCheckoutOriginalCheckOut?: Date | null;
   hasBreakfast: boolean;
   breakfastRate: number;
   breakfastSelections?: Record<string, string>;

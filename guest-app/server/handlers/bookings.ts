@@ -18,7 +18,7 @@ import {
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
-import { buildRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
+import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
@@ -28,6 +28,28 @@ const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirm
 const ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready — previous guest has not checked out yet.";
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+
+function sumLedgerAmounts(snapshot: any): number {
+  return snapshot.docs.reduce((sum: number, docSnap: any) => sum + Number(docSnap.data()?.amount || 0), 0);
+}
+
+function sumBilledAddToBillOrders(snapshot: any): number {
+  return snapshot.docs.reduce((sum: number, docSnap: any) => {
+    const order = docSnap.data() || {};
+    return order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled
+      ? sum + Number(order.totalAmount || 0)
+      : sum;
+  }, 0);
+}
+
+function calculateCheckoutPoints(totalPrice: number, rewardsConfig: any): number {
+  if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
+  if ((rewardsConfig.earningMode || "per-spend") === "per-booking") {
+    return Math.max(Math.floor(Number(rewardsConfig.pointsPerBooking || 0)), 0);
+  }
+  const pointsPerHundred = Math.max(Number(rewardsConfig.pointsPerHundred || 0), 0);
+  return Math.max(Math.floor((Math.max(totalPrice, 0) / 100) * pointsPerHundred), 0);
+}
 
 function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart;
@@ -1960,6 +1982,7 @@ export async function handleAddPayment(req: any, res: any) {
   let hadPaymentProof = false;
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot: any = null;
+  let loyaltyPointsAwarded = 0;
 
   try {
     await adminDb.runTransaction(async (transaction) => {
@@ -1990,6 +2013,18 @@ export async function handleAddPayment(req: any, res: any) {
       hadPaymentProof = !!bookingData.paymentProofUrl;
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
 
+      const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
+      const settlesCheckedOutFolio = bookingData.status === "checked-out"
+        && bookingData.loyaltyAwardStatus === "pending-payment"
+        && pendingLoyaltyPoints > 0
+        && totalPaid >= Number(bookingData.checkedOutFolioTotal || 0);
+      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId
+        ? adminDb.collection("members").doc(String(bookingData.memberId))
+        : null;
+      const loyaltyMemberDoc = loyaltyMemberRef
+        ? await transaction.get(loyaltyMemberRef)
+        : null;
+
       const bookingUpdates: Record<string, any> = {};
 
       // Mark the staff-new-payment dedup inside the transaction so a
@@ -2014,6 +2049,32 @@ export async function handleAddPayment(req: any, res: any) {
           ...bookingData,
           ...bookingUpdates
         };
+      }
+
+      if (settlesCheckedOutFolio && loyaltyMemberRef && loyaltyMemberDoc?.exists) {
+        loyaltyPointsAwarded = pendingLoyaltyPoints;
+        const awardedAt = new Date();
+        Object.assign(bookingUpdates, {
+          pointsAwarded: loyaltyPointsAwarded,
+          pendingLoyaltyPoints: 0,
+          loyaltyAwardStatus: "awarded",
+          pointsAwardedAt: awardedAt,
+          updatedAt: awardedAt
+        });
+        transaction.update(loyaltyMemberRef, {
+          rewardsPoints: Number(loyaltyMemberDoc.data()?.rewardsPoints || 0) + loyaltyPointsAwarded,
+          updatedAt: awardedAt
+        });
+        const historyRef = loyaltyMemberRef.collection("pointsHistory").doc(`earn-${bookingId}`);
+        transaction.set(historyRef, {
+          type: "earn",
+          points: loyaltyPointsAwarded,
+          bookingId,
+          bookingRef: bookingData.bookingRef,
+          description: `Settled Stay Earnings (${bookingData.bookingRef})`,
+          by: staffUid,
+          createdAt: awardedAt
+        });
       }
 
       if (Object.keys(bookingUpdates).length > 0) {
@@ -2058,7 +2119,8 @@ export async function handleAddPayment(req: any, res: any) {
     data: {
       ...paymentRecord,
       totalPaid,
-      status: bookingDataSnapshot?.status || null
+      status: bookingDataSnapshot?.status || null,
+      loyaltyPointsAwarded
     }
   });
 }
@@ -2297,9 +2359,10 @@ export async function handleCheckoutBooking(req: any, res: any) {
     // fields flow into the `bookings/audit/records` collection
     // and are PII-sensitive.
     const checkedOutBy = req.staff?.uid || "staff";
-    const totalPrice = Number(bookingData.totalPrice || 0);
 
     let pointsAwarded = 0;
+    let eligiblePoints = 0;
+    let checkedOutWithBalance = 0;
     let memberId: string | null = bookingData.memberId || null;
     let rewardsConfig: any = null;
 
@@ -2323,17 +2386,6 @@ export async function handleCheckoutBooking(req: any, res: any) {
     if (memberDoc?.exists) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
-      const pointsEnabled = rewardsConfig?.pointsEnabled !== false;
-
-      if (pointsEnabled && rewardsConfig) {
-        const earningMode = rewardsConfig.earningMode || "per-spend";
-        if (earningMode === "per-spend") {
-          const pointsPerHundred = Number(rewardsConfig.pointsPerHundred || 0);
-          pointsAwarded = Math.floor((totalPrice / 100) * pointsPerHundred);
-        } else {
-          pointsAwarded = Number(rewardsConfig.pointsPerBooking || 0);
-        }
-      }
     }
 
     await adminDb.runTransaction(async (transaction) => {
@@ -2346,7 +2398,22 @@ export async function handleCheckoutBooking(req: any, res: any) {
         throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
       }
 
-      const memberRef = memberId && pointsAwarded > 0
+      const paymentsRef = bookingRef.collection("payments");
+      const chargesRef = bookingRef.collection("charges");
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const chargesSnapshot = await transaction.get(chargesRef);
+      const storeOrdersSnapshot = await transaction.get(storeOrdersQuery);
+      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+      const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
+      checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
+      eligiblePoints = memberId
+        ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
+        : 0;
+
+      const memberRef = memberId && eligiblePoints > 0
         ? adminDb.collection("members").doc(memberId)
         : null;
       const memberDocInTransaction = memberRef
@@ -2365,17 +2432,31 @@ export async function handleCheckoutBooking(req: any, res: any) {
         status: "checked-out",
         checkedOutAt: new Date(),
         checkedOutBy,
-        pointsAwarded,
+        checkedOutWithBalance,
+        checkedOutFolioTotal: checkoutFolioTotal,
+        checkedOutCollectedTotal: collectedTotal,
         updatedAt: new Date()
       };
       if (memberId && freshBookingData.memberId !== memberId) {
         bookingUpdate.memberId = memberId;
       }
       if (shouldTruncateStay && originalCheckIn) {
+        const truncatedNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 86400000), 1);
         bookingUpdate.checkOut = Timestamp.fromDate(checkoutDate);
-        bookingUpdate.numNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 86400000), 1);
+        bookingUpdate.numNights = truncatedNights;
         bookingUpdate.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
+        bookingUpdate.rateBreakdown = rebuildEarlyCheckoutRateBreakdown(freshBookingData, truncatedNights);
       }
+
+      const canAwardPoints = Boolean(memberId && eligiblePoints > 0 && memberRef && memberDocInTransaction?.exists);
+      const awardNow = canAwardPoints && checkedOutWithBalance <= 0;
+      pointsAwarded = awardNow ? eligiblePoints : 0;
+      Object.assign(bookingUpdate, {
+        pointsAwarded,
+        pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
+        loyaltyAwardStatus: canAwardPoints ? (awardNow ? "awarded" : "pending-payment") : "ineligible",
+        pointsAwardedAt: awardNow ? new Date() : null
+      });
 
       transaction.update(bookingRef, bookingUpdate);
 
@@ -2402,14 +2483,14 @@ export async function handleCheckoutBooking(req: any, res: any) {
         );
       }
 
-      if (memberId && pointsAwarded > 0 && memberRef && memberDocInTransaction?.exists) {
+      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
         const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
         transaction.update(memberRef, {
           rewardsPoints: currentPoints + pointsAwarded,
           updatedAt: new Date()
         });
 
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
         transaction.set(historyRef, {
           type: "earn",
           points: pointsAwarded,
@@ -2427,7 +2508,8 @@ export async function handleCheckoutBooking(req: any, res: any) {
       data: {
         status: "checked-out",
         pointsAwarded,
-        memberId
+        memberId,
+        checkedOutWithBalance
       }
     });
   } catch (error: any) {
