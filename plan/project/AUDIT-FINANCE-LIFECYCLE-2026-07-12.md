@@ -725,7 +725,7 @@ being written back through Firestore client rules. Regression tests pin the
 rule allowlist, forbidden fields, route usage, transition validation, and
 idempotence.
 
-### FLR-03 — Bound the Reports ledger listeners before the data outgrows them · `Open`
+### FLR-03 — Bound the Reports ledger listeners before the data outgrows them · `Deferred — volume trigger`
 
 **Why:** `ReportsPage.tsx` subscribes to `collectionGroup("charges")` and
 `collectionGroup("payments")` with no range — every ledger row ever
@@ -768,7 +768,7 @@ apply the booking assertion to online, voucher, member, and walk-in creation;
 discount rejection; points redemption/undo; rate-breakdown rebuilds; and early
 checkout. The Reports finance fixture applies the revenue/stream assertion.
 
-### FLR-05 — Operational handover items (owner-facing) · `Open`
+### FLR-05 — Operational handover items (owner-facing) · `In progress`
 
 1. **Annotate pre-FL-05 Daily Closes** — closes recorded before
    2026-07-13 legitimately show store-cash variances that are now
@@ -785,3 +785,14 @@ checkout. The Reports finance fixture applies the revenue/stream assertion.
    → Daily Close → exports, on staging with the owner, before the next
    `dev → main` milestone merge (a `feat:` merge per the pre-launch
    versioning rule).
+
+**Prepared 2026-07-14:**
+`plan/project/FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md` now records the
+historical Daily Close convention without modifying locked close documents,
+including the narrow rule that only variances exactly traceable to pre-FL-05
+direct-paid store orders receive that explanation. It also contains an
+accountant review/sign-off record and an owner staging walkthrough covering the
+complete money path and all finance exports. The walkthrough has an explicit
+environment-isolation gate because the `stg`-named Firebase project has
+historically served production traffic. FLR-05 remains open until the
+accountant and owner sign-offs are actually completed.
