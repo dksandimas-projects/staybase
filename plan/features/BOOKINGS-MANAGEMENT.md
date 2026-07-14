@@ -111,8 +111,8 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
   - `checked-out` → no further transitions
   - `cancelled` → no further transitions
 - [x] Check-in gate: `/api/bookings/checkin` rejects check-in unless the booking is in `confirmed` or `payment-confirmed` status, has `guestIdPhotoUrl`, and has saved required `guestRegistration` fields. The admin drawer mirrors the same rule client-side with a disabled CTA and plain-language missing-items checklist.
-- [ ] Status update: direct staff `updateDoc` on `bookings/{bookingId}` for ordinary operational transitions, updating `status` + `updatedAt` + `handledBy`
-- [ ] `confirmed` and `payment-confirmed` status changes trigger corresponding emails via email API route after the staff update succeeds
+- [x] Status updates are server-authoritative: cancellation, uploaded-payment verification, confirmation, check-in, and checkout use their authenticated `/api/bookings/*` routes; Firestore client rules exclude `status` from the staff update allowlist
+- [x] `/api/bookings/mark-payment-confirmed` transactionally permits `payment-uploaded` → `payment-confirmed`, is idempotent for exact retries, and sends the payment-confirmed email only after a new transition commits; `/api/bookings/confirm` owns the confirmed transition and email
 - [ ] Cancellation: POST to `/api/bookings/cancel` so owner/staff authorization, status validation, `cancellationReason`, and cancellation email stay server-side
 - [x] Walk-in booking creation: POST to authenticated `/api/bookings/create-walkin`; API strictly validates the full request before the availability-locking transaction, caps a finite manual override at 1,000,000, writes `source: "walk-in"`, defaults to `confirmed` unless immediate check-in is selected, and stores `handledBy` from the verified staff token
 - [ ] Walk-in booking ref generated inside the same transaction as booking creation; do not call `/api/reference/generate` separately for walk-ins

@@ -1372,14 +1372,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           throw new Error(data.error || "Failed to confirm booking via server API.");
         }
       } else if (status === "payment-confirmed") {
-        await updateDoc(bookingDocRef, {
-          status,
-          ...details,
-          updatedAt: serverTimestamp(),
-          handledBy: currentUser?.uid || currentUser?.email || "staff"
-        });
         const token = await auth.currentUser?.getIdToken(true);
-        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/email/payment-confirmed`, {
+        const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/mark-payment-confirmed`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1389,7 +1383,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         });
         const data = await res.json();
         if (!res.ok || !data.success) {
-          throw new Error(data.error || "Payment was marked confirmed, but the email could not be sent.");
+          throw new Error(data.error || "Failed to confirm payment via server API.");
         }
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
@@ -1420,13 +1414,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           throw new Error(data.error || "Failed to check in booking via server API.");
         }
       } else {
-        const updatePayload: Record<string, any> = {
-          status,
-          ...details,
-          updatedAt: serverTimestamp()
-        };
-
-        await updateDoc(bookingDocRef, updatePayload);
+        throw new Error(`Unsupported client-side booking status transition: ${status}`);
       }
     } catch (error) {
       console.error("Error updating booking status:", error);
