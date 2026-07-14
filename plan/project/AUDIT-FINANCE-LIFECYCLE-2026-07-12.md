@@ -659,7 +659,7 @@ discount as a separate deduction using the canonical stacking base.
 > scope. Numbered `FLR-<n>`; tracked in `ROADMAP.md §Finance Lifecycle
 > Recommendations`. Status is tracked here with implementation and verification.
 
-### FLR-01 — Historical finance data repair (one-off integrity scan) · `In review`
+### FLR-01 — Historical finance data repair (one-off integrity scan) · `Fixed 2026-07-14`
 
 **Why:** every FL fix protects writes from 2026-07-13 onward; documents
 corrupted *before* the fixes still carry wrong money. Three cohorts:
@@ -686,10 +686,13 @@ separately guarded apply mode that revalidates every approved row inside a
 transaction. Booking repairs are limited to a still-current canonical
 `rateBreakdown.finalTotal`; historical store settlement is append-only via the
 deterministic `delivery-tender` record. Every applied repair also creates an
-Admin-only `financeIntegrityRepairs` audit document. The read-only live scan of
-the configured project reviewed 6 bookings and 1 store order and found one
-pre-FL-05 tender gap. No Firestore writes were made; FLR-01 remains open pending
-staff review/sign-off of that row.
+Admin-only `financeIntegrityRepairs` audit document. The first read-only live
+scan of the configured project reviewed 6 bookings and 1 store order and found
+one pre-FL-05 tender gap. After owner sign-off, the guarded workflow appended
+the single ₱1,500 `delivery-tender` and created its immutable repair audit
+record. A fresh read-only scan of the same 6 bookings and 1 store order then
+reported zero findings. No booking totals or existing ledger entries were
+edited.
 
 ### FLR-02 — `bookings` update rule needs a field allowlist · `Fixed 2026-07-14`
 
