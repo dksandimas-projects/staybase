@@ -53,14 +53,14 @@ The `/my-booking` page lets guests retrieve their booking using their booking re
 
 ## Manual QA
 
-- [ ] Valid ref + email returns correct booking details
-- [ ] Wrong email for valid ref returns not found (never reveals booking exists)
-- [ ] Status badge matches actual booking status in admin dashboard
-- [ ] Cancel button hidden for confirmed/checked-in/checked-out bookings
-- [ ] Cancellation modal requires confirmation before proceeding
-- [ ] Cancelled booking reflects in admin dashboard immediately
-- [ ] Cancellation email received by guest
-- [ ] Resend email button sends confirmation email successfully
+- [x] Valid ref + email returns correct booking details
+- [x] Wrong email for valid ref returns not found (never reveals booking exists)
+- [x] Status badge matches actual booking status in admin dashboard
+- [x] Cancel button hidden for confirmed/checked-in/checked-out bookings
+- [x] Cancellation modal requires confirmation before proceeding
+- [x] Cancelled booking reflects in admin dashboard immediately
+- [x] Cancellation email received by guest
+- [x] Resend email button sends confirmation email successfully
 
 ## References
 
