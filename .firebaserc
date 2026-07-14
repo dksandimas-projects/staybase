@@ -1,6 +1,19 @@
 {
   "projects": {
     "default": "spark-inn-stg-7a7ad",
-    "staging": "spark-inn-stg-7a7ad"
+    "staging": "spark-inn-stg-7a7ad",
+    "production": "spark-inn-prod"
+  },
+  "targets": {
+    "spark-inn-stg-7a7ad": {
+      "storage": {
+        "app": ["spark-inn-stg-7a7ad.firebasestorage.app"]
+      }
+    },
+    "spark-inn-prod": {
+      "storage": {
+        "app": ["spark-inn-prod.firebasestorage.app"]
+      }
+    }
   }
 }
