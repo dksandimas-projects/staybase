@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { getManilaDateInfo } from "@spark-inn/shared";
+import { assertBookingFinanceInvariant, getManilaDateInfo } from "@spark-inn/shared";
 import handler from "../../server/apiRouter";
 
 // Global mock state
@@ -703,6 +703,7 @@ describe("/api/bookings/create", () => {
       expect(created.roomType).toBe("standard-double");
       expect(created.roomNumber).toBeTruthy();
       expect(created.originalTotalPrice).toBe(created.totalPrice);
+      assertBookingFinanceInvariant(created);
     });
 
     test("skips a candidate room with an overlapping booking and assigns the next free one of the same type", async () => {
@@ -1081,6 +1082,7 @@ describe("/api/bookings/create", () => {
       expect(created.voucherCode).toBe("SAVE10");
       expect(created.voucherDiscount).toBe(expectedVoucherDiscount);
       expect(created.totalPrice).toBe(created.originalTotalPrice - seniorPwdDiscount - expectedVoucherDiscount);
+      assertBookingFinanceInvariant(created);
       expect(updateCalls).toContainEqual({
         path: "vouchers/SAVE10",
         data: expect.objectContaining({
@@ -1127,6 +1129,7 @@ describe("/api/bookings/create", () => {
       expect(createdWalkin.totalPrice).toBe(5000);
       expect(createdWalkin.originalTotalPrice).toBe(5000); // staff-agreed manual override is the pre-discount pricing basis
       expect(createdWalkin.source).toBe("walk-in");
+      assertBookingFinanceInvariant(createdWalkin);
     });
 
     test("POST /api/bookings/create-walkin: blocks unauthenticated requests", async () => {
