@@ -647,3 +647,102 @@ discount as a separate deduction using the canonical stacking base.
   front-desk judgment call under decision #118; the server stamps the unpaid
   balance and defers loyalty points, while a hard block could strand guests
   at the desk.
+
+---
+
+## Post-remediation recommendations — 2026-07-14
+
+> Added after all 20 findings were verified fixed (8 batches merged to
+> `dev`, full suite green: 1,096 tests across shared / guest API / admin).
+> These are follow-ups the remediation deliberately did not cover — the
+> fixes are forward-only and two structural risks remain outside the FL
+> scope. Numbered `FLR-<n>`; tracked in `ROADMAP.md §Finance Lifecycle
+> Recommendations`. Status is `Open` until closed here with verification.
+
+### FLR-01 — Historical finance data repair (one-off integrity scan) · `Open`
+
+**Why:** every FL fix protects writes from 2026-07-13 onward; documents
+corrupted *before* the fixes still carry wrong money. Three cohorts:
+
+1. Bookings that hit **FL-02** pre-fix (Senior/PWD rejected while points
+   were redeemed) — `totalPrice` still overcharges by `pointsRedeemedValue`.
+2. Bookings that hit **FL-03** pre-fix (legacy no-breakdown docs zeroed by
+   staff apply-discount) — `totalPrice ≈ 0`, `originalTotalPrice = 0`.
+3. Delivered **direct-paid store orders** from before FL-05 — no tender
+   entry exists, so historical Outstanding / reconciliation figures retain
+   the phantom gap even though new orders reconcile (decision #116's
+   `createdAt` fallback covers revenue recognition only, not tenders).
+
+**Recommendation:** `scripts/finance-integrity-scan.ts` (Admin SDK, same
+pattern as `seed-firestore.ts`): flag `rateBreakdown.finalTotal !==
+totalPrice`, `totalPrice === 0` with non-empty room lines, non-finite
+totals, and delivered direct-paid orders without a tender doc. Output a
+review CSV first; corrective writes only after staff sign-off (append-only
+where the ledger is involved — correcting entries, never edits).
+
+### FLR-02 — `bookings` update rule needs a field allowlist · `Open`
+
+**Why:** `firebase/firestore.rules` still has `allow update: if isStaff()`
+on `bookings/{bookingId}` with no field restriction. All FL money
+mutations now route through server-authoritative APIs, but any
+staff-authenticated *client* can still write `totalPrice`,
+`pointsAwarded`, `status`, etc. directly to Firestore, bypassing every
+control the FL batches added. This is the largest remaining structural
+hole in the finance-integrity story.
+
+**Recommendation:** enumerate the fields the admin app legitimately writes
+client-side (guest registration, `guestIdPhotoUrl`, breakfast
+selections/served, notes, `handledBy`, the `payment-confirmed` status
+write in `AdminContext.updateBookingStatus`, room-move preview fields) and
+enforce `request.resource.data.diff(resource.data).affectedKeys().hasOnly([...])`
+— the `members` rule already demonstrates the pattern. Alternatively move
+the remaining client-side status write behind an API first (mirroring
+confirm/checkout) so the allowlist can exclude `status` and all pricing
+fields entirely.
+
+### FLR-03 — Bound the Reports ledger listeners before the data outgrows them · `Open`
+
+**Why:** `ReportsPage.tsx` subscribes to `collectionGroup("charges")` and
+`collectionGroup("payments")` with no range — every ledger row ever
+written, live, on each Reports visit. Correct today at 14 rooms; read
+volume and snapshot size grow linearly forever on the client's Blaze plan.
+
+**Recommendation:** no action now. Revisit when the combined ledger passes
+a few thousand rows (~1 year of operation): switch to `recordedAt`-bounded
+queries (selected period plus a buffer for the all-time Receivables tab,
+which can fall back to one-shot `getDocs`). Add the trigger condition to
+the roadmap so it isn't rediscovered by a slow Reports page.
+
+### FLR-04 — Shared finance invariant assertions in tests · `Open`
+
+**Why:** every SEV-1/SEV-2 in this audit was the same failure shape — two
+representations of the same money drifting (`totalPrice` vs
+`rateBreakdown`, revenue streams vs Total Revenue, billed vs collected
+bases). The per-fix regression tests pin the specific bugs; nothing
+guards the *class*.
+
+**Recommendation:** a small shared helper (e.g.
+`shared/utils/financeInvariants.ts` + test utility) asserting per booking:
+breakdown lines sum to `finalTotal`, `finalTotal === totalPrice`, all
+amounts finite, streams disjoint (room/breakfast/store/incidentals sum to
+Total Revenue on report fixtures). Call it from every handler test that
+writes pricing, so the next drift fails loudly regardless of which path
+introduced it.
+
+### FLR-05 — Operational handover items (owner-facing) · `Open`
+
+1. **Annotate pre-FL-05 Daily Closes** — closes recorded before
+   2026-07-13 legitimately show store-cash variances that are now
+   explained; note this in the handover so staff don't chase them (the
+   close docs are locked, so annotation belongs in the handover doc/notes
+   field convention, not edits).
+2. **Confirm the FIN-06 VAT posture with the accountant** — VAT remains a
+   client-side display/export calculation with no OR/invoice printing
+   (BIR manual OR booklets fallback). Confirm sufficiency before the
+   first filing period.
+3. **One staging walkthrough of the full money path** — the 8 FL batches
+   shipped with unit/API coverage but no browser-level pass: book → pay →
+   incidental charge → store order (direct-paid + add-to-bill) → checkout
+   → Daily Close → exports, on staging with the owner, before the next
+   `dev → main` milestone merge (a `feat:` merge per the pre-launch
+   versioning rule).
