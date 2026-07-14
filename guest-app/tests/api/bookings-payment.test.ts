@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const { mockBookings, mockMembers, mockPayments, mockPointsHistory, mockUpdates, sendBookingTrigger } = vi.hoisted(() => {
-  const mockPayments: Array<{ amount: number }> = [];
+  const mockPayments: Array<{ id?: string; amount: number; method?: string; note?: string }> = [];
   const mockBookings: Record<string, any> = {};
   const mockUpdates: Array<{ path: string; data: any }> = [];
   return {
@@ -44,10 +44,10 @@ vi.mock("../../server/lib/firebase-admin", () => {
       collection: (sub: string) => {
         if (sub === "payments") {
           return {
-            doc: () => ({
-              id: `payment_${mockPayments.length + 1}`,
+            doc: (paymentId = `payment_${mockPayments.length + 1}`) => ({
+              id: paymentId,
               set: async (data: any) => {
-                mockPayments.push(data);
+                mockPayments.push({ id: paymentId, ...data });
               }
             }),
             add: async (data: any) => {
@@ -56,7 +56,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
             },
             get: async () => ({
               docs: mockPayments.map((p, i) => ({
-                id: `payment_${i + 1}`,
+                id: p.id || `payment_${i + 1}`,
                 data: () => p
               }))
             })
@@ -96,6 +96,9 @@ vi.mock("../../server/lib/firebase-admin", () => {
         mockPointsHistory.push({ id: ref.id, data });
       } else if (ref?.path) mockUpdates.push({ path: ref.path, data });
     }),
+    create: vi.fn().mockImplementation((ref: any, data: any) => {
+      if (ref && typeof ref.set === "function") return ref.set(data);
+    }),
     update: vi.fn().mockImplementation((ref: any, data: any) => {
       if (ref && typeof ref.update === "function") return ref.update(data);
     })
@@ -128,6 +131,7 @@ const staffReq = (overrides: Record<string, any> = {}) => ({
   staff: { uid: "staff_1", email: "frontdesk@sparkinn.com", role: "front-desk" },
   body: {
     bookingId: "booking_1",
+    paymentId: "paymentRequest001",
     amount: 1500,
     method: "gcash",
     note: "First installment",
@@ -162,6 +166,29 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
     expect(mockBookings["booking_1"].status).toBe("pending");
     expect(sendBookingTrigger).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test("replaying the same payment ID does not append a duplicate", async () => {
+    const res1 = mockResponse();
+    const res2 = mockResponse();
+
+    await handleAddPayment(staffReq({ amount: 2000 }), res1);
+    await handleAddPayment(staffReq({ amount: 2000 }), res2);
+
+    expect(mockPayments).toHaveLength(1);
+    expect(res2.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idempotentReplay: true, totalPaid: 2000 })
+    }));
+  });
+
+  test("rejects reuse of a payment ID for different payment details", async () => {
+    await handleAddPayment(staffReq({ amount: 2000 }), mockResponse());
+    const res = mockResponse();
+
+    await handleAddPayment(staffReq({ amount: 2500 }), res);
+
+    expect(mockPayments).toHaveLength(1);
+    expect(res.status).toHaveBeenCalledWith(409);
   });
 
   test("fires payment-confirmed once the running total reaches totalPrice for a pending booking", async () => {

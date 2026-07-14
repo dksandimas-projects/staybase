@@ -27,6 +27,7 @@ export function getConfiguredBookingRefPrefix() {
 const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 const ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready — previous guest has not checked out yet.";
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+const PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 
 function sumLedgerAmounts(snapshot: any): number {
@@ -898,7 +899,8 @@ export async function handleCreateBooking(req: any, res: any) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
-      // Pre-discount total to restore if discount is rejected.
+      // Canonical pre-discount pricing basis. Always stored, even when no
+      // discount is present, so every downstream reader has one convention.
       // Per BF-05 (booking-flow audit 2026-06-26): the value
       // stored must be the full pre-Senior/PWD subtotal so a
       // rejection restores the price the guest would have paid
@@ -908,7 +910,7 @@ export async function handleCreateBooking(req: any, res: any) {
       // `null` and the reject-discount handler 500'd. The
       // handler now uses `originalTotalPrice - voucherDiscount`
       // to apply the voucher if one was also applied.
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
@@ -1447,7 +1449,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
-        originalTotalPrice: discountType || voucherCode ? pricingSubtotal : subtotal,
+        originalTotalPrice: pricingSubtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
         // walkin flow writes a token too so the email
@@ -1926,9 +1928,12 @@ export async function handleCancelBooking(req: any, res: any) {
 }
 
 export async function handleAddPayment(req: any, res: any) {
-  const { bookingId, amount, method, note } = req.body || {};
-  if (!bookingId || amount === undefined || !method) {
-    return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
+  const { bookingId, paymentId, amount, method, note } = req.body || {};
+  if (!bookingId || !paymentId || amount === undefined || !method) {
+    return res.status(400).json({ success: false, error: "Booking ID, payment ID, amount, and payment method are required." });
+  }
+  if (!PREALLOCATED_PAYMENT_ID_REGEX.test(String(paymentId))) {
+    return res.status(400).json({ success: false, error: "Invalid payment ID format." });
   }
 
   const numericAmount = Number(amount);
@@ -1983,6 +1988,7 @@ export async function handleAddPayment(req: any, res: any) {
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot: any = null;
   let loyaltyPointsAwarded = 0;
+  let idempotentReplay = false;
 
   try {
     await adminDb.runTransaction(async (transaction) => {
@@ -2004,6 +2010,20 @@ export async function handleAddPayment(req: any, res: any) {
         const data = docSnap.data() as { amount?: number };
         return sum + Number(data.amount || 0);
       }, 0);
+      const existingPayment = paymentsSnapshot.docs.find((docSnap: any) => docSnap.id === paymentId);
+      if (existingPayment) {
+        const existingData = existingPayment.data();
+        const sameRequest = Number(existingData.amount) === numericAmount
+          && String(existingData.method) === String(method)
+          && String(existingData.note || "") === safeNote;
+        if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
+        idempotentReplay = true;
+        totalPaid = existingPaid;
+        totalPrice = Number(bookingData.totalPrice || 0);
+        fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+        staffPaymentMarkerMissing = false;
+        return;
+      }
       totalPaid = existingPaid + numericAmount;
 
       totalPrice = Number(bookingData.totalPrice || 0);
@@ -2083,12 +2103,15 @@ export async function handleAddPayment(req: any, res: any) {
 
       // Append the payment record inside the transaction after
       // all reads have completed.
-      const newPaymentRef = paymentsRef.doc();
-      transaction.set(newPaymentRef, paymentRecord);
+      const newPaymentRef = paymentsRef.doc(paymentId);
+      transaction.create(newPaymentRef, paymentRecord);
     });
   } catch (error: any) {
     if (error.message === "Booking not found") {
       return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error.message === "Payment ID has already been used for a different payment.") {
+      return res.status(409).json({ success: false, error: error.message });
     }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -2120,7 +2143,8 @@ export async function handleAddPayment(req: any, res: any) {
       ...paymentRecord,
       totalPaid,
       status: bookingDataSnapshot?.status || null,
-      loyaltyPointsAwarded
+      loyaltyPointsAwarded,
+      idempotentReplay
     }
   });
 }
@@ -2908,7 +2932,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,

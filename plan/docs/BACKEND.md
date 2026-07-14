@@ -108,7 +108,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `discountRejected` | boolean | `true` if staff rejected the discount ID |
 | `discountRejectedBy` | string \| null | Staff UID who rejected |
 | `discountRejectionReason` | string | Optional reason entered by staff at rejection |
-| `originalTotalPrice` | number \| null | Pre-discount total — stored at booking creation if a discount was applied; used to restore `totalPrice` on rejection |
+| `originalTotalPrice` | number \| null | Canonical pre-discount room/add-on subtotal — always stored by current create, reschedule, and discount writers; `null` is legacy-only |
 | `voucherCode` | string | Applied promo voucher code (if any) |
 | `voucherDiscount` | number | Flat ₱ or % discount from voucher |
 | `isCorporate` | boolean | `true` if booked via `/corporate/book` |
@@ -169,7 +169,7 @@ and adds a guest-visible retained-total line to the rebuilt rate breakdown.
 
 ### `bookings/{bookingId}/payments/{paymentId}`
 
-Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. All writes use authenticated server routes; Firestore client creation is denied.
+Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. Onsite payment clients preallocate `paymentId`; the server creates that exact document so matching retries are idempotent. All writes use authenticated server routes; Firestore client creation is denied.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -195,16 +195,16 @@ Append-only incidental folio ledger. Positive entries add an amount owed; voidin
 | Field | Type | Notes |
 |---|---|---|
 | `label` | string | Staff-facing description shown on the folio and receipt |
-| `amount` | number | Positive charge or negative reversal |
+| `amount` | number | Positive charge or negative reversal; absolute value capped at 1,000,000 |
 | `category` | string | `late-checkout`, `early-checkin`, `extra-person`, `damage`, `laundry`, or `other` |
 | `note` | string | Optional context; required as the void reason on reversals |
 | `addedBy` | string | Staff UID |
 | `addedAt` | timestamp | Server timestamp |
-| `voidOf` | string \| null | Original charge ID for reversal entries |
+| `voidOf` | string \| null | Original charge ID for reversal entries; reversal document ID must be `void-{voidOf}` |
 
 Folio total = `booking.totalPrice + delivered billed-to-room store orders + sum(charges[].amount)`. Outstanding balance subtracts the append-only payments ledger from that total.
 
-**Security rules:** Staff/Admin read + create; no updates or deletes.
+**Security rules:** Staff/Admin read + create; no updates or deletes. Rules enforce the absolute amount cap and deterministic reversal ID, which makes each original charge voidable only once.
 
 ---
 
@@ -589,7 +589,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
 | `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; ordinary updates = Staff/Admin; delivery + direct tender = staff API; guest cancellation via API only |
-| `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment`; no updates or deletes |
+| `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment` using a client-preallocated document ID for idempotency; no updates or deletes |
 | `storeOrders/{id}/payments` | Staff/Admin only through the collection-group read rule | Create = Admin SDK via `/api/store/deliver-order`; no updates or deletes |
 | `settings/rewardsConfig` | Public via `settings/{documentId}` rule; non-sensitive booking/member display config | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |

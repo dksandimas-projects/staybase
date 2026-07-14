@@ -129,7 +129,7 @@ Booking {
   ratePerNight: number
   rateBreakdown: BookingRateBreakdown | null
   totalPrice: number
-  originalTotalPrice: number | null   // pre-discount total; set when discount applied; used to restore on rejection
+  originalTotalPrice: number | null   // canonical pre-discount room/add-on subtotal; all new writers always set it, null is legacy-only
   discountType: DiscountType
   discountPct: number
   discountIdPhotoUrl: string | null   // OSCA/PWD ID uploaded by guest at Step 3
@@ -216,9 +216,9 @@ Booking {
 }
 
 OnsitePayment {
-  id: string
+  id: string              // client-preallocated for idempotent onsite payment creation
   type: "payment" | "refund"
-  amount: number
+  amount: number          // absolute value capped at 1,000,000
   method: PaymentMethod
   note: string
   reason: string | null
@@ -233,12 +233,12 @@ IncidentalCharge {
   bookingRef?: string
   roomNumber?: string
   label: string
-  amount: number
+  amount: number          // positive charge or negative reversal; absolute value capped at 1,000,000
   category: "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other"
   note: string
   addedBy: string
   addedAt: Date
-  voidOf: string | null
+  voidOf: string | null   // reversal document ID is deterministically `void-{voidOf}`
 }
 
 CorporateInvoice {
