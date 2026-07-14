@@ -105,50 +105,50 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 ### UI Checklist
 
 #### Summary Cards (top of tab)
-- [ ] **Total Revenue** — combined across all streams for the selected period
-- [ ] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
-- [ ] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
-- [ ] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
+- [x] **Total Revenue** — combined across all streams for the selected period
+- [x] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
+- [x] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
+- [x] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
 - [x] **Incidental Revenue** — net sum of append-only `bookings/{id}/charges` entries, including negative void reversals
-- [ ] **Total Transactions** — count of bookings + delivered store orders combined
+- [x] **Total Transactions** — count of bookings + delivered store orders combined
 
 #### Charts
 - [x] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store / Incidentals
-- [ ] **Revenue trend line** — total combined revenue per month over the selected period
-- [ ] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
+- [x] **Revenue trend line** — total combined revenue per month over the selected period
+- [x] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
 - [x] **Payment method breakdown** — pie chart by amount from actual payment-ledger entries, plus a separately labeled uncollected Add-to-Bill slice
 - [x] **Direct-paid store collections** — delivery appends a store-scoped tender consumed by the same collection-group ledger and Daily Close; store tenders never reduce the linked room folio
 
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
 - [x] **Incidentals sub-table** — Booking Ref, Room, Category, Label, Amount, Added By, Date
-- [ ] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
-- [ ] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
-- [ ] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
-- [ ] All sub-tables are paginated (20 rows default), searchable by ref or name
-- [ ] All sub-tables filterable by payment method and status
+- [x] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
+- [x] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
+- [x] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
+- [x] All sub-tables are paginated (20 rows default), searchable by ref or name
+- [x] All sub-tables filterable by payment method and status
 
 #### Export Controls
-- [ ] **Print Sales Report** button — opens a clean printable PDF (see §Sales Report PDF below)
-- [ ] **Export XLSX** button — multi-sheet Excel file (see §Sales XLSX Export below)
+- [x] **Print Sales Report** button — opens a clean printable PDF (see §Sales Report PDF below)
+- [x] **Export XLSX** button — multi-sheet Excel file (see §Sales XLSX Export below)
 
 ### Data & Logic Checklist
-- [ ] Bookings query: `status` in `["confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
-- [ ] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
-- [ ] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
-- [ ] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
+- [x] Bookings query: `status` in `["confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
+- [x] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
+- [x] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
+- [x] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
 - [x] Incidental revenue: real-time `collectionGroup("charges")`, filtered by `addedAt`; positive charges and negative reversals net together
-- [ ] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
-- [ ] Combined total: net room revenue + net breakfast revenue + store revenue + incidental revenue
-- [ ] Payment method breakdown: merge payment method counts from `bookings.paymentMethod` + `storeOrders.paymentMethod`
-- [ ] All aggregation client-side
+- [x] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
+- [x] Combined total: net room revenue + net breakfast revenue + store revenue + incidental revenue
+- [x] Payment method breakdown: merge payment method counts from `bookings.paymentMethod` + `storeOrders.paymentMethod`
+- [x] All aggregation client-side
 
 ### Edge Cases & States
-- [ ] Loading state — skeleton cards and charts while all three queries resolve in parallel
-- [ ] No store orders for period — Store card shows ₱0, store charts hidden with "No store data" message
-- [ ] Breakfast disabled globally — Breakfast card shows ₱0, no breakfast sub-table
-- [ ] Partial month selected — all stats reflect only the selected range, not the full month
-- [ ] "Add to Bill" orders: clearly labeled in payment breakdown — front desk knows these are uncollected
+- [x] Loading state — skeleton cards and charts while all three queries resolve in parallel
+- [x] No store orders for period — Store card shows ₱0, store charts hidden with "No store data" message
+- [x] Breakfast disabled globally — Breakfast card shows ₱0, no breakfast sub-table
+- [x] Partial month selected — all stats reflect only the selected range, not the full month
+- [x] "Add to Bill" orders: clearly labeled in payment breakdown — front desk knows these are uncollected
 
 ---
 
@@ -166,14 +166,14 @@ Generated via jsPDF. Clean, branded layout intended for printing or sharing with
 7. **Footer** — "Generated on {date} by {staffName}" + "Spark Inn Hotel Corp"
 
 ### PDF Checklist
-- [ ] Apollo + Inter fonts embedded as base64
-- [ ] Logo embedded as base64
-- [ ] Charts captured via html2canvas before PDF generation — call `html2canvas(chartRef.current)` on each Recharts wrapper div
-- [ ] Tables paginate across PDF pages — jsPDF `autoTable` plugin handles this
-- [ ] Currency formatted as `₱{amount.toLocaleString('en-PH')}` throughout
-- [ ] Dates formatted as `MMM D, YYYY` throughout
-- [ ] Filename: `spark-inn-sales-report-{startDate}-to-{endDate}.pdf`
-- [ ] Print button triggers `window.print()` as fallback for browser printing
+- [x] Apollo + Inter fonts embedded as base64
+- [x] Logo embedded as base64
+- [x] Charts captured via html2canvas before PDF generation — call `html2canvas(chartRef.current)` on each Recharts wrapper div
+- [x] Tables paginate across PDF pages — jsPDF `autoTable` plugin handles this
+- [x] Currency formatted as `₱{amount.toLocaleString('en-PH')}` throughout
+- [x] Dates formatted as `MMM D, YYYY` throughout
+- [x] Filename: `spark-inn-sales-report-{startDate}-to-{endDate}.pdf`
+- [x] Print button triggers `window.print()` as fallback for browser printing
 
 ---
 
@@ -205,14 +205,14 @@ One XLSX file with 5 sheets covering all revenue data.
 | Payment Method Breakdown | one row per method with count + total ₱ |
 
 ### XLSX Checklist
-- [ ] Use SheetJS (`xlsx` npm package)
-- [ ] Generate entirely client-side — no API route needed
-- [ ] Filename: `spark-inn-sales-{YYYY-MM-DD}.xlsx`
-- [ ] Header rows bold in all sheets
-- [ ] Currency columns formatted as number (no ₱ symbol — Excel handles formatting)
-- [ ] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
-- [ ] Empty Breakfast sheet with header row only if no breakfast bookings in period
-- [ ] Empty Store Orders sheet with header row only if no store orders in period
+- [x] Use SheetJS (`xlsx` npm package)
+- [x] Generate entirely client-side — no API route needed
+- [x] Filename: `spark-inn-sales-{YYYY-MM-DD}.xlsx`
+- [x] Header rows bold in all sheets
+- [x] Currency columns formatted as number (no ₱ symbol — Excel handles formatting)
+- [x] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
+- [x] Empty Breakfast sheet with header row only if no breakfast bookings in period
+- [x] Empty Store Orders sheet with header row only if no store orders in period
 
 ---
 
@@ -220,17 +220,17 @@ One XLSX file with 5 sheets covering all revenue data.
 
 Separate from the Sales tab — this is an operational tool for kitchen prep, not a revenue report.
 
-- [ ] **Daily kitchen prep report** — date picker (default: tomorrow) → shows total count of each silog needed for that morning
+- [x] **Daily kitchen prep report** — date picker (default: tomorrow) → shows total count of each silog needed for that morning
   - e.g. "Tapsilog × 4, Longsilog × 2, Tocilog × 3"
   - Grouped by silog name, sorted by count descending
   - Only counts `bookings/{bookingId}.breakfastSelections` map entries for that date on `confirmed` or `checked-in` bookings
-- [ ] Print/export kitchen prep report — simple printable list for kitchen staff (window.print() or jsPDF)
-- [ ] Unentered selections warning — if a breakfast booking is checking in today but silog selections are not yet entered, show alert
+- [x] Print/export kitchen prep report — simple printable list for kitchen staff (window.print() or jsPDF)
+- [x] Unentered selections warning — if a breakfast booking is checking in today but silog selections are not yet entered, show alert
 
 > Breakfast **revenue** figures live in the Sales Report tab, not here.
 
 ### Data & Logic Checklist
-- [ ] Kitchen prep: scan active breakfast bookings and aggregate `breakfastSelections` map keys matching the selected date
+- [x] Kitchen prep: scan active breakfast bookings and aggregate `breakfastSelections` map keys matching the selected date
 
 ---
 
@@ -250,17 +250,17 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 
 ## Manual QA — Sales Report
 
-- [ ] Total Revenue card matches the sum of all four disjoint stream totals
-- [ ] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
-- [ ] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
-- [ ] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
-- [ ] Stacked bar chart shows correct monthly breakdown per stream
-- [ ] Bookings sub-table rows match booking count in Bookings Management for same period
-- [ ] Store sub-table rows match delivered order count in Store Management for same period
-- [ ] Payment method pie chart totals equal total transaction count
-- [ ] PDF generates with logo, correct date range, all sections present, tables paginate correctly
-- [ ] XLSX has all 4 sheets with correct headers and data
-- [ ] Changing date range updates all cards, charts, and tables simultaneously
+- [x] Total Revenue card matches the sum of all four disjoint stream totals
+- [x] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
+- [x] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
+- [x] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
+- [x] Stacked bar chart shows correct monthly breakdown per stream
+- [x] Bookings sub-table rows match booking count in Bookings Management for same period
+- [x] Store sub-table rows match delivered order count in Store Management for same period
+- [x] Payment method pie chart totals equal total transaction count
+- [x] PDF generates with logo, correct date range, all sections present, tables paginate correctly
+- [x] XLSX has all 4 sheets with correct headers and data
+- [x] Changing date range updates all cards, charts, and tables simultaneously
 
 ---
 
