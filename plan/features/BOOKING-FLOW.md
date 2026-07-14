@@ -133,7 +133,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Pay at Hotel: "Present this confirmation at check-in. Payment is due upon arrival."
 - [x] Online payment: "Your payment is under review. You will receive a confirmation email within 24 hours."
 - [x] Celebratory design treatment — Peak-End Rule, positive final impression
-- [ ] Link to `/my-booking` to check status anytime
+- [x] Link to `/my-booking` to check status anytime
 - [x] Spark Rewards prompt — shown only to logged-out guests or non-members:
   - [x] Heading: "Join Spark Rewards and earn points on this stay!"
   - [x] Perks chips — two static icon + name chips ("Earn Points", "Member Discounts"); NOT settings-driven (the settings-driven perks list lives on the homepage section only)
@@ -163,20 +163,20 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 
 ## Manual QA
 
-- [ ] Complete full booking flow from Step 1 to Step 4 — verify booking appears in admin dashboard
-- [ ] Date range picker blocks past dates and enforces min 1 night
-- [ ] Guest count filter hides rooms below capacity
-- [ ] Weekend rate applies correctly when stay includes weekend
-- [ ] Mixed weekday/weekend stay shows separate regular and weekend lines and the sum matches the submitted total
-- [ ] Holiday/seasonal override stay shows the override label and rate, and override nights beat weekend/base rates
-- [ ] Stay with breakfast plus discount/voucher shows room subtotal, add-on, deductions, and final total in the expected order
-- [ ] Voucher code applies and updates total correctly
-- [ ] Invalid voucher shows appropriate error message
-- [ ] Pay at Hotel flow: no upload required, correct confirmation message
-- [ ] GCash flow: upload required, correct payment instructions shown
-- [ ] Booking confirmation email received by guest
-- [ ] Add to Calendar creates correct event with check-in/out times
-- [ ] Double-booking prevented — test by opening two sessions simultaneously
+- [x] Complete full booking flow from Step 1 to Step 4 — verify booking appears in admin dashboard
+- [x] Date range picker blocks past dates and enforces min 1 night
+- [x] Guest count filter hides rooms below capacity
+- [x] Weekend rate applies correctly when stay includes weekend
+- [x] Mixed weekday/weekend stay shows separate regular and weekend lines and the sum matches the submitted total
+- [x] Holiday/seasonal override stay shows the override label and rate, and override nights beat weekend/base rates
+- [x] Stay with breakfast plus discount/voucher shows room subtotal, add-on, deductions, and final total in the expected order
+- [x] Voucher code applies and updates total correctly
+- [x] Invalid voucher shows appropriate error message
+- [x] Pay at Hotel flow: no upload required, correct confirmation message
+- [x] GCash flow: upload required, correct payment instructions shown
+- [x] Booking confirmation email received by guest
+- [x] Add to Calendar creates correct event with check-in/out times
+- [x] Double-booking prevented — test by opening two sessions simultaneously
 
 ## References
 
