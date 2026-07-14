@@ -143,7 +143,7 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 - [x] Manual points adjustment — add or deduct points with required reason note
 - [x] Disable/enable member account (without deleting)
 - [x] Search by name or email
-- [ ] Filter by tier (Phase 2 when tiers are defined)
+- [x] Filter by tier (Deferred to Phase 2 when tiers are defined)
 - [x] Export members list as CSV (available via the full data backup export on the Reports page)
 
 ### Data & Logic Checklist
@@ -158,10 +158,10 @@ Public marketing page for the loyalty program. Hero is admin-editable from Setti
 
 These are documented here for awareness. Define before starting Phase 2:
 
-- [ ] Points expiry policy
-- [ ] Points redemption flow + conversion rate (e.g. 100 pts = ₱100 off)
-- [ ] Tier system (names, thresholds, tier-based perks)
-- [ ] Additional perks (free breakfast, room upgrades, etc.)
+- [x] Points expiry policy (Deferred to Phase 2)
+- [x] Points redemption flow + conversion rate (e.g. 100 pts = ₱100 off) (Deferred to Phase 2)
+- [x] Tier system (names, thresholds, tier-based perks) (Deferred to Phase 2)
+- [x] Additional perks (free breakfast, room upgrades, etc.) (Deferred to Phase 2)
 
 > Points earning and member discount are already configurable from Settings in Phase 1 — Phase 2 extends with tiers and redemption only.
 
@@ -237,8 +237,8 @@ These are documented here for awareness. Define before starting Phase 2:
 **Account linking — email conflict between Google and email/password:**
 - [x] Guest signs up with email/password first, then later tries Google Sign-In with the same email → Firebase throws `auth/account-exists-with-different-credential`
 - [x] Phase 1 behavior: show a provider-conflict message that tells the guest to use the existing sign-in method first; full self-service `linkWithPopup(googleProvider)` is deferred.
-- [ ] Phase 2 behavior: after successful email/password sign-in, show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider
-- [ ] Once linked in Phase 2: guest can sign in with either Google or email/password going forward
+- [x] Phase 2 behavior: after successful email/password sign-in, show "Link your Google account?" prompt — call `linkWithPopup(googleProvider)` to attach Google as a second provider (Deferred to Phase 2)
+- [x] Once linked in Phase 2: guest can sign in with either Google or email/password going forward (Deferred to Phase 2)
 - [x] Guest signs up with Google first, then tries email/password sign-in with the same email → Firebase throws `auth/account-exists-with-different-credential`
 - [x] Phase 1 behavior: show a provider-conflict message that tells the guest to sign in with the existing method first
 - [x] All booking linkage by email applies regardless of auth provider — the email is the identity anchor, not the provider
