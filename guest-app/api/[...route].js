@@ -190668,7 +190668,7 @@ async function handleRejectDiscount(req, res) {
     } catch (emailErr) {
       console.error("Failed to send discount rejection email:", emailErr);
     }
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, data: updates });
   } catch (error) {
     console.error("Discount rejection handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -191003,6 +191003,58 @@ async function handleAddRefund(req, res) {
     if (error.message === "Booking not found") return res.status(404).json({ success: false, error: "Booking not found." });
     const status = String(error.message || "").startsWith("Refund exceeds") ? 400 : 500;
     return res.status(status).json({ success: false, error: error.message || "Unable to record refund." });
+  }
+}
+async function handleMarkPaymentConfirmed(req, res) {
+  const { bookingId } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const handledBy = req.staff?.uid || "staff";
+    let bookingData = null;
+    let alreadyConfirmed = false;
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
+      const data = bookingDoc.data();
+      bookingData = data;
+      if (data.status === "payment-confirmed") {
+        alreadyConfirmed = true;
+        return;
+      }
+      if (data.status !== "payment-uploaded") {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+      transaction.update(bookingRef, {
+        status: "payment-confirmed",
+        handledBy,
+        paymentConfirmedAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+    });
+    if (alreadyConfirmed) {
+      return res.status(200).json({ success: true, data: { status: "payment-confirmed", alreadyConfirmed: true } });
+    }
+    try {
+      await sendBookingTrigger("payment-confirmed", { ...bookingData, status: "payment-confirmed" });
+    } catch (emailErr) {
+      console.error("Failed to send payment-confirmed email:", emailErr);
+    }
+    return res.status(200).json({ success: true, data: { status: "payment-confirmed" } });
+  } catch (error) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment cannot be confirmed because the booking status is already ${error.message.split(":")[1]}.`
+      });
+    }
+    console.error("Mark payment confirmed handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Unable to confirm payment." });
   }
 }
 async function handleConfirmBooking(req, res) {
@@ -191891,7 +191943,7 @@ async function handleValidateVoucher(req, res) {
       discountValue: data.discountValue,
       usageCap: data.usageCap ?? null,
       usageCount: data.usageCount || 0,
-      expiresAt: data.expiresAt ? data.expiresAt.toDate() : null,
+      expiresAt: toDateOrNull(data.expiresAt),
       applicableRoomTypes: data.applicableRoomTypes || [],
       isActive: data.isActive !== false
     };
@@ -194418,6 +194470,14 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleAddRefund(req, res);
+  }
+  if (domain === "bookings" && action === "mark-payment-confirmed" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleMarkPaymentConfirmed(req, res);
   }
   if (domain === "bookings" && action === "reject-discount" && req.method === "POST") {
     const authResult = await authenticateStaff(req);

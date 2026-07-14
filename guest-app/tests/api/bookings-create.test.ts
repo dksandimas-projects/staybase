@@ -1373,7 +1373,16 @@ describe("/api/bookings/create", () => {
       await handler(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith({ success: true });
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: expect.objectContaining({
+          discountRejected: true,
+          discountRejectedBy: "mock_staff_uid",
+          discountRejectionReason: "Invalid ID card photo quality",
+          discountPct: 0,
+          totalPrice: 6000
+        })
+      });
 
       // Assert database document was updated correctly
       expect(discountedBooking.discountRejected).toBe(true);

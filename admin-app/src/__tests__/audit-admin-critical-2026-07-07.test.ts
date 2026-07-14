@@ -45,10 +45,11 @@ describe("Admin audit 2026-07-07 critical fixes", () => {
     expect(contextSrc).toMatch(/status === ["']confirmed["'][\s\S]*api\/bookings\/confirm/);
     const confirmedBranchIndex = contextSrc.indexOf(`} else if (status === "confirmed") {`);
     const checkoutBranchIndex = contextSrc.indexOf(`} else if (status === "checked-out") {`);
-    const genericUpdateIndex = contextSrc.indexOf("const updatePayload: Record<string, any>");
+    const unsupportedTransitionIndex = contextSrc.indexOf("Unsupported client-side booking status transition");
     expect(confirmedBranchIndex).toBeGreaterThan(-1);
     expect(checkoutBranchIndex).toBeGreaterThan(confirmedBranchIndex);
-    expect(genericUpdateIndex).toBeGreaterThan(checkoutBranchIndex);
+    expect(unsupportedTransitionIndex).toBeGreaterThan(checkoutBranchIndex);
+    expect(contextSrc).not.toContain("const updatePayload: Record<string, any>");
   });
 
   it("AA-03 renders real payment proof URLs and removes the fake store receipt panel", () => {

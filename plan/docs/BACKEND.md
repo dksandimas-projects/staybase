@@ -152,6 +152,13 @@ the idempotency guard for the guest payment-confirmed email. Staff may then
 transition `payment-confirmed` to `confirmed`, or check in directly when the
 registration gate is otherwise complete.
 
+A staff member verifying an uploaded online payment uses
+`POST /api/bookings/mark-payment-confirmed`. That route transactionally permits
+only `payment-uploaded` → `payment-confirmed`, stamps `handledBy` and
+`paymentConfirmedAt`, treats an already-confirmed booking as an idempotent
+retry, and sends the guest email only after a new transition commits. Firestore
+client rules do not allow direct status updates.
+
 Checkout does not hard-block an unsettled folio. It records the charge-inclusive
 balance for audit/receivables and defers any eligible Spark Rewards award until
 the final payment. Points are based only on net `totalPrice` (room/breakfast),
@@ -578,6 +585,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `rooms` | Public | Create/Update = Staff; Delete = Admin |
 | `roomDeletionAudit` | Staff/Admin only | Create = Admin only; immutable |
 | `bookings` | Staff/Admin in Firestore client rules; guest lookup via API/ref+email only | Create = API/Admin SDK only; Update = Staff/Admin operational updates; Delete = Admin |
+| `financeIntegrityRepairs` | Admin only | Admin SDK only; immutable audit records created by the approved FLR-01 repair workflow |
 | `guests` | Owner or Staff/Admin | Create/disable via Admin SDK routes; profile update = Owner or Admin |
 | `settings` | Public | Admin only |
 | `corporateInquiries` | Staff/Admin only | Staff/Admin only; public guest submissions use `/api/corporate/inquiry` |
@@ -596,6 +604,14 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |
 
 Full rules live in `firebase/firestore.rules`.
+
+The one-off FLR-01 workflow lives at `scripts/finance-integrity-scan.ts`. Its
+default mode is read-only and writes a local review CSV with every row set to
+`approved=NO`. Apply mode requires staff to change individual rows to
+`approved=YES` and supply the exact confirmation phrase; it transactionally
+revalidates current source data, appends missing store tenders rather than
+editing ledger history, and records each applied action in
+`financeIntegrityRepairs`.
 
 ---
 
