@@ -52,7 +52,8 @@ describe("Admin audit SEV-3 fixes — 2026-07-07", () => {
     expect(ratesPage).toMatch(/corpUsageCap/);
     expect(bookingsPage).toMatch(/value="payment-confirmed"/);
     expect(bookingsPage).toMatch(/handleStatusTransition\("payment-confirmed"\)/);
-    expect(adminContext).toMatch(/\/api\/email\/payment-confirmed/);
+    expect(adminContext).toMatch(/\/api\/bookings\/mark-payment-confirmed/);
+    expect(adminContext).not.toMatch(/\/api\/email\/payment-confirmed/);
   });
 
   it("AA-19/AA-20/AA-22 closes rewards, white-label, and API fallback gaps", () => {
