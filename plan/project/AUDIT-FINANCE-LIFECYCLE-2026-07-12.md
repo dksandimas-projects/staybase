@@ -29,9 +29,9 @@
 |---|---|---|---|
 | **SEV-1 (critical)** | 0 | 2 | **2** |
 | **SEV-2 (major)** | 0 | 5 | **5** |
-| **SEV-3 (minor)** | 2 | 6 | **8** |
+| **SEV-3 (minor)** | 0 | 8 | **8** |
 | **SEV-4 (nit / polish)** | 5 | 0 | **5** |
-| **Total** | **7** | **13** | **20** |
+| **Total** | **5** | **15** | **20** |
 
 **Verdict:** the FIN-01..FIN-14 + FR-01..FR-05 work gave the system a real
 cash side (collections, refunds, receivables, daily close) and the core
@@ -57,6 +57,10 @@ The non-policy reporting batch then aligned Billed and Collected on a
 to-date folio snapshot, surfaced retained no-show deposits, and moved report
 windows plus stay-overlap calculations onto hotel-timezone calendar days
 (FL-13, FL-14, FL-15).
+The owner-policy batch closed the remaining SEV-3 items: early departures
+retain the contracted total with a transparent adjustment, while loyalty
+earnings are locked at checkout and credited only after the full folio is
+settled (FL-10, FL-11). All SEV-1 through SEV-3 findings are now closed.
 
 ### What's already solid
 
@@ -87,9 +91,8 @@ windows plus stay-overlap calculations onto hotel-timezone calendar days
 2. ✅ **FL-04 + FL-09 + FL-12** — status-consistency batch shipped
    2026-07-13: atomic full-payment transition, working
    `payment-confirmed → confirmed`, and aligned Dashboard revenue.
-3. 🔄 **FL-08 + FL-10** — shared `rebuildRateBreakdown(booking)` helper
-   shipped with FL-08 on 2026-07-13 and now serves points redeem/undo plus
-   reject-discount. FL-10 early-checkout integration remains policy-blocked.
+3. ✅ **FL-08 + FL-10** — shared rate-breakdown helpers now serve points
+   redeem/undo, discount rejection, and retained-total early checkout.
 4. ✅ **FL-05** — direct-paid store tenders join the shared ledger on
    delivery; COD maps to Cash, Add to Bill remains a folio charge, and the
    decision is recorded in `DECISIONS-FEATURES.md`.
@@ -98,10 +101,11 @@ windows plus stay-overlap calculations onto hotel-timezone calendar days
    including the capped finite `totalPriceOverride`, before Firestore work.
 6. ✅ **FL-13 + FL-14 + FL-15** — reporting-period batch shipped:
    comparable to-date folio snapshots, retained no-show deposits, and
-   hotel-timezone report boundaries. FL-10/FL-11 remain policy-blocked
-   (early-checkout refunds, points on unpaid folio); log owner outcomes in
-   `DECISIONS-FEATURES.md`.
-7. **FL-16..FL-20** — SEV-4 polish batch.
+   hotel-timezone report boundaries.
+7. ✅ **FL-10 + FL-11** — policy batch shipped: retained-total early
+   departure breakdowns plus settled-folio loyalty awards and unpaid-checkout
+   audit stamps. Decisions recorded as #117 and #118.
+8. **FL-16..FL-20** — SEV-4 polish batch.
 
 ---
 
@@ -416,7 +420,7 @@ allow-list, matching the existing drawer action and documented state machine.
 The transition fires the distinct booking-confirmed email once; direct
 check-in from `payment-confirmed` remains supported.
 
-### FL-10 — Early checkout truncates the stay but keeps the full price · `Open`
+### FL-10 — Early checkout truncates the stay but keeps the full price · `Fixed 2026-07-13`
 
 **Where:** `guest-app/server/handlers/bookings.ts:2346-2369` (`handleCheckoutBooking` truncation block)
 
@@ -433,7 +437,14 @@ Regardless of policy outcome, rebuild `rateBreakdown` to reflect the
 truncated stay (with an explicit "early checkout — original total
 retained" adjustment line if the no-refund policy stands).
 
-### FL-11 — Checkout awards loyalty points regardless of payment; balance gate is client-only · `Open`
+**Remediation:** Decision #117 retains the contracted booking total on early
+departure. Checkout now rebuilds both modern and legacy breakdowns around the
+shortened stay, preserves the booking deductions, and adds an explicit
+“Early departure — original total retained” adjustment whose visible lines
+sum back to `totalPrice`. The original checkout timestamp remains on the
+booking and focused helper/API tests cover the receipt math.
+
+### FL-11 — Checkout awards loyalty points regardless of payment; balance gate is client-only · `Fixed 2026-07-13`
 
 **Where:** `guest-app/server/handlers/bookings.ts:2291-2327` (points calc), `admin-app/src/pages/BookingsPage.tsx:3590-3604` (two-click balance confirm)
 
@@ -447,6 +458,15 @@ spend — likely intended ("per-spend" on the room bill) but unconfirmed.
 **Fix:** owner decision (points on unpaid folio? points on incidentals?)
 → `DECISIONS-FEATURES.md`; at minimum stamp `checkedOutWithBalance:
 <amount>` on the booking during checkout so the audit trail is explicit.
+
+**Remediation:** Decision #118 limits earnings to net room/breakfast booking
+spend and requires a fully settled charge-inclusive folio. Checkout reads the
+payment, incidental, and billed Add-to-Bill ledgers in its transaction,
+stamps billed/collected/balance audit fields, and either awards immediately
+or locks a pending award. A later final payment consumes that award once in
+the same transaction as the payment append, using booking state plus a
+deterministic history id for idempotency. Checkout with a balance remains a
+front-desk judgment call rather than a server block.
 
 ### FL-12 — Dashboard revenue and Reports disagree on `payment-confirmed` · `Fixed 2026-07-13`
 
@@ -599,5 +619,6 @@ and let any residual show as a separate "Member discount" line.
 - **Payments on cancelled/checked-out bookings** — `add-payment` allows
   them deliberately (receivables are settled after checkout); not a defect.
 - **Server-side checkout without balance enforcement** — retained as a
-  front-desk judgment call (see FL-11 for the audit-trail ask); hard
-  server blocks would strand guests at the desk.
+  front-desk judgment call under decision #118; the server stamps the unpaid
+  balance and defers loyalty points, while a hard block could strand guests
+  at the desk.

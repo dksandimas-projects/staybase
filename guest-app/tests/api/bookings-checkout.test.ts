@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockBookings, mockRooms, mockSettings, mockMembers, mockPointsHistory, mockWrites, sendBookingTrigger } = vi.hoisted(() => {
+const { mockBookings, mockRooms, mockSettings, mockMembers, mockPayments, mockCharges, mockStoreOrders, mockPointsHistory, mockWrites, sendBookingTrigger } = vi.hoisted(() => {
   const mockWrites: Array<{ type: string; path: string; data: any }> = [];
   return {
     mockBookings: {} as Record<string, any>,
     mockRooms: {} as Record<string, any>,
     mockSettings: {} as Record<string, any>,
     mockMembers: {} as Record<string, any>,
+    mockPayments: [] as Array<{ amount: number }>,
+    mockCharges: [] as Array<{ amount: number }>,
+    mockStoreOrders: [] as Array<Record<string, any>>,
     mockPointsHistory: [] as Array<{ id: string; data: any }>,
     mockWrites,
     sendBookingTrigger: vi.fn().mockResolvedValue(undefined)
@@ -38,7 +41,14 @@ vi.mock("../../server/lib/firebase-admin", () => {
           : { exists: false };
       },
       collection: (sub: string) => ({
-        doc: (subDocId?: string) => docRef(`${path}/${sub}/${subDocId || "auto_id"}`)
+        path: `${path}/${sub}`,
+        doc: (subDocId?: string) => docRef(`${path}/${sub}/${subDocId || "auto_id"}`),
+        get: async () => ({
+          docs: (sub === "payments" ? mockPayments : sub === "charges" ? mockCharges : []).map((data, index) => ({
+            id: `${sub}_${index + 1}`,
+            data: () => data
+          }))
+        })
       }),
       update: async (data: any) => {
         if (coll === "bookings" && mockBookings[docId]) {
@@ -86,6 +96,13 @@ vi.mock("../../server/lib/firebase-admin", () => {
                         .map(([id, data]) => ({ id, data: () => data, exists: true }));
                       return { empty: docs.length === 0, docs };
                     }
+                    if (collName === "storeOrders") {
+                      const docs = mockStoreOrders
+                        .filter((data) => op !== "==" || data[field] === value)
+                        .slice(0, n)
+                        .map((data, index) => ({ id: data.id || `order_${index + 1}`, data: () => data, exists: true }));
+                      return { empty: docs.length === 0, docs };
+                    }
                     return { empty: true, docs: [] };
                   }
                 };
@@ -98,6 +115,12 @@ vi.mock("../../server/lib/firebase-admin", () => {
                       return true;
                     })
                     .map(([id, data]) => ({ id, data: () => data, exists: true }));
+                  return { empty: docs.length === 0, docs };
+                }
+                if (collName === "storeOrders") {
+                  const docs = mockStoreOrders
+                    .filter((data) => op !== "==" || data[field] === value)
+                    .map((data, index) => ({ id: data.id || `order_${index + 1}`, data: () => data, exists: true }));
                   return { empty: docs.length === 0, docs };
                 }
                 return { empty: true, docs: [] };
@@ -178,6 +201,9 @@ describe("/api/bookings/checkout", () => {
     Object.keys(mockRooms).forEach((k) => delete mockRooms[k]);
     Object.keys(mockSettings).forEach((k) => delete mockSettings[k]);
     Object.keys(mockMembers).forEach((k) => delete mockMembers[k]);
+    mockPayments.length = 0;
+    mockCharges.length = 0;
+    mockStoreOrders.length = 0;
     mockPointsHistory.length = 0;
     mockWrites.length = 0;
     sendBookingTrigger.mockClear();
@@ -226,7 +252,7 @@ describe("/api/bookings/checkout", () => {
     expect(mockPointsHistory.length).toBe(0);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { status: "checked-out", pointsAwarded: 0, memberId: null }
+      data: { status: "checked-out", pointsAwarded: 0, memberId: null, checkedOutWithBalance: 5000 }
     });
   });
 
@@ -248,6 +274,7 @@ describe("/api/bookings/checkout", () => {
       pointsPerBooking: 50
     };
     mockRooms["room_101"] = { status: "occupied" };
+    mockPayments.push({ amount: 5000 });
 
     const res = mockResponse();
     await handleCheckoutBooking(staffReq(), res);
@@ -283,6 +310,7 @@ describe("/api/bookings/checkout", () => {
       pointsPerBooking: 50
     };
     mockRooms["room_101"] = { status: "occupied" };
+    mockPayments.push({ amount: 5000 });
 
     const res = mockResponse();
     await handleCheckoutBooking(staffReq(), res);
@@ -309,6 +337,7 @@ describe("/api/bookings/checkout", () => {
       pointsPerBooking: 50
     };
     mockRooms["room_101"] = { status: "occupied" };
+    mockPayments.push({ amount: 2000 });
 
     const res = mockResponse();
     await handleCheckoutBooking(staffReq(), res);
@@ -349,6 +378,7 @@ describe("/api/bookings/checkout", () => {
     mockMembers["member_1"] = { rewardsPoints: 0, email: "alex@sparkinn.com" };
     mockSettings["rewardsConfig"] = { pointsEnabled: true, earningMode: "per-spend", pointsPerHundred: 5 };
     mockRooms["room_101"] = { status: "occupied" };
+    mockPayments.push({ amount: 2000 });
 
     const res = mockResponse();
     await handleCheckoutBooking(staffReq(), res);
@@ -356,5 +386,66 @@ describe("/api/bookings/checkout", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mockBookings["booking_1"].memberId).toBe("member_1");
     expect(mockMembers["member_1"].rewardsPoints).toBe(100);
+  });
+
+  test("defers points and stamps the charge-inclusive balance when checkout is unpaid", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-001",
+      guestEmail: "member@sparkinn.com",
+      status: "checked-in",
+      totalPrice: 5000,
+      roomId: "room_101",
+      memberId: "member_1"
+    };
+    mockMembers["member_1"] = { rewardsPoints: 100 };
+    mockSettings["rewardsConfig"] = { pointsEnabled: true, earningMode: "per-spend", pointsPerHundred: 10 };
+    mockPayments.push({ amount: 2000 });
+    mockCharges.push({ amount: 500 });
+    mockStoreOrders.push({ bookingId: "booking_1", paymentMethod: "add-to-bill", status: "delivered", isBilled: true, totalAmount: 300 });
+    mockRooms["room_101"] = { status: "occupied" };
+
+    const res = mockResponse();
+    await handleCheckoutBooking(staffReq(), res);
+
+    expect(mockBookings["booking_1"]).toEqual(expect.objectContaining({
+      checkedOutFolioTotal: 5800,
+      checkedOutCollectedTotal: 2000,
+      checkedOutWithBalance: 3800,
+      pointsAwarded: 0,
+      pendingLoyaltyPoints: 500,
+      loyaltyAwardStatus: "pending-payment"
+    }));
+    expect(mockMembers["member_1"].rewardsPoints).toBe(100);
+    expect(mockPointsHistory).toHaveLength(0);
+  });
+
+  test("rebuilds an early-checkout breakdown with an explicit retained-total line", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260710-001",
+      status: "checked-in",
+      totalPrice: 7500,
+      ratePerNight: 2500,
+      numNights: 3,
+      checkIn: new Date("2026-07-11T00:00:00Z"),
+      checkOut: new Date("2026-07-20T00:00:00Z"),
+      roomId: "room_101",
+      memberId: null,
+      rateBreakdown: {
+        roomSubtotal: 7500,
+        roomLines: [{ source: "regular", label: "Regular rate", startDate: "2026-07-11", endDate: "2026-07-14", nights: 3, nightlyRate: 2500, subtotal: 7500 }],
+        addOns: [], deductions: [], finalTotal: 7500
+      }
+    };
+    mockPayments.push({ amount: 7500 });
+    mockRooms["room_101"] = { status: "occupied" };
+
+    const res = mockResponse();
+    await handleCheckoutBooking(staffReq(), res);
+
+    expect(mockBookings["booking_1"].earlyCheckoutOriginalCheckOut).toBeDefined();
+    expect(mockBookings["booking_1"].rateBreakdown.addOns).toContainEqual(expect.objectContaining({
+      label: "Early departure — original total retained"
+    }));
+    expect(mockBookings["booking_1"].rateBreakdown.finalTotal).toBe(7500);
   });
 });

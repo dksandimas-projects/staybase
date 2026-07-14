@@ -168,6 +168,14 @@ Booking {
   pointsRedeemedValue: number         // ₱ value deducted from totalPrice (0 if none)
   pointsRedeemedBy: string | null     // staff UID who applied redemption
   pointsRedeemedAt: Date | null
+  pointsAwarded?: number
+  pendingLoyaltyPoints?: number
+  loyaltyAwardStatus?: "pending-payment" | "awarded" | "ineligible"
+  pointsAwardedAt?: Date | null
+  checkedOutWithBalance?: number
+  checkedOutFolioTotal?: number
+  checkedOutCollectedTotal?: number
+  earlyCheckoutOriginalCheckOut?: Timestamp | null
   hasBreakfast: boolean
   breakfastRate: number
   guestIdPhotoUrl: string | null      // guest ID photo uploaded by front desk at check-in

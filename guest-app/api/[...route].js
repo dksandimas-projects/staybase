@@ -189449,6 +189449,80 @@ function rebuildRateBreakdown(booking, overrides = {}) {
     finalTotal
   });
 }
+function shiftDateKey(dateKey2, days) {
+  const [year, month, day] = dateKey2.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+function dateKeyFromUnknown(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const date = value instanceof Date ? value : value && typeof value.toDate === "function" ? value.toDate() : new Date(value);
+  return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
+}
+function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
+  const nights = Math.max(Math.floor(nonNegativeFinite(newNights)), 1);
+  const originalNights = Math.max(Math.floor(nonNegativeFinite(booking.numNights)), nights);
+  const finalTotal = nonNegativeFinite(booking.totalPrice);
+  const existing = booking.rateBreakdown;
+  let remainingNights = nights;
+  const roomLines = (existing?.roomLines || []).flatMap((line) => {
+    if (remainingNights <= 0) return [];
+    const lineNights = Math.max(Math.floor(nonNegativeFinite(line.nights)), 0);
+    const consumedNights = Math.min(lineNights, remainingNights);
+    if (consumedNights <= 0) return [];
+    remainingNights -= consumedNights;
+    return [{
+      ...line,
+      endDate: shiftDateKey(line.startDate, consumedNights),
+      nights: consumedNights,
+      subtotal: nonNegativeFinite(line.nightlyRate) * consumedNights
+    }];
+  });
+  if (roomLines.length === 0) {
+    const startDate = dateKeyFromUnknown(booking.checkIn);
+    const nightlyRate = nonNegativeFinite(booking.ratePerNight);
+    roomLines.push({
+      source: "manual",
+      label: "Locked room rate",
+      startDate,
+      endDate: shiftDateKey(startDate, nights),
+      nights,
+      nightlyRate,
+      subtotal: nightlyRate * nights
+    });
+  }
+  const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
+  const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
+  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
+    label: "Breakfast add-on",
+    amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
+  }] : [];
+  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
+  const originalAddOns = existing?.addOns ?? (booking.hasBreakfast ? [{
+    label: "Breakfast add-on",
+    amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * originalNights
+  }] : []);
+  const originalPricing = composeRateBreakdown({
+    roomLines: existing?.roomLines || roomLines,
+    roomSubtotal: originalRoomSubtotal,
+    addOns: originalAddOns,
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite(booking.discountPct),
+    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    pointsRedeemedValue: nonNegativeFinite(booking.pointsRedeemedValue),
+    finalTotal
+  });
+  const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
+  const consumedGross = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const retainedAmount = Math.max(Math.round((finalTotal + deductionTotal - consumedGross) * 100) / 100, 0);
+  return {
+    roomSubtotal,
+    roomLines,
+    addOns: retainedAmount > 0 ? [...addOns, { label: "Early departure \u2014 original total retained", amount: retainedAmount }] : addOns,
+    deductions: originalPricing.deductions,
+    finalTotal
+  };
+}
 
 // server/handlers/bookings.ts
 function getConfiguredBookingRefPrefix() {
@@ -189458,6 +189532,23 @@ var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed
 var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+function sumLedgerAmounts(snapshot) {
+  return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
+}
+function sumBilledAddToBillOrders(snapshot) {
+  return snapshot.docs.reduce((sum, docSnap) => {
+    const order = docSnap.data() || {};
+    return order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled ? sum + Number(order.totalAmount || 0) : sum;
+  }, 0);
+}
+function calculateCheckoutPoints(totalPrice, rewardsConfig) {
+  if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
+  if ((rewardsConfig.earningMode || "per-spend") === "per-booking") {
+    return Math.max(Math.floor(Number(rewardsConfig.pointsPerBooking || 0)), 0);
+  }
+  const pointsPerHundred = Math.max(Number(rewardsConfig.pointsPerHundred || 0), 0);
+  return Math.max(Math.floor(Math.max(totalPrice, 0) / 100 * pointsPerHundred), 0);
+}
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
@@ -190738,6 +190829,7 @@ async function handleAddPayment(req, res) {
   let hadPaymentProof = false;
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot = null;
+  let loyaltyPointsAwarded = 0;
   try {
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -190760,6 +190852,10 @@ async function handleAddPayment(req, res) {
       isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
       hadPaymentProof = !!bookingData.paymentProofUrl;
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
+      const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
+      const settlesCheckedOutFolio = bookingData.status === "checked-out" && bookingData.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData.checkedOutFolioTotal || 0);
+      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId ? adminDb.collection("members").doc(String(bookingData.memberId)) : null;
+      const loyaltyMemberDoc = loyaltyMemberRef ? await transaction.get(loyaltyMemberRef) : null;
       const bookingUpdates = {};
       if (hadPaymentProof && staffPaymentMarkerMissing) {
         bookingUpdates["emailNotificationsSent.staffNewPayment"] = /* @__PURE__ */ new Date();
@@ -190776,6 +190872,31 @@ async function handleAddPayment(req, res) {
           ...bookingData,
           ...bookingUpdates
         };
+      }
+      if (settlesCheckedOutFolio && loyaltyMemberRef && loyaltyMemberDoc?.exists) {
+        loyaltyPointsAwarded = pendingLoyaltyPoints;
+        const awardedAt = /* @__PURE__ */ new Date();
+        Object.assign(bookingUpdates, {
+          pointsAwarded: loyaltyPointsAwarded,
+          pendingLoyaltyPoints: 0,
+          loyaltyAwardStatus: "awarded",
+          pointsAwardedAt: awardedAt,
+          updatedAt: awardedAt
+        });
+        transaction.update(loyaltyMemberRef, {
+          rewardsPoints: Number(loyaltyMemberDoc.data()?.rewardsPoints || 0) + loyaltyPointsAwarded,
+          updatedAt: awardedAt
+        });
+        const historyRef = loyaltyMemberRef.collection("pointsHistory").doc(`earn-${bookingId}`);
+        transaction.set(historyRef, {
+          type: "earn",
+          points: loyaltyPointsAwarded,
+          bookingId,
+          bookingRef: bookingData.bookingRef,
+          description: `Settled Stay Earnings (${bookingData.bookingRef})`,
+          by: staffUid,
+          createdAt: awardedAt
+        });
       }
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
@@ -190808,7 +190929,8 @@ async function handleAddPayment(req, res) {
     data: {
       ...paymentRecord,
       totalPaid,
-      status: bookingDataSnapshot?.status || null
+      status: bookingDataSnapshot?.status || null,
+      loyaltyPointsAwarded
     }
   });
 }
@@ -190996,8 +191118,9 @@ async function handleCheckoutBooking(req, res) {
       });
     }
     const checkedOutBy = req.staff?.uid || "staff";
-    const totalPrice = Number(bookingData.totalPrice || 0);
     let pointsAwarded = 0;
+    let eligiblePoints = 0;
+    let checkedOutWithBalance = 0;
     let memberId = bookingData.memberId || null;
     let rewardsConfig = null;
     let memberDoc = null;
@@ -191015,16 +191138,6 @@ async function handleCheckoutBooking(req, res) {
     if (memberDoc?.exists) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
-      const pointsEnabled = rewardsConfig?.pointsEnabled !== false;
-      if (pointsEnabled && rewardsConfig) {
-        const earningMode = rewardsConfig.earningMode || "per-spend";
-        if (earningMode === "per-spend") {
-          const pointsPerHundred = Number(rewardsConfig.pointsPerHundred || 0);
-          pointsAwarded = Math.floor(totalPrice / 100 * pointsPerHundred);
-        } else {
-          pointsAwarded = Number(rewardsConfig.pointsPerBooking || 0);
-        }
-      }
     }
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
@@ -191035,7 +191148,19 @@ async function handleCheckoutBooking(req, res) {
       if (freshBookingData.status !== "checked-in") {
         throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
       }
-      const memberRef = memberId && pointsAwarded > 0 ? adminDb.collection("members").doc(memberId) : null;
+      const paymentsRef = bookingRef.collection("payments");
+      const chargesRef = bookingRef.collection("charges");
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const chargesSnapshot = await transaction.get(chargesRef);
+      const storeOrdersSnapshot = await transaction.get(storeOrdersQuery);
+      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+      const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
+      checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
+      eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      const memberRef = memberId && eligiblePoints > 0 ? adminDb.collection("members").doc(memberId) : null;
       const memberDocInTransaction = memberRef ? await transaction.get(memberRef) : null;
       const { todayStr } = getManilaDateInfo();
       const checkoutDate = /* @__PURE__ */ new Date(`${todayStr}T00:00:00Z`);
@@ -191046,17 +191171,30 @@ async function handleCheckoutBooking(req, res) {
         status: "checked-out",
         checkedOutAt: /* @__PURE__ */ new Date(),
         checkedOutBy,
-        pointsAwarded,
+        checkedOutWithBalance,
+        checkedOutFolioTotal: checkoutFolioTotal,
+        checkedOutCollectedTotal: collectedTotal,
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (memberId && freshBookingData.memberId !== memberId) {
         bookingUpdate.memberId = memberId;
       }
       if (shouldTruncateStay && originalCheckIn) {
+        const truncatedNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 864e5), 1);
         bookingUpdate.checkOut = Timestamp.fromDate(checkoutDate);
-        bookingUpdate.numNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 864e5), 1);
+        bookingUpdate.numNights = truncatedNights;
         bookingUpdate.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
+        bookingUpdate.rateBreakdown = rebuildEarlyCheckoutRateBreakdown(freshBookingData, truncatedNights);
       }
+      const canAwardPoints = Boolean(memberId && eligiblePoints > 0 && memberRef && memberDocInTransaction?.exists);
+      const awardNow = canAwardPoints && checkedOutWithBalance <= 0;
+      pointsAwarded = awardNow ? eligiblePoints : 0;
+      Object.assign(bookingUpdate, {
+        pointsAwarded,
+        pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
+        loyaltyAwardStatus: canAwardPoints ? awardNow ? "awarded" : "pending-payment" : "ineligible",
+        pointsAwardedAt: awardNow ? /* @__PURE__ */ new Date() : null
+      });
       transaction.update(bookingRef, bookingUpdate);
       if (bookingData.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
@@ -191075,13 +191213,13 @@ async function handleCheckoutBooking(req, res) {
           { merge: true }
         );
       }
-      if (memberId && pointsAwarded > 0 && memberRef && memberDocInTransaction?.exists) {
+      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
         const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
         transaction.update(memberRef, {
           rewardsPoints: currentPoints + pointsAwarded,
           updatedAt: /* @__PURE__ */ new Date()
         });
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
         transaction.set(historyRef, {
           type: "earn",
           points: pointsAwarded,
@@ -191098,7 +191236,8 @@ async function handleCheckoutBooking(req, res) {
       data: {
         status: "checked-out",
         pointsAwarded,
-        memberId
+        memberId,
+        checkedOutWithBalance
       }
     });
   } catch (error) {
