@@ -98,7 +98,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `checkOut` | timestamp | |
 | `numNights` | number | Computed at booking time |
 | `ratePerNight` | number | Rate locked at booking time |
-| `rateBreakdown` | object \| null | Locked itemized price explanation for mixed regular/weekend/seasonal rates, add-ons, and deductions. New bookings should persist it; legacy bookings may be null and fall back to `ratePerNight × numNights`. |
+| `rateBreakdown` | object \| null | Locked itemized price explanation for mixed regular/weekend/seasonal rates, add-ons, and deductions. New bookings should persist it; later money mutations such as points redeem/undo rebuild it atomically with `totalPrice`. Legacy bookings may be null and fall back to `ratePerNight × numNights`. |
 | `totalPrice` | number | Computed at booking time |
 | `discountType` | string | `""` \| `"senior"` \| `"pwd"` |
 | `discountPct` | number | `0` \| `20` |
@@ -108,7 +108,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `discountRejected` | boolean | `true` if staff rejected the discount ID |
 | `discountRejectedBy` | string \| null | Staff UID who rejected |
 | `discountRejectionReason` | string | Optional reason entered by staff at rejection |
-| `originalTotalPrice` | number \| null | Pre-discount total — stored at booking creation if a discount was applied; used to restore `totalPrice` on rejection |
+| `originalTotalPrice` | number \| null | Canonical pre-discount room/add-on subtotal — always stored by current create, reschedule, and discount writers; `null` is legacy-only |
 | `voucherCode` | string | Applied promo voucher code (if any) |
 | `voucherDiscount` | number | Flat ₱ or % discount from voucher |
 | `isCorporate` | boolean | `true` if booked via `/corporate/book` |
@@ -128,6 +128,14 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `pointsRedeemedValue` | number | ₱ value of redeemed points deducted from `totalPrice` (0 if none) |
 | `pointsRedeemedBy` | string \| null | Staff UID who applied the redemption |
 | `pointsRedeemedAt` | timestamp \| null | When redemption was applied |
+| `pointsAwarded` | number | Checkout points actually credited to the member; `0` while a qualifying award is pending payment |
+| `pendingLoyaltyPoints` | number | Locked checkout award waiting for final folio settlement; cleared atomically when awarded |
+| `loyaltyAwardStatus` | string | `pending-payment`, `awarded`, or `ineligible`; transaction/idempotency state for checkout earnings |
+| `pointsAwardedAt` | timestamp \| null | When checkout earnings were credited; null while pending/ineligible |
+| `checkedOutWithBalance` | number | Immutable charge-inclusive outstanding balance stamped at checkout; remains the audit record even after later settlement |
+| `checkedOutFolioTotal` | number | Checkout snapshot of booking total + net incidentals + delivered billed-to-room store orders |
+| `checkedOutCollectedTotal` | number | Net payment-ledger total at checkout, including refunds |
+| `earlyCheckoutOriginalCheckOut` | timestamp \| null | Original departure timestamp retained when early checkout shortens the operational stay |
 | `hasBreakfast` | boolean | `true` if breakfast add-on purchased |
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
 | `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
@@ -137,7 +145,22 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
 
+When an appended payment brings a `pending` or `payment-uploaded` booking to
+its locked `totalPrice`, the payment record and `payment-confirmed` status are
+written in the same server transaction. The committed status transition is
+the idempotency guard for the guest payment-confirmed email. Staff may then
+transition `payment-confirmed` to `confirmed`, or check in directly when the
+registration gate is otherwise complete.
+
+Checkout does not hard-block an unsettled folio. It records the charge-inclusive
+balance for audit/receivables and defers any eligible Spark Rewards award until
+the final payment. Points are based only on net `totalPrice` (room/breakfast),
+not incidentals or store orders. Early departure retains the contracted total
+and adds a guest-visible retained-total line to the rebuilt rate breakdown.
+
 > **Store charges are not denormalized onto the booking document.** The checkout folio in `admin-app/src/pages/BookingsPage.tsx` (`getBookingStoreCharges`) derives the billed store orders for a booking at read time by filtering the `storeOrders` collection on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. This avoids denormalization drift between the booking and store order lifecycles. `storeOrders.isBilled` and `storeOrders.billedAt` are the source of truth (set by the front desk "Add to Booking Bill" action in the admin Bookings drawer).
+
+> **Manual walk-in pricing is durable across room/date moves.** A walk-in created with a manual override stores a `manual` room line in its locked rate breakdown. Rescheduling derives the exact nightly basis from that line's subtotal and nights, rescales it for the new stay length, and does not replace it with the target room's live standard/seasonal rate or add a separate breakfast line. Non-manual bookings continue to recalculate against the target room/date pricing basis.
 
 > **Fixed 2026-07-02: `GET /api/rooms/availability` was 500ing in production** with a Firestore `FAILED_PRECONDITION: The query requires an index` error on the composite `status` (ASC) + `checkIn` (ASC) query. All 5 composite indexes defined in `firebase/firestore.indexes.json` (4 on `bookings`, 1 on `rooms`) existed in source control but had never actually been deployed to the live project — confirmed via `firestore_list_indexes` that zero indexes existed before the fix. Resolved by creating all 5 directly against the live project (`spark-inn-stg-7a7ad`); all now `READY` and `/api/rooms/availability` returns `200`. **Lesson: `firebase/firestore.indexes.json` being present and correct in the repo does not mean it's deployed** — there is no CI step or pre-deploy hook that runs `firebase deploy --only firestore:indexes` automatically. If a new query needs a composite index, add it to `firestore.indexes.json` **and** deploy it (via `firebase deploy --only firestore:indexes` or the Firebase MCP `firestore_create_index` tool) — don't assume the JSON file alone is sufficient. Separately still worth confirming with whoever owns the Firebase project config: the live `FIREBASE_PROJECT_ID` used by both the Preview and Production Vercel environments is `spark-inn-stg-7a7ad` (a "stg"-named project serving production traffic) — may be intentional (single project, historically named), but flagging since it reads like a staging/production mixup.
 
@@ -146,7 +169,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 
 ### `bookings/{bookingId}/payments/{paymentId}`
 
-Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. All writes use authenticated server routes; Firestore client creation is denied.
+Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. Onsite payment clients preallocate `paymentId`; the server creates that exact document so matching retries are idempotent. All writes use authenticated server routes; Firestore client creation is denied.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -172,16 +195,16 @@ Append-only incidental folio ledger. Positive entries add an amount owed; voidin
 | Field | Type | Notes |
 |---|---|---|
 | `label` | string | Staff-facing description shown on the folio and receipt |
-| `amount` | number | Positive charge or negative reversal |
+| `amount` | number | Positive charge or negative reversal; absolute value capped at 1,000,000 |
 | `category` | string | `late-checkout`, `early-checkin`, `extra-person`, `damage`, `laundry`, or `other` |
 | `note` | string | Optional context; required as the void reason on reversals |
 | `addedBy` | string | Staff UID |
 | `addedAt` | timestamp | Server timestamp |
-| `voidOf` | string \| null | Original charge ID for reversal entries |
+| `voidOf` | string \| null | Original charge ID for reversal entries; reversal document ID must be `void-{voidOf}` |
 
 Folio total = `booking.totalPrice + delivered billed-to-room store orders + sum(charges[].amount)`. Outstanding balance subtracts the append-only payments ledger from that total.
 
-**Security rules:** Staff/Admin read + create; no updates or deletes.
+**Security rules:** Staff/Admin read + create; no updates or deletes. Rules enforce the absolute amount cap and deterministic reversal ID, which makes each original charge voidable only once.
 
 ---
 
@@ -479,6 +502,7 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `paymentProofUrl` | string | Firebase Storage URL (required for any non-`cod`/non-`add-to-bill` method) |
 | `status` | string | `"placed"` \| `"confirmed"` \| `"out-for-delivery"` \| `"delivered"` \| `"cancelled"` |
 | `stockRestoredAt` | timestamp \| null | Set once when reserved stock is restored after a placed order cancellation |
+| `deliveredAt` | timestamp \| null | Set by the staff delivery API; revenue-recognition and direct-tender timestamp |
 | `isBilled` | boolean | `true` if added to booking bill |
 | `billedAt` | timestamp \| null | When billed |
 | `cancellationReason` | string | Optional |
@@ -486,6 +510,8 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `notes` | string | Internal staff notes |
 | `createdAt` | timestamp | |
 | `updatedAt` | timestamp | |
+
+Direct-paid orders carry an append-only `payments/delivery-tender` record created atomically with the delivery transition. Its shape matches the shared payment ledger and adds store source metadata (`source`, source/order identifiers, room, and guest display fields). COD is normalized to the Cash tender. Add to Bill does not create this record because settlement occurs through the linked booking folio. The deterministic document ID makes retries idempotent, and keeping the tender under the order prevents it from reducing the booking's room balance.
 
 ---
 
@@ -562,8 +588,9 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `members/{uid}/pointsHistory` | Owner or Staff/Admin | Create = system/Staff/Admin only |
 | `settings/breakfastConfig` | Public (needed for booking flow) | Admin only |
 | `storeItems` | Public (guests need to browse) | Staff or Admin |
-| `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; Update = Staff/Admin; guest cancellation via API only |
-| `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment`; no updates or deletes |
+| `storeOrders` | Staff/Admin only in Firestore client rules; guest status lookup via API room/order ref only | Create = API/Admin SDK only; ordinary updates = Staff/Admin; delivery + direct tender = staff API; guest cancellation via API only |
+| `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment` using a client-preallocated document ID for idempotency; no updates or deletes |
+| `storeOrders/{id}/payments` | Staff/Admin only through the collection-group read rule | Create = Admin SDK via `/api/store/deliver-order`; no updates or deletes |
 | `settings/rewardsConfig` | Public via `settings/{documentId}` rule; non-sensitive booking/member display config | Admin only |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |

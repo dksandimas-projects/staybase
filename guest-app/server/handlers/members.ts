@@ -2,6 +2,7 @@ import { z } from "zod";
 import { generateMemberNumber, validatePointsRedemption } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 import { adminAuth, adminDb } from "../lib/firebase-admin";
+import { rebuildRateBreakdown } from "../lib/rate-breakdown";
 
 const registerMemberSchema = z.object({
   fullName: z.string().trim().max(120).optional().default(""),
@@ -343,6 +344,10 @@ export async function handleRedeemMemberPoints(req: any, res: any) {
       }
 
       const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+      const rateBreakdown = rebuildRateBreakdown(booking, {
+        pointsRedeemedValue: redemptionValue,
+        finalTotal: nextTotalPrice
+      });
       const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
 
       transaction.update(bookingRef, {
@@ -352,6 +357,7 @@ export async function handleRedeemMemberPoints(req: any, res: any) {
         pointsRedeemedValue: redemptionValue,
         pointsRedeemedBy: staff.uid,
         pointsRedeemedAt: now,
+        ...(rateBreakdown ? { rateBreakdown } : {}),
         updatedAt: now
       });
       transaction.update(memberRef, {
@@ -438,6 +444,10 @@ export async function handleUndoMemberPointsRedemption(req: any, res: any) {
       const restoredPoints = Number(booking.pointsRedeemed || 0);
       const restoredValue = Number(booking.pointsRedeemedValue || 0);
       const nextTotalPrice = Number(booking.totalPrice || 0) + restoredValue;
+      const rateBreakdown = rebuildRateBreakdown(booking, {
+        pointsRedeemedValue: 0,
+        finalTotal: nextTotalPrice
+      });
       const nextRewardsPoints = Number(member.rewardsPoints || 0) + restoredPoints;
       const historyRef = adminDb.collection(`members/${booking.memberId}/pointsHistory`).doc();
 
@@ -447,6 +457,7 @@ export async function handleUndoMemberPointsRedemption(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
+        ...(rateBreakdown ? { rateBreakdown } : {}),
         updatedAt: now
       });
       transaction.update(memberRef, {

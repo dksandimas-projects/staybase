@@ -124,6 +124,7 @@ export interface Booking {
   ratePerNight: number;
   totalPrice: number;
   rateBreakdown?: BookingRateBreakdown | null;
+  /** Pre-discount room/add-on subtotal. New writers always set it; null is legacy-only. */
   originalTotalPrice: number | null;
   discountType: string;
   discountPct: number;
@@ -156,6 +157,14 @@ export interface Booking {
   pointsRedeemedValue: number;
   pointsRedeemedBy: string | null;
   pointsRedeemedAt: string | null;
+  pointsAwarded?: number;
+  pendingLoyaltyPoints?: number;
+  loyaltyAwardStatus?: "pending-payment" | "awarded" | "ineligible";
+  pointsAwardedAt?: string | null;
+  checkedOutWithBalance?: number;
+  checkedOutFolioTotal?: number;
+  checkedOutCollectedTotal?: number;
+  earlyCheckoutOriginalCheckOut?: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
   paymentReferenceNumber?: string | null;
@@ -340,6 +349,7 @@ export interface StoreOrder {
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
   stockRestoredAt: string | null;
   stockDecrementedAt: string | null;
+  deliveredAt: string | null;
   isBilled: boolean;
   billedAt: string | null;
   cancellationReason: string;
@@ -373,8 +383,8 @@ export interface AdminContextType {
   bookings: Booking[];
   updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
-  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string }>;
-  addOnsitePayment: (bookingId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
+  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
+  addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
   roomBlocks: RoomBlock[];
@@ -1242,7 +1252,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to move booking." };
       }
-      return { success: true };
+      return { success: true, data: data.data };
     } catch (err: any) {
       console.error("rescheduleBooking failed:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
@@ -1424,7 +1434,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addOnsitePayment = async (bookingId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
+  const addOnsitePayment = async (bookingId: string, paymentId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-payment`, {
@@ -1435,6 +1445,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         },
         body: JSON.stringify({
           bookingId,
+          paymentId,
           amount,
           method,
           note
@@ -2618,6 +2629,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             status: data.status || "placed",
             stockRestoredAt: data.stockRestoredAt ? formatStoreDate(data.stockRestoredAt) : null,
             stockDecrementedAt: data.stockDecrementedAt ? formatStoreDate(data.stockDecrementedAt) : null,
+            deliveredAt: data.deliveredAt ? formatStoreDate(data.deliveredAt) : null,
             isBilled: !!data.isBilled,
             billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
             cancellationReason: data.cancellationReason || "",
@@ -2636,6 +2648,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   }, [currentUser]);
 
   const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
+    if (status === "delivered") {
+      const token = await auth.currentUser?.getIdToken(true);
+      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/store/deliver-order`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ orderId })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to mark store order delivered.");
+      }
+      return;
+    }
+
     if (status === "cancelled" || status === "confirmed") {
       await runTransaction(db, async (transaction) => {
         const orderRef = doc(db, "storeOrders", orderId);

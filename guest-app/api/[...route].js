@@ -187690,6 +187690,30 @@ var PaymentReviewSchema = external_exports.object({
   turnstileToken: external_exports.string().optional(),
   _hp: external_exports.string().optional()
 });
+var WalkinGuestDetailsSchema = external_exports.object({
+  firstName: external_exports.string().trim().min(1).max(80),
+  lastName: external_exports.string().trim().min(1).max(80),
+  email: external_exports.string().trim().toLowerCase().email().max(160),
+  phone: external_exports.string().trim().min(2).max(32),
+  requests: external_exports.string().trim().max(1e3).optional().default(""),
+  consent: external_exports.boolean().optional()
+}).strict();
+var WalkinBookingSchema = external_exports.object({
+  bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
+  roomId: external_exports.string().trim().min(1).max(64),
+  checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  guests: external_exports.coerce.number().int().min(1).max(100),
+  hasBreakfast: external_exports.boolean(),
+  guestDetails: WalkinGuestDetailsSchema,
+  paymentMethod: external_exports.string().trim().min(1).max(80),
+  paymentReferenceNumber: external_exports.string().trim().max(120).nullable().optional(),
+  status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
+  totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
+  discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
+  voucherCode: external_exports.string().trim().max(40).optional().default(""),
+  linkedInquiryId: external_exports.string().trim().max(64).nullable().optional()
+}).strict();
 
 // ../shared/schemas/paymentMethod.ts
 var PaymentMethodConfigSchema = external_exports.object({
@@ -187993,6 +188017,19 @@ function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedempt
     value: calculatePointsRedemptionValue(pointsToRedeem, pointsRedemptionRate),
     error: ""
   };
+}
+
+// ../shared/utils/pricing.ts
+function getLockedManualNightlyRate(breakdown) {
+  const manualLine = breakdown?.roomLines?.find((line) => line.source === "manual");
+  if (!manualLine) return null;
+  const nights = Number(manualLine.nights);
+  const subtotal = Number(manualLine.subtotal);
+  if (Number.isFinite(nights) && nights > 0 && Number.isFinite(subtotal) && subtotal >= 0) {
+    return subtotal / nights;
+  }
+  const nightlyRate = Number(manualLine.nightlyRate);
+  return Number.isFinite(nightlyRate) && nightlyRate >= 0 ? nightlyRate : null;
 }
 
 // ../shared/utils/references.ts
@@ -189351,6 +189388,142 @@ async function handleEmailPreview(req, res) {
   }
 }
 
+// server/lib/rate-breakdown.ts
+function nonNegativeFinite(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+function composeRateBreakdown(input) {
+  const roomSubtotal = nonNegativeFinite(input.roomSubtotal);
+  const addOns = input.addOns.map((line) => ({
+    ...line,
+    amount: nonNegativeFinite(line.amount)
+  }));
+  const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const discountPct = nonNegativeFinite(input.discountPct);
+  const seniorPwdDiscount = Math.round(subtotal * (discountPct / 100));
+  const afterSeniorPwd = Math.max(subtotal - seniorPwdDiscount, 0);
+  const voucherDiscount = nonNegativeFinite(input.voucherDiscount);
+  const afterVoucher = Math.max(afterSeniorPwd - voucherDiscount, 0);
+  const memberDiscountPct = nonNegativeFinite(input.memberDiscountPct);
+  const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
+  const pointsRedeemedValue = nonNegativeFinite(input.pointsRedeemedValue);
+  const deductions = [
+    ...seniorPwdDiscount > 0 ? [{
+      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${discountPct}%)`,
+      amount: seniorPwdDiscount
+    }] : [],
+    ...voucherDiscount > 0 ? [{ label: "Voucher discount", amount: voucherDiscount }] : [],
+    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${memberDiscountPct}%)`, amount: memberDiscount }] : [],
+    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
+  ];
+  return {
+    roomSubtotal,
+    roomLines: input.roomLines,
+    addOns,
+    deductions,
+    finalTotal: nonNegativeFinite(input.finalTotal)
+  };
+}
+function buildRateBreakdown(input) {
+  return composeRateBreakdown({
+    ...input,
+    addOns: input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [],
+    pointsRedeemedValue: input.pointsRedeemedValue || 0
+  });
+}
+function rebuildRateBreakdown(booking, overrides = {}) {
+  const existing = booking.rateBreakdown;
+  if (!existing) return void 0;
+  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite(booking.pointsRedeemedValue) : nonNegativeFinite(overrides.pointsRedeemedValue);
+  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite(booking.totalPrice) : nonNegativeFinite(overrides.finalTotal);
+  return composeRateBreakdown({
+    roomLines: existing.roomLines || [],
+    roomSubtotal: existing.roomSubtotal,
+    addOns: existing.addOns || [],
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite(booking.discountPct),
+    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    pointsRedeemedValue,
+    finalTotal
+  });
+}
+function shiftDateKey(dateKey2, days) {
+  const [year, month, day] = dateKey2.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+function dateKeyFromUnknown(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const date = value instanceof Date ? value : value && typeof value.toDate === "function" ? value.toDate() : new Date(value);
+  return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
+}
+function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
+  const nights = Math.max(Math.floor(nonNegativeFinite(newNights)), 1);
+  const originalNights = Math.max(Math.floor(nonNegativeFinite(booking.numNights)), nights);
+  const finalTotal = nonNegativeFinite(booking.totalPrice);
+  const existing = booking.rateBreakdown;
+  let remainingNights = nights;
+  const roomLines = (existing?.roomLines || []).flatMap((line) => {
+    if (remainingNights <= 0) return [];
+    const lineNights = Math.max(Math.floor(nonNegativeFinite(line.nights)), 0);
+    const consumedNights = Math.min(lineNights, remainingNights);
+    if (consumedNights <= 0) return [];
+    remainingNights -= consumedNights;
+    return [{
+      ...line,
+      endDate: shiftDateKey(line.startDate, consumedNights),
+      nights: consumedNights,
+      subtotal: nonNegativeFinite(line.nightlyRate) * consumedNights
+    }];
+  });
+  if (roomLines.length === 0) {
+    const startDate = dateKeyFromUnknown(booking.checkIn);
+    const nightlyRate = nonNegativeFinite(booking.ratePerNight);
+    roomLines.push({
+      source: "manual",
+      label: "Locked room rate",
+      startDate,
+      endDate: shiftDateKey(startDate, nights),
+      nights,
+      nightlyRate,
+      subtotal: nightlyRate * nights
+    });
+  }
+  const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
+  const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
+  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
+    label: "Breakfast add-on",
+    amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * nights
+  }] : [];
+  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
+  const originalAddOns = existing?.addOns ?? (booking.hasBreakfast ? [{
+    label: "Breakfast add-on",
+    amount: nonNegativeFinite(booking.breakfastRate) * nonNegativeFinite(booking.numGuests) * originalNights
+  }] : []);
+  const originalPricing = composeRateBreakdown({
+    roomLines: existing?.roomLines || roomLines,
+    roomSubtotal: originalRoomSubtotal,
+    addOns: originalAddOns,
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite(booking.discountPct),
+    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    pointsRedeemedValue: nonNegativeFinite(booking.pointsRedeemedValue),
+    finalTotal
+  });
+  const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
+  const consumedGross = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const retainedAmount = Math.max(Math.round((finalTotal + deductionTotal - consumedGross) * 100) / 100, 0);
+  return {
+    roomSubtotal,
+    roomLines,
+    addOns: retainedAmount > 0 ? [...addOns, { label: "Early departure \u2014 original total retained", amount: retainedAmount }] : addOns,
+    deductions: originalPricing.deductions,
+    finalTotal
+  };
+}
+
 // server/handlers/bookings.ts
 function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
@@ -189358,7 +189531,25 @@ function getConfiguredBookingRefPrefix() {
 var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+var PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+function sumLedgerAmounts(snapshot) {
+  return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
+}
+function sumBilledAddToBillOrders(snapshot) {
+  return snapshot.docs.reduce((sum, docSnap) => {
+    const order = docSnap.data() || {};
+    return order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled ? sum + Number(order.totalAmount || 0) : sum;
+  }, 0);
+}
+function calculateCheckoutPoints(totalPrice, rewardsConfig) {
+  if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
+  if ((rewardsConfig.earningMode || "per-spend") === "per-booking") {
+    return Math.max(Math.floor(Number(rewardsConfig.pointsPerBooking || 0)), 0);
+  }
+  const pointsPerHundred = Math.max(Number(rewardsConfig.pointsPerHundred || 0), 0);
+  return Math.max(Math.floor(Math.max(totalPrice, 0) / 100 * pointsPerHundred), 0);
+}
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return aStart < bEnd && aEnd > bStart;
 }
@@ -189417,31 +189608,6 @@ async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, chec
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
-}
-function buildRateBreakdown(input) {
-  const addOns = input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [];
-  const subtotal = input.roomSubtotal + input.breakfastTotal;
-  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
-  const afterSeniorPwd = subtotal - seniorPwdDiscount;
-  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
-  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
-  const pointsRedeemedValue = Math.max(0, Number(input.pointsRedeemedValue) || 0);
-  const deductions = [
-    ...seniorPwdDiscount > 0 ? [{
-      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
-      amount: seniorPwdDiscount
-    }] : [],
-    ...input.voucherDiscount > 0 ? [{ label: "Voucher discount", amount: input.voucherDiscount }] : [],
-    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }] : [],
-    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
-  ];
-  return {
-    roomSubtotal: input.roomSubtotal,
-    roomLines: input.roomLines,
-    addOns,
-    deductions,
-    finalTotal: input.finalTotal
-  };
 }
 var lookupSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
@@ -189839,7 +190005,7 @@ async function handleCreateBooking(req, res) {
       const afterVoucher = afterSeniorPwd - voucherDiscount;
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
@@ -190064,9 +190230,12 @@ async function handleCreateBooking(req, res) {
   }
 }
 async function handleCreateWalkin(req, res) {
-  const body = req.body;
-  if (!body) {
-    return res.status(400).json({ success: false, error: "Invalid request body." });
+  const parsedWalkin = WalkinBookingSchema.safeParse(req.body || {});
+  if (!parsedWalkin.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the walk-in details \u2014 a required field is missing or invalid."
+    });
   }
   const {
     bookingId,
@@ -190083,13 +190252,7 @@ async function handleCreateWalkin(req, res) {
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
     linkedInquiryId
-  } = body;
-  if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
-    return res.status(400).json({ success: false, error: "Missing required booking fields." });
-  }
-  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
-    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
-  }
+  } = parsedWalkin.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
@@ -190262,7 +190425,7 @@ async function handleCreateWalkin(req, res) {
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
-        originalTotalPrice: discountType || voucherCode ? pricingSubtotal : subtotal,
+        originalTotalPrice: pricingSubtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
         // walkin flow writes a token too so the email
@@ -190371,7 +190534,10 @@ async function handleApplyBookingDiscount(req, res) {
         throw new Error("This booking already has a discount or voucher. Existing grants cannot be replaced from this action.");
       }
       const breakdown = booking.rateBreakdown;
-      const subtotal = Number(booking.originalTotalPrice ?? Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0) ?? booking.totalPrice);
+      const storedOriginalTotal = Number(booking.originalTotalPrice);
+      const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0) + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      const storedTotalPrice = Number(booking.totalPrice);
+      const subtotal = booking.originalTotalPrice !== null && booking.originalTotalPrice !== void 0 && Number.isFinite(storedOriginalTotal) && storedOriginalTotal >= 0 ? storedOriginalTotal : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0 ? breakdownSubtotal : storedTotalPrice;
       if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
       const discountPct = discountType ? 20 : 0;
@@ -190469,7 +190635,19 @@ async function handleRejectDiscount(req, res) {
     const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
     const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
     const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
-    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount, 0);
+    const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+    const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
+    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
+    const rateBreakdown = rebuildRateBreakdown({
+      ...bookingData,
+      discountType: "",
+      discountPct: 0,
+      pointsRedeemedValue,
+      totalPrice: restoredTotalPrice
+    }, {
+      pointsRedeemedValue,
+      finalTotal: restoredTotalPrice
+    });
     const discountRejectedBy = req.staff?.uid || "staff";
     const updates = {
       discountRejected: true,
@@ -190477,6 +190655,7 @@ async function handleRejectDiscount(req, res) {
       discountRejectionReason: reason || "",
       discountPct: 0,
       totalPrice: restoredTotalPrice,
+      ...rateBreakdown ? { rateBreakdown } : {},
       updatedAt: /* @__PURE__ */ new Date()
     };
     await bookingRef.update(updates);
@@ -190620,9 +190799,12 @@ async function handleCancelBooking(req, res) {
   }
 }
 async function handleAddPayment(req, res) {
-  const { bookingId, amount, method, note } = req.body || {};
-  if (!bookingId || amount === void 0 || !method) {
-    return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
+  const { bookingId, paymentId, amount, method, note } = req.body || {};
+  if (!bookingId || !paymentId || amount === void 0 || !method) {
+    return res.status(400).json({ success: false, error: "Booking ID, payment ID, amount, and payment method are required." });
+  }
+  if (!PREALLOCATED_PAYMENT_ID_REGEX.test(String(paymentId))) {
+    return res.status(400).json({ success: false, error: "Invalid payment ID format." });
   }
   const numericAmount = Number(amount);
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
@@ -190647,9 +190829,12 @@ async function handleAddPayment(req, res) {
   let totalPrice = 0;
   let isConfirmableStatus = false;
   let fullyPaid = false;
+  let transitionedToPaymentConfirmed = false;
   let hadPaymentProof = false;
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot = null;
+  let loyaltyPointsAwarded = 0;
+  let idempotentReplay = false;
   try {
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -190659,35 +190844,95 @@ async function handleAddPayment(req, res) {
       }
       const bookingData = bookingDoc.data();
       bookingDataSnapshot = bookingData;
+      transitionedToPaymentConfirmed = false;
       const paymentsRef = bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         const data = docSnap.data();
         return sum + Number(data.amount || 0);
       }, 0);
+      const existingPayment = paymentsSnapshot.docs.find((docSnap) => docSnap.id === paymentId);
+      if (existingPayment) {
+        const existingData = existingPayment.data();
+        const sameRequest = Number(existingData.amount) === numericAmount && String(existingData.method) === String(method) && String(existingData.note || "") === safeNote;
+        if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
+        idempotentReplay = true;
+        totalPaid = existingPaid;
+        totalPrice = Number(bookingData.totalPrice || 0);
+        fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+        staffPaymentMarkerMissing = false;
+        return;
+      }
       totalPaid = existingPaid + numericAmount;
       totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
       hadPaymentProof = !!bookingData.paymentProofUrl;
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
+      const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
+      const settlesCheckedOutFolio = bookingData.status === "checked-out" && bookingData.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData.checkedOutFolioTotal || 0);
+      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId ? adminDb.collection("members").doc(String(bookingData.memberId)) : null;
+      const loyaltyMemberDoc = loyaltyMemberRef ? await transaction.get(loyaltyMemberRef) : null;
+      const bookingUpdates = {};
       if (hadPaymentProof && staffPaymentMarkerMissing) {
-        transaction.update(bookingRef, {
-          "emailNotificationsSent.staffNewPayment": /* @__PURE__ */ new Date()
+        bookingUpdates["emailNotificationsSent.staffNewPayment"] = /* @__PURE__ */ new Date();
+      }
+      if (fullyPaid && isConfirmableStatus) {
+        const updatedAt = /* @__PURE__ */ new Date();
+        Object.assign(bookingUpdates, {
+          status: "payment-confirmed",
+          handledBy: staffUid,
+          updatedAt
+        });
+        transitionedToPaymentConfirmed = true;
+        bookingDataSnapshot = {
+          ...bookingData,
+          ...bookingUpdates
+        };
+      }
+      if (settlesCheckedOutFolio && loyaltyMemberRef && loyaltyMemberDoc?.exists) {
+        loyaltyPointsAwarded = pendingLoyaltyPoints;
+        const awardedAt = /* @__PURE__ */ new Date();
+        Object.assign(bookingUpdates, {
+          pointsAwarded: loyaltyPointsAwarded,
+          pendingLoyaltyPoints: 0,
+          loyaltyAwardStatus: "awarded",
+          pointsAwardedAt: awardedAt,
+          updatedAt: awardedAt
+        });
+        transaction.update(loyaltyMemberRef, {
+          rewardsPoints: Number(loyaltyMemberDoc.data()?.rewardsPoints || 0) + loyaltyPointsAwarded,
+          updatedAt: awardedAt
+        });
+        const historyRef = loyaltyMemberRef.collection("pointsHistory").doc(`earn-${bookingId}`);
+        transaction.set(historyRef, {
+          type: "earn",
+          points: loyaltyPointsAwarded,
+          bookingId,
+          bookingRef: bookingData.bookingRef,
+          description: `Settled Stay Earnings (${bookingData.bookingRef})`,
+          by: staffUid,
+          createdAt: awardedAt
         });
       }
-      const newPaymentRef = paymentsRef.doc();
-      transaction.set(newPaymentRef, paymentRecord);
+      if (Object.keys(bookingUpdates).length > 0) {
+        transaction.update(bookingRef, bookingUpdates);
+      }
+      const newPaymentRef = paymentsRef.doc(paymentId);
+      transaction.create(newPaymentRef, paymentRecord);
     });
   } catch (error) {
     if (error.message === "Booking not found") {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
+    if (error.message === "Payment ID has already been used for a different payment.") {
+      return res.status(409).json({ success: false, error: error.message });
+    }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
   try {
-    if (fullyPaid && isConfirmableStatus) {
+    if (transitionedToPaymentConfirmed) {
       await sendBookingTrigger("payment-confirmed", bookingDataSnapshot);
     }
     if (hadPaymentProof && staffPaymentMarkerMissing) {
@@ -190701,7 +190946,13 @@ async function handleAddPayment(req, res) {
   }
   return res.status(200).json({
     success: true,
-    data: { ...paymentRecord, totalPaid }
+    data: {
+      ...paymentRecord,
+      totalPaid,
+      status: bookingDataSnapshot?.status || null,
+      loyaltyPointsAwarded,
+      idempotentReplay
+    }
   });
 }
 async function handleAddRefund(req, res) {
@@ -190775,7 +191026,7 @@ async function handleConfirmBooking(req, res) {
         alreadyConfirmed = true;
         return;
       }
-      const allowedStatuses = ["pending", "payment-uploaded"];
+      const allowedStatuses = ["pending", "payment-uploaded", "payment-confirmed"];
       if (!allowedStatuses.includes(data.status)) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
@@ -190888,8 +191139,9 @@ async function handleCheckoutBooking(req, res) {
       });
     }
     const checkedOutBy = req.staff?.uid || "staff";
-    const totalPrice = Number(bookingData.totalPrice || 0);
     let pointsAwarded = 0;
+    let eligiblePoints = 0;
+    let checkedOutWithBalance = 0;
     let memberId = bookingData.memberId || null;
     let rewardsConfig = null;
     let memberDoc = null;
@@ -190907,16 +191159,6 @@ async function handleCheckoutBooking(req, res) {
     if (memberDoc?.exists) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
-      const pointsEnabled = rewardsConfig?.pointsEnabled !== false;
-      if (pointsEnabled && rewardsConfig) {
-        const earningMode = rewardsConfig.earningMode || "per-spend";
-        if (earningMode === "per-spend") {
-          const pointsPerHundred = Number(rewardsConfig.pointsPerHundred || 0);
-          pointsAwarded = Math.floor(totalPrice / 100 * pointsPerHundred);
-        } else {
-          pointsAwarded = Number(rewardsConfig.pointsPerBooking || 0);
-        }
-      }
     }
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
@@ -190927,7 +191169,19 @@ async function handleCheckoutBooking(req, res) {
       if (freshBookingData.status !== "checked-in") {
         throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
       }
-      const memberRef = memberId && pointsAwarded > 0 ? adminDb.collection("members").doc(memberId) : null;
+      const paymentsRef = bookingRef.collection("payments");
+      const chargesRef = bookingRef.collection("charges");
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const chargesSnapshot = await transaction.get(chargesRef);
+      const storeOrdersSnapshot = await transaction.get(storeOrdersQuery);
+      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+      const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
+      checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
+      eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      const memberRef = memberId && eligiblePoints > 0 ? adminDb.collection("members").doc(memberId) : null;
       const memberDocInTransaction = memberRef ? await transaction.get(memberRef) : null;
       const { todayStr } = getManilaDateInfo();
       const checkoutDate = /* @__PURE__ */ new Date(`${todayStr}T00:00:00Z`);
@@ -190938,17 +191192,30 @@ async function handleCheckoutBooking(req, res) {
         status: "checked-out",
         checkedOutAt: /* @__PURE__ */ new Date(),
         checkedOutBy,
-        pointsAwarded,
+        checkedOutWithBalance,
+        checkedOutFolioTotal: checkoutFolioTotal,
+        checkedOutCollectedTotal: collectedTotal,
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (memberId && freshBookingData.memberId !== memberId) {
         bookingUpdate.memberId = memberId;
       }
       if (shouldTruncateStay && originalCheckIn) {
+        const truncatedNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 864e5), 1);
         bookingUpdate.checkOut = Timestamp.fromDate(checkoutDate);
-        bookingUpdate.numNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 864e5), 1);
+        bookingUpdate.numNights = truncatedNights;
         bookingUpdate.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
+        bookingUpdate.rateBreakdown = rebuildEarlyCheckoutRateBreakdown(freshBookingData, truncatedNights);
       }
+      const canAwardPoints = Boolean(memberId && eligiblePoints > 0 && memberRef && memberDocInTransaction?.exists);
+      const awardNow = canAwardPoints && checkedOutWithBalance <= 0;
+      pointsAwarded = awardNow ? eligiblePoints : 0;
+      Object.assign(bookingUpdate, {
+        pointsAwarded,
+        pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
+        loyaltyAwardStatus: canAwardPoints ? awardNow ? "awarded" : "pending-payment" : "ineligible",
+        pointsAwardedAt: awardNow ? /* @__PURE__ */ new Date() : null
+      });
       transaction.update(bookingRef, bookingUpdate);
       if (bookingData.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
@@ -190967,13 +191234,13 @@ async function handleCheckoutBooking(req, res) {
           { merge: true }
         );
       }
-      if (memberId && pointsAwarded > 0 && memberRef && memberDocInTransaction?.exists) {
+      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
         const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
         transaction.update(memberRef, {
           rewardsPoints: currentPoints + pointsAwarded,
           updatedAt: /* @__PURE__ */ new Date()
         });
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
         transaction.set(historyRef, {
           type: "earn",
           points: pointsAwarded,
@@ -190990,7 +191257,8 @@ async function handleCheckoutBooking(req, res) {
       data: {
         status: "checked-out",
         pointsAwarded,
-        memberId
+        memberId,
+        checkedOutWithBalance
       }
     });
   } catch (error) {
@@ -191203,6 +191471,9 @@ async function handleRescheduleBooking(req, res) {
       if (typeof typeEntry.maxCapacity === "number" && (booking.numGuests || 0) > typeEntry.maxCapacity) {
         throw new Error(`Target room type capacity is exceeded. Maximum allowed guests: ${typeEntry.maxCapacity}.`);
       }
+      const manualNightlyRate = getLockedManualNightlyRate(
+        booking.rateBreakdown
+      );
       let activeRoomRate = typeEntry.pricePerNight || 0;
       if (booking.isCorporate) {
         let typeCorporateRate = typeEntry.corporateRate || 0;
@@ -191219,7 +191490,18 @@ async function handleRescheduleBooking(req, res) {
         }
       }
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const roomBreakdown = booking.isCorporate ? {
+      const roomBreakdown = manualNightlyRate !== null ? {
+        roomSubtotal: Math.round(manualNightlyRate * numNights),
+        roomLines: [{
+          source: "manual",
+          label: "Manual front-desk rate",
+          startDate: checkIn,
+          endDate: checkOut,
+          nights: numNights,
+          nightlyRate: manualNightlyRate,
+          subtotal: Math.round(manualNightlyRate * numNights)
+        }]
+      } : booking.isCorporate ? {
         roomSubtotal: activeRoomRate * numNights,
         roomLines: [{
           source: "corporate",
@@ -191240,7 +191522,7 @@ async function handleRescheduleBooking(req, res) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
       const subtotal = roomTotal + breakfastTotal;
       let discountPct = 0;
       if (booking.discountType === "senior" || booking.discountType === "pwd") {
@@ -191280,7 +191562,7 @@ async function handleRescheduleBooking(req, res) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
@@ -191304,6 +191586,7 @@ async function handleRescheduleBooking(req, res) {
         reason: typeof reason === "string" ? reason.slice(0, 500) : "",
         by: req.staff?.uid || req.staff?.email || "staff",
         at: (/* @__PURE__ */ new Date()).toISOString(),
+        pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
         deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
       };
       updatedBooking = {
@@ -191313,7 +191596,7 @@ async function handleRescheduleBooking(req, res) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        ratePerNight: activeRoomRate,
+        ratePerNight: manualNightlyRate ?? activeRoomRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
         originalTotalPrice,
@@ -192465,6 +192748,10 @@ async function handleRedeemMemberPoints(req, res) {
         throw new Error("Points redemption value exceeds the booking total.");
       }
       const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+      const rateBreakdown = rebuildRateBreakdown(booking, {
+        pointsRedeemedValue: redemptionValue,
+        finalTotal: nextTotalPrice
+      });
       const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
       transaction.update(bookingRef, {
         memberId,
@@ -192473,6 +192760,7 @@ async function handleRedeemMemberPoints(req, res) {
         pointsRedeemedValue: redemptionValue,
         pointsRedeemedBy: staff.uid,
         pointsRedeemedAt: now,
+        ...rateBreakdown ? { rateBreakdown } : {},
         updatedAt: now
       });
       transaction.update(memberRef, {
@@ -192549,6 +192837,10 @@ async function handleUndoMemberPointsRedemption(req, res) {
       const restoredPoints = Number(booking.pointsRedeemed || 0);
       const restoredValue = Number(booking.pointsRedeemedValue || 0);
       const nextTotalPrice = Number(booking.totalPrice || 0) + restoredValue;
+      const rateBreakdown = rebuildRateBreakdown(booking, {
+        pointsRedeemedValue: 0,
+        finalTotal: nextTotalPrice
+      });
       const nextRewardsPoints = Number(member.rewardsPoints || 0) + restoredPoints;
       const historyRef = adminDb.collection(`members/${booking.memberId}/pointsHistory`).doc();
       transaction.update(bookingRef, {
@@ -192557,6 +192849,7 @@ async function handleUndoMemberPointsRedemption(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
+        ...rateBreakdown ? { rateBreakdown } : {},
         updatedAt: now
       });
       transaction.update(memberRef, {
@@ -193070,6 +193363,88 @@ var MAX_GUEST_NAME_LENGTH = 120;
 var MAX_ROOM_NUMBER_LENGTH = 12;
 var MAX_ORDER_REF_LENGTH = 40;
 var MAX_REASON_LENGTH = 500;
+async function handleDeliverStoreOrder(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const body = req.body || {};
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "A valid store order ID is required." });
+  }
+  try {
+    let responseData = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRef = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+      const order = orderDoc.data();
+      if (order.status === "delivered") {
+        responseData = {
+          orderId,
+          status: "delivered",
+          tenderRecorded: order.paymentMethod !== "add-to-bill"
+        };
+        return;
+      }
+      if (order.status !== "out-for-delivery") {
+        throw new Error("ORDER_NOT_DELIVERABLE");
+      }
+      const totalAmount = Number(order.totalAmount);
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 1e6) {
+        throw new Error("INVALID_ORDER_TOTAL");
+      }
+      const deliveredAt = /* @__PURE__ */ new Date();
+      const staffUid = req.staff?.uid || "staff";
+      const isDirectPaid = order.paymentMethod !== "add-to-bill";
+      transaction.update(orderRef, {
+        status: "delivered",
+        deliveredAt,
+        updatedAt: deliveredAt,
+        handledBy: staffUid
+      });
+      if (isDirectPaid) {
+        const tenderRef = orderRef.collection("payments").doc("delivery-tender");
+        transaction.set(tenderRef, {
+          type: "payment",
+          amount: totalAmount,
+          method: order.paymentMethod === "cod" ? "cash" : String(order.paymentMethod || "unknown"),
+          note: `Direct store payment for ${String(order.orderRef || orderId)}`.slice(0, 500),
+          reason: null,
+          approvedBy: null,
+          recordedBy: staffUid,
+          recordedAt: deliveredAt,
+          source: "store-order",
+          sourceId: orderId,
+          orderRef: String(order.orderRef || orderId),
+          bookingId: order.bookingId || null,
+          roomNumber: String(order.roomNumber || ""),
+          guestName: String(order.guestName || "")
+        });
+      }
+      responseData = {
+        orderId,
+        status: "delivered",
+        tenderRecorded: isDirectPaid
+      };
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    const knownErrors = {
+      ORDER_NOT_FOUND: { status: 404, message: "Store order was not found." },
+      ORDER_NOT_DELIVERABLE: { status: 409, message: "Only an order out for delivery can be marked delivered." },
+      INVALID_ORDER_TOTAL: { status: 409, message: "The store order total is invalid and cannot be recorded." }
+    };
+    const mapped = knownErrors[error.message];
+    if (!mapped) console.error("Store order delivery failed:", error);
+    return res.status(mapped?.status || 500).json({
+      success: false,
+      error: mapped?.message || "Unable to mark the store order delivered."
+    });
+  }
+}
 async function handleCreateStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -194394,6 +194769,14 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many store status requests. Please try again in a minute." });
     }
     return await handleGetStoreOrderStatus(req, res);
+  }
+  if (domain === "store" && action === "deliver-order" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleDeliverStoreOrder(req, res);
   }
   if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-verify:${ip}`, 20, 6e4)) {

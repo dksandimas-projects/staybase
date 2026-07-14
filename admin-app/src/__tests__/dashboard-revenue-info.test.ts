@@ -24,6 +24,11 @@ describe("Dashboard revenue info controls", () => {
     expect(statsCardSrc).toMatch(/aria-expanded=\{helpOpen\}/);
   });
 
+  it("includes payment-confirmed bookings in the same revenue basis as Reports", () => {
+    expect(dashboardSrc).toMatch(/\["payment-confirmed", "confirmed", "checked-in", "checked-out"\]\.includes\(b\.status\)/);
+    expect(dashboardSrc).toMatch(/payment-confirmed, confirmed, checked-in, or checked-out status/);
+  });
+
   it("hides revenue by default with bullets and lets staff reveal it", () => {
     expect(dashboardSrc).toMatch(/useState\(false\)/);
     expect(dashboardSrc).toMatch(/setShowRevenue/);

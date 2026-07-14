@@ -1,5 +1,5 @@
 import { adminDb } from "../lib/firebase-admin";
-import { validateVoucher } from "@spark-inn/shared";
+import { validateVoucher, toDateOrNull } from "@spark-inn/shared";
 
 export async function handleValidateVoucher(req: any, res: any) {
   if (req.method !== "POST") {
@@ -50,7 +50,7 @@ export async function handleValidateVoucher(req: any, res: any) {
       discountValue: data.discountValue,
       usageCap: data.usageCap ?? null,
       usageCount: data.usageCount || 0,
-      expiresAt: data.expiresAt ? data.expiresAt.toDate() : null,
+      expiresAt: toDateOrNull(data.expiresAt),
       applicableRoomTypes: data.applicableRoomTypes || [],
       isActive: data.isActive !== false
     };

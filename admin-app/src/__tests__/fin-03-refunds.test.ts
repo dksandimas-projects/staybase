@@ -21,8 +21,8 @@ describe("FIN-03 refund surfaces", () => {
   it("reports gross, refunds, net, and cancelled bookings retaining funds", () => {
     expect(reports).toMatch(/grossCollectionsTotal/);
     expect(reports).toMatch(/refundsTotal/);
-    expect(reports).toMatch(/cancelledWithCollections/);
-    expect(reports).toMatch(/Cancelled bookings with money collected/);
+    expect(reports).toMatch(/cancelledOrNoShowWithCollections/);
+    expect(reports).toMatch(/Cancelled and no-show bookings with money collected/);
     expect(reports).toMatch(/payment\.type/);
   });
 });

@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -81,8 +81,11 @@ function estimateNewTotalPrice(
   const checkInDate = new Date(`${checkInStr}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOutStr}T00:00:00Z`);
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
+  const manualNightlyRate = getLockedManualNightlyRate(booking.rateBreakdown);
 
-  const roomBreakdown = booking.isCorporate
+  const roomBreakdown = manualNightlyRate !== null
+    ? { roomSubtotal: Math.round(manualNightlyRate * numNights) }
+    : booking.isCorporate
     ? {
         roomSubtotal: baseRate * numNights,
       }
@@ -98,7 +101,7 @@ function estimateNewTotalPrice(
   const roomTotal = roomBreakdown.roomSubtotal;
 
   const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-  const breakfastTotal = booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
+  const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
   const subtotal = roomTotal + breakfastTotal;
 
   let discountPct = booking.discountPct || 0;
@@ -461,6 +464,8 @@ export function BookingsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const paymentSubmissionIdRef = useRef<string | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundMethod, setRefundMethod] = useState("cash");
   const [refundReason, setRefundReason] = useState("");
@@ -1535,15 +1540,20 @@ export function BookingsPage() {
               ? "PWD Discount"
               : "Discount";
           const storedDiscountBase = b.originalTotalPrice ?? subtotal;
-          const discountAmount = Math.max(
-            0,
-            Math.round(storedDiscountBase - b.totalPrice - (b.voucherDiscount || 0) - (b.pointsRedeemedValue || 0))
-          );
+          const discountAmount = Math.max(0, Math.round(storedDiscountBase * (b.discountPct / 100)));
           drawAmountRow(`${discountLabel} (${b.discountPct}%)`, `-${formatAmount(discountAmount)}`, { muted: true });
         }
 
         if (b.voucherCode && b.voucherDiscount && b.voucherDiscount > 0) {
           drawAmountRow(`Voucher (${b.voucherCode})`, `-${formatAmount(b.voucherDiscount)}`, { muted: true });
+        }
+
+        if (b.memberDiscountPct && b.memberDiscountPct > 0) {
+          const discountBase = b.originalTotalPrice ?? subtotal;
+          const seniorPwdAmount = b.discountPct ? Math.round(discountBase * (b.discountPct / 100)) : 0;
+          const memberBase = Math.max(discountBase - seniorPwdAmount - (b.voucherDiscount || 0), 0);
+          const memberDiscountAmount = Math.max(0, Math.round(memberBase * (b.memberDiscountPct / 100)));
+          drawAmountRow(`Member Discount (${b.memberDiscountPct}%)`, `-${formatAmount(memberDiscountAmount)}`, { muted: true });
         }
 
         if (b.pointsRedeemed && b.pointsRedeemed > 0) {
@@ -1848,6 +1858,11 @@ export function BookingsPage() {
     }
   }, [selectedBooking, showMoveForm, moveRoomId, moveCheckIn, moveCheckOut, rooms, roomTypes, seasonalRateOverrides, corporateCodes, rewardsConfig, breakfastConfig, vouchers]);
 
+  const lockedManualMoveRate = useMemo(
+    () => getLockedManualNightlyRate(selectedBooking?.rateBreakdown),
+    [selectedBooking?.rateBreakdown]
+  );
+
   const handleMoveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBooking || !moveRoomId || !moveCheckIn || !moveCheckOut) return;
@@ -1870,9 +1885,21 @@ export function BookingsPage() {
           roomType: targetRoom ? targetRoom.type : selectedBooking.roomType,
           checkIn: moveCheckIn,
           checkOut: moveCheckOut,
-          totalPrice: selectedBooking.totalPrice + movePriceDelta
+          numNights: Math.max(
+            Math.round((new Date(`${moveCheckOut}T00:00:00Z`).getTime() - new Date(`${moveCheckIn}T00:00:00Z`).getTime()) / 86400000),
+            1
+          ),
+          ratePerNight: result.data?.ratePerNight ?? selectedBooking.ratePerNight,
+          totalPrice: result.data?.totalPrice ?? selectedBooking.totalPrice + movePriceDelta,
+          rateBreakdown: result.data?.rateBreakdown ?? selectedBooking.rateBreakdown,
+          originalTotalPrice: result.data?.originalTotalPrice ?? selectedBooking.originalTotalPrice,
+          voucherDiscount: result.data?.voucherDiscount ?? selectedBooking.voucherDiscount
         };
-        syncSelectedBooking(updatedFields);
+        // The reschedule API already committed the authoritative Firestore
+        // update with Timestamp dates. Update only the open drawer here; using
+        // syncSelectedBooking would write the display strings back over those
+        // server timestamps.
+        setSelectedBooking((previous) => previous ? { ...previous, ...updatedFields } : null);
         setShowMoveForm(false);
       } else {
         toast.error("Failed to move booking", result.error || "Please choose another room or date range.");
@@ -1889,9 +1916,15 @@ export function BookingsPage() {
     e.preventDefault();
     if (selectedBooking && paymentAmount) {
       const amount = parseFloat(paymentAmount);
+      const paymentId = paymentSubmissionIdRef.current
+        || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+      paymentSubmissionIdRef.current = paymentId;
+      setIsRecordingPayment(true);
+      let paymentCompleted = false;
       try {
-        const result = await addOnsitePayment(selectedBooking.id, amount, paymentMethod, paymentNote);
+        const result = await addOnsitePayment(selectedBooking.id, paymentId, amount, paymentMethod, paymentNote);
         if (result.success) {
+          paymentCompleted = true;
           setPaymentAmount("");
           setPaymentNote("");
           toast.success("Payment recorded", `${formatPrice(amount)} via ${getOnsitePaymentMethodLabel(paymentMethod)}`);
@@ -1900,6 +1933,12 @@ export function BookingsPage() {
         }
       } catch (err: any) {
         toast.error("Failed to record payment", err.message);
+      } finally {
+        // Keep the same ID after an uncertain/network failure. A manual
+        // retry then replays the original server commit instead of creating
+        // a second ledger entry. Successful submissions mint a fresh ID.
+        if (paymentCompleted) paymentSubmissionIdRef.current = null;
+        setIsRecordingPayment(false);
       }
     }
   };
@@ -1936,8 +1975,8 @@ export function BookingsPage() {
     e.preventDefault();
     if (!selectedBooking) return;
     const amount = Number(chargeAmount);
-    if (!chargeLabel.trim() || !Number.isFinite(amount) || amount <= 0) {
-      toast.warning("Check charge details", "Enter a label and an amount greater than zero.");
+    if (!chargeLabel.trim() || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+      toast.warning("Check charge details", "Enter a label and an amount between 0.01 and 1,000,000.");
       return;
     }
     setIsSavingCharge(true);
@@ -2658,6 +2697,15 @@ export function BookingsPage() {
                   </label>
 
                   {/* Price Delta block */}
+                  {lockedManualMoveRate !== null && (
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-[10px] leading-relaxed text-blue-800">
+                      <p className="font-bold">Locked manual rate will be preserved</p>
+                      <p className="mt-1">
+                        This booking keeps its agreed front-desk rate of {formatPrice(lockedManualMoveRate)} per night. The total will be rescaled only for the new number of nights; the target room's standard rate will not replace it.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="rounded-lg border border-gray-150 bg-gray-50/50 p-3 space-y-1.5">
                     <p className="font-semibold text-gray-700">Estimated Price Delta</p>
                     <div className="flex items-center justify-between text-xs">
@@ -3072,9 +3120,10 @@ export function BookingsPage() {
                   
                     <button
                       type="submit"
-                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                      disabled={isRecordingPayment}
+                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark disabled:opacity-60"
                     >
-                      Log Payment
+                      {isRecordingPayment ? "Recording..." : "Record payment"}
                     </button>
                   </div>
                 </form>
@@ -3394,7 +3443,7 @@ export function BookingsPage() {
                       </label>
                       <label className="block text-[10px] font-semibold text-gray-600">
                         Amount ({config.currencySymbol})
-                        <input required type="number" min="0.01" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
+                        <input required type="number" min="0.01" max="1000000" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
                       </label>
                       <label className="block text-[10px] font-semibold text-gray-600">
                         Note (optional)
@@ -3830,9 +3879,18 @@ export function BookingsPage() {
 
               {selectedOrder.status === "out-for-delivery" && (
                 <button
-                  onClick={() => {
-                    void updateStoreOrderStatus(selectedOrder.id, "delivered");
-                    setSelectedOrder((prev: any) => prev ? { ...prev, status: "delivered" } : null);
+                  onClick={async () => {
+                    try {
+                      await updateStoreOrderStatus(selectedOrder.id, "delivered");
+                      setSelectedOrder((prev: any) => prev ? {
+                        ...prev,
+                        status: "delivered",
+                        deliveredAt: new Date().toISOString()
+                      } : null);
+                      toast.success("Order delivered", "The delivery and direct-payment tender were recorded together.");
+                    } catch (error) {
+                      toast.error("Could not complete delivery", error instanceof Error ? error.message : String(error));
+                    }
                   }}
                   className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-gray-900 hover:bg-black text-xs font-bold text-white shadow-sm transition active:scale-95"
                 >

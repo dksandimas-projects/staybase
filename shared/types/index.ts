@@ -183,6 +183,7 @@ export interface Booking {
   ratePerNight: number;
   totalPrice: number;
   rateBreakdown?: BookingRateBreakdown | null;
+  /** Pre-discount room/add-on subtotal. New writers always set it; null is legacy-only. */
   originalTotalPrice: number | null;
   discountType: DiscountType;
   discountPct: number;
@@ -227,6 +228,14 @@ export interface Booking {
   pointsRedeemedValue: number;
   pointsRedeemedBy: string | null;
   pointsRedeemedAt: Date | null;
+  pointsAwarded?: number;
+  pendingLoyaltyPoints?: number;
+  loyaltyAwardStatus?: "pending-payment" | "awarded" | "ineligible";
+  pointsAwardedAt?: Date | null;
+  checkedOutWithBalance?: number;
+  checkedOutFolioTotal?: number;
+  checkedOutCollectedTotal?: number;
+  earlyCheckoutOriginalCheckOut?: Date | null;
   hasBreakfast: boolean;
   breakfastRate: number;
   breakfastSelections?: Record<string, string>;

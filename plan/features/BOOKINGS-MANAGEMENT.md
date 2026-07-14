@@ -90,6 +90,9 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Cancellation — opens confirmation modal with optional reason input
 - [x] Checkout folio review — room/add-ons, billed store charges, payments collected, balance due/overpaid/settled state
 - [x] Checkout confirmation guard — warns if staff tries to check out with balance still due
+- [x] Unpaid checkout audit — server snapshots charge-inclusive folio billed/collected totals and `checkedOutWithBalance`; checkout remains allowed after the staff warning.
+- [x] Early-departure policy — retain the contracted total, shorten the operational stay, preserve the original checkout timestamp, and rebuild the receipt with an explicit retained-total adjustment.
+- [x] Settled-folio rewards — checkout awards eligible points only when fully settled; otherwise the final onsite payment consumes the locked pending award exactly once.
 - [x] Walk-in / manual booking button — "New Booking" CTA opens a creation modal/drawer
 - [x] Walk-in booking form — standard walk-in fields and immediate check-in option
 - [x] Calendar view — `/calendar` renders a live room × date grid for active rooms, occupying bookings, and blocked rooms. Staff can click a start/end range on one room, then block or book the selected dates. Booked ranges open a booking drawer with full-booking link, cancel action, and server-backed move/reschedule transaction. Blocked ranges open a block drawer with edit/unblock actions. Active `roomBlocks` render with strikethrough styling.
@@ -111,7 +114,7 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Status update: direct staff `updateDoc` on `bookings/{bookingId}` for ordinary operational transitions, updating `status` + `updatedAt` + `handledBy`
 - [ ] `confirmed` and `payment-confirmed` status changes trigger corresponding emails via email API route after the staff update succeeds
 - [ ] Cancellation: POST to `/api/bookings/cancel` so owner/staff authorization, status validation, `cancellationReason`, and cancellation email stay server-side
-- [ ] Walk-in booking creation: POST to authenticated `/api/bookings/create-walkin`; API runs the availability-locking transaction, writes `source: "walk-in"`, default `status: "confirmed"` unless immediate check-in is selected, and stores `handledBy` from the verified staff token
+- [x] Walk-in booking creation: POST to authenticated `/api/bookings/create-walkin`; API strictly validates the full request before the availability-locking transaction, caps a finite manual override at 1,000,000, writes `source: "walk-in"`, defaults to `confirmed` unless immediate check-in is selected, and stores `handledBy` from the verified staff token
 - [ ] Walk-in booking ref generated inside the same transaction as booking creation; do not call `/api/reference/generate` separately for walk-ins
 - [ ] Points redemption: POST to `/api/members/redeem-points` — validates member balance, computes `₱ value = pointsRedeemed × (redemptionRate / 100)`, updates booking `totalPrice`, `pointsRedeemed`, `pointsRedeemedValue`; deducts from `members/{uid}.rewardsPoints`; logs to `members/{uid}/pointsHistory` with `type: "redeem"`, `bookingId`, `by: staffUID`
 - [ ] Redemption rate fetched from `settings/rewardsConfig.pointsRedemptionRate` — never hardcoded
@@ -119,11 +122,11 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 - [ ] Receipt PDF generated client-side with jsPDF — see `plan/features/EMAIL-PDF-STORAGE.md`
 - [ ] Payment proof image viewable in drawer from Firebase Storage URL
 - [ ] **Reference Number field** (owner request 2026-07-09) — editable text field in the drawer next to the payment proof thumbnail, showing `booking.paymentReferenceNumber`. Always editable by staff, **independent of** the payment method's `requireReferenceNumber` setting (`plan/features/SETTINGS.md §2 Payment Methods`) — that setting only controls whether the *guest* was required to submit one during booking; staff can always add, correct, or fill it in later (e.g. when confirming payment for a method the guest wasn't asked to supply a reference for, or correcting a typo the guest made). Saved via `updateDoc` on `bookings/{bookingId}`, same pattern as the Notes field above.
-- [ ] Additional payments: POST to `/api/bookings/add-payment` — API appends `{ amount, method, note, recordedBy: staffUID, recordedAt: timestamp }` to `bookings/{bookingId}/payments`
+- [ ] Additional payments: POST to `/api/bookings/add-payment` with a client-preallocated `paymentId` — API creates that exact immutable payment document, safely replays exact retries, and atomically advances `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the status transition gates the one-time guest email
 - [ ] `onSnapshot` on `bookings/{bookingId}/payments` in drawer — real-time list updates
 - [ ] Outstanding balance computed client-side: `booking.totalPrice − sum(payments[].amount)`
 - [ ] Discount verification: `updateDoc` on `bookings/{bookingId}` — set `discountVerified: true` + `discountVerifiedBy: staffUID`
-- [ ] Discount rejection: POST to `/api/bookings/reject-discount` — sets `discountRejected: true`, `discountVerified: false`, `discountRejectedBy`, `discountRejectionReason`; restores `totalPrice` to pre-discount amount; triggers `/api/email/discount-rejected`; staff role required
+- [ ] Discount rejection: POST to `/api/bookings/reject-discount` — sets `discountRejected: true`, `discountVerified: false`, `discountRejectedBy`, `discountRejectionReason`; removes only the rejected Senior/PWD deduction while preserving voucher, member, and redeemed-points deductions; rebuilds the stored rate breakdown; triggers `/api/email/discount-rejected`; staff role required
 
 ## Edge Cases & States
 
@@ -200,8 +203,9 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 - `POST /api/bookings/reschedule` (`handleRescheduleBooking`, `guest-app/server/handlers/bookings.ts`) accepts `{ bookingId, roomId, checkIn, checkOut, reason }` inside a Firestore transaction. `roomId` can point to a room of a **different type**, so this already covers both a same-type room swap and a type upgrade/downgrade, not just a date change.
 - ✅ Capacity check — rejects the move if `booking.numGuests` exceeds the target room type's `maxCapacity`.
 - ✅ Conflict checks — target room can't have an overlapping booking or an active `roomBlocks` window for the new dates.
-- ✅ Full re-pricing — recomputes `roomBreakdown`/`rateBreakdown` against the target room type's base/weekend/seasonal/corporate rate, then re-applies Senior/PWD discount, voucher, and Spark Rewards member discount in the same order as booking creation. Points redemption value is re-subtracted.
+- ✅ Pricing basis — standard/corporate bookings recompute against the target room/date basis, while a locked manual walk-in rate is preserved and rescaled only by the new night count. The move form explicitly identifies that manual basis before confirmation. Discounts, vouchers, member discount, and redeemed points remain in the canonical order.
 - ✅ `deltaTotalPrice` (new total − old total) is computed and stored in a `rescheduleHistory` entry on the booking, so an upgrade's price difference is on record.
+- ✅ `pricingBasis` records whether each move preserved a manual rate or used recalculated pricing; the admin applies the authoritative response breakdown after the move.
 - ✅ Guest notification — fires the `booking-rescheduled` email with the new room/dates after a successful move.
 - ✅ Staff entry point exists today at `/calendar` — the booking drawer's "Move booking" form lists every room across every type (labelled with type), so staff can already pick an upgrade/downgrade target, not just a same-type room.
 
@@ -268,7 +272,7 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
   - `note` (string, optional)
   - `addedBy` (staff UID), `addedAt` (timestamp)
   - `voidOf` (chargeId | null) — set on a reversal entry pointing at the charge it cancels
-- **Append-only, same as payments:** `firebase/firestore.rules` — `allow read, create: if isStaff(); allow update, delete: if false;`. Voiding = create a negative reversal entry with `voidOf`, never edit/delete. Corrections stay auditable.
+- **Append-only, same as payments:** `firebase/firestore.rules` — `allow read, create: if isStaff(); allow update, delete: if false;`. Positive charges and negative reversals are capped at 1,000,000 absolute value. Voiding requires the deterministic document ID `void-{voidOf}`, so the rules enforce one reversal per charge; never edit/delete. Corrections stay auditable.
 - Types added to `shared/types/index.ts` + documented in `plan/docs/TYPES.md` and `plan/docs/BACKEND.md §bookings`.
 
 ### Shipped Workflow

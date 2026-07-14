@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { normalizePaymentMethodBucket, dateKeyInTimeZone, PAYMENT_BUCKETS } from "../utils/finance";
+import { normalizePaymentMethodBucket, dateKeyInTimeZone, PAYMENT_BUCKETS, splitBookingRevenue } from "../utils/finance";
 
 const reports = readFileSync(resolve(__dirname, "../pages/ReportsPage.tsx"), "utf8");
 const bookings = readFileSync(resolve(__dirname, "../pages/BookingsPage.tsx"), "utf8");
@@ -51,6 +51,43 @@ describe("dateKeyInTimeZone", () => {
   });
 });
 
+describe("splitBookingRevenue", () => {
+  it("counts a breakfast booking exactly once across disjoint streams", () => {
+    const split = splitBookingRevenue({
+      totalPrice: 6_000,
+      ratePerNight: 2_500,
+      numNights: 2,
+      numGuests: 2,
+      hasBreakfast: true,
+      breakfastRate: 250,
+      rateBreakdown: { roomSubtotal: 5_000 }
+    });
+
+    expect(split).toEqual({ room: 5_000, breakfast: 1_000 });
+    expect(split.room + split.breakfast).toBe(6_000);
+  });
+
+  it("allocates discounts proportionally between room and breakfast", () => {
+    const split = splitBookingRevenue({
+      totalPrice: 4_800,
+      numNights: 2,
+      numGuests: 2,
+      hasBreakfast: true,
+      breakfastRate: 250,
+      rateBreakdown: { roomSubtotal: 5_000 }
+    });
+
+    expect(split).toEqual({ room: 4_000, breakfast: 800 });
+    expect(split.room + split.breakfast).toBe(4_800);
+  });
+
+  it("keeps non-breakfast and malformed legacy bookings safe", () => {
+    expect(splitBookingRevenue({ totalPrice: 3_000, hasBreakfast: false })).toEqual({ room: 3_000, breakfast: 0 });
+    expect(splitBookingRevenue({ totalPrice: 3_000, hasBreakfast: true, breakfastRate: 200, numGuests: 2, numNights: 1 })).toEqual({ room: 3_000, breakfast: 0 });
+    expect(splitBookingRevenue({ totalPrice: Number.NaN, hasBreakfast: true, breakfastRate: 200 })).toEqual({ room: 0, breakfast: 0 });
+  });
+});
+
 // ── Wiring: the four fixes are actually applied in the page ────────────────
 describe("ReportsPage finance-audit wiring", () => {
   it("Fix #1 — Collections by day groups by hotel-timezone day, not UTC", () => {
@@ -82,6 +119,12 @@ describe("ReportsPage finance-audit wiring", () => {
 
   it("Fix #4 — revenue/billed side includes payment-confirmed bookings", () => {
     expect(reports).toMatch(/b\.status === "payment-confirmed" \|\| b\.status === "confirmed"/);
+  });
+
+  it("FL-01 — room and breakfast streams split the booking net total", () => {
+    expect(reports.match(/splitBookingRevenue\(b\)\.room \* fraction/g)).toHaveLength(3);
+    expect(reports).toMatch(/splitBookingRevenue\(b\)\.breakfast \* fraction/);
+    expect(reports).toMatch(/const bookingRevenue = splitBookingRevenue\(b\)/);
   });
 
   it("FR-05 — payment/charge listeners are stable (not re-subscribed on booking changes)", () => {

@@ -69,21 +69,23 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` and persisted guest-safe `rateBreakdown` for the confirmation page. The corporate "Continue without code" path sends `corporateFlatRate: true` — an intent flag only; the server resolves the flat rate from `roomTypes[].corporateRate` (never a client-supplied number) and a validated `corporateCode` always wins (per BI-04, booking-intercom audit 2026-07-06). |
-| `/api/bookings/create-walkin` | POST | Staff | Create walk-in/manual booking with staff auth and the same Firestore transaction conflict checks |
+| `/api/bookings/create-walkin` | POST | Staff | Strict-Zod validate the full walk-in body, including nested guest details and an optional finite manual override capped at 1,000,000, before creating the booking with staff auth and transactional conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
 | `/api/bookings/lookup` | POST | None (owner by ref+email or ref+lookup token) | Look up a single booking by `bookingRef` plus either `guestEmail` or magic-link `lookupToken` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}`. Response payload intentionally includes `guestName`, `guestEmail`, `guestPhone`, `roomType`/`roomNumber`, and guest-safe `rateBreakdown` so the self-service page can display the booking back to the guest. These fields are the data-subject's own PII or non-sensitive pricing details (per RA 10173 right to be informed + the right to access), and the endpoint enforces ref+email or ref+token ownership before returning them. |
-| `/api/bookings/add-payment` | POST | Staff | Append onsite payment audit record to `bookings/{bookingId}/payments`; fires `payment-confirmed` email when running total reaches `totalPrice` |
+| `/api/bookings/add-payment` | POST | Staff | Atomically append an onsite payment using the required client-preallocated `paymentId`; exact retries replay without a duplicate, while reuse with different details is rejected. Moves `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the committed status transition gates the one-time payment-confirmed email. For a checked-out member folio with a locked pending loyalty award, the final payment also awards those points exactly once. |
 | `/api/bookings/add-refund` | POST | Admin | Append an immutable negative refund entry after transactionally verifying it does not exceed net collected funds; requires method, reason, and approver UID |
-| `/api/bookings/confirm` | POST | Staff | Flip `pending`/`payment-uploaded` → `confirmed`; fires `booking-confirmed` email |
+| `/api/bookings/confirm` | POST | Staff | Flip `pending`/`payment-uploaded`/`payment-confirmed` → `confirmed`; fires the booking-confirmed email once |
 | `/api/bookings/checkin` | POST | Staff | Flip `confirmed`/`payment-confirmed` → `checked-in` inside a transaction; validates the assigned room is not blocked or occupied by another checked-in booking, then atomically marks the room `occupied` |
-| `/api/bookings/checkout` | POST | Staff | Flip `checked-in` → `checked-out`; atomically frees the room (`status: "available"`, `housekeepingStatus: "dirty"`) and, if the booking is linked to a Spark Rewards member (or the guest email matches an existing member), awards points per `settings/rewardsConfig.earningMode` (`per-spend` or `per-booking`) and writes a `members/{uid}/pointsHistory` entry. Falls back gracefully (no points) if points are disabled. |
+| `/api/bookings/checkout` | POST | Staff | Flip `checked-in` → `checked-out`; atomically frees the room and snapshots the charge-inclusive folio. Points use net `booking.totalPrice` only and are awarded immediately only when the folio is settled; otherwise a locked pending award is consumed by the later final payment. An early departure retains the contracted total while rebuilding the receipt breakdown with an explicit retained-total adjustment. |
 | `/api/bookings/reject-discount` | POST | Staff | Reject Senior/PWD discount ID — restores `totalPrice`, sets rejection fields, triggers discount-rejected email |
 | `/api/bookings/apply-discount` | POST | Staff | Apply a verified Senior/PWD grant and/or validated voucher to an existing active booking; transactionally re-prices in canonical stacking order and increments voucher usage |
-| `/api/bookings/reschedule` | POST | Staff | Move a booking to a new room/date range inside a transaction. Keeps original pricing locked, rejects terminal statuses, overlapping bookings, and active room blocks, and appends `rescheduleHistory[]`. |
+| `/api/bookings/reschedule` | POST | Staff | Move a booking to a new room/date range inside a transaction. Preserves and rescales a locked manual walk-in nightly rate; otherwise recalculates from the target room/date basis. Rejects terminal statuses, overlaps, and active room blocks, and appends `rescheduleHistory[]`. |
 
 Booking creation MUST use a Firestore transaction to prevent double-booking. Public online and corporate bookings use `/api/bookings/create`; staff walk-in/manual bookings use `/api/bookings/create-walkin`. Both routes must perform room active/blocked checks, overlapping booking checks, rate breakdown generation, and booking reference generation inside the transaction. Public online and corporate clients preallocate the Firestore booking document ID before Storage uploads and pass that ID to `/api/bookings/create`; the API creates the document at that exact ID while generating only the guest-facing booking reference inside the transaction. See `plan/features/AVAILABILITY-LOCKING.md`.
 
 Existing booking documents may still receive authenticated staff/admin operational updates directly from the admin app where Firestore rules allow it. Use booking API routes when the mutation creates a booking, appends audit/payment records, sends email, validates guest ownership, or changes money/member balances.
+
+Walk-in validation completes before the Firestore transaction starts. The strict request schema rejects unknown fields, malformed guest contact data, non-finite/negative manual overrides, and overrides above the per-transaction cap.
 
 ---
 
@@ -144,13 +146,15 @@ Both routes return the discount/rate details on success. Never expose full vouch
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/store/create-order` | POST | None | Create store order with server-side stock check, stock decrement, active booking lookup, and order ref generation |
+| `/api/store/create-order` | POST | None | Create store order with server-side stock check, active booking lookup, and order ref generation; stock decrements on staff confirmation |
 | `/api/store/cancel-order` | POST | None (room + order ref match) | Cancel a placed store order from the guest intercom and restore reserved stock once |
 | `/api/store/order-status` | POST | None (room + order ref match) | Return the latest guest-safe order status for the intercom tracker |
+| `/api/store/deliver-order` | POST | Staff | Atomically mark an out-for-delivery order delivered and append one deterministic direct-payment tender; Add to Bill creates no tender |
 
 Store order creation MUST use a Firestore transaction to prevent overselling.
 Store order cancellation MUST only allow `placed` orders and MUST use a transaction so stock restore is idempotent.
 Store order status MUST return only guest-safe metadata (`status`, `updatedAt`) and never expose `paymentProofUrl`, internal notes, or full order records.
+Store order delivery MUST use the authenticated server route. Direct-paid tenders are written under the store order so collection-group reports and Daily Close include them without settling the linked booking folio.
 
 ---
 
@@ -194,8 +198,8 @@ Janitor routes are operational endpoints. They must not be called from guest-fac
 |---|---|---|---|
 | `/api/members/register` | POST | Signed-in guest | Enroll the authenticated guest in Spark Rewards, generate the sequential `memberNumber`, create or update `members/{uid}`, and link past bookings by email |
 | `/api/members/stays` | GET | Signed-in guest | Return the calling member's guest-safe booking history by `memberId == uid` or `guestEmail == token.email`. Response includes display fields only (`bookingRef`, `lookupToken`, room, dates, nights, total, status, breakfast flag) and never returns staff-only fields such as `paymentProofUrl`, `notes`, or `remarks`. |
-| `/api/members/redeem-points` | POST | Staff | Redeem member points against a booking; transactionally deducts member balance, lowers `booking.totalPrice`, stores redemption fields, and appends a `pointsHistory` entry |
-| `/api/members/undo-redemption` | POST | Admin | Undo a points redemption while the booking is still `confirmed`; transactionally restores booking total, returns member points, clears redemption fields, and logs the reversal |
+| `/api/members/redeem-points` | POST | Staff | Redeem member points against a booking; transactionally deducts member balance, lowers `booking.totalPrice`, rebuilds the locked rate breakdown, stores redemption fields, and appends a `pointsHistory` entry |
+| `/api/members/undo-redemption` | POST | Admin | Undo a points redemption while the booking is still `confirmed`; transactionally restores booking total and its locked breakdown, returns member points, clears redemption fields, and logs the reversal |
 | `/api/members/set-active` | POST | Admin | Suspend or reactivate a Spark Rewards member account; updates the member document and Firebase Auth disabled state together |
 | `/api/members/delete-account` | POST | Signed-in guest | Erase the calling member's account per RA 10173 right to erasure: anonymize every linked booking (write a no-PII audit record to `bookings/audit/records/{id}` first, then scrub `guestName` / `guestEmail` / `guestPhone` / `memberId`), recursively delete the `pointsHistory` subcollection, delete `members/{uid}`, and delete the Firebase Auth user. Body must include `{ confirmation: "erase-my-account" }`. |
 

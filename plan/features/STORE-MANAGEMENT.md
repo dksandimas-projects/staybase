@@ -55,7 +55,7 @@ Settings is admin-only. Front Desk processes guest orders and billing from the o
   - `placed` → Confirm, Cancel
   - `confirmed` → Mark Out for Delivery, Cancel
   - `out-for-delivery` → Mark Delivered
-  - `delivered` → no further actions
+  - `delivered` → staff-authenticated server transition; atomically records the direct tender for COD/online methods, then no further actions
   - `cancelled` → no further actions
 - [ ] "Add to Booking Bill" action — available on delivered or confirmed orders with `paymentMethod: "add-to-bill"`; links order to booking, marks as billed
 - [ ] Cancel order modal — optional reason input
@@ -77,6 +77,7 @@ Settings is admin-only. Front Desk processes guest orders and billing from the o
 ### UI Checklist
 - [x] Sales by item — bar chart, most ordered items in selected period
 - [x] Store revenue — total revenue from delivered store orders in selected period
+- [x] Direct-paid delivery tender — one idempotent ledger entry at delivery; COD maps to Cash, Add to Bill remains on the booking folio
 - [x] Orders by payment method — pie chart (CoD, Add to Bill, GCash)
 - [x] Orders by status — count of delivered vs cancelled vs pending
 - [x] Low stock alert — list of items with stock ≤ threshold (default 5) or out of stock

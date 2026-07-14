@@ -86,6 +86,9 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] **FIN-03 refunds** — separate gross collections, refunds, and net collected totals; payment-method reporting nets refunds by their actual payout method.
 - [x] Show cancelled bookings with payment history, including gross paid, refunded, and still-retained amounts.
 - [x] Collections CSV, Sales XLSX, and Full Backup carry entry type, refund reason, and approver.
+- [x] **FL-13 reconciliation basis** — Billed and Collected are comparable to-date snapshots for booking folios touching the selected hotel-date range plus direct-paid store orders delivered in range. Billed includes full booking totals, all net incidentals, and delivered billed-to-room orders; Collected includes every matching payment/refund even when recorded before the selected range. Gross Collections and Refunds remain period cash-flow totals.
+- [x] **FL-14 retained no-show money** — the retained-payments table includes both cancelled bookings and past `confirmed` no-shows, with an explicit status plus gross paid, refunded, and still-retained totals.
+- [x] **FL-15 hotel-day windows** — preset/custom report membership, booking overlap/proration, no-show cutoffs, and export date labels use `config.timezone` calendar days rather than browser-local midnight or UTC slicing.
 
 ### Receivables & Aging *(FIN-04 shipped 2026-07-11)*
 
@@ -103,8 +106,8 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 
 #### Summary Cards (top of tab)
 - [ ] **Total Revenue** — combined across all streams for the selected period
-- [ ] **Room Revenue** — sum of booking `totalPrice` (includes any discounts/vouchers applied)
-- [ ] **Breakfast Revenue** — sum of `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`
+- [ ] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
+- [ ] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
 - [ ] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
 - [x] **Incidental Revenue** — net sum of append-only `bookings/{id}/charges` entries, including negative void reversals
 - [ ] **Total Transactions** — count of bookings + delivered store orders combined
@@ -114,6 +117,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [ ] **Revenue trend line** — total combined revenue per month over the selected period
 - [ ] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
 - [x] **Payment method breakdown** — pie chart by amount from actual payment-ledger entries, plus a separately labeled uncollected Add-to-Bill slice
+- [x] **Direct-paid store collections** — delivery appends a store-scoped tender consumed by the same collection-group ledger and Daily Close; store tenders never reduce the linked room folio
 
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
@@ -130,12 +134,12 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 
 ### Data & Logic Checklist
 - [ ] Bookings query: `status` in `["confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
-- [ ] Room revenue: sum of `totalPrice` per booking (already net of discounts/vouchers)
-- [ ] Breakfast revenue: `breakfastRate × numGuests × numNights` computed per booking where `hasBreakfast: true` — NOT a separate collection, derived from booking documents
+- [ ] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
+- [ ] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
 - [ ] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
 - [x] Incidental revenue: real-time `collectionGroup("charges")`, filtered by `addedAt`; positive charges and negative reversals net together
 - [ ] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
-- [ ] Combined total: room revenue + breakfast revenue + store revenue
+- [ ] Combined total: net room revenue + net breakfast revenue + store revenue + incidental revenue
 - [ ] Payment method breakdown: merge payment method counts from `bookings.paymentMethod` + `storeOrders.paymentMethod`
 - [ ] All aggregation client-side
 
@@ -246,9 +250,9 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 
 ## Manual QA — Sales Report
 
-- [ ] Total Revenue card matches sum of all three stream totals
-- [ ] Room Revenue matches sum of `totalPrice` across confirmed/checked-in/checked-out bookings for the period
-- [ ] Breakfast Revenue matches manual calculation: `breakfastRate × numGuests × numNights` per breakfast booking
+- [ ] Total Revenue card matches the sum of all four disjoint stream totals
+- [ ] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
+- [ ] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
 - [ ] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
 - [ ] Stacked bar chart shows correct monthly breakdown per stream
 - [ ] Bookings sub-table rows match booking count in Bookings Management for same period

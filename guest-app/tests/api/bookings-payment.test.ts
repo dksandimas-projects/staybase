@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockBookings, mockPayments, mockUpdates, sendBookingTrigger } = vi.hoisted(() => {
-  const mockPayments: Array<{ amount: number }> = [];
+const { mockBookings, mockMembers, mockPayments, mockPointsHistory, mockUpdates, sendBookingTrigger } = vi.hoisted(() => {
+  const mockPayments: Array<{ id?: string; amount: number; method?: string; note?: string }> = [];
   const mockBookings: Record<string, any> = {};
   const mockUpdates: Array<{ path: string; data: any }> = [];
   return {
     mockBookings,
+    mockMembers: {} as Record<string, any>,
     mockPayments,
+    mockPointsHistory: [] as Array<{ id: string; data: any }>,
     mockUpdates,
     sendBookingTrigger: vi.fn().mockResolvedValue(undefined)
   };
@@ -19,30 +21,33 @@ vi.mock("../../server/handlers/email", () => ({
 
 vi.mock("../../server/lib/firebase-admin", () => {
   const bookingDocRef = (path: string) => {
-    const docId = path.split("/").pop() || "";
+    const segments = path.split("/");
+    const collectionName = segments[0];
+    const docId = segments[1] || "";
     const ref = {
       id: docId,
       path,
       get: async () => {
-        const booking = mockBookings[docId];
-        return booking
-          ? { exists: true, id: docId, data: () => booking }
+        const store = collectionName === "members" ? mockMembers : mockBookings;
+        const data = store[docId];
+        return data
+          ? { exists: true, id: docId, data: () => data }
           : { exists: false };
       },
       update: async (data: any) => {
-        const booking = mockBookings[docId];
-        if (booking) {
-          Object.assign(booking, data);
+        const store = collectionName === "members" ? mockMembers : mockBookings;
+        if (store[docId]) {
+          Object.assign(store[docId], data);
         }
         mockUpdates.push({ path, data });
       },
       collection: (sub: string) => {
         if (sub === "payments") {
           return {
-            doc: () => ({
-              id: `payment_${mockPayments.length + 1}`,
+            doc: (paymentId = `payment_${mockPayments.length + 1}`) => ({
+              id: paymentId,
               set: async (data: any) => {
-                mockPayments.push(data);
+                mockPayments.push({ id: paymentId, ...data });
               }
             }),
             add: async (data: any) => {
@@ -51,9 +56,18 @@ vi.mock("../../server/lib/firebase-admin", () => {
             },
             get: async () => ({
               docs: mockPayments.map((p, i) => ({
-                id: `payment_${i + 1}`,
+                id: p.id || `payment_${i + 1}`,
                 data: () => p
               }))
+            })
+          };
+        }
+        if (sub === "pointsHistory") {
+          return {
+            doc: (historyId: string) => ({
+              id: historyId,
+              path: `${path}/pointsHistory/${historyId}`,
+              set: async (data: any) => mockPointsHistory.push({ id: historyId, data })
             })
           };
         }
@@ -78,7 +92,12 @@ vi.mock("../../server/lib/firebase-admin", () => {
     }),
     set: vi.fn().mockImplementation((ref: any, data: any) => {
       if (ref && typeof ref.set === "function") return ref.set(data);
-      if (ref?.path) mockUpdates.push({ path: ref.path, data });
+      if (ref?.path?.includes("/pointsHistory/")) {
+        mockPointsHistory.push({ id: ref.id, data });
+      } else if (ref?.path) mockUpdates.push({ path: ref.path, data });
+    }),
+    create: vi.fn().mockImplementation((ref: any, data: any) => {
+      if (ref && typeof ref.set === "function") return ref.set(data);
     }),
     update: vi.fn().mockImplementation((ref: any, data: any) => {
       if (ref && typeof ref.update === "function") return ref.update(data);
@@ -112,6 +131,7 @@ const staffReq = (overrides: Record<string, any> = {}) => ({
   staff: { uid: "staff_1", email: "frontdesk@sparkinn.com", role: "front-desk" },
   body: {
     bookingId: "booking_1",
+    paymentId: "paymentRequest001",
     amount: 1500,
     method: "gcash",
     note: "First installment",
@@ -122,7 +142,9 @@ const staffReq = (overrides: Record<string, any> = {}) => ({
 describe("/api/bookings/add-payment payment-confirmed trigger", () => {
   beforeEach(() => {
     Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
+    Object.keys(mockMembers).forEach((k) => delete mockMembers[k]);
     mockPayments.length = 0;
+    mockPointsHistory.length = 0;
     mockUpdates.length = 0;
     sendBookingTrigger.mockClear();
     mockBookings["booking_1"] = {
@@ -141,8 +163,32 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
 
     expect(mockPayments).toHaveLength(1);
     expect(mockPayments[0].amount).toBe(2000);
+    expect(mockBookings["booking_1"].status).toBe("pending");
     expect(sendBookingTrigger).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test("replaying the same payment ID does not append a duplicate", async () => {
+    const res1 = mockResponse();
+    const res2 = mockResponse();
+
+    await handleAddPayment(staffReq({ amount: 2000 }), res1);
+    await handleAddPayment(staffReq({ amount: 2000 }), res2);
+
+    expect(mockPayments).toHaveLength(1);
+    expect(res2.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idempotentReplay: true, totalPaid: 2000 })
+    }));
+  });
+
+  test("rejects reuse of a payment ID for different payment details", async () => {
+    await handleAddPayment(staffReq({ amount: 2000 }), mockResponse());
+    const res = mockResponse();
+
+    await handleAddPayment(staffReq({ amount: 2500 }), res);
+
+    expect(mockPayments).toHaveLength(1);
+    expect(res.status).toHaveBeenCalledWith(409);
   });
 
   test("fires payment-confirmed once the running total reaches totalPrice for a pending booking", async () => {
@@ -154,6 +200,10 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
     await handleAddPayment(staffReq({ amount: 1500 }), res);
 
     expect(sendBookingTrigger).toHaveBeenCalledTimes(1);
+    expect(mockBookings["booking_1"]).toEqual(expect.objectContaining({
+      status: "payment-confirmed",
+      handledBy: "staff_1"
+    }));
     expect(sendBookingTrigger).toHaveBeenCalledWith(
       "payment-confirmed",
       expect.objectContaining({
@@ -176,8 +226,21 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
     expect(sendBookingTrigger).toHaveBeenCalledTimes(1);
     expect(sendBookingTrigger).toHaveBeenCalledWith(
       "payment-confirmed",
-      expect.objectContaining({ status: "payment-uploaded" })
+      expect.objectContaining({ status: "payment-confirmed" })
     );
+    expect(mockBookings["booking_1"].status).toBe("payment-confirmed");
+  });
+
+  test("uses the committed status transition to prevent duplicate confirmation email", async () => {
+    mockBookings["booking_1"].status = "payment-confirmed";
+    mockPayments.push({ amount: 5000 });
+
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 100 }), res);
+
+    expect(sendBookingTrigger).not.toHaveBeenCalled();
+    expect(mockBookings["booking_1"].status).toBe("payment-confirmed");
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 
   test("does not re-fire payment-confirmed if the booking is already confirmed", async () => {
@@ -208,5 +271,59 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
 
     expect(res.status).toHaveBeenCalledWith(404);
     expect(sendBookingTrigger).not.toHaveBeenCalled();
+  });
+
+  test("awards deferred checkout points exactly when the final folio payment lands", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-001",
+      totalPrice: 5000,
+      status: "checked-out",
+      memberId: "member_1",
+      checkedOutFolioTotal: 5800,
+      checkedOutWithBalance: 3800,
+      pendingLoyaltyPoints: 500,
+      loyaltyAwardStatus: "pending-payment",
+      pointsAwarded: 0
+    };
+    mockMembers["member_1"] = { rewardsPoints: 100 };
+    mockPayments.push({ amount: 2000 });
+
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 3800 }), res);
+
+    expect(mockBookings["booking_1"]).toEqual(expect.objectContaining({
+      pointsAwarded: 500,
+      pendingLoyaltyPoints: 0,
+      loyaltyAwardStatus: "awarded",
+      checkedOutWithBalance: 3800
+    }));
+    expect(mockMembers["member_1"].rewardsPoints).toBe(600);
+    expect(mockPointsHistory).toHaveLength(1);
+    expect(mockPointsHistory[0].data).toMatchObject({ type: "earn", points: 500, bookingId: "booking_1" });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ loyaltyPointsAwarded: 500 })
+    }));
+  });
+
+  test("keeps deferred points pending on another partial payment", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-001",
+      totalPrice: 5000,
+      status: "checked-out",
+      memberId: "member_1",
+      checkedOutFolioTotal: 5800,
+      checkedOutWithBalance: 3800,
+      pendingLoyaltyPoints: 500,
+      loyaltyAwardStatus: "pending-payment"
+    };
+    mockMembers["member_1"] = { rewardsPoints: 100 };
+    mockPayments.push({ amount: 2000 });
+
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 1000 }), res);
+
+    expect(mockBookings["booking_1"].loyaltyAwardStatus).toBe("pending-payment");
+    expect(mockMembers["member_1"].rewardsPoints).toBe(100);
+    expect(mockPointsHistory).toHaveLength(0);
   });
 });

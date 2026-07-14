@@ -23,7 +23,14 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { collection, collectionGroup, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { normalizePaymentMethodBucket, dateKeyInTimeZone } from "../utils/finance";
+import {
+  normalizePaymentMethodBucket,
+  dateKeyInTimeZone,
+  getTimeZoneDayRange,
+  shiftDateKey,
+  splitBookingRevenue,
+  summarizeFolioSnapshot
+} from "../utils/finance";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -47,6 +54,8 @@ interface ReportCharge {
 interface ReportPayment {
   id: string;
   type: "payment" | "refund";
+  source: "booking" | "store-order";
+  sourceId: string;
   bookingId: string;
   bookingRef: string;
   roomNumber: string;
@@ -60,10 +69,10 @@ interface ReportPayment {
   recordedAt: Date | null;
 }
 
-// The ledger rows as stored in Firestore, before the booking-derived display
-// fields (bookingRef / roomNumber / guestName) are joined in.
+// Booking ledger rows receive display fields from the booking snapshot below;
+// store-order tenders already carry their own order/room display fields.
 type RawReportCharge = Omit<ReportCharge, "bookingRef" | "roomNumber">;
-type RawReportPayment = Omit<ReportPayment, "bookingRef" | "roomNumber" | "guestName">;
+type RawReportPayment = ReportPayment;
 
 interface ReceivableRow {
   bookingId: string;
@@ -109,34 +118,34 @@ function toDate(value: string | Date | null | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function reportDateKey(value: string | Date | null | undefined): string | null {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  const date = toDate(value);
+  return date ? dateKeyInTimeZone(date, config.timezone) : null;
+}
+
+function dateKeyDayNumber(dateKey: string): number {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
+}
+
 const getOverlapNights = (
   checkIn: any,
   checkOut: any,
   rangeStart: Date,
   rangeEnd: Date
 ): number => {
-  const cInParsed = toDate(checkIn);
-  const cOutParsed = toDate(checkOut);
-  if (!cInParsed || !cOutParsed) return 0;
+  const checkInKey = reportDateKey(checkIn);
+  const checkOutKey = reportDateKey(checkOut);
+  const rangeStartKey = reportDateKey(rangeStart);
+  const rangeEndKey = reportDateKey(rangeEnd);
+  if (!checkInKey || !checkOutKey || !rangeStartKey || !rangeEndKey) return 0;
 
-  const cIn = new Date(cInParsed);
-  cIn.setHours(0, 0, 0, 0);
-  const cOut = new Date(cOutParsed);
-  cOut.setHours(0, 0, 0, 0);
-
-  const rStart = new Date(rangeStart);
-  rStart.setHours(0, 0, 0, 0);
-  const rEnd = new Date(rangeEnd);
-  rEnd.setHours(0, 0, 0, 0);
-  const rEndCheckoutLimit = new Date(rEnd.getTime() + 86_400_000);
-
-  const overlapStart = new Date(Math.max(cIn.getTime(), rStart.getTime()));
-  const overlapEnd = new Date(Math.min(cOut.getTime(), rEndCheckoutLimit.getTime()));
-
-  if (overlapEnd.getTime() <= overlapStart.getTime()) {
-    return 0;
-  }
-  return Math.round((overlapEnd.getTime() - overlapStart.getTime()) / 86_400_000);
+  const overlapStart = Math.max(dateKeyDayNumber(checkInKey), dateKeyDayNumber(rangeStartKey));
+  const overlapEnd = Math.min(dateKeyDayNumber(checkOutKey), dateKeyDayNumber(rangeEndKey) + 1);
+  return Math.max(overlapEnd - overlapStart, 0);
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -192,13 +201,10 @@ export function ReportsPage() {
   const [activeTab, setActiveTab] = useState<ReportTab>("performance");
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - 29); // default to last 30 days
-    return d.toISOString().slice(0, 10);
+    return shiftDateKey(dateKeyInTimeZone(new Date(), config.timezone), -29);
   });
   const [customEndDate, setCustomEndDate] = useState(() => {
-    return new Date().toISOString().slice(0, 10);
+    return dateKeyInTimeZone(new Date(), config.timezone);
   });
   const [salesSubTab, setSalesSubTab] = useState<SalesSubTab>("bookings");
   const [searchTerm, setSearchTerm] = useState("");
@@ -268,11 +274,20 @@ export function ReportsPage() {
     const unsubscribe = onSnapshot(collectionGroup(db, "payments"), (snapshot) => {
       setRawPayments(snapshot.docs.map((paymentDoc) => {
         const data = paymentDoc.data();
-        const bookingId = paymentDoc.ref.parent.parent?.id || "";
+        const parentDocumentId = paymentDoc.ref.parent.parent?.id || "";
+        const isStoreTender = data.source === "store-order";
+        const sourceId = isStoreTender ? String(data.sourceId || parentDocumentId) : parentDocumentId;
         return {
           id: paymentDoc.id,
           type: data.type === "refund" || Number(data.amount || 0) < 0 ? "refund" : "payment",
-          bookingId,
+          source: isStoreTender ? "store-order" : "booking",
+          sourceId,
+          // Keep store tenders outside booking-folio sums. They reconcile the
+          // direct-paid store charge but must not settle the guest's room bill.
+          bookingId: isStoreTender ? `store:${sourceId}` : parentDocumentId,
+          bookingRef: isStoreTender ? String(data.orderRef || sourceId) : "",
+          roomNumber: isStoreTender ? String(data.roomNumber || "") : "",
+          guestName: isStoreTender ? String(data.guestName || "") : "",
           amount: Number(data.amount || 0),
           method: String(data.method || "unknown"),
           note: String(data.note || ""),
@@ -335,6 +350,9 @@ export function ReportsPage() {
 
   const payments = useMemo<ReportPayment[]>(() =>
     rawPayments.map((payment) => {
+      if (payment.source === "store-order") {
+        return payment;
+      }
       const display = bookingDisplayById.get(payment.bookingId);
       return {
         ...payment,
@@ -367,29 +385,20 @@ export function ReportsPage() {
     return customEndDate >= customStartDate;
   }, [dateRange, customStartDate, customEndDate]);
 
-  const periodStart = useMemo(() => {
+  const hotelTodayKey = dateKeyInTimeZone(new Date(), config.timezone);
+  const { periodStartKey, periodEndKey } = useMemo(() => {
     if (dateRange === "custom") {
-      const start = new Date(customStartDate);
-      start.setHours(0, 0, 0, 0);
-      return start;
+      return { periodStartKey: customStartDate, periodEndKey: customEndDate };
     }
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (Number(dateRange) - 1));
-    return start;
-  }, [dateRange, customStartDate]);
-
-  const periodEnd = useMemo(() => {
-    if (dateRange === "custom") {
-      const end = new Date(customEndDate);
-      end.setHours(23, 59, 59, 999);
-      return end;
-    }
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    return end;
-  }, [dateRange, customEndDate]);
-
+    return {
+      periodStartKey: shiftDateKey(hotelTodayKey, -(Number(dateRange) - 1)),
+      periodEndKey: hotelTodayKey
+    };
+  }, [dateRange, customStartDate, customEndDate, hotelTodayKey]);
+  const { start: periodStart, end: periodEnd } = useMemo(
+    () => getTimeZoneDayRange(periodStartKey, periodEndKey, config.timezone),
+    [periodStartKey, periodEndKey]
+  );
   const isWithinSelectedRange = (value: string | Date | null | undefined) => {
     const date = toDate(value);
     if (!date) return false;
@@ -410,23 +419,21 @@ export function ReportsPage() {
 
   const rangeBookings = useMemo(() => {
     return revenueBookings.filter(b => {
-      const cIn = toDate(b.checkIn);
-      const cOut = toDate(b.checkOut);
-      if (!cIn || !cOut) return false;
+      const checkInKey = reportDateKey(b.checkIn);
+      const checkOutKey = reportDateKey(b.checkOut);
+      if (!checkInKey || !checkOutKey) return false;
 
       // 1. Must overlap with the selected range
-      const overlaps = cIn < periodEnd && cOut > periodStart;
+      const overlaps = checkInKey <= periodEndKey && checkOutKey > periodStartKey;
       if (!overlaps) return false;
 
       // 2. Exclude past confirmed bookings (entirely in the past and never checked in / no-show)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      if (b.status === "confirmed" && cOut <= today) {
+      if (b.status === "confirmed" && checkOutKey <= hotelTodayKey) {
         return false;
       }
 
       // 3. Exclude future confirmed bookings that have no payments recorded
-      if (b.status === "confirmed" && cIn > today) {
+      if (b.status === "confirmed" && checkInKey > hotelTodayKey) {
         const collected = payments.filter(p => p.bookingId === b.id).reduce((sum, p) => sum + p.amount, 0);
         if (collected <= 0) {
           return false;
@@ -435,10 +442,10 @@ export function ReportsPage() {
 
       return true;
     });
-  }, [revenueBookings, periodStart, periodEnd, payments]);
+  }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey, payments]);
 
   const rangeStoreOrders = useMemo(
-    () => storeOrders.filter(o => isWithinSelectedRange(o.createdAt)),
+    () => storeOrders.filter(o => isWithinSelectedRange(o.status === "delivered" ? (o.deliveredAt || o.createdAt) : o.createdAt)),
     [storeOrders, periodStart, periodEnd]
   );
 
@@ -452,7 +459,7 @@ export function ReportsPage() {
     return rangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + (b.totalPrice || 0) * fraction;
+      return sum + splitBookingRevenue(b).room * fraction;
     }, 0);
   }, [rangeBookings, periodStart, periodEnd]);
 
@@ -464,7 +471,8 @@ export function ReportsPage() {
   const breakfastRevenue = useMemo(() => {
     return breakfastBookingsInRange.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
-      return sum + (b.breakfastRate || 0) * (b.numGuests || 0) * overlapNights;
+      const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+      return sum + splitBookingRevenue(b).breakfast * fraction;
     }, 0);
   }, [breakfastBookingsInRange, periodStart, periodEnd]);
 
@@ -491,14 +499,18 @@ export function ReportsPage() {
     [payments, periodStart, periodEnd]
   );
 
-  const billedTotal = useMemo(
-    () => rangeBookings.reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0) + storeRevenue + incidentalRevenue,
-    [rangeBookings, storeRevenue, incidentalRevenue]
-  );
-  const collectedTotal = useMemo(
-    () => rangePayments.reduce((sum, payment) => sum + payment.amount, 0),
-    [rangePayments]
-  );
+  const folioSnapshot = useMemo(() => summarizeFolioSnapshot({
+    bookings,
+    bookingIds: rangeBookings.map((booking) => booking.id),
+    payments,
+    charges,
+    storeOrders,
+    directStoreOrderIds: deliveredStoreOrders
+      .filter((order) => order.paymentMethod !== "add-to-bill")
+      .map((order) => order.id)
+  }), [bookings, rangeBookings, payments, charges, storeOrders, deliveredStoreOrders]);
+  const billedTotal = folioSnapshot.billed;
+  const collectedTotal = folioSnapshot.collected;
   const grossCollectionsTotal = useMemo(
     () => rangePayments.filter((payment) => payment.type === "payment").reduce((sum, payment) => sum + payment.amount, 0),
     [rangePayments]
@@ -510,9 +522,13 @@ export function ReportsPage() {
   const outstandingTotal = Math.max(billedTotal - collectedTotal, 0);
   const overCollectedTotal = Math.max(collectedTotal - billedTotal, 0);
 
-  const cancelledWithCollections = useMemo(() => {
+  const cancelledOrNoShowWithCollections = useMemo(() => {
     return bookings
-      .filter((booking) => booking.status === "cancelled")
+      .filter((booking) => {
+        if (booking.status === "cancelled") return true;
+        const checkOutKey = reportDateKey(booking.checkOut);
+        return booking.status === "confirmed" && Boolean(checkOutKey && checkOutKey <= hotelTodayKey);
+      })
       .map((booking) => {
         const entries = payments.filter((payment) => payment.bookingId === booking.id);
         const grossPaid = entries.filter((entry) => entry.type === "payment").reduce((sum, entry) => sum + entry.amount, 0);
@@ -522,6 +538,7 @@ export function ReportsPage() {
           bookingRef: booking.bookingRef,
           guestName: booking.guestName,
           roomNumber: booking.roomNumber,
+          statusLabel: booking.status === "cancelled" ? "Cancelled" : "No-show",
           grossPaid,
           refunded,
           retained: Math.max(grossPaid - refunded, 0)
@@ -529,7 +546,7 @@ export function ReportsPage() {
       })
       .filter((row) => row.grossPaid > 0)
       .sort((a, b) => b.retained - a.retained);
-  }, [bookings, payments]);
+  }, [bookings, payments, hotelTodayKey]);
 
   const collectionsByDay = useMemo(() => {
     const rows = new Map<string, { date: string; count: number; total: number }>();
@@ -772,16 +789,15 @@ export function ReportsPage() {
       const checkIn = toDate(b.checkIn);
       if (!checkIn) return;
       const slot = ensureMonth(checkIn);
-      slot.room += b.totalPrice || 0;
-      if (b.hasBreakfast) {
-        slot.breakfast += (b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0);
-      }
+      const bookingRevenue = splitBookingRevenue(b);
+      slot.room += bookingRevenue.room;
+      slot.breakfast += bookingRevenue.breakfast;
     });
 
     deliveredStoreOrders.forEach(o => {
-      const created = toDate(o.createdAt);
-      if (!created) return;
-      const slot = ensureMonth(created);
+      const delivered = toDate(o.deliveredAt || o.createdAt);
+      if (!delivered) return;
+      const slot = ensureMonth(delivered);
       slot.store += o.totalAmount || 0;
     });
 
@@ -994,7 +1010,7 @@ export function ReportsPage() {
     const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
     triggerDownload(
       new Blob([csv], { type: "text/csv;charset=utf-8;" }),
-      `sparkinn_collections_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.csv`
+      `sparkinn_collections_${periodStartKey}_to_${periodEndKey}.csv`
     );
   };
 
@@ -1023,7 +1039,7 @@ export function ReportsPage() {
       csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${b.paymentReferenceNumber || ""}"\n`;
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    triggerDownload(blob, `sparkinn_bookings_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.csv`);
+    triggerDownload(blob, `sparkinn_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
   };
 
   const handlePrintReport = () => {
@@ -1077,7 +1093,7 @@ export function ReportsPage() {
         heightLeft -= pageHeight;
       }
 
-      pdf.save(`sparkinn_${activeTab}_report_${periodStart.toISOString().slice(0, 10)}_to_${periodEnd.toISOString().slice(0, 10)}.pdf`);
+      pdf.save(`sparkinn_${activeTab}_report_${periodStartKey}_to_${periodEndKey}.pdf`);
       toast.success("PDF downloaded", "Your report PDF has been downloaded successfully.");
     } catch (err) {
       console.error(err);
@@ -1303,7 +1319,7 @@ export function ReportsPage() {
       toast.error("Invalid range", "Start date cannot be after end date.");
       return;
     }
-    const dateRangeLabel = `${periodStart.toISOString().slice(0, 10)} to ${periodEnd.toISOString().slice(0, 10)}`;
+    const dateRangeLabel = `${periodStartKey} to ${periodEndKey}`;
 
     const summaryRows = [
       ["Date Range", dateRangeLabel],
@@ -1312,8 +1328,8 @@ export function ReportsPage() {
       ["Breakfast Revenue", breakfastRevenue],
       ["Store Revenue", storeRevenue],
       ["Incidental Revenue", incidentalRevenue],
-      ["Billed Total (charge-inclusive)", billedTotal],
-      ["Collected Total (actual payments)", collectedTotal],
+      ["Billed to Date (selected folios)", billedTotal],
+      ["Collected to Date (selected folios)", collectedTotal],
       ["Gross Collections", grossCollectionsTotal],
       ["Refunds", refundsTotal],
       ["Outstanding", outstandingTotal],
@@ -1463,7 +1479,7 @@ export function ReportsPage() {
       "Paid By": invoice.paidBy || ""
     }))), "Corporate Invoices");
 
-    XLSX.writeFile(wb, `spark-inn-sales-${periodStart.toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `spark-inn-sales-${periodStartKey}.xlsx`);
   };
 
   const totalBookingsInRange = rangeBookings.length;
@@ -1516,7 +1532,7 @@ export function ReportsPage() {
 
   const prevDeliveredStoreOrders = useMemo(() => {
     const prevRangeStoreOrders = storeOrders.filter(o => {
-      const date = toDate(o.createdAt);
+      const date = toDate(o.deliveredAt || o.createdAt);
       return date && date >= prevPeriod.start && date <= prevPeriod.end;
     });
     return prevRangeStoreOrders.filter(o => o.status === "delivered");
@@ -1530,14 +1546,15 @@ export function ReportsPage() {
     return prevRangeBookings.reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-      return sum + (b.totalPrice || 0) * fraction;
+      return sum + splitBookingRevenue(b).room * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
   const prevBreakfastRevenue = useMemo(() => {
     return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
-      return sum + (b.breakfastRate || 0) * (b.numGuests || 0) * overlapNights;
+      const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
+      return sum + splitBookingRevenue(b).breakfast * fraction;
     }, 0);
   }, [prevRangeBookings, prevPeriod]);
 
@@ -1592,7 +1609,7 @@ export function ReportsPage() {
         .reduce((sum, b) => {
           const overlapNights = getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd);
           const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
-          return sum + (b.totalPrice || 0) * fraction;
+          return sum + splitBookingRevenue(b).room * fraction;
         }, 0);
       return { name: rt.label, revenue };
     });
@@ -1811,7 +1828,7 @@ export function ReportsPage() {
           collectionsByStaff={collectionsByStaff}
           filteredPayments={filteredPayments}
           onExportCollectionsCSV={handleExportCollectionsCSV}
-          cancelledWithCollections={cancelledWithCollections}
+          cancelledOrNoShowWithCollections={cancelledOrNoShowWithCollections}
           receivablesTotal={receivablesTotal}
           overdueReceivablesTotal={overdueReceivablesTotal}
           corporateReceivablesTotal={corporateReceivablesTotal}
@@ -2192,7 +2209,7 @@ function SalesTab(props: {
   collectionsByStaff: Array<{ staff: string; count: number; total: number }>;
   filteredPayments: ReportPayment[];
   onExportCollectionsCSV: () => void;
-  cancelledWithCollections: Array<{ bookingId: string; bookingRef: string; guestName: string; roomNumber: string; grossPaid: number; refunded: number; retained: number }>;
+  cancelledOrNoShowWithCollections: Array<{ bookingId: string; bookingRef: string; guestName: string; roomNumber: string; statusLabel: string; grossPaid: number; refunded: number; retained: number }>;
   receivablesTotal: number;
   overdueReceivablesTotal: number;
   corporateReceivablesTotal: number;
@@ -2245,7 +2262,7 @@ function SalesTab(props: {
     deltas,
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
     billedTotal, collectedTotal, grossCollectionsTotal, refundsTotal, outstandingTotal, overCollectedTotal, collectionsByDay, collectionsByStaff,
-    filteredPayments, onExportCollectionsCSV, cancelledWithCollections,
+    filteredPayments, onExportCollectionsCSV, cancelledOrNoShowWithCollections,
     receivablesTotal, overdueReceivablesTotal, corporateReceivablesTotal, addToBillReceivablesTotal,
     receivablesByAge, corporateReceivables, filteredReceivables, onExportReceivablesCSV,
     corporateInvoices, invoiceAction, onIssueCorporateInvoice, onMarkCorporateInvoicePaid,
@@ -2344,7 +2361,7 @@ function SalesTab(props: {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-base font-heading text-gray-950 lowercase tracking-tight">Collections Reconciliation</h2>
-            <p className="mt-1 text-[10px] text-gray-500">Actual entries from the append-only payment ledger, compared with charge-inclusive billed totals for this period.</p>
+            <p className="mt-1 text-[10px] text-gray-500">Period collection activity, plus a billed-to-date and collected-to-date snapshot for folios touching the selected hotel-date range.</p>
           </div>
           <button type="button" onClick={onExportCollectionsCSV} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50">
             <Download size={14} /> Export Collections CSV
@@ -2353,14 +2370,14 @@ function SalesTab(props: {
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Billed</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Billed to date</p>
             <p className="mt-1 text-xl font-heading text-gray-950">{formatPrice(billedTotal)}</p>
-            <p className="mt-1 text-[10px] text-gray-500">Bookings + store + incidentals</p>
+            <p className="mt-1 text-[10px] text-gray-500">Selected folios + direct store orders</p>
           </div>
           <div className="rounded-lg bg-emerald-50 p-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Net Collected</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Collected to date</p>
             <p className="mt-1 text-xl font-heading text-emerald-800">{formatPrice(collectedTotal)}</p>
-            <p className="mt-1 text-[10px] text-emerald-700">Actual payment entries</p>
+            <p className="mt-1 text-[10px] text-emerald-700">All payments on selected folios</p>
           </div>
           <div className="rounded-lg bg-emerald-50/60 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Gross Collections</p>
@@ -2375,12 +2392,12 @@ function SalesTab(props: {
           <div className="rounded-lg bg-red-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-red-600">Outstanding</p>
             <p className="mt-1 text-xl font-heading text-red-700">{formatPrice(outstandingTotal)}</p>
-            <p className="mt-1 text-[10px] text-red-600">Billed less collected</p>
+            <p className="mt-1 text-[10px] text-red-600">To-date billed less collected</p>
           </div>
           <div className="rounded-lg bg-amber-50 p-4">
             <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Over-collected</p>
             <p className="mt-1 text-xl font-heading text-amber-800">{formatPrice(overCollectedTotal)}</p>
-            <p className="mt-1 text-[10px] text-amber-700">Review for refund or timing mismatch</p>
+            <p className="mt-1 text-[10px] text-amber-700">Review for refund or excess payment</p>
           </div>
         </div>
 
@@ -2436,16 +2453,17 @@ function SalesTab(props: {
         </div>
 
         <div>
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Cancelled bookings with money collected</h3>
-          {cancelledWithCollections.length === 0 ? <p className="text-xs text-gray-400">No cancelled bookings have payment history.</p> : (
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-500">Cancelled and no-show bookings with money collected</h3>
+          {cancelledOrNoShowWithCollections.length === 0 ? <p className="text-xs text-gray-400">No cancelled or no-show bookings have payment history.</p> : (
             <div className="overflow-x-auto rounded-lg border border-gray-150">
               <table className="min-w-full text-xs">
-                <thead className="bg-gray-50 text-left"><tr>{["Booking", "Guest / Room", "Gross Paid", "Refunded", "Still Retained"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr></thead>
+                <thead className="bg-gray-50 text-left"><tr>{["Booking", "Guest / Room", "Status", "Gross Paid", "Refunded", "Still Retained"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr></thead>
                 <tbody className="divide-y divide-gray-100">
-                  {cancelledWithCollections.map((row) => (
+                  {cancelledOrNoShowWithCollections.map((row) => (
                     <tr key={row.bookingId}>
                       <td className="px-3 py-2 font-semibold text-gray-900">{row.bookingRef}</td>
                       <td className="px-3 py-2 text-gray-600">{row.guestName} · Room {row.roomNumber}</td>
+                      <td className="px-3 py-2 font-semibold text-amber-700">{row.statusLabel}</td>
                       <td className="px-3 py-2 text-right text-gray-700">{formatPrice(row.grossPaid)}</td>
                       <td className="px-3 py-2 text-right text-red-600">{formatPrice(row.refunded)}</td>
                       <td className={`px-3 py-2 text-right font-bold ${row.retained > 0 ? "text-amber-700" : "text-emerald-700"}`}>{formatPrice(row.retained)}</td>

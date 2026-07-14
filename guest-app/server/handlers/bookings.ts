@@ -11,11 +11,14 @@ import {
   getManilaDateInfo,
   BOOKING_REF_REGEX,
   generateLookupToken,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
+  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  getLockedManualNightlyRate,
+  WalkinBookingSchema
 } from "@spark-inn/shared";
-import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
+import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
+import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
@@ -24,7 +27,30 @@ export function getConfiguredBookingRefPrefix() {
 const ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 const ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready — previous guest has not checked out yet.";
 const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+const PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+
+function sumLedgerAmounts(snapshot: any): number {
+  return snapshot.docs.reduce((sum: number, docSnap: any) => sum + Number(docSnap.data()?.amount || 0), 0);
+}
+
+function sumBilledAddToBillOrders(snapshot: any): number {
+  return snapshot.docs.reduce((sum: number, docSnap: any) => {
+    const order = docSnap.data() || {};
+    return order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled
+      ? sum + Number(order.totalAmount || 0)
+      : sum;
+  }, 0);
+}
+
+function calculateCheckoutPoints(totalPrice: number, rewardsConfig: any): number {
+  if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
+  if ((rewardsConfig.earningMode || "per-spend") === "per-booking") {
+    return Math.max(Math.floor(Number(rewardsConfig.pointsPerBooking || 0)), 0);
+  }
+  const pointsPerHundred = Math.max(Number(rewardsConfig.pointsPerHundred || 0), 0);
+  return Math.max(Math.floor((Math.max(totalPrice, 0) / 100) * pointsPerHundred), 0);
+}
 
 function rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart;
@@ -116,47 +142,6 @@ async function hasActiveRoomBlockConflict(
     const end = toDateOrNull(data.endDate);
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
-}
-
-function buildRateBreakdown(input: {
-  roomLines: BookingRateLine[];
-  roomSubtotal: number;
-  breakfastTotal: number;
-  discountType: string;
-  discountPct: number;
-  voucherDiscount: number;
-  memberDiscountPct: number;
-  pointsRedeemedValue?: number;
-  finalTotal: number;
-}): BookingRateBreakdown {
-  const addOns = input.breakfastTotal > 0
-    ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
-    : [];
-  const subtotal = input.roomSubtotal + input.breakfastTotal;
-  const seniorPwdDiscount = Math.round(subtotal * (input.discountPct / 100));
-  const afterSeniorPwd = subtotal - seniorPwdDiscount;
-  const afterVoucher = afterSeniorPwd - input.voucherDiscount;
-  const memberDiscount = Math.round(afterVoucher * (input.memberDiscountPct / 100));
-  const pointsRedeemedValue = Math.max(0, Number(input.pointsRedeemedValue) || 0);
-  const deductions = [
-    ...(seniorPwdDiscount > 0
-      ? [{
-          label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${input.discountPct}%)`,
-          amount: seniorPwdDiscount
-        }]
-      : []),
-    ...(input.voucherDiscount > 0 ? [{ label: "Voucher discount", amount: input.voucherDiscount }] : []),
-    ...(memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }] : []),
-    ...(pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : [])
-  ];
-
-  return {
-    roomSubtotal: input.roomSubtotal,
-    roomLines: input.roomLines,
-    addOns,
-    deductions,
-    finalTotal: input.finalTotal
-  };
 }
 
 // Per BF-21 (booking-flow audit 2026-06-26): the public
@@ -914,7 +899,8 @@ export async function handleCreateBooking(req: any, res: any) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
 
-      // Pre-discount total to restore if discount is rejected.
+      // Canonical pre-discount pricing basis. Always stored, even when no
+      // discount is present, so every downstream reader has one convention.
       // Per BF-05 (booking-flow audit 2026-06-26): the value
       // stored must be the full pre-Senior/PWD subtotal so a
       // rejection restores the price the guest would have paid
@@ -924,7 +910,7 @@ export async function handleCreateBooking(req: any, res: any) {
       // `null` and the reject-discount handler 500'd. The
       // handler now uses `originalTotalPrice - voucherDiscount`
       // to apply the voucher if one was also applied.
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
@@ -1207,9 +1193,12 @@ export async function handleCreateBooking(req: any, res: any) {
 }
 
 export async function handleCreateWalkin(req: any, res: any) {
-  const body = req.body;
-  if (!body) {
-    return res.status(400).json({ success: false, error: "Invalid request body." });
+  const parsedWalkin = WalkinBookingSchema.safeParse(req.body || {});
+  if (!parsedWalkin.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the walk-in details — a required field is missing or invalid."
+    });
   }
 
   const {
@@ -1227,14 +1216,7 @@ export async function handleCreateWalkin(req: any, res: any) {
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
     linkedInquiryId
-  } = body;
-
-  if (!bookingId || !roomId || !checkIn || !checkOut || !guests || !guestDetails) {
-    return res.status(400).json({ success: false, error: "Missing required booking fields." });
-  }
-  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
-    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
-  }
+  } = parsedWalkin.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
@@ -1467,7 +1449,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
-        originalTotalPrice: discountType || voucherCode ? pricingSubtotal : subtotal,
+        originalTotalPrice: pricingSubtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
         // walkin flow writes a token too so the email
@@ -1585,10 +1567,18 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
       }
 
       const breakdown = booking.rateBreakdown as BookingRateBreakdown | undefined;
-      const subtotal = Number(booking.originalTotalPrice ?? (
-        Number(breakdown?.roomSubtotal || 0)
-        + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0)
-      ) ?? booking.totalPrice);
+      const storedOriginalTotal = Number(booking.originalTotalPrice);
+      const breakdownSubtotal = Number(breakdown?.roomSubtotal || 0)
+        + (breakdown?.addOns || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+      const storedTotalPrice = Number(booking.totalPrice);
+      const subtotal = booking.originalTotalPrice !== null
+        && booking.originalTotalPrice !== undefined
+        && Number.isFinite(storedOriginalTotal)
+        && storedOriginalTotal >= 0
+        ? storedOriginalTotal
+        : breakdown && Number.isFinite(breakdownSubtotal) && breakdownSubtotal > 0
+          ? breakdownSubtotal
+          : storedTotalPrice;
       if (!Number.isFinite(subtotal) || subtotal < 0) throw new Error("Booking pricing data is incomplete.");
 
       const discountType = requestedDiscountType === "senior" || requestedDiscountType === "pwd" ? requestedDiscountType : "";
@@ -1696,12 +1686,26 @@ export async function handleRejectDiscount(req: any, res: any) {
     // Per LR-L2: preserve the booking's existing workflow status
     // and re-apply the Spark Rewards member discount after removing
     // only the rejected Senior/PWD discount. Stacking remains:
-    // subtotal -> voucher -> member discount.
+    // subtotal -> voucher -> member discount -> redeemed points.
     const voucherDiscount = Number(bookingData.voucherDiscount || 0);
     const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
     const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
     const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
-    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount, 0);
+    const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+    const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue)
+      ? Math.max(rawPointsRedeemedValue, 0)
+      : 0;
+    const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
+    const rateBreakdown = rebuildRateBreakdown({
+      ...bookingData,
+      discountType: "",
+      discountPct: 0,
+      pointsRedeemedValue,
+      totalPrice: restoredTotalPrice
+    }, {
+      pointsRedeemedValue,
+      finalTotal: restoredTotalPrice
+    });
 
     // Per BF-15 (booking-flow audit 2026-06-26): the
     // `discountRejectedBy` field is a staff UID per the
@@ -1717,6 +1721,7 @@ export async function handleRejectDiscount(req: any, res: any) {
       discountRejectionReason: reason || "",
       discountPct: 0,
       totalPrice: restoredTotalPrice,
+      ...(rateBreakdown ? { rateBreakdown } : {}),
       updatedAt: new Date()
     };
 
@@ -1923,9 +1928,12 @@ export async function handleCancelBooking(req: any, res: any) {
 }
 
 export async function handleAddPayment(req: any, res: any) {
-  const { bookingId, amount, method, note } = req.body || {};
-  if (!bookingId || amount === undefined || !method) {
-    return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
+  const { bookingId, paymentId, amount, method, note } = req.body || {};
+  if (!bookingId || !paymentId || amount === undefined || !method) {
+    return res.status(400).json({ success: false, error: "Booking ID, payment ID, amount, and payment method are required." });
+  }
+  if (!PREALLOCATED_PAYMENT_ID_REGEX.test(String(paymentId))) {
+    return res.status(400).json({ success: false, error: "Invalid payment ID format." });
   }
 
   const numericAmount = Number(amount);
@@ -1975,9 +1983,12 @@ export async function handleAddPayment(req: any, res: any) {
   let totalPrice = 0;
   let isConfirmableStatus = false;
   let fullyPaid = false;
+  let transitionedToPaymentConfirmed = false;
   let hadPaymentProof = false;
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot: any = null;
+  let loyaltyPointsAwarded = 0;
+  let idempotentReplay = false;
 
   try {
     await adminDb.runTransaction(async (transaction) => {
@@ -1988,6 +1999,7 @@ export async function handleAddPayment(req: any, res: any) {
       }
       const bookingData = bookingDoc.data()!;
       bookingDataSnapshot = bookingData;
+      transitionedToPaymentConfirmed = false;
 
       const paymentsRef = bookingRef.collection("payments");
       // Read existing payments before queuing writes. Firestore
@@ -1998,6 +2010,20 @@ export async function handleAddPayment(req: any, res: any) {
         const data = docSnap.data() as { amount?: number };
         return sum + Number(data.amount || 0);
       }, 0);
+      const existingPayment = paymentsSnapshot.docs.find((docSnap: any) => docSnap.id === paymentId);
+      if (existingPayment) {
+        const existingData = existingPayment.data();
+        const sameRequest = Number(existingData.amount) === numericAmount
+          && String(existingData.method) === String(method)
+          && String(existingData.note || "") === safeNote;
+        if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
+        idempotentReplay = true;
+        totalPaid = existingPaid;
+        totalPrice = Number(bookingData.totalPrice || 0);
+        fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+        staffPaymentMarkerMissing = false;
+        return;
+      }
       totalPaid = existingPaid + numericAmount;
 
       totalPrice = Number(bookingData.totalPrice || 0);
@@ -2007,22 +2033,85 @@ export async function handleAddPayment(req: any, res: any) {
       hadPaymentProof = !!bookingData.paymentProofUrl;
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
 
-      // Mark the staff-new-payment dedup inside the transaction
-      // so a concurrent addPayment call doesn't re-fire the email.
+      const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
+      const settlesCheckedOutFolio = bookingData.status === "checked-out"
+        && bookingData.loyaltyAwardStatus === "pending-payment"
+        && pendingLoyaltyPoints > 0
+        && totalPaid >= Number(bookingData.checkedOutFolioTotal || 0);
+      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId
+        ? adminDb.collection("members").doc(String(bookingData.memberId))
+        : null;
+      const loyaltyMemberDoc = loyaltyMemberRef
+        ? await transaction.get(loyaltyMemberRef)
+        : null;
+
+      const bookingUpdates: Record<string, any> = {};
+
+      // Mark the staff-new-payment dedup inside the transaction so a
+      // concurrent addPayment call doesn't re-fire the staff alert.
       if (hadPaymentProof && staffPaymentMarkerMissing) {
-        transaction.update(bookingRef, {
-          "emailNotificationsSent.staffNewPayment": new Date()
+        bookingUpdates["emailNotificationsSent.staffNewPayment"] = new Date();
+      }
+
+      // Per Decision #77 / FL-04, reaching the locked booking total is the
+      // authoritative transition to payment-confirmed. Keeping this write in
+      // the same transaction as the payment append makes the status itself
+      // the guest-email idempotency guard under concurrent submissions.
+      if (fullyPaid && isConfirmableStatus) {
+        const updatedAt = new Date();
+        Object.assign(bookingUpdates, {
+          status: "payment-confirmed",
+          handledBy: staffUid,
+          updatedAt
         });
+        transitionedToPaymentConfirmed = true;
+        bookingDataSnapshot = {
+          ...bookingData,
+          ...bookingUpdates
+        };
+      }
+
+      if (settlesCheckedOutFolio && loyaltyMemberRef && loyaltyMemberDoc?.exists) {
+        loyaltyPointsAwarded = pendingLoyaltyPoints;
+        const awardedAt = new Date();
+        Object.assign(bookingUpdates, {
+          pointsAwarded: loyaltyPointsAwarded,
+          pendingLoyaltyPoints: 0,
+          loyaltyAwardStatus: "awarded",
+          pointsAwardedAt: awardedAt,
+          updatedAt: awardedAt
+        });
+        transaction.update(loyaltyMemberRef, {
+          rewardsPoints: Number(loyaltyMemberDoc.data()?.rewardsPoints || 0) + loyaltyPointsAwarded,
+          updatedAt: awardedAt
+        });
+        const historyRef = loyaltyMemberRef.collection("pointsHistory").doc(`earn-${bookingId}`);
+        transaction.set(historyRef, {
+          type: "earn",
+          points: loyaltyPointsAwarded,
+          bookingId,
+          bookingRef: bookingData.bookingRef,
+          description: `Settled Stay Earnings (${bookingData.bookingRef})`,
+          by: staffUid,
+          createdAt: awardedAt
+        });
+      }
+
+      if (Object.keys(bookingUpdates).length > 0) {
+        transaction.update(bookingRef, bookingUpdates);
       }
 
       // Append the payment record inside the transaction after
       // all reads have completed.
-      const newPaymentRef = paymentsRef.doc();
-      transaction.set(newPaymentRef, paymentRecord);
+      const newPaymentRef = paymentsRef.doc(paymentId);
+      transaction.create(newPaymentRef, paymentRecord);
     });
   } catch (error: any) {
     if (error.message === "Booking not found") {
       return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error.message === "Payment ID has already been used for a different payment.") {
+      return res.status(409).json({ success: false, error: error.message });
     }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -2032,7 +2121,7 @@ export async function handleAddPayment(req: any, res: any) {
   // external and slow) but the dedup marker is now written
   // transactionally so the duplicate-fire race is closed.
   try {
-    if (fullyPaid && isConfirmableStatus) {
+    if (transitionedToPaymentConfirmed) {
       await sendBookingTrigger("payment-confirmed", bookingDataSnapshot);
     }
     // Per W4.4 / decision #104: notify staff when a guest
@@ -2050,7 +2139,13 @@ export async function handleAddPayment(req: any, res: any) {
 
   return res.status(200).json({
     success: true,
-    data: { ...paymentRecord, totalPaid }
+    data: {
+      ...paymentRecord,
+      totalPaid,
+      status: bookingDataSnapshot?.status || null,
+      loyaltyPointsAwarded,
+      idempotentReplay
+    }
   });
 }
 
@@ -2141,7 +2236,7 @@ export async function handleConfirmBooking(req: any, res: any) {
         return;
       }
 
-      const allowedStatuses = ["pending", "payment-uploaded"];
+      const allowedStatuses = ["pending", "payment-uploaded", "payment-confirmed"];
       if (!allowedStatuses.includes(data.status)) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
@@ -2288,9 +2383,10 @@ export async function handleCheckoutBooking(req: any, res: any) {
     // fields flow into the `bookings/audit/records` collection
     // and are PII-sensitive.
     const checkedOutBy = req.staff?.uid || "staff";
-    const totalPrice = Number(bookingData.totalPrice || 0);
 
     let pointsAwarded = 0;
+    let eligiblePoints = 0;
+    let checkedOutWithBalance = 0;
     let memberId: string | null = bookingData.memberId || null;
     let rewardsConfig: any = null;
 
@@ -2314,17 +2410,6 @@ export async function handleCheckoutBooking(req: any, res: any) {
     if (memberDoc?.exists) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
-      const pointsEnabled = rewardsConfig?.pointsEnabled !== false;
-
-      if (pointsEnabled && rewardsConfig) {
-        const earningMode = rewardsConfig.earningMode || "per-spend";
-        if (earningMode === "per-spend") {
-          const pointsPerHundred = Number(rewardsConfig.pointsPerHundred || 0);
-          pointsAwarded = Math.floor((totalPrice / 100) * pointsPerHundred);
-        } else {
-          pointsAwarded = Number(rewardsConfig.pointsPerBooking || 0);
-        }
-      }
     }
 
     await adminDb.runTransaction(async (transaction) => {
@@ -2337,7 +2422,22 @@ export async function handleCheckoutBooking(req: any, res: any) {
         throw new Error(`Booking can only be checked out from 'checked-in' status (current: ${freshBookingData.status}).`);
       }
 
-      const memberRef = memberId && pointsAwarded > 0
+      const paymentsRef = bookingRef.collection("payments");
+      const chargesRef = bookingRef.collection("charges");
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const chargesSnapshot = await transaction.get(chargesRef);
+      const storeOrdersSnapshot = await transaction.get(storeOrdersQuery);
+      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+      const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
+      checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
+      eligiblePoints = memberId
+        ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
+        : 0;
+
+      const memberRef = memberId && eligiblePoints > 0
         ? adminDb.collection("members").doc(memberId)
         : null;
       const memberDocInTransaction = memberRef
@@ -2356,17 +2456,31 @@ export async function handleCheckoutBooking(req: any, res: any) {
         status: "checked-out",
         checkedOutAt: new Date(),
         checkedOutBy,
-        pointsAwarded,
+        checkedOutWithBalance,
+        checkedOutFolioTotal: checkoutFolioTotal,
+        checkedOutCollectedTotal: collectedTotal,
         updatedAt: new Date()
       };
       if (memberId && freshBookingData.memberId !== memberId) {
         bookingUpdate.memberId = memberId;
       }
       if (shouldTruncateStay && originalCheckIn) {
+        const truncatedNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 86400000), 1);
         bookingUpdate.checkOut = Timestamp.fromDate(checkoutDate);
-        bookingUpdate.numNights = Math.max(Math.round((checkoutDate.getTime() - originalCheckIn.getTime()) / 86400000), 1);
+        bookingUpdate.numNights = truncatedNights;
         bookingUpdate.earlyCheckoutOriginalCheckOut = freshBookingData.checkOut;
+        bookingUpdate.rateBreakdown = rebuildEarlyCheckoutRateBreakdown(freshBookingData, truncatedNights);
       }
+
+      const canAwardPoints = Boolean(memberId && eligiblePoints > 0 && memberRef && memberDocInTransaction?.exists);
+      const awardNow = canAwardPoints && checkedOutWithBalance <= 0;
+      pointsAwarded = awardNow ? eligiblePoints : 0;
+      Object.assign(bookingUpdate, {
+        pointsAwarded,
+        pendingLoyaltyPoints: canAwardPoints && !awardNow ? eligiblePoints : 0,
+        loyaltyAwardStatus: canAwardPoints ? (awardNow ? "awarded" : "pending-payment") : "ineligible",
+        pointsAwardedAt: awardNow ? new Date() : null
+      });
 
       transaction.update(bookingRef, bookingUpdate);
 
@@ -2393,14 +2507,14 @@ export async function handleCheckoutBooking(req: any, res: any) {
         );
       }
 
-      if (memberId && pointsAwarded > 0 && memberRef && memberDocInTransaction?.exists) {
+      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
         const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
         transaction.update(memberRef, {
           rewardsPoints: currentPoints + pointsAwarded,
           updatedAt: new Date()
         });
 
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc();
+        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
         transaction.set(historyRef, {
           type: "earn",
           points: pointsAwarded,
@@ -2418,7 +2532,8 @@ export async function handleCheckoutBooking(req: any, res: any) {
       data: {
         status: "checked-out",
         pointsAwarded,
-        memberId
+        memberId,
+        checkedOutWithBalance
       }
     });
   } catch (error: any) {
@@ -2710,6 +2825,9 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       // PF-03: Pricing recalculation
+      const manualNightlyRate = getLockedManualNightlyRate(
+        booking.rateBreakdown as BookingRateBreakdown | null | undefined
+      );
       let activeRoomRate = typeEntry.pricePerNight || 0;
       if (booking.isCorporate) {
         let typeCorporateRate = typeEntry.corporateRate || 0;
@@ -2728,7 +2846,20 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
 
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
-      const roomBreakdown = booking.isCorporate
+      const roomBreakdown = manualNightlyRate !== null
+        ? {
+            roomSubtotal: Math.round(manualNightlyRate * numNights),
+            roomLines: [{
+              source: "manual" as const,
+              label: "Manual front-desk rate",
+              startDate: checkIn,
+              endDate: checkOut,
+              nights: numNights,
+              nightlyRate: manualNightlyRate,
+              subtotal: Math.round(manualNightlyRate * numNights)
+            }]
+          }
+        : booking.isCorporate
         ? {
             roomSubtotal: activeRoomRate * numNights,
             roomLines: [{
@@ -2752,7 +2883,12 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const roomTotal = roomBreakdown.roomSubtotal;
 
       const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const breakfastTotal = booking.hasBreakfast ? breakfastRate * (booking.numGuests || 1) * numNights : 0;
+      // A walk-in manual override is the complete staff-agreed pricing basis;
+      // its original breakdown intentionally carries no separate breakfast
+      // line. Preserve that convention instead of adding breakfast on move.
+      const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast
+        ? breakfastRate * (booking.numGuests || 1) * numNights
+        : 0;
       const subtotal = roomTotal + breakfastTotal;
 
       let discountPct = 0;
@@ -2796,7 +2932,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
@@ -2821,6 +2957,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
         reason: typeof reason === "string" ? reason.slice(0, 500) : "",
         by: req.staff?.uid || req.staff?.email || "staff",
         at: new Date().toISOString(),
+        pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
         deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
       };
 
@@ -2831,7 +2968,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
         checkIn: Timestamp.fromDate(checkInDate),
         checkOut: Timestamp.fromDate(checkOutDate),
         numNights,
-        ratePerNight: activeRoomRate,
+        ratePerNight: manualNightlyRate ?? activeRoomRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
         originalTotalPrice,
