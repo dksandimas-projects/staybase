@@ -96,16 +96,16 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 
 ## Manual QA
 
-- [ ] All rooms appear in status grid
-- [ ] Housekeeping status cycles Clean → Dirty → In Progress → Clean on toggle
-- [ ] Housekeeping status change reflects immediately in grid
-- [ ] Pending payment alert appears when a guest uploads a screenshot
-- [ ] Confirm Payment CTA changes booking status and sends email
-- [ ] Today's check-ins/check-outs show correct bookings for today's date
-- [ ] Overdue check-outs appear only for still-checked-in bookings whose checkout date is before today, or whose checkout time has passed today, and each row opens the booking detail drawer
-- [ ] New corporate inquiries appear only for `status: "new"` and each row opens the corporate inquiry drawer
-- [ ] Intercom unread badge count matches actual unread messages
-- [ ] Dashboard loads in under 2s
+- [x] All rooms appear in status grid
+- [x] Housekeeping status cycles Clean → Dirty → In Progress → Clean on toggle
+- [x] Housekeeping status change reflects immediately in grid
+- [x] Pending payment alert appears when a guest uploads a screenshot
+- [x] Confirm Payment CTA changes booking status and sends email
+- [x] Today's check-ins/check-outs show correct bookings for today's date
+- [x] Overdue check-outs appear only for still-checked-in bookings whose checkout date is before today, or whose checkout time has passed today, and each row opens the booking detail drawer
+- [x] New corporate inquiries appear only for `status: "new"` and each row opens the corporate inquiry drawer
+- [x] Intercom unread badge count matches actual unread messages
+- [x] Dashboard loads in under 2s
 
 ## References
 
