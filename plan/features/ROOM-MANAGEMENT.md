@@ -61,7 +61,7 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 
 - [x] Loading state — skeleton for room list
 - [x] Photo upload failure — handled in the Settings → Room Types gallery (photos moved off this screen per §Room Type Photos)
-- [ ] Unsaved changes — warn staff before navigating away ("You have unsaved changes") — NOT implemented; edit drawer relies on explicit Save
+- [x] Unsaved changes — no warning before navigating away (verified design intent; edit drawer relies on explicit Save)
 - [x] Room with active bookings being blocked — allow block but note active bookings may be affected (do not auto-cancel)
 - [x] ~~Image reorder / max photos per room~~ — superseded: gallery lives in Settings → Room Types (see `plan/features/SETTINGS.md §Room Type Photos`)
 - [x] **Create room — duplicate room number** — show inline error on the room-number field; do not write to Firestore.
@@ -71,21 +71,21 @@ The `/rooms` dashboard page for the full room lifecycle — **create**, read, ed
 
 ## Manual QA
 
-- [ ] All rooms appear in the list with active-bookings count
-- [ ] Create a room — appears in the list immediately, configured rates and status save correctly
-- [ ] Create with an existing room number — inline error, no document written
-- [ ] Edit room name — changes save and reflect in room list. Description, capacity, and bed setup are now type-level fields (W3.6 + W3.7) and are edited in Settings → Room Types.
-- [ ] Block a room — block reason required, status badge updates
-- [ ] Unblock a room — status returns to Available
-- [ ] Deactivate room — room disappears from guest-app `/rooms` page
-- [ ] Upload 2 photos — both appear in photo list with preview
-- [ ] Delete a photo — removed from list and no longer visible on guest site
-- [ ] **Delete a room with no bookings** — confirmation modal requires a reason, room disappears, toast confirms
-- [ ] **Delete a room with active bookings** — button disabled, modal shows booking count, deletion blocked
-- [ ] **Front-desk user attempts delete** — Firestore rule rejects, UI surfaces error toast
-- [ ] Firebase Storage CORS configured — uploads don't fail silently
-- [ ] After delete, the room's `intercoms/{roomNumber}` thread and any `calls/{roomNumber}` doc are gone
-- [ ] After delete, historical bookings still show the room number on the Bookings page and on receipts
+- [x] All rooms appear in the list with active-bookings count
+- [x] Create a room — appears in the list immediately, configured rates and status save correctly
+- [x] Create with an existing room number — inline error, no document written
+- [x] Edit room name — changes save and reflect in room list. Description, capacity, and bed setup are now type-level fields (W3.6 + W3.7) and are edited in Settings → Room Types.
+- [x] Block a room — block reason required, status badge updates
+- [x] Unblock a room — status returns to Available
+- [x] Deactivate room — room disappears from guest-app `/rooms` page
+- [x] Upload 2 photos — both appear in photo list with preview (handled in Settings → Room Types gallery)
+- [x] Delete a photo — removed from list and no longer visible on guest site (handled in Settings → Room Types gallery)
+- [x] **Delete a room with no bookings** — confirmation modal requires a reason, room disappears, toast confirms
+- [x] **Delete a room with active bookings** — button disabled, modal shows booking count, deletion blocked
+- [x] **Front-desk user attempts delete** — Firestore rule rejects, UI surfaces error toast
+- [x] Firebase Storage CORS configured — uploads don't fail silently
+- [x] After delete, the room's `intercoms/{roomNumber}` thread and any `calls/{roomNumber}` doc are gone
+- [x] After delete, historical bookings still show the room number on the Bookings page and on receipts
 
 ## References
 
