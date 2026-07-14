@@ -10,8 +10,8 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 
 ### Export CSV Button (page header, both tabs)
 
-- [ ] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
-- [ ] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
+- [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
+- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
 
 ### Custom Date Range (owner request 2026-07-09)
 
@@ -19,24 +19,24 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 
 **Target behavior — keep the dropdown, add a custom option alongside it:**
 
-- ⬜ Add a fourth option to the existing `<select>`: **"Custom Range"**. The three existing options (7/30/90 days) are unchanged and remain the default.
-- ⬜ When "Custom Range" is selected, reveal two date inputs (start date, end date) next to the dropdown — reuse `DateRangePicker`-style native `<input type="date">` fields already used elsewhere in the app, not a new custom calendar component.
-- ⬜ `periodStart`/`periodEnd` derive from the two picked dates when in custom mode, instead of the "N days back from today" calculation — end date is no longer forced to be today.
-- ⬜ Validation: end date must be on or after start date; a sensible max range (e.g. disable/warn past 1 year) to keep exports from becoming unreasonably large.
-- ⬜ The selected custom range is reflected in export filenames/labels the same way the preset ranges already are (e.g. `sparkinn_bookings_{start}_to_{end}.csv`, the Sales XLSX "Date Range" summary row) — no separate code path needed there since those already read from `periodStart`/`periodEnd`.
-- ⬜ Switching back from "Custom Range" to a preset option reverts to the normal "N days back from today" behavior.
+- [x] Add a fourth option to the existing `<select>`: **"Custom Range"**. The three existing options (7/30/90 days) are unchanged and remain the default.
+- [x] When "Custom Range" is selected, reveal two date inputs (start date, end date) next to the dropdown — reuse `DateRangePicker`-style native `<input type="date">` fields already used elsewhere in the app, not a new custom calendar component.
+- [x] `periodStart`/`periodEnd` derive from the two picked dates when in custom mode, instead of the "N days back from today" calculation — end date is no longer forced to be today.
+- [x] Validation: end date must be on or after start date; a sensible max range (e.g. disable/warn past 1 year) to keep exports from becoming unreasonably large.
+- [x] The selected custom range is reflected in export filenames/labels the same way the preset ranges already are (e.g. `sparkinn_bookings_{start}_to_{end}.csv`, the Sales XLSX "Date Range" summary row) — no separate code path needed there since those already read from `periodStart`/`periodEnd`.
+- [x] Switching back from "Custom Range" to a preset option reverts to the normal "N days back from today" behavior.
 
 ---
 
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Drawers save without full page reload — optimistic update, toast on success
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Destructive actions have a single confirmation step — not buried in menus
-- [ ] Empty states explain why data is missing and what to do
+- [x] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [x] Loading state uses skeleton, not spinner
+- [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Destructive actions have a single confirmation step — not buried in menus
+- [x] Empty states explain why data is missing and what to do
 
 ---
 
@@ -45,27 +45,27 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 Occupancy and booking patterns. Not revenue-focused.
 
 ### UI Checklist
-- [ ] Date range selector — preset ranges (This Month, Last Month, Last 3 Months, Last 6 Months, Custom)
-- [ ] Occupancy rate chart — bar or line chart, occupancy % per month (overall + breakdown by room type)
-- [ ] Bookings by source chart — pie or bar chart: Online, Walk-in, Phone, Facebook, Corporate
-- [ ] Summary stat cards — total bookings, avg occupancy %, busiest room type for selected period
-- [ ] Recharts tooltips — hover shows exact value per data point
-- [ ] Responsive charts — readable on tablet (768px min)
-- [ ] Export PDF button — performance report (charts + stat cards) via jsPDF
+- [x] Date range selector — preset ranges (This Month, Last Month, Last 3 Months, Last 6 Months, Custom)
+- [x] Occupancy rate chart — bar or line chart, occupancy % per month (overall + breakdown by room type)
+- [x] Bookings by source chart — pie or bar chart: Online, Walk-in, Phone, Facebook, Corporate
+- [x] Summary stat cards — total bookings, avg occupancy %, busiest room type for selected period
+- [x] Recharts tooltips — hover shows exact value per data point
+- [x] Responsive charts — readable on tablet (768px min)
+- [x] Export PDF button — performance report (charts + stat cards) via jsPDF
 
 ### Data & Logic Checklist
-- [ ] Query `bookings` where `status` is in `["confirmed", "checked-in", "checked-out"]` for selected date range
-- [ ] Occupancy rate: (occupied room-nights / total available room-nights) × 100 per month
-- [ ] Total available room-nights: total active room count × days in month — query room count from Firestore, never hardcode
-- [ ] Bookings by source: count grouped by `source` field
-- [ ] All aggregation done client-side — no server-side aggregation needed at this scale
+- [x] Query `bookings` where `status` is in `["confirmed", "checked-in", "checked-out"]` for selected date range
+- [x] Occupancy rate: (occupied room-nights / total available room-nights) × 100 per month
+- [x] Total available room-nights: total active room count × days in month — query room count from Firestore, never hardcode
+- [x] Bookings by source: count grouped by `source` field
+- [x] All aggregation done client-side — no server-side aggregation needed at this scale
 
 ### Manual QA
-- [ ] Occupancy chart reflects correct data for the current month
-- [ ] Bookings by source chart matches source breakdown in Bookings table
-- [ ] Date range change updates all charts simultaneously
-- [ ] PDF export includes all charts legibly
-- [ ] Charts render correctly at 768px (tablet)
+- [x] Occupancy chart reflects correct data for the current month
+- [x] Bookings by source chart matches source breakdown in Bookings table
+- [x] Date range change updates all charts simultaneously
+- [x] PDF export includes all charts legibly
+- [x] Charts render correctly at 768px (tablet)
 
 ---
 
