@@ -164,9 +164,8 @@ catalog + any real vouchers/corporate codes directly on prod when needed.
 
 - [ ] Announce a short freeze window (no new bookings taken at the desk)
 - [ ] Verify staff accounts can log in on production (PC-05)
-- [ ] Redeploy both Vercel projects on Production (activates the prod env
-  vars saved in PC-04)
-- [ ] `node scripts/preflight.mjs` green
+- [ ] Redeploy both Vercel projects on Production (activates the prod env vars saved in PC-04)
+- [x] `node scripts/preflight.mjs` green *(done 2026-07-14 — 35/35 passed)*
 - [ ] One end-to-end smoke booking **on production**: book → pay →
   incidental charge → store order (direct-paid + add-to-bill) → check-in →
   checkout → Daily Close preview → exports — then cancel/refund the test
