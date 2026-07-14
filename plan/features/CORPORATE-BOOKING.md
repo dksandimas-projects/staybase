@@ -64,14 +64,14 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 
 ## Manual QA
 
-- [ ] Valid access code unlocks correct company name and rates
-- [ ] Rates in Step 1 reflect corporate pricing (not standard rates)
-- [ ] "Corporate Rate — [Company]" badge visible on all 4 steps
-- [ ] Corporate fields appear in Step 2 and are required
-- [ ] Completed booking shows `isCorporate: true` in admin dashboard
-- [ ] Flat rate (no code) booking works correctly
-- [ ] Expired/invalid code shows friendly error, does not block flow entry (can continue without code)
-- [ ] Usage count increments on `corporateCodes` document after successful booking
+- [x] Valid access code unlocks correct company name and rates
+- [x] Rates in Step 1 reflect corporate pricing (not standard rates)
+- [x] "Corporate Rate — [Company]" badge visible on all 4 steps
+- [x] Corporate fields appear in Step 2 and are required
+- [x] Completed booking shows `isCorporate: true` in admin dashboard
+- [x] Flat rate (no code) booking works correctly
+- [x] Expired/invalid code shows friendly error, does not block flow entry (can continue without code)
+- [x] Usage count increments on `corporateCodes` document after successful booking
 
 ## References
 
