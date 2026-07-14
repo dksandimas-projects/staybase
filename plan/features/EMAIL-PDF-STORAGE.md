@@ -130,10 +130,10 @@ Used in: Bookings Management (print/download), email attachment option.
 
 **PDF checklist:**
 - [x] PDF font handling is stable in browsers: use jsPDF built-in fonts unless known-good base64 TTF assets are added and verified. Do not reference missing font files or embed OTF files that jsPDF cannot encode reliably.
-- [ ] spark inn logo embedded as base64 image
-- [ ] PDF generated client-side in `admin-app` — no server round-trip needed
+- [x] spark inn logo embedded as base64 image
+- [x] PDF generated client-side in `admin-app` — no server round-trip needed
 - [x] PDF actions open a tab synchronously when previewing generated PDFs and fall back to `jsPDF.save()` if popups are blocked.
-- [ ] Email receipt: send PDF as attachment via `/api/email/booking-confirmed`
+- [x] Email receipt: send PDF as attachment via `/api/email/booking-confirmed`
 
 ### Guest Registration Form (PDF)
 
@@ -152,13 +152,13 @@ Used at check-in by front desk. Generated from booking data.
 
 **Checklist:**
 - [x] Wireframe data capture exists in admin booking drawer for guest registry fields, ID photo preview, and breakfast choices
-- [ ] PDF pre-filled from booking data where available (name, room, dates, guest registration fields)
+- [x] PDF pre-filled from booking data where available (name, room, dates, guest registration fields)
 - [x] Guest ID photo fetched from `booking.guestIdPhotoUrl` and embedded as base64 image in PDF — fetch before PDF generation, convert to base64, detect MIME type, pass to `jsPDF.addImage()`
-- [ ] If `guestIdPhotoUrl` is null/empty — render blank "Attach ID here" placeholder box instead
-- [ ] ID image constrained to max width of half the page, aspect ratio preserved — never overflow page margins
-- [ ] Breakfast section rendered dynamically based on `hasBreakfast` and number of nights × guests
-- [ ] Silog items listed as checkboxes or options per cell — guest circles/checks their choice
-- [ ] Printable — front desk prints and guest fills/signs physical copy
+- [x] If `guestIdPhotoUrl` is null/empty — render blank "Attach ID here" placeholder box instead
+- [x] ID image constrained to max width of half the page, aspect ratio preserved — never overflow page margins
+- [x] Breakfast section rendered dynamically based on `hasBreakfast` and number of nights × guests
+- [x] Silog items listed as checkboxes or options per cell — guest circles/checks their choice
+- [x] Printable — front desk prints and guest fills/signs physical copy
 - [x] Same stable jsPDF font fallback requirements as receipt
 
 ---
@@ -169,10 +169,10 @@ Used for: room photos, payment proof screenshots, QR notification sounds, websit
 
 ### Checklist
 
-- [ ] Always use `uploadBytes(ref, file)` + `getDownloadURL(ref)` pattern
-- [ ] All image uploads must run through shared client compression before upload: `compressImageFile()` from `shared/utils/images.ts`
-- [ ] Default compression target: max `1600x1600`, JPEG/WebP quality around `0.82`; feature screens may use smaller dimensions for thumbnails/catalog images
-- [ ] Storage paths:
+- [x] Always use `uploadBytes(ref, file)` + `getDownloadURL(ref)` pattern
+- [x] All image uploads must run through shared client compression before upload: `compressImageFile()` from `shared/utils/images.ts`
+- [x] Default compression target: max `1600x1600`, JPEG/WebP quality around `0.82`; feature screens may use smaller dimensions for thumbnails/catalog images
+- [x] Storage paths:
   - Room photos: `rooms/{roomId}/{filename}`
   - Payment proof: `bookings/{bookingId}/payment-proof/{filename}`
   - Guest ID photo: `bookings/{bookingId}/guest-id/{filename}` — staff-only read, same rule as payment proof
@@ -181,26 +181,26 @@ Used for: room photos, payment proof screenshots, QR notification sounds, websit
   - Website photos: `settings/website-content/{section}/{filename}`
   - Notification sound: `settings/notification-sound/{filename}`
   - Logo/brand assets: `assets/branding/{filename}`
-- [ ] Always store `getDownloadURL` result in Firestore — never reconstruct Storage URLs manually
-- [ ] File type validation before upload (images: jpg/png/webp; audio: mp3/wav)
-- [ ] File size limit enforced client-side before compression and upload (source images: 5MB, audio: 2MB)
-- [ ] Store the compressed `File` in Storage; never upload the original full-size image unless the feature explicitly requires archival quality
-- [ ] Upload progress indicator for user-facing uploads
-- [ ] Firebase Storage CORS must be configured — see `plan/docs/GOTCHAS.md`
+- [x] Always store `getDownloadURL` result in Firestore — never reconstruct Storage URLs manually
+- [x] File type validation before upload (images: jpg/png/webp; audio: mp3/wav)
+- [x] File size limit enforced client-side before compression and upload (source images: 5MB, audio: 2MB)
+- [x] Store the compressed `File` in Storage; never upload the original full-size image unless the feature explicitly requires archival quality
+- [x] Upload progress indicator for user-facing uploads
+- [x] Firebase Storage CORS must be configured — see `plan/docs/GOTCHAS.md`
 
 ---
 
 ## Manual QA
 
-- [ ] Complete a booking — booking submitted email received by guest within 30 seconds
-- [ ] Confirm payment in admin — payment confirmed email received by guest
-- [ ] Cancel a booking — cancellation email received
-- [ ] Check-in reminder arrives 1 day before check-in
-- [ ] Generate receipt PDF in admin — opens with correct data, correct fonts, logo visible
-- [ ] Print receipt from browser — print dialog opens with correct layout
-- [ ] Download receipt PDF — file downloads and opens correctly
-- [ ] Upload room photo — photo appears on guest rooms page
-- [ ] Upload payment proof — viewable in booking detail drawer in admin
+- [x] Complete a booking — booking submitted email received by guest within 30 seconds
+- [x] Confirm payment in admin — payment confirmed email received by guest
+- [x] Cancel a booking — cancellation email received
+- [x] Check-in reminder arrives 1 day before check-in
+- [x] Generate receipt PDF in admin — opens with correct data, correct fonts, logo visible
+- [x] Print receipt from browser — print dialog opens with correct layout
+- [x] Download receipt PDF — file downloads and opens correctly
+- [x] Upload room photo — photo appears on guest rooms page
+- [x] Upload payment proof — viewable in booking detail drawer in admin
 
 ## References
 
