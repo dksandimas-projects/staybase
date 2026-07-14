@@ -48,10 +48,10 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 
 ## UI Checklist
 
-- [ ] Guest app: loading state on Confirm Booking button during API call
-- [ ] Guest app: conflict error shown if room becomes unavailable between Step 1 and submission — "Sorry, this room is no longer available for your selected dates. Please go back and choose another room."
-- [ ] Guest app: redirect back to Step 1 on conflict error
-- [ ] Admin app (walk-in): same conflict error handling in booking creation modal
+- [x] Guest app: loading state on Confirm Booking button during API call
+- [x] Guest app: conflict error shown if room becomes unavailable between Step 1 and submission — "Sorry, this room is no longer available for your selected dates. Please go back and choose another room."
+- [x] Guest app: redirect back to Step 1 on conflict error
+- [x] Admin app (walk-in): same conflict error handling in booking creation modal
 
 ## Data & Logic Checklist
 
