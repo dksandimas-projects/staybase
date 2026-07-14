@@ -37,17 +37,17 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 
 ### Email Content Checklist
 
-- [ ] All emails include: spark inn logo, hotel name, address, contact
-- [ ] **Bugfix — wrong logo variant on the dark email header** (owner request 2026-07-09): `guest-app/server/handlers/email.ts`'s `brandLogoUrl()` (~line 76-78) returns `config.logos.navbar`, and it's rendered inside the email layout's hero block (~line 230) whose background is `config.colors.sidebar` — a dark color. Per `CLAUDE.md` Hard Rules ("Footer and dark backgrounds always use `config.logos.white`"), this should be using `config.logos.white`, not the navbar logo — the navbar variant is meant for a light/transparent background, not the dark hero. Fix: change `brandLogoUrl()` to resolve `config.logos.white` instead of `config.logos.navbar`.
-- [ ] Booking submitted: acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under review and a final confirmation email will follow after manual verification; includes booking ref, room, dates, payment instructions, link to `/my-booking`
-- [ ] Payment confirmed: receipt of payment, full booking summary
-- [ ] Booking confirmed: final confirmation, check-in time, check-in instructions
-- [ ] Check-in reminder: room details, check-in time, hotel address, contact
-- [ ] Booking cancelled: cancellation confirmation, reason (if provided)
-- [ ] Corporate inquiry: inquiry details (company, contact, dates, requirements), link to admin dashboard
+- [x] All emails include: spark inn logo, hotel name, address, contact
+- [x] **Bugfix — wrong logo variant on the dark email header** (owner request 2026-07-09): `guest-app/server/handlers/email.ts`'s `brandLogoUrl()` (~line 76-78) returns `config.logos.white` when rendering in a dark sidebar background.
+- [x] Booking submitted: acts as an acknowledgment/receipt submission, warning the guest that their booking and payment are under review and a final confirmation email will follow after manual verification; includes booking ref, room, dates, payment instructions, link to `/my-booking`
+- [x] Payment confirmed: receipt of payment, full booking summary
+- [x] Booking confirmed: final confirmation, check-in time, check-in instructions
+- [x] Check-in reminder: room details, check-in time, hotel address, contact
+- [x] Booking cancelled: cancellation confirmation, reason (if provided)
+- [x] Corporate inquiry: inquiry details (company, contact, dates, requirements), link to admin dashboard
 - [x] Corporate inquiry confirmation: warm acknowledgement, echoes back company name, rooms needed, and preferred dates; guest-facing only (no admin links)
 - [x] Contact inquiry confirmation: warm acknowledgement, echoes back name, subject, and message; guest-facing only (no admin links)
-- [ ] Discount rejected: see §Discount Rejected Email below
+- [x] Discount rejected: see §Discount Rejected Email below
 
 ### Discount Rejected Email
 
@@ -67,21 +67,21 @@ Triggered by `/api/email/discount-rejected` when staff rejects a Senior Citizen 
 - Hotel contact block + footer
 
 **Checklist:**
-- [ ] Triggered server-side via `/api/email/discount-rejected` (staff-auth required)
-- [ ] Restored `totalPrice` fetched from booking document at send time — never computed client-side
-- [ ] `discountRejectionReason` included in email only if non-empty
-- [ ] Discount type label: "Senior Citizen" if `discountType == "senior"`, "PWD" if `discountType == "pwd"`
-- [ ] ID label: "OSCA Card" if senior, "PWD ID" if pwd
+- [x] Triggered server-side via `/api/email/discount-rejected` (staff-auth required)
+- [x] Restored `totalPrice` fetched from booking document at send time — never computed client-side
+- [x] `discountRejectionReason` included in email only if non-empty
+- [x] Discount type label: "Senior Citizen" if `discountType == "senior"`, "PWD" if `discountType == "pwd"`
+- [x] ID label: "OSCA Card" if senior, "PWD ID" if pwd
 
 ---
 
 ### Email Logic Checklist
 
-- [ ] All email routes validate Firebase ID token (staff routes) or accept booking ref + email for guest-triggered resend
-- [ ] Check-in reminder: implement via Vercel Cron — checks all `confirmed` bookings where `checkIn = tomorrow`
-- [ ] Resend client initialized once in `api/lib/resend.ts`
-- [ ] Email templates defined server-side as HTML strings or React Email components
-- [ ] On Resend API error: log error server-side, return error response — do not silently fail
+- [x] All email routes validate Firebase ID token (staff routes) or accept booking ref + email for guest-triggered resend
+- [x] Check-in reminder: implement via Vercel Cron — checks all `confirmed` bookings where `checkIn = tomorrow`
+- [x] Resend client initialized once in `api/lib/resend.ts`
+- [x] Email templates defined server-side as HTML strings or React Email components
+- [x] On Resend API error: log error server-side, return error response — do not silently fail
 
 ### Check-In Reminder Scheduling Decision
 
