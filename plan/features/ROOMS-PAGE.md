@@ -75,15 +75,15 @@ Date-aware availability + the date range picker live on `BookingPage.tsx` Step 1
 
 ## Manual QA
 
-- [ ] All room types in `settings/hotelConfig.roomTypes[]` display as cards (no per-room duplicates, no `isActive` filter)
-- [ ] No filter UI on the page (no sidebar, no drawer, no Filters button on mobile)
-- [ ] No availability badge or "Sold out" state on any card or in the modal
-- [ ] Book Now CTA on each card navigates to `/book` with no query params
-- [ ] Room type detail modal opens with all type data and closes on backdrop click / close button
-- [ ] Photo carousel in the modal swipes on mobile
-- [ ] Homepage availability checker → Search button lands on `/book?checkIn=…&checkOut=…&guests=…` (not `/rooms?…`)
-- [ ] Direct navigation to `/rooms?checkIn=2026-12-01&checkOut=2026-12-03&guests=2` renders the catalog view (URL params silently ignored)
-- [ ] Page loads in under 3s on 4G mobile
+- [x] All room types in `settings/hotelConfig.roomTypes[]` display as cards (no per-room duplicates, no `isActive` filter)
+- [x] No filter UI on the page (no sidebar, no drawer, no Filters button on mobile)
+- [x] No availability badge or "Sold out" state on any card or in the modal
+- [x] Book Now CTA on each card navigates to `/book` with no query params
+- [x] Room type detail modal opens with all type data and closes on backdrop click / close button
+- [x] Photo carousel in the modal swipes on mobile
+- [x] Homepage availability checker → Search button lands on `/book?checkIn=…&checkOut=…&guests=…` (not `/rooms?…`)
+- [x] Direct navigation to `/rooms?checkIn=2026-12-01&checkOut=2026-12-03&guests=2` renders the catalog view (URL params silently ignored)
+- [x] Page loads in under 3s on 4G mobile
 
 ## References
 
