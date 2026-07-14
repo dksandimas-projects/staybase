@@ -11,6 +11,29 @@ Two `.env` files — one per app. All are gitignored. Never commit env files.
 
 ---
 
+## Environments (two Firebase projects, three surfaces)
+
+| Environment | Git branch | Domains | Firebase project | Vercel env scope |
+|---|---|---|---|---|
+| Production | `main` | `www.` / `admin.sparkinnbohol.com` | `spark-inn-prod` | Production |
+| Staging | `dev` | `stg.` / `stg-admin.sparkinnbohol.com` | `spark-inn-stg-7a7ad` | Preview |
+| Local | — | `localhost` | staging (or emulators) | — |
+
+- `.firebaserc` defines the `staging` (default) and `production` aliases plus
+  per-project storage-bucket targets; deploy with
+  `firebase deploy --only firestore,storage --project production|staging`.
+  A bare `firebase deploy` hits **staging** on purpose.
+- Local env switching: `guest-app/.env.spark-inn-prod` / `.env.spark-inn-stg`
+  (and the `admin-app/` equivalents) are local-only, gitignored variants —
+  `cp` the one you need onto `.env`. They deliberately avoid Vite's magic
+  `.env.production` name, which `vite build` would auto-load.
+- Admin-SDK scripts (`seed-firestore`, `create-admin-user`,
+  `finance-integrity-scan`, `set-storage-cors`) read `guest-app/.env` —
+  whichever variant is active is the project they act on.
+- Full cutover sequencing: `plan/project/PROD-CUTOVER-RUNBOOK.md`.
+
+---
+
 ## `guest-app/.env`
 
 Contains both client-side (`VITE_` prefix) and server-side (no prefix) vars — all in one file.
@@ -34,6 +57,7 @@ VITE_SENTRY_DSN=
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY=
+FIREBASE_STORAGE_BUCKET=
 
 # Vercel Deploy Hook (server-side only; guest production deployment)
 VERCEL_DEPLOY_HOOK_URL=
@@ -41,9 +65,10 @@ VERCEL_DEPLOY_HOOK_URL=
 # Resend (server-side only)
 RESEND_API_KEY=
 
-# Email
+# Email (RESEND_ADMIN_EMAIL is the address staff notifications go to;
+# ADMIN_NOTIFICATION_EMAIL is a legacy alias no code reads anymore)
 RESEND_FROM_EMAIL=sparkinn.dev@gmail.com
-ADMIN_NOTIFICATION_EMAIL=sparkinn.dev@gmail.com
+RESEND_ADMIN_EMAIL=sparkinn.dev@gmail.com
 
 # Cloudflare Turnstile (secret key — server-side only)
 TURNSTILE_SECRET_KEY=

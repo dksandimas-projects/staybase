@@ -61,21 +61,22 @@ full admin over production. Staging keeps its existing (separate) key.
 
 ---
 
-## PC-01 — Repo configuration split
+## PC-01 — Repo configuration split ✅ (completed 2026-07-14)
 
-- [ ] `.firebaserc`: add `"production": "spark-inn-prod"` alias; keep
-  `"default"` pointing at **staging** so a bare `firebase deploy` can
-  never hit production.
-- [ ] `firebase.json`: the `storage[0].bucket` is hardcoded to the staging
-  bucket — convert to deploy targets
-  (`firebase target:apply storage staging spark-inn-stg-7a7ad.firebasestorage.app`
-  / `... production spark-inn-prod.firebasestorage.app`) so storage rules
-  deploy to the right bucket per `--project`.
-- [ ] `scripts/set-storage-cors.ts` + `scripts/seed-firestore.ts` +
-  `scripts/create-admin-user.ts`: confirm each selects its target project
-  from credentials/env (not a hardcoded project id); parameterize if not.
-- [ ] `plan/docs/ENV-SETUP.md`: document the two-project / three-environment
-  matrix and the Vercel Production-vs-Preview scoping rule.
+- [x] `.firebaserc`: `"production": "spark-inn-prod"` alias added;
+  `"default"` stays on **staging** so a bare `firebase deploy` can never
+  hit production. Per-project storage targets (`app` →
+  `spark-inn-{stg-7a7ad,prod}.firebasestorage.app`) added.
+- [x] `firebase.json`: hardcoded staging bucket replaced with the `app`
+  storage deploy target.
+- [x] Scripts confirmed project-parameterized — all four
+  (`seed-firestore`, `create-admin-user`, `finance-integrity-scan`,
+  `set-storage-cors`) read credentials + bucket from `guest-app/.env`;
+  the local `.env.spark-inn-{stg,prod}` swap files select the target.
+- [x] `plan/docs/ENV-SETUP.md`: environment matrix + deploy aliases +
+  env-swap workflow documented; stale var names corrected
+  (`RESEND_ADMIN_EMAIL` is live, `ADMIN_NOTIFICATION_EMAIL` legacy,
+  `FIREBASE_STORAGE_BUCKET` added).
 
 ## PC-02 — Provision `spark-inn-prod`
 
@@ -91,12 +92,16 @@ full admin over production. Staging keeps its existing (separate) key.
   `admin.sparkinnbohol.com`
 - [ ] Browser API key restricted to the production domains (do it from day
   one — open roadmap item on staging, don't repeat the gap)
-- [ ] Deploy rules + indexes:
-  `npx -y firebase-tools@latest deploy --only firestore:rules,firestore:indexes,storage --project spark-inn-prod`
-- [ ] **Verify deployed rules match the repo** (fetch live rules and diff —
-  per the 2026-07-14 stale-rules lesson) and confirm all **6 composite
-  indexes** finish building (booking lookup endpoints fail without them)
-- [ ] Storage CORS applied to the prod bucket (`set-storage-cors.ts`)
+- [x] Deploy rules + indexes *(done 2026-07-14 —
+  `firebase deploy --only firestore,storage --project production`;
+  required granting `dksandimas.projects@gmail.com` access to
+  `spark-inn-prod` first; the firebase-adminsdk service account cannot
+  deploy rules, only the CLI login can)*
+- [x] **Verified deployed rules match the repo** (Firestore + Storage
+  fetched live and diffed) and all **6 composite indexes** deployed
+  *(done 2026-07-14)*
+- [x] Storage CORS applied to the prod bucket *(done 2026-07-14 via
+  `set-storage-cors.ts` with the prod env swap)*
 - [ ] **Scheduled backups / PITR enabled on Firestore** — non-negotiable
   for the production finance ledger; staging never had it
 
