@@ -170,14 +170,14 @@ Core content-light pages: About Us, Corporate Stays (marketing), Contact Us, Pri
 
 ## Manual QA
 
-- [ ] About page: mission, vision, story display correctly — no team/owner section present
-- [ ] Corporate page: dark hero, perks grid, rooms overview (no prices), inquiry form all render
-- [ ] Corporate inquiry form submits and appears in admin Corporate Inquiries pipeline
-- [ ] Contact page: all details match `settings/hotelConfig`
-- [ ] Terms page: booking, cancellation, discount eligibility, liability, and governing law sections render correctly
-- [ ] CTA to `/corporate/book` present and working on corporate page
-- [ ] 404 page appears for any unmatched route
-- [ ] All pages load in under 3s on 4G mobile
+- [x] About page: mission, vision, story display correctly — no team/owner section present
+- [x] Corporate page: dark hero, perks grid, rooms overview (no prices), inquiry form all render
+- [x] Corporate inquiry form submits and appears in admin Corporate Inquiries pipeline
+- [x] Contact page: all details match `settings/hotelConfig`
+- [x] Terms page: booking, cancellation, discount eligibility, liability, and governing law sections render correctly
+- [x] CTA to `/corporate/book` present and working on corporate page
+- [x] 404 page appears for any unmatched route
+- [x] All pages load in under 3s on 4G mobile
 
 ## References
 
