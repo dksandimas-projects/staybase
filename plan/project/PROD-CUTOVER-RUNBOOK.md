@@ -153,11 +153,10 @@ catalog + any real vouchers/corporate codes directly on prod when needed.
   database **before** the cutover (this also satisfies the FLR-05
   isolated-staging walkthrough environment requirement) *(done 2026-07-14)*
 
-## PC-05 — Archive + data carry-over
+## PC-05 — Archive + data carry-over (Skipped: test data only)
 
-- [ ] Full Backup XLSX export (Reports → Full Backup, admin login)
-- [ ] `gcloud firestore export` of `spark-inn-stg-7a7ad` to a GCS bucket
-  (point-in-time archive of the pre-split history)
+- [x] Full Backup XLSX export (Skipped: database is test data only)
+- [x] `gcloud firestore export` of `spark-inn-stg-7a7ad` to a GCS bucket (Skipped: database is test data only)
 - [x] Recreate active staff accounts in production Auth/Firestore (using a migration script mapping same UIDs & claims) *(done 2026-07-14)*
 - [x] Decision + outcome recorded in `DECISIONS-FEATURES.md` *(done 2026-07-14 — Decision #119)*
 
