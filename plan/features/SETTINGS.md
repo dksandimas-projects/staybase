@@ -260,13 +260,13 @@ Source: `settings/websiteContent` — `setDoc` on save per section.
 
 ### 10. Breakfast
 
-- [ ] Enable/disable breakfast add-on globally — toggle
-- [ ] Silog menu management — list of items with edit/delete per item
-- [ ] Add silog item — name input + Add button (e.g. "Tapsilog", "Longsilog", "Tocilog", "Bangsilog")
-- [ ] Enable/disable individual silog items — hidden from booking flow and registration form when inactive
-- [ ] Note: "Breakfast rate is set in Rate Management"
-- [ ] Admin-only — Front Desk records guest selections in the booking drawer but cannot manage the silog menu
-- [ ] Source: `settings/breakfastConfig`
+- [x] Enable/disable breakfast add-on globally — toggle
+- [x] Silog menu management — list of items with edit/delete per item
+- [x] Add silog item — name input + Add button (e.g. "Tapsilog", "Longsilog", "Tocilog", "Bangsilog")
+- [x] Enable/disable individual silog items — hidden from booking flow and registration form when inactive
+- [x] Note: "Breakfast rate is set in Rate Management"
+- [x] Admin-only — Front Desk records guest selections in the booking drawer but cannot manage the silog menu
+- [x] Source: `settings/breakfastConfig`
 
 ---
 
