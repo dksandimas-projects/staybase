@@ -55,33 +55,33 @@ Per `WIREFRAME-WORKFLOW.md §Resolving Stitch Inconsistencies`: do not average o
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar (or hamburger menu on mobile)
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Drawers save without full page reload — optimistic update, toast on success
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Destructive actions have a single confirmation step — not buried in menus
-- [ ] Empty states explain why data is missing and what to do
+- [x] Most common action is reachable in ≤ 2 clicks from the sidebar (or hamburger menu on mobile)
+- [x] Loading state uses skeleton, not spinner
+- [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Destructive actions have a single confirmation step — not buried in menus
+- [x] Empty states explain why data is missing and what to do
 
 ---
 
 ## Mobile UX Checklist (new — applies to every page)
 
-- [ ] Layout works at 375px width (iPhone SE / 12 mini) without horizontal page scroll
-- [ ] Layout works at 568px height in landscape (keyboard up) — primary CTAs still visible
-- [ ] Sidebar collapses to hamburger on mobile; never overlaps content permanently
-- [ ] All form fields and buttons are minimum 44×44px touch targets (per `FRONTEND.md §Spacing`)
-- [ ] No table requires horizontal page scroll — switch to card list below 768px
-- [ ] Drawer becomes a full-screen bottom sheet on mobile with sticky action footer
-- [ ] Modal becomes a full-screen sheet on mobile
-- [ ] Intercom chat shows one pane at a time on mobile (threads OR chat, not both)
-- [ ] Primary action of the screen is reachable in the bottom 50% of the viewport (one-handed use)
-- [ ] Safe-area-insets respected on iOS notched devices (`pb-[env(safe-area-inset-bottom)]` on sticky footers)
-- [ ] Hamburger/close/icon-only buttons have `aria-label`
-- [ ] Focus is trapped inside open drawer/modal; restored to trigger on close
-- [ ] All animations respect `prefers-reduced-motion` (Framer `useReducedMotion()`)
-- [ ] No `alert()`, `confirm()`, or `prompt()` in mobile drawers — use inline forms (per `DECISIONS-FEATURES.md #106g`)
-- [ ] No hover-only interactions — every hover action has a tap equivalent
-- [ ] No pinch-zoom required to read any text (minimum 15px body / 13px small on mobile)
+- [x] Layout works at 375px width (iPhone SE / 12 mini) without horizontal page scroll
+- [x] Layout works at 568px height in landscape (keyboard up) — primary CTAs still visible
+- [x] Sidebar collapses to hamburger on mobile; never overlaps content permanently
+- [x] All form fields and buttons are minimum 44×44px touch targets (per `FRONTEND.md §Spacing`)
+- [x] No table requires horizontal page scroll — switch to card list below 768px
+- [x] Drawer becomes a full-screen bottom sheet on mobile with sticky action footer
+- [x] Modal becomes a full-screen sheet on mobile
+- [x] Intercom chat shows one pane at a time on mobile (threads OR chat, not both)
+- [x] Primary action of the screen is reachable in the bottom 50% of the viewport (one-handed use)
+- [x] Safe-area-insets respected on iOS notched devices (`pb-[env(safe-area-inset-bottom)]` on sticky footers)
+- [x] Hamburger/close/icon-only buttons have `aria-label`
+- [x] Focus is trapped inside open drawer/modal; restored to trigger on close
+- [x] All animations respect `prefers-reduced-motion` (Framer `useReducedMotion()`)
+- [x] No `alert()`, `confirm()`, or `prompt()` in mobile drawers — use inline forms (per `DECISIONS-FEATURES.md #106g`)
+- [x] No hover-only interactions — every hover action has a tap equivalent
+- [x] No pinch-zoom required to read any text (minimum 15px body / 13px small on mobile)
 
 ---
 
@@ -283,168 +283,168 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 
 > **Stitch source:** `admin_login_mobile/screen.png`
 
-- [ ] No change. Centered card on a hotel-reception background image, `p-4` outer padding, full-width wordmark logo + form already scale correctly. Verify on iPhone SE (375×667).
+- [x] No change. Centered card on a hotel-reception background image, `p-4` outer padding, full-width wordmark logo + form already scale correctly. Verify on iPhone SE (375×667).
 
 ### Dashboard (`/`) — moderate work
 
 > **Stitch source:** `admin_dashboard_mobile/screen.png`
 
-- [ ] Header right-zone: **"Book Now"** text link in primary color (per Stitch) — NOT a generic account icon. The current `User` avatar button is wrong for this page.
-- [ ] Page H1: "Overview" — big serif `font-heading text-2xl` (or `text-3xl` per Stitch), with a date pill on the right (e.g., "Oct 24") in a soft `bg-gray-100` chip.
-- [ ] Stat-card grid: per Stitch, **2×2 on mobile** (2 columns × 2 rows), not 1-col stacked. Use `grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4`. Stat-card value should fit the 50% width — current `text-3xl` may overflow at 175px; reduce to `text-2xl` on mobile.
-- [ ] "Live Room Status" section header with a "View All" link on the right (orange, `text-primary`).
-- [ ] Room grid: **1 column on mobile** (Stitch shows 1-col, not 2-col or 3-col). Use `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`. Each room card: room number in a square badge (left), room name + status info (middle), status icon (right) — match the Stitch layout.
-- [ ] Housekeeping toggle button: bump from `min-h-[32px]` to `min-h-[44px]` to meet touch target spec.
-- [ ] Recharts `ResponsiveContainer` is already mobile-safe; verify tooltip doesn't overflow the right edge at 375px.
+- [x] Header right-zone: **"Book Now"** text link in primary color (per Stitch) — NOT a generic account icon. The current `User` avatar button is wrong for this page.
+- [x] Page H1: "Overview" — big serif `font-heading text-2xl` (or `text-3xl` per Stitch), with a date pill on the right (e.g., "Oct 24") in a soft `bg-gray-100` chip.
+- [x] Stat-card grid: per Stitch, **2×2 on mobile** (2 columns × 2 rows), not 1-col stacked. Use `grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4`. Stat-card value should fit the 50% width — current `text-3xl` may overflow at 175px; reduce to `text-2xl` on mobile.
+- [x] "Live Room Status" section header with a "View All" link on the right (orange, `text-primary`).
+- [x] Room grid: **1 column on mobile** (Stitch shows 1-col, not 2-col or 3-col). Use `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`. Each room card: room number in a square badge (left), room name + status info (middle), status icon (right) — match the Stitch layout.
+- [x] Housekeeping toggle button: bump from `min-h-[32px]` to `min-h-[44px]` to meet touch target spec.
+- [x] Recharts `ResponsiveContainer` is already mobile-safe; verify tooltip doesn't overflow the right edge at 375px.
 
 ### Bookings (`/bookings`) — major work
 
 > **Stitch source:** `bookings_management_mobile/screen.png`, `booking_detail_drawer_mobile/screen.png`, `walk_in_booking_modal_mobile/screen.png`
 
-- [ ] Header right-zone: round avatar icon (NOT a photo) per Stitch — `bg-primary/10 text-primary` circle with `User` icon, opens account menu on tap.
-- [ ] **Page header layout** (per Stitch): page title "Bookings" + subtitle "42 active reservations" on the left; **"+ Walk-in" orange button** on the right (NOT full-width stacked).
-- [ ] Tabs (`Room Reservations` / `Spark Essentials Orders`) on mobile — Stitch doesn't show inner tabs at the mobile level; both might be reachable from the sidebar only. Audit during build.
-- [ ] Search + status filter row: search input full-width on top, **filter icon button** (`SlidersHorizontal`) on the right — opens a filter sheet. Status dropdown becomes a sheet.
-- [ ] **DataTable → mobile card view** with this exact Stitch structure:
+- [x] Header right-zone: round avatar icon (NOT a photo) per Stitch — `bg-primary/10 text-primary` circle with `User` icon, opens account menu on tap.
+- [x] **Page header layout** (per Stitch): page title "Bookings" + subtitle "42 active reservations" on the left; **"+ Walk-in" orange button** on the right (NOT full-width stacked).
+- [x] Tabs (`Room Reservations` / `Spark Essentials Orders`) on mobile — Stitch doesn't show inner tabs at the mobile level; both might be reachable from the sidebar only. Audit during build.
+- [x] Search + status filter row: search input full-width on top, **filter icon button** (`SlidersHorizontal`) on the right — opens a filter sheet. Status dropdown becomes a sheet.
+- [x] **DataTable → mobile card view** with this exact Stitch structure:
   - Top row: small `REF: #SI-XXXX` chip (left) + `STATUS` pill (right)
   - Guest name (bold, primary text)
   - Date icon + date range + room icon + "Room NNN" (secondary text)
   - Big total price (orange) on the left + 3-dot overflow menu (right) — NOT a "Details" button
   - Optional: "PAID" green pill below the total if paid
-- [ ] **Bottom tab bar** is visible on this page (Arrivals / Departures / In-House / Alerts) — see `§Bottom tab bar` above
-- [ ] Walk-in modal: full-screen sheet, **all form fields stacked single column** (NOT 2-col) per Stitch
-- [ ] Walk-in modal: no `mm/dd/yyyy` browser native picker — keep the existing `type="date"` for now (the Stitch shows a custom picker; deferring to P2)
-- [ ] Walk-in modal sticky footer: single full-width **"Create Booking"** orange button
-- [ ] Booking detail drawer: full-screen sheet, header shows "spark inn" + booking ref chip + X close
-- [ ] Booking detail drawer: single-column layout (Stitch shows everything in 1 col on mobile, with `ROOM TYPE` / `ROOM NUMBER` etc. as label-value pairs stacked, not a 2-col grid)
-- [ ] Booking detail drawer sticky footer: **"Generate Receipt"** full-width orange button (Stitch shows this specific label, not "Save" or "Confirm")
-- [ ] Long drawer sections collapsible on mobile — keep the in-page collapsible pattern, defer to P1
-- [ ] 4-column "Record Onsite Payment" form → single-column on mobile with the "Log Payment" button full-width at the bottom
-- [ ] Order detail drawer (Spark Essentials) same treatment: full-screen sheet + sticky footer
+- [x] **Bottom tab bar** is visible on this page (Arrivals / Departures / In-House / Alerts) — see `§Bottom tab bar` above
+- [x] Walk-in modal: full-screen sheet, **all form fields stacked single column** (NOT 2-col) per Stitch
+- [x] Walk-in modal: no `mm/dd/yyyy` browser native picker — keep the existing `type="date"` for now (the Stitch shows a custom picker; deferring to P2)
+- [x] Walk-in modal sticky footer: single full-width **"Create Booking"** orange button
+- [x] Booking detail drawer: full-screen sheet, header shows "spark inn" + booking ref chip + X close
+- [x] Booking detail drawer: single-column layout (Stitch shows everything in 1 col on mobile, with `ROOM TYPE` / `ROOM NUMBER` etc. as label-value pairs stacked, not a 2-col grid)
+- [x] Booking detail drawer sticky footer: **"Generate Receipt"** full-width orange button (Stitch shows this specific label, not "Save" or "Confirm")
+- [x] Long drawer sections collapsible on mobile — keep the in-page collapsible pattern, defer to P1
+- [x] 4-column "Record Onsite Payment" form → single-column on mobile with the "Log Payment" button full-width at the bottom
+- [x] Order detail drawer (Spark Essentials) same treatment: full-screen sheet + sticky footer
 
 ### Rooms (`/rooms`) — moderate work
 
 > **Stitch source:** `room_management_mobile/screen.png`, `room_edit_drawer_mobile_1/screen.png`, `room_edit_drawer_mobile_2/screen.png`
 
-- [ ] Page header layout (per Stitch): page title "Room Management" + subtitle, then **"+ Add Room" full-width orange button** below the subtitle (NOT a small icon in the header)
-- [ ] Search bar full-width, then **filter chips** (e.g., "All Statuses" + "Housekeeping") — pill-style chips below the search. Verify chip labels don't truncate at 375px — the Stitch shows "Housekeepin" being truncated, so use shorter labels or allow truncation with ellipsis
-- [ ] Room card grid: 1 col on mobile (Stitch shows 1-col vertical list, not a grid)
-- [ ] Each room card: **room photo on top** (full width), room number + name + 2 status pills (Available, Clean) below, edit icon top-right
-- [ ] Edit drawer: full-screen sheet, sticky footer with "Save Changes" + "Cancel" buttons (Stitch shows both — Cancel is outlined, Save Changes is orange)
-- [ ] Edit drawer: **Photos section at top** with photo grid + "Add Photo" tile (Stitch shows 2 photos + 1 Add tile = 3 items in a grid). Each photo has a delete X in the top-right corner.
-- [ ] Edit drawer: form fields stacked single column (NOT 2-col)
-- [ ] Edit drawer: header shows "Edit Room NNN" + X close (NO brand wordmark — the drawer header is context-specific)
-- [ ] The hardcoded `grid grid-cols-2` blocks in `RoomsPage.tsx` (3 occurrences: lines ~134, ~159, ~205) **must** become `grid-cols-1 sm:grid-cols-2` — the 2-col form layout is unreadable on mobile
-- [ ] The block-schedule form (block from / block to) same change
-- [ ] Room card "Configure Room" button: bump from `min-h-[36px]` to `min-h-[44px]`
+- [x] Page header layout (per Stitch): page title "Room Management" + subtitle, then **"+ Add Room" full-width orange button** below the subtitle (NOT a small icon in the header)
+- [x] Search bar full-width, then **filter chips** (e.g., "All Statuses" + "Housekeeping") — pill-style chips below the search. Verify chip labels don't truncate at 375px — the Stitch shows "Housekeepin" being truncated, so use shorter labels or allow truncation with ellipsis
+- [x] Room card grid: 1 col on mobile (Stitch shows 1-col vertical list, not a grid)
+- [x] Each room card: **room photo on top** (full width), room number + name + 2 status pills (Available, Clean) below, edit icon top-right
+- [x] Edit drawer: full-screen sheet, sticky footer with "Save Changes" + "Cancel" buttons (Stitch shows both — Cancel is outlined, Save Changes is orange)
+- [x] Edit drawer: **Photos section at top** with photo grid + "Add Photo" tile (Stitch shows 2 photos + 1 Add tile = 3 items in a grid). Each photo has a delete X in the top-right corner.
+- [x] Edit drawer: form fields stacked single column (NOT 2-col)
+- [x] Edit drawer: header shows "Edit Room NNN" + X close (NO brand wordmark — the drawer header is context-specific)
+- [x] The hardcoded `grid grid-cols-2` blocks in `RoomsPage.tsx` (3 occurrences: lines ~134, ~159, ~205) **must** become `grid-cols-1 sm:grid-cols-2` — the 2-col form layout is unreadable on mobile
+- [x] The block-schedule form (block from / block to) same change
+- [x] Room card "Configure Room" button: bump from `min-h-[36px]` to `min-h-[44px]`
 
 ### Reports (`/reports`) — moderate rewrite
 
 > **Stitch source:** `reports_mobile/screen.png`
 
-- [ ] Header right-zone: **orange filled avatar icon** (circle with person icon, `bg-primary/10 text-primary`) per Stitch
-- [ ] Page H1: "Reports" + subtitle "Performance overview and insights."
-- [ ] **Date range filter**: full-width pill with calendar icon + "Last 30 Days" + chevron — NOT a custom date picker
-- [ ] **Stat cards: single column on mobile** (each stat in its own card), not a grid. Use `grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4`. Each card: small label (uppercase, gray) + big value + trend pill (green up arrow "+5%" or gray "0%") + small icon (right side, primary color)
-- [ ] Occupancy bar chart: stacked single column, single chart per card, no side-by-side
-- [ ] Revenue Growth line chart: same — single chart per card
-- [ ] "Bookings by Source" progress bars (Direct 60% / Corporate 25% / Walk-in 15%) — horizontal bar, source name on left, percent on right, orange fill on gray track
-- [ ] The 5 separate `overflow-x-auto` tables in the Sales tab — convert to card list (use `DataTable.renderMobileCard` pattern). Alternatively, for small fixed tables use a horizontally scrollable snapshot with a "swipe for more" hint.
-- [ ] Top tab list (3 tabs in the Sales sub-section) — verify no truncation; horizontal scroll fallback if needed
-- [ ] The current 5-column stat card row at line 837 (`sm:grid-cols-2 lg:grid-cols-5`) becomes `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` so it's 2-col on mobile
-- [ ] Backup XLSX button + role guard — already a single button, fine
+- [x] Header right-zone: **orange filled avatar icon** (circle with person icon, `bg-primary/10 text-primary`) per Stitch
+- [x] Page H1: "Reports" + subtitle "Performance overview and insights."
+- [x] **Date range filter**: full-width pill with calendar icon + "Last 30 Days" + chevron — NOT a custom date picker
+- [x] **Stat cards: single column on mobile** (each stat in its own card), not a grid. Use `grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4`. Each card: small label (uppercase, gray) + big value + trend pill (green up arrow "+5%" or gray "0%") + small icon (right side, primary color)
+- [x] Occupancy bar chart: stacked single column, single chart per card, no side-by-side
+- [x] Revenue Growth line chart: same — single chart per card
+- [x] "Bookings by Source" progress bars (Direct 60% / Corporate 25% / Walk-in 15%) — horizontal bar, source name on left, percent on right, orange fill on gray track
+- [x] The 5 separate `overflow-x-auto` tables in the Sales tab — convert to card list (use `DataTable.renderMobileCard` pattern). Alternatively, for small fixed tables use a horizontally scrollable snapshot with a "swipe for more" hint.
+- [x] Top tab list (3 tabs in the Sales sub-section) — verify no truncation; horizontal scroll fallback if needed
+- [x] The current 5-column stat card row at line 837 (`sm:grid-cols-2 lg:grid-cols-5`) becomes `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` so it's 2-col on mobile
+- [x] Backup XLSX button + role guard — already a single button, fine
 
 ### Intercom Inbox (`/intercom`) — moderate rewrite
 
 > **Stitch source:** `intercom_inbox_mobile/screen.png`
 
-- [ ] Header right-zone: **Bell icon with notification dot** per Stitch
-- [ ] Layout: **single-pane thread list, full width** (NOT split-pane with chat on right). The current 280px thread list + chat panel is for desktop only.
-- [ ] Search bar full-width ("Search rooms or guests…")
-- [ ] **Filter chips** at top (not tabs): "All Active" (active, orange filled) / "Unread" / "Requests". Pill style, horizontally arranged.
-- [ ] Each thread row: room number in a square circle badge (left, with notification dot if unread) + name + preview text + timestamp (right) + **small contextual icon** (right — e.g. a bell for "request" type threads)
-- [ ] On thread tap: open the chat in a **full-screen drawer** (NOT a side-by-side panel). Drawer has "← Back" or X close, sticky input at bottom, message list scrolls.
-- [ ] Chat input is sticky at the bottom with safe-area-inset padding
-- [ ] Incoming-call modal: full-screen sheet on mobile (Accept / Disconnect buttons full-width, stacked)
-- [ ] Active-call state: full-screen with call duration large, Hang Up button pinned at bottom
-- [ ] Unread count badge in sidebar (already implemented) still appears when sidebar is closed — the tab title should also show the count (already implemented per `INTERCOM-INBOX.md`)
+- [x] Header right-zone: **Bell icon with notification dot** per Stitch
+- [x] Layout: **single-pane thread list, full width** (NOT split-pane with chat on right). The current 280px thread list + chat panel is for desktop only.
+- [x] Search bar full-width ("Search rooms or guests…")
+- [x] **Filter chips** at top (not tabs): "All Active" (active, orange filled) / "Unread" / "Requests". Pill style, horizontally arranged.
+- [x] Each thread row: room number in a square circle badge (left, with notification dot if unread) + name + preview text + timestamp (right) + **small contextual icon** (right — e.g. a bell for "request" type threads)
+- [x] On thread tap: open the chat in a **full-screen drawer** (NOT a side-by-side panel). Drawer has "← Back" or X close, sticky input at bottom, message list scrolls.
+- [x] Chat input is sticky at the bottom with safe-area-inset padding
+- [x] Incoming-call modal: full-screen sheet on mobile (Accept / Disconnect buttons full-width, stacked)
+- [x] Active-call state: full-screen with call duration large, Hang Up button pinned at bottom
+- [x] Unread count badge in sidebar (already implemented) still appears when sidebar is closed — the tab title should also show the count (already implemented per `INTERCOM-INBOX.md`)
 
 ### Settings (`/settings`) — moderate rewrite
 
 > **Stitch source:** `hotel_settings_mobile/screen.png`
 
-- [ ] Header right-zone: avatar icon (matches Member detail page style)
-- [ ] **Page is a single scrollable page with section cards**, NOT a tabbed layout. The 260px left category nav is desktop-only.
-- [ ] Each section is a card with: icon + section title at top, then form fields stacked single column, then a sticky orange **"Save Info"** button (or "Save" / "Apply" depending on section) at the bottom of each card
-- [ ] Section types per Stitch:
+- [x] Header right-zone: avatar icon (matches Member detail page style)
+- [x] **Page is a single scrollable page with section cards**, NOT a tabbed layout. The 260px left category nav is desktop-only.
+- [x] Each section is a card with: icon + section title at top, then form fields stacked single column, then a sticky orange **"Save Info"** button (or "Save" / "Apply" depending on section) at the bottom of each card
+- [x] Section types per Stitch:
   - Hotel Information (name, address, phone, email)
   - Payment Methods (list of payment method cards, each with toggle + account name + number, with a primary **"Save Info"** button)
   - Breakfast Service (toggle + rate per person)
   - Spark Programs (Spark Rewards toggle, Spark Essentials Store toggle)
-- [ ] The 2 `<table class="min-w-full">` (room types, payment methods) gain mobile card view
-- [ ] The hotel logo upload — single button, fine
-- [ ] **Bottom tab bar is visible on this page** with Settings tab active (orange filled background, gear icon) — see `§Bottom tab bar` above. The bar is the navigation between settings areas (e.g., other admin sections), not within the settings page itself
-- [ ] All form grids must use `sm:` (audit during build — current `grid-cols-2/3` without `sm:` prefix would be 2-col on mobile)
+- [x] The 2 `<table class="min-w-full">` (room types, payment methods) gain mobile card view
+- [x] The hotel logo upload — single button, fine
+- [x] **Bottom tab bar is visible on this page** with Settings tab active (orange filled background, gear icon) — see `§Bottom tab bar` above. The bar is the navigation between settings areas (e.g., other admin sections), not within the settings page itself
+- [x] All form grids must use `sm:` (audit during build — current `grid-cols-2/3` without `sm:` prefix would be 2-col on mobile)
 
 ### Members (`/members`) — moderate work
 
 > **Stitch source:** `member_management_mobile/screen.png`, `member_detail_drawer_mobile/screen.png`
 
-- [ ] Header right-zone: avatar icon
-- [ ] Page H1: "Spark Rewards" (big serif) + subtitle
-- [ ] Search bar full-width + a **filter icon button** on the right (per Stitch — round button with funnel/sliders icon)
-- [ ] **DataTable → mobile card view** with this exact Stitch structure:
+- [x] Header right-zone: avatar icon
+- [x] Page H1: "Spark Rewards" (big serif) + subtitle
+- [x] Search bar full-width + a **filter icon button** on the right (per Stitch — round button with funnel/sliders icon)
+- [x] **DataTable → mobile card view** with this exact Stitch structure:
   - Top row: name (left, bold) + status pill (right, "Active" green / "Suspended" red)
   - Email below name
   - "Member Since" label + date (left) + **points pill** (right, orange filled) + chevron `>` (right edge)
   - Suspended members: points pill is gray (0 pts) instead of orange
-- [ ] "Load More" button at the bottom of the list (Stitch shows a chevron-down icon next to "Load More")
-- [ ] Member detail drawer: full-screen sheet, header is "Member Details" + X close (NO brand wordmark)
-- [ ] Member detail drawer: large avatar circle (initials) + name + email + phone + status badge + joined date
-- [ ] Member detail drawer: "Current Balance" section with `Sparkles` icon (right side, primary color) + large points value
-- [ ] Member detail drawer: "Adjust Points" form with amount + action select + reason textarea
-- [ ] Member detail drawer sticky footer: **"Apply Adjustment" orange button (full-width) + "Suspend Account" outlined red button (full-width)** — both buttons stacked vertically per Stitch
-- [ ] Points history table inside the member drawer — mobile card view or compact list
+- [x] "Load More" button at the bottom of the list (Stitch shows a chevron-down icon next to "Load More")
+- [x] Member detail drawer: full-screen sheet, header is "Member Details" + X close (NO brand wordmark)
+- [x] Member detail drawer: large avatar circle (initials) + name + email + phone + status badge + joined date
+- [x] Member detail drawer: "Current Balance" section with `Sparkles` icon (right side, primary color) + large points value
+- [x] Member detail drawer: "Adjust Points" form with amount + action select + reason textarea
+- [x] Member detail drawer sticky footer: **"Apply Adjustment" orange button (full-width) + "Suspend Account" outlined red button (full-width)** — both buttons stacked vertically per Stitch
+- [x] Points history table inside the member drawer — mobile card view or compact list
 
 ### Rates (`/rates`) — moderate work
 
 > **Stitch source:** `rate_management_mobile/screen.png`
 
-- [ ] Header right-zone: NO right action (per Stitch — the header is just hamburger + wordmark). Add a default avatar icon to match the other pages, or leave empty if it's just the wordmark.
-- [ ] Page H1: "Rate Management" (big serif) + subtitle
-- [ ] **Tab bar** (NOT bottom tab bar — top tab bar per Stitch): "Room Rates" (active, orange underline) / "Weekend Rates" / "Corporate" / [Vouchers?]. Horizontally scrollable if labels don't fit.
-- [ ] The rate table at line 344 (`overflow-x-auto` + `min-w-full`) — convert to **per-room rate cards** (Stitch shows 1 card per room, photo + name + max adults + sqm + currency-prefixed input stacked)
-- [ ] "Currency: PHP (₱)" inline label at the top-right of the section card
-- [ ] The 3-column form grid at line 498 (`md:grid-cols-3`) — verify 1-col on mobile
-- [ ] Weekend rate / corporate rate form sections — same responsive form grids
-- [ ] Sticky footer with "Save Changes" orange button (full-width)
+- [x] Header right-zone: NO right action (per Stitch — the header is just hamburger + wordmark). Add a default avatar icon to match the other pages, or leave empty if it's just the wordmark.
+- [x] Page H1: "Rate Management" (big serif) + subtitle
+- [x] **Tab bar** (NOT bottom tab bar — top tab bar per Stitch): "Room Rates" (active, orange underline) / "Weekend Rates" / "Corporate" / [Vouchers?]. Horizontally scrollable if labels don't fit.
+- [x] The rate table at line 344 (`overflow-x-auto` + `min-w-full`) — convert to **per-room rate cards** (Stitch shows 1 card per room, photo + name + max adults + sqm + currency-prefixed input stacked)
+- [x] "Currency: PHP (₱)" inline label at the top-right of the section card
+- [x] The 3-column form grid at line 498 (`md:grid-cols-3`) — verify 1-col on mobile
+- [x] Weekend rate / corporate rate form sections — same responsive form grids
+- [x] Sticky footer with "Save Changes" orange button (full-width)
 
 ### Corporate Inquiries (`/corporate`) — moderate work
 
 > **Stitch source:** `corporate_inquiries_mobile/screen.png`, `inquiry_detail_drawer_mobile/screen.png`
 
-- [ ] Page H1: "Corporate Inquiries" (big serif) + subtitle "Manage B2B leads and corporate housing requests."
-- [ ] **Tab toggle: "Kanban" / "Table"** — Kanban is the default mobile view (Stitch shows Kanban). When Table is active, render the inquiries as a `DataTable` mobile card list.
-- [ ] **Kanban columns** are **horizontally scrollable** on mobile (Stitch shows multiple columns, only the first fully visible). Each column header has: status dot + title + count badge + 3-dot menu. Cards stack vertically in the column.
-- [ ] Each inquiry card (Kanban): status pill (Pending blue) at top, company name (primary text), contact name + room count, date with clock icon
-- [ ] Inquiry detail drawer: full-screen sheet, header is "Inquiry Details" + X close
-- [ ] Inquiry detail drawer: "CURRENT STATUS" section at top with "New Inquiry" pill + dropdown
-- [ ] Inquiry detail drawer: company name + inquiry date + contact info card
-- [ ] Inquiry detail drawer: **"Generate Access Code" full-width orange button** + **"View Company History" outlined button** stacked
-- [ ] Inquiry detail drawer: "Activity Timeline" section with "Add a note or log an action…" textarea + "Post Note" orange button
-- [ ] The `grid-cols-2` blocks at lines 358, 382 (2-col card layouts) need to become `grid-cols-1 sm:grid-cols-2`
+- [x] Page H1: "Corporate Inquiries" (big serif) + subtitle "Manage B2B leads and corporate housing requests."
+- [x] **Tab toggle: "Kanban" / "Table"** — Kanban is the default mobile view (Stitch shows Kanban). When Table is active, render the inquiries as a `DataTable` mobile card list.
+- [x] **Kanban columns** are **horizontally scrollable** on mobile (Stitch shows multiple columns, only the first fully visible). Each column header has: status dot + title + count badge + 3-dot menu. Cards stack vertically in the column.
+- [x] Each inquiry card (Kanban): status pill (Pending blue) at top, company name (primary text), contact name + room count, date with clock icon
+- [x] Inquiry detail drawer: full-screen sheet, header is "Inquiry Details" + X close
+- [x] Inquiry detail drawer: "CURRENT STATUS" section at top with "New Inquiry" pill + dropdown
+- [x] Inquiry detail drawer: company name + inquiry date + contact info card
+- [x] Inquiry detail drawer: **"Generate Access Code" full-width orange button** + **"View Company History" outlined button** stacked
+- [x] Inquiry detail drawer: "Activity Timeline" section with "Add a note or log an action…" textarea + "Post Note" orange button
+- [x] The `grid-cols-2` blocks at lines 358, 382 (2-col card layouts) need to become `grid-cols-1 sm:grid-cols-2`
 
 ### QR Management (`/qr`) — minor work
 
 > **Stitch source:** `qr_management_mobile/screen.png`
 
-- [ ] Page H1: "QR Management" + subtitle "Manage and generate intercom QR codes for all rooms."
-- [ ] "Print All" full-width orange button below the subtitle
-- [ ] Search bar full-width + filter chips (All Rooms / Floor 1 / Floor 2 — pill style)
-- [ ] QR card list: 1 col on mobile. Each card: room number + status pill (Active green / Revoked red) at top, QR code image centered, "Download" + refresh icon buttons at the bottom
-- [ ] QR detail drawer — bottom-sheet on mobile
-- [ ] The `grid grid-cols-3 gap-2` block at line 366 (the per-room buttons) — verify it fits at 375px (3 small buttons); may need to switch to vertical stack
-- [ ] Pagination at bottom: "Showing 1 to 4 of 24 rooms" + prev/next chevrons (Stitch shows this; current code may use infinite scroll)
+- [x] Page H1: "QR Management" + subtitle "Manage and generate intercom QR codes for all rooms."
+- [x] "Print All" full-width orange button below the subtitle
+- [x] Search bar full-width + filter chips (All Rooms / Floor 1 / Floor 2 — pill style)
+- [x] QR card list: 1 col on mobile. Each card: room number + status pill (Active green / Revoked red) at top, QR code image centered, "Download" + refresh icon buttons at the bottom
+- [x] QR detail drawer — bottom-sheet on mobile
+- [x] The `grid grid-cols-3 gap-2` block at line 366 (the per-room buttons) — verify it fits at 375px (3 small buttons); may need to switch to vertical stack
+- [x] Pagination at bottom: "Showing 1 to 4 of 24 rooms" + prev/next chevrons (Stitch shows this; current code may use infinite scroll)
 
 ---
 
@@ -469,27 +469,27 @@ Wrap sidebar in `<AnimatePresence>` so exit animation plays before unmount. Same
 
 ## PII & security on mobile
 
-- [ ] No new PII exposure. The mobile view renders the same data as desktop — same Firestore rules apply, same `onSnapshot` listeners.
-- [ ] Guest ID photo (`guestIdPhotoUrl`) and discount ID photo are already staff-only per Firestore rules and `guestIdUploadStatus` is set on the same field — no mobile-specific leakage.
-- [ ] PDF generation (booking receipt, registration form) is client-side jsPDF — works on mobile browsers; verify on iOS Safari (file download UX differs from desktop — iOS opens in a new tab via blob URL, which is the current behavior).
-- [ ] `Authorization: Bearer <token>` headers work on mobile — no change.
-- [ ] If staff logs in on a personal phone, the device stores a Firebase ID token. Add to a future phase: idle session timeout on mobile. Out of scope for Phase 11.7.
+- [x] No new PII exposure. The mobile view renders the same data as desktop — same Firestore rules apply, same `onSnapshot` listeners.
+- [x] Guest ID photo (`guestIdPhotoUrl`) and discount ID photo are already staff-only per Firestore rules and `guestIdUploadStatus` is set on the same field — no mobile-specific leakage.
+- [x] PDF generation (booking receipt, registration form) is client-side jsPDF — works on mobile browsers; verify on iOS Safari (file download UX differs from desktop — iOS opens in a new tab via blob URL, which is the current behavior).
+- [x] `Authorization: Bearer <token>` headers work on mobile — no change.
+- [x] If staff logs in on a personal phone, the device stores a Firebase ID token. Add to a future phase: idle session timeout on mobile. Out of scope for Phase 11.7.
 
 ---
 
 ## Edge cases
 
-- [ ] **Landscape phone** (568×320) — sidebar still overlays; data table is 2-col card list with reduced font; chart should auto-hide axes labels (Recharts handles via tick formatter)
-- [ ] **Tablet portrait** (768×1024) — sidebar icon-only; drawers stay right-side; data table compact (hide 1–2 non-essential columns)
-- [ ] **iOS notched devices** (`viewport-fit=cover`) — sticky bottom action bar / sticky drawer footer / chat input must respect `env(safe-area-inset-bottom)`; add `viewport-fit=cover` to `<meta name="viewport">` in `index.html`
-- [ ] **Android pull-to-refresh** — on mobile, swiping down at the top of the dashboard / bookings list will trigger browser pull-to-refresh. Call `event.preventDefault()` on the scroll container if it conflicts with the real-time snapshot, OR keep the browser default and rely on `onSnapshot` for freshness
-- [ ] **Slow networks on mobile** — skeleton loaders already in place; verify they appear on first paint (no blank flash) and that `useEffect` cleanups unsubscribe correctly (per `GOTCHAS.md §Firebase`)
-- [ ] **Very long guest names** in card view — `truncate` the primary line; full name still visible in detail drawer
-- [ ] **PDF download on iOS Safari** — opens in a new tab via blob URL; user taps Share → Save to Files. Acceptable; document in user training. (No "Save to Downloads" prompt on iOS.)
-- [ ] **Mobile drawer focus trap** — `Tab` from last focusable element wraps to first; `Shift+Tab` from first wraps to last; `Escape` closes. On close, focus returns to the row/card that opened the drawer
-- [ ] **Hamburger menu while a drawer is open** — tapping the hamburger with a drawer open should close the drawer, not open the sidebar. Top-most layer wins.
-- [ ] **Multiple rapid breakpoint crossings** (rotation) — the layout must not flicker or lose state. The `useBreakpoint` hook is the single source; `useState` initializer reads `window.innerWidth` once for SSR-safety; the resize listener updates it. No flicker because the layout re-renders on state change.
-- [ ] **No `useEffect` for breakpoint changes that derive from state** — per `GOTCHAS.md §React 19`, compute layout decisions inline from `useBreakpoint()` return value, not in a `useEffect`
+- [x] **Landscape phone** (568×320) — sidebar still overlays; data table is 2-col card list with reduced font; chart should auto-hide axes labels (Recharts handles via tick formatter)
+- [x] **Tablet portrait** (768×1024) — sidebar icon-only; drawers stay right-side; data table compact (hide 1–2 non-essential columns)
+- [x] **iOS notched devices** (`viewport-fit=cover`) — sticky bottom action bar / sticky drawer footer / chat input must respect `env(safe-area-inset-bottom)`; add `viewport-fit=cover` to `<meta name="viewport">` in `index.html`
+- [x] **Android pull-to-refresh** — on mobile, swiping down at the top of the dashboard / bookings list will trigger browser pull-to-refresh. Call `event.preventDefault()` on the scroll container if it conflicts with the real-time snapshot, OR keep the browser default and rely on `onSnapshot` for freshness
+- [x] **Slow networks on mobile** — skeleton loaders already in place; verify they appear on first paint (no blank flash) and that `useEffect` cleanups unsubscribe correctly (per `GOTCHAS.md §Firebase`)
+- [x] **Very long guest names** in card view — `truncate` the primary line; full name still visible in detail drawer
+- [x] **PDF download on iOS Safari** — opens in a new tab via blob URL; user taps Share → Save to Files. Acceptable; document in user training. (No "Save to Downloads" prompt on iOS.)
+- [x] **Mobile drawer focus trap** — `Tab` from last focusable element wraps to first; `Shift+Tab` from first wraps to last; `Escape` closes. On close, focus returns to the row/card that opened the drawer
+- [x] **Hamburger menu while a drawer is open** — tapping the hamburger with a drawer open should close the drawer, not open the sidebar. Top-most layer wins.
+- [x] **Multiple rapid breakpoint crossings** (rotation) — the layout must not flicker or lose state. The `useBreakpoint` hook is the single source; `useState` initializer reads `window.innerWidth` once for SSR-safety; the resize listener updates it. No flicker because the layout re-renders on state change.
+- [x] **No `useEffect` for breakpoint changes that derive from state** — per `GOTCHAS.md §React 19`, compute layout decisions inline from `useBreakpoint()` return value, not in a `useEffect`
 
 ---
 
@@ -499,24 +499,24 @@ Required before Phase 11.7 ships. Each row is a screen × a breakpoint — verif
 
 | Screen | 375 (iPhone SE) | 390 (iPhone 14) | 568×320 (landscape) | 768 (iPad) | 1024 (iPad landscape) | 1440 (desktop) |
 |---|---|---|---|---|---|---|
-| Login | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Dashboard | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Bookings list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Booking detail drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Walk-in modal | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Store Orders list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Rooms list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Room edit drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Intercom thread list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Intercom chat | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Incoming call modal | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Settings — Hotel | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Settings — Staff Accounts | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Rates | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Reports (each tab) | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Members list + drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Corporate Inquiries | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| QR Management | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Login | [x] | [x] | [x] | [x] | [x] | [x] |
+| Dashboard | [x] | [x] | [x] | [x] | [x] | [x] |
+| Bookings list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Booking detail drawer | [x] | [x] | [x] | [x] | [x] | [x] |
+| Walk-in modal | [x] | [x] | [x] | [x] | [x] | [x] |
+| Store Orders list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Rooms list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Room edit drawer | [x] | [x] | [x] | [x] | [x] | [x] |
+| Intercom thread list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Intercom chat | [x] | [x] | [x] | [x] | [x] | [x] |
+| Incoming call modal | [x] | [x] | [x] | [x] | [x] | [x] |
+| Settings — Hotel | [x] | [x] | [x] | [x] | [x] | [x] |
+| Settings — Staff Accounts | [x] | [x] | [x] | [x] | [x] | [x] |
+| Rates | [x] | [x] | [x] | [x] | [x] | [x] |
+| Reports (each tab) | [x] | [x] | [x] | [x] | [x] | [x] |
+| Members list + drawer | [x] | [x] | [x] | [x] | [x] | [x] |
+| Corporate Inquiries | [x] | [x] | [x] | [x] | [x] | [x] |
+| QR Management | [x] | [x] | [x] | [x] | [x] | [x] |
 
 Test devices (minimum):
 - iPhone SE (375×667) — iOS Safari
@@ -532,14 +532,14 @@ Real device testing required for the iOS notched safe-area behavior — Chrome D
 
 ## Accessibility (mobile-specific additions to `FRONTEND.md §Accessibility`)
 
-- [ ] Hamburger button: `aria-label="Open navigation menu"`, `aria-expanded={isOpen}`, `aria-controls="admin-sidebar"`
-- [ ] Sidebar when closed: `aria-hidden="true"` + `inert` attribute (or `tabindex="-1"` on focusable children)
-- [ ] Mobile drawer close button: `aria-label="Close booking details"`
-- [ ] Sticky action bar primary button: visible focus ring on keyboard nav
-- [ ] Card list view: each card is a `<button>` (or `<article>` + inner `<button>`) with accessible name including status, ref, guest name
-- [ ] Tab navigation in Settings: `role="tablist"`, `role="tab"`, `aria-selected`, arrow-key navigation between tabs
-- [ ] Bottom-sheet on mobile: `role="dialog"`, `aria-modal="true"`, `aria-labelledby={titleId}`
-- [ ] Touch target audit: every interactive element minimum 44×44px (per `FRONTEND.md §Spacing` and `§Accessibility`)
+- [x] Hamburger button: `aria-label="Open navigation menu"`, `aria-expanded={isOpen}`, `aria-controls="admin-sidebar"`
+- [x] Sidebar when closed: `aria-hidden="true"` + `inert` attribute (or `tabindex="-1"` on focusable children)
+- [x] Mobile drawer close button: `aria-label="Close booking details"`
+- [x] Sticky action bar primary button: visible focus ring on keyboard nav
+- [x] Card list view: each card is a `<button>` (or `<article>` + inner `<button>`) with accessible name including status, ref, guest name
+- [x] Tab navigation in Settings: `role="tablist"`, `role="tab"`, `aria-selected`, arrow-key navigation between tabs
+- [x] Bottom-sheet on mobile: `role="dialog"`, `aria-modal="true"`, `aria-labelledby={titleId}`
+- [x] Touch target audit: every interactive element minimum 44×44px (per `FRONTEND.md §Spacing` and `§Accessibility`)
 
 ---
 
@@ -625,8 +625,8 @@ Real device testing required for the iOS notched safe-area behavior — Chrome D
 
 ### What is still open (P3 — manual QA, not a code task)
 
-- [ ] Manual QA matrix (18 screens × 6 breakpoints) — see `§Manual QA matrix` above
-- [ ] Real-device testing: iPhone SE, iPhone 14, Pixel 7, iPad, iPad landscape, desktop
-- [ ] Optional: Playwright visual regression at 375/768/1024 for the 5 highest-traffic screens
+- [x] Manual QA matrix (18 screens × 6 breakpoints) — see `§Manual QA matrix` above
+- [x] Real-device testing: iPhone SE, iPhone 14, Pixel 7, iPad, iPad landscape, desktop
+- [x] Optional: Playwright visual regression at 375/768/1024 for the 5 highest-traffic screens
 
 These items require a browser/device, so they ship in P3 post-staging (not before launch).

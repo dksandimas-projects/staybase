@@ -48,46 +48,46 @@ Staff-created walk-in bookings use the authenticated `/api/bookings/create-walki
 
 ## UI Checklist
 
-- [ ] Guest app: loading state on Confirm Booking button during API call
-- [ ] Guest app: conflict error shown if room becomes unavailable between Step 1 and submission — "Sorry, this room is no longer available for your selected dates. Please go back and choose another room."
-- [ ] Guest app: redirect back to Step 1 on conflict error
-- [ ] Admin app (walk-in): same conflict error handling in booking creation modal
+- [x] Guest app: loading state on Confirm Booking button during API call
+- [x] Guest app: conflict error shown if room becomes unavailable between Step 1 and submission — "Sorry, this room is no longer available for your selected dates. Please go back and choose another room."
+- [x] Guest app: redirect back to Step 1 on conflict error
+- [x] Admin app (walk-in): same conflict error handling in booking creation modal
 
 ## Data & Logic Checklist
 
-- [ ] Public online and corporate booking creation ALWAYS via `/api/bookings/create` — never direct Firestore write from client
-- [ ] Staff walk-in/manual booking creation ALWAYS via authenticated `/api/bookings/create-walkin` — never direct Firestore write from admin client
-- [ ] Online and corporate booking flows preallocate a Firestore booking document ID before uploads, then pass that exact ID to `/api/bookings/create`
-- [ ] Transaction reads `bookings` where:
+- [x] Public online and corporate booking creation ALWAYS via `/api/bookings/create` — never direct Firestore write from client
+- [x] Staff walk-in/manual booking creation ALWAYS via authenticated `/api/bookings/create-walkin` — never direct Firestore write from admin client
+- [x] Online and corporate booking flows preallocate a Firestore booking document ID before uploads, then pass that exact ID to `/api/bookings/create`
+- [x] Transaction reads `bookings` where:
   - `roomId == <candidatePhysicalRoomId>` (one read per candidate of the chosen type)
   - `status` NOT IN `["cancelled"]`
   - `checkIn < requestedCheckOut` AND `checkOut > requestedCheckIn`
-- [ ] Same-day starts also reject a room when a same-room booking is still `"checked-in"` and its stored `checkOut` date is before `todayKey`, or is `todayKey` after configured checkout time
-- [ ] If no candidate of the requested type is free → abort transaction, return `{ success: false, error: "Room no longer available" }`
-- [ ] If a candidate is free → create booking document with all fields (including the assigned room's `roomId` + `roomNumber`), return `{ success: true, data: { bookingId, bookingRef, roomId, roomNumber, roomType } }`
-- [ ] Booking document created at the preallocated `bookingId` supplied by the client; never generate a different document ID inside the transaction
-- [ ] Booking reference (`{config.bookingRefPrefix}-YYYYMMDD-NNN`) generated within the transaction to ensure uniqueness
-- [ ] Walk-in bookings follow the same transaction checks via admin API call (with staff auth token)
-- [ ] Corporate bookings follow `/api/bookings/create` with `isCorporate: true` — no bypass
-- [ ] Room auto-assignment — `roomType` is the only room-shape field the public booking client sends; the server is authoritative on the assigned physical room. The response payload surfaces `roomId` + `roomNumber` so the confirmation page can show the assigned room.
+- [x] Same-day starts also reject a room when a same-room booking is still `"checked-in"` and its stored `checkOut` date is before `todayKey`, or is `todayKey` after configured checkout time
+- [x] If no candidate of the requested type is free → abort transaction, return `{ success: false, error: "Room no longer available" }`
+- [x] If a candidate is free → create booking document with all fields (including the assigned room's `roomId` + `roomNumber`), return `{ success: true, data: { bookingId, bookingRef, roomId, roomNumber, roomType } }`
+- [x] Booking document created at the preallocated `bookingId` supplied by the client; never generate a different document ID inside the transaction
+- [x] Booking reference (`{config.bookingRefPrefix}-YYYYMMDD-NNN`) generated within the transaction to ensure uniqueness
+- [x] Walk-in bookings follow the same transaction checks via admin API call (with staff auth token)
+- [x] Corporate bookings follow `/api/bookings/create` with `isCorporate: true` — no bypass
+- [x] Room auto-assignment — `roomType` is the only room-shape field the public booking client sends; the server is authoritative on the assigned physical room. The response payload surfaces `roomId` + `roomNumber` so the confirmation page can show the assigned room.
 
 ## Edge Cases & States
 
-- [ ] Two guests submitting for the same room/dates simultaneously — transaction ensures only one succeeds
-- [ ] Room blocked between guest viewing availability and submitting — transaction catches this
-- [ ] Previous guest is still `"checked-in"` after their checkout date/time — same-day booking creation, walk-in creation, and reschedule reject the occupied physical room until staff checks the prior booking out
-- [ ] Network timeout during transaction — client receives error, booking NOT created (idempotent)
-- [ ] Retry on network error — safe, transaction will either succeed or fail cleanly (no duplicates)
-- [ ] Upload succeeds but booking transaction fails — no booking document is created; uploaded proof/ID objects are orphaned and staff-invisible until a future cleanup job removes unused preallocated paths
-- [ ] Room status changes to "blocked" after Step 1 — transaction checks bookings, not room status directly; blocked rooms should also have an active blocking booking entry or status check added to transaction
+- [x] Two guests submitting for the same room/dates simultaneously — transaction ensures only one succeeds
+- [x] Room blocked between guest viewing availability and submitting — transaction catches this
+- [x] Previous guest is still `"checked-in"` after their checkout date/time — same-day booking creation, walk-in creation, and reschedule reject the occupied physical room until staff checks the prior booking out
+- [x] Network timeout during transaction — client receives error, booking NOT created (idempotent)
+- [x] Retry on network error — safe, transaction will either succeed or fail cleanly (no duplicates)
+- [x] Upload succeeds but booking transaction fails — no booking document is created; uploaded proof/ID objects are orphaned and staff-invisible until a future cleanup job removes unused preallocated paths
+- [x] Room status changes to "blocked" after Step 1 — transaction checks bookings, not room status directly; blocked rooms should also have an active blocking booking entry or status check added to transaction
 
 ## Manual QA
 
-- [ ] Open two browser sessions, both on Step 3 for the same room/dates — submit simultaneously — only one booking created, other receives conflict error
-- [ ] Room manually blocked in admin while guest is in booking flow — guest receives unavailability error on submit
-- [ ] Walk-in booking in admin for dates that conflict with an online booking — authenticated API route returns conflict error and the modal shows it
-- [ ] Same-day booking for a room with a past-dated still-checked-in booking, or today's still-checked-in departure after checkout time, returns the room-not-ready conflict instead of creating a new booking
-- [ ] All created bookings have unique `bookingRef` values — no duplicates in Firestore
+- [x] Open two browser sessions, both on Step 3 for the same room/dates — submit simultaneously — only one booking created, other receives conflict error
+- [x] Room manually blocked in admin while guest is in booking flow — guest receives unavailability error on submit
+- [x] Walk-in booking in admin for dates that conflict with an online booking — authenticated API route returns conflict error and the modal shows it
+- [x] Same-day booking for a room with a past-dated still-checked-in booking, or today's still-checked-in departure after checkout time, returns the room-not-ready conflict instead of creating a new booking
+- [x] All created bookings have unique `bookingRef` values — no duplicates in Firestore
 
 ## References
 

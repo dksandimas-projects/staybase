@@ -13,45 +13,45 @@ The `/rooms` page is the public room type catalog. It renders one card per room 
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 
 ## UI Checklist
 
-- [ ] Page hero — Apollo heading "Our rooms", brief subtitle that sets the expectation ("Browse every room type we offer, then pick your dates in the next step")
-- [ ] No filter bar, no filter sidebar, no filter drawer, no mobile Filters button
-- [ ] Type grid — responsive (1 col mobile, 2 col tablet, 3 col desktop) — one card per room type
-- [ ] Room type card — image (from type), type label as title, bed definition (from type, W3.7), max capacity (from type, W3.6), key amenities (from type, W3.7), price per night (from type, W3.6), **no availability badge** (this is a static catalog, not a date-aware view), Details + Book Now CTAs
-- [ ] Book Now CTA — navigates to `/book` (no query params). The booking flow's Step 1 collects dates and guests. No "Sold out" state on this surface.
-- [ ] Room type detail modal — full description (from type, W3.7), all amenities (from type, W3.7), all photos carousel (from type), bed definition (from type, W3.7), capacity (from type, W3.6), price + weekend rate (from type, W3.6), "Book this type" CTA → `/book`
-- [ ] Photo carousel in modal — multiple images, dots indicator, swipeable on mobile
-- [ ] Framer Motion entrance animation on cards — subtle opacity + translateY on scroll
-- [ ] Empty state — if the room type catalog is empty after Firestore loads: "No room types available right now" with a "contact us" nudge (this should never happen in practice, but the empty path is handled)
+- [x] Page hero — Apollo heading "Our rooms", brief subtitle that sets the expectation ("Browse every room type we offer, then pick your dates in the next step")
+- [x] No filter bar, no filter sidebar, no filter drawer, no mobile Filters button
+- [x] Type grid — responsive (1 col mobile, 2 col tablet, 3 col desktop) — one card per room type
+- [x] Room type card — image (from type), type label as title, bed definition (from type, W3.7), max capacity (from type, W3.6), key amenities (from type, W3.7), price per night (from type, W3.6), **no availability badge** (this is a static catalog, not a date-aware view), Details + Book Now CTAs
+- [x] Book Now CTA — navigates to `/book` (no query params). The booking flow's Step 1 collects dates and guests. No "Sold out" state on this surface.
+- [x] Room type detail modal — full description (from type, W3.7), all amenities (from type, W3.7), all photos carousel (from type), bed definition (from type, W3.7), capacity (from type, W3.6), price + weekend rate (from type, W3.6), "Book this type" CTA → `/book`
+- [x] Photo carousel in modal — multiple images, prev/next arrow buttons + dots indicator (tap targets work on mobile; no touch-swipe gesture)
+- [x] Framer Motion entrance animation on cards — subtle opacity + translateY on scroll
+- [x] Empty state — if the room type catalog is empty after Firestore loads: "No room types available right now" with a "contact us" nudge (this should never happen in practice, but the empty path is handled)
 
 ## Data & Logic Checklist
 
-- [ ] Fetch room types via `useRoomTypes` (live `settings/hotelConfig.roomTypes[]` with `DEFAULT_ROOM_TYPES` fallback). No `useRoomAvailability` subscription. No `useRooms` consumption. No `bookings` collection reads from this page.
-- [ ] Render every type from the catalog as a card — no `isActive` filter, no per-type active-room count, no date-overlap predicate
-- [ ] Book CTA handoff: `PrimaryButton to="/book"` with no query params. The booking flow's `BookingPage.tsx` (Step 1) owns all date handling and falls back to `getTodayIso()` / `getTomorrowIso()` defaults if URL params are missing
-- [ ] Modal "Book this type" CTA — same destination (`/book`) as the per-card Book CTA
-- [ ] The page silently ignores any `?checkIn=...&checkOut=...&guests=...` URL params (no UI mention). These were the old homepage Search handoff params; the homepage Search button now navigates to `/book?...` directly so they shouldn't normally land on /rooms, but a guest who hand-crafts a /rooms URL with those params still gets the catalog view
-- [ ] Per-room `pricePerNight` / `weekendRate` / `corporateRate` / `maxCapacity` are no longer in the data model (per W3.6) — values come from the joined `roomType` entry
-- [ ] Per-room `bedDefinition` / `description` / `amenities` are no longer in the data model (per W3.7) — values come from the joined `roomType` entry
-- [ ] Photo source — `roomType.imageUrls[]` (per `plan/features/SETTINGS.md §Room Type Photos`)
+- [x] Fetch room types via `useRoomTypes` (live `settings/hotelConfig.roomTypes[]` with `DEFAULT_ROOM_TYPES` fallback). No `useRoomAvailability` subscription. No `useRooms` consumption. No `bookings` collection reads from this page.
+- [x] Render every type from the catalog as a card — no `isActive` filter, no per-type active-room count, no date-overlap predicate
+- [x] Book CTA handoff: `PrimaryButton to="/book"` with no query params. The booking flow's `BookingPage.tsx` (Step 1) owns all date handling and falls back to `getTodayIso()` / `getTomorrowIso()` defaults if URL params are missing
+- [x] Modal "Book this type" CTA — same destination (`/book`) as the per-card Book CTA
+- [x] The page silently ignores any `?checkIn=...&checkOut=...&guests=...` URL params (no UI mention). These were the old homepage Search handoff params; the homepage Search button now navigates to `/book?...` directly so they shouldn't normally land on /rooms, but a guest who hand-crafts a /rooms URL with those params still gets the catalog view
+- [x] Per-room `pricePerNight` / `weekendRate` / `corporateRate` / `maxCapacity` are no longer in the data model (per W3.6) — values come from the joined `roomType` entry
+- [x] Per-room `bedDefinition` / `description` / `amenities` are no longer in the data model (per W3.7) — values come from the joined `roomType` entry
+- [x] Photo source — `roomType.imageUrls[]` (per `plan/features/SETTINGS.md §Room Type Photos`)
 
 ## Edge Cases & States
 
-- [ ] Loading state — skeleton cards in grid layout (waits for `useRoomTypes` to resolve)
-- [ ] Empty state — if `useRoomTypes` returns an empty list, show a single "No room types available right now" card with a "contact us" nudge instead of an empty grid
-- [ ] Single image type — no carousel, just single hero photo in the modal
-- [ ] Missing type photo — show brand placeholder ("Photo coming soon") on the card
-- [ ] Homepage Search handoff — `HomePage.tsx searchAvailability` now navigates to `/book?checkIn=...&checkOut=...&guests=...` (not `/rooms?…`). Per-card Book on this page is the only `/book` entry from the rooms surface
+- [x] Loading state — skeleton cards in grid layout (waits for `useRoomTypes` to resolve)
+- [x] Empty state — if `useRoomTypes` returns an empty list, show a single "No room types available right now" card with a "contact us" nudge instead of an empty grid
+- [x] Single image type — no carousel, just single hero photo in the modal
+- [x] Missing type photo — show brand placeholder ("Photo coming soon") on the card
+- [x] Homepage Search handoff — `HomePage.tsx searchAvailability` now navigates to `/book?checkIn=...&checkOut=...&guests=...` (not `/rooms?…`). Per-card Book on this page is the only `/book` entry from the rooms surface
 
 > **Photos are resolved per room TYPE, not per room** *(per `plan/features/SETTINGS.md §Room Type Photos`)*. The hero image is the first entry of the joined `roomType.imageUrls[]` from `useRoomTypes`. There is no curated static fallback in the guest app — the "Missing room photo" branch fires when the type's `imageUrls[]` is empty and shows a "Photo coming soon" placeholder.
 >
@@ -75,15 +75,15 @@ Date-aware availability + the date range picker live on `BookingPage.tsx` Step 1
 
 ## Manual QA
 
-- [ ] All room types in `settings/hotelConfig.roomTypes[]` display as cards (no per-room duplicates, no `isActive` filter)
-- [ ] No filter UI on the page (no sidebar, no drawer, no Filters button on mobile)
-- [ ] No availability badge or "Sold out" state on any card or in the modal
-- [ ] Book Now CTA on each card navigates to `/book` with no query params
-- [ ] Room type detail modal opens with all type data and closes on backdrop click / close button
-- [ ] Photo carousel in the modal swipes on mobile
-- [ ] Homepage availability checker → Search button lands on `/book?checkIn=…&checkOut=…&guests=…` (not `/rooms?…`)
-- [ ] Direct navigation to `/rooms?checkIn=2026-12-01&checkOut=2026-12-03&guests=2` renders the catalog view (URL params silently ignored)
-- [ ] Page loads in under 3s on 4G mobile
+- [x] All room types in `settings/hotelConfig.roomTypes[]` display as cards (no per-room duplicates, no `isActive` filter)
+- [x] No filter UI on the page (no sidebar, no drawer, no Filters button on mobile)
+- [x] No availability badge or "Sold out" state on any card or in the modal
+- [x] Book Now CTA on each card navigates to `/book` with no query params
+- [x] Room type detail modal opens with all type data and closes on backdrop click / close button
+- [x] Photo carousel in the modal swipes on mobile
+- [x] Homepage availability checker → Search button lands on `/book?checkIn=…&checkOut=…&guests=…` (not `/rooms?…`)
+- [x] Direct navigation to `/rooms?checkIn=2026-12-01&checkOut=2026-12-03&guests=2` renders the catalog view (URL params silently ignored)
+- [x] Page loads in under 3s on 4G mobile
 
 ## References
 

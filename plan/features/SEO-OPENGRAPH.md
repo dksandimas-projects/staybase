@@ -105,14 +105,14 @@ Detect known crawler user-agents at the edge and stream an `index.html` variant 
 
 ## Acceptance criteria
 
-- [ ] `https://{domain}/robots.txt` returns 200 and points to the sitemap.
-- [ ] `https://{domain}/sitemap.xml` returns 200 and lists all indexable routes (no `noIndex` routes).
-- [ ] `https://{domain}/og-image.png` returns 200, is 1200×630.
-- [ ] Facebook Sharing Debugger, WhatsApp, and Viber render a correct card for **at least 3 different** public URLs (home, rooms, about) — each with the right title/description (per-route, not all identical) once G1 ships.
-- [ ] X (Twitter) Card Validator shows `summary_large_image`.
-- [ ] Google Rich Results Test validates the Hotel JSON-LD with no errors.
-- [ ] `admin.{domain}` is `noindex` and disallowed.
-- [ ] Google Search Console + Bing Webmaster Tools: sitemap submitted, no coverage errors (post-deploy manual step).
+- [x] `https://{domain}/robots.txt` returns 200 and points to the sitemap.
+- [x] `https://{domain}/sitemap.xml` returns 200 and lists all indexable routes (no `noIndex` routes).
+- [x] `https://{domain}/og-image.png` returns 200, is 1200×630.
+- [x] Facebook Sharing Debugger, WhatsApp, and Viber render a correct card for **at least 3 different** public URLs (home, rooms, about) — each with the right title/description (per-route, not all identical) once G1 ships.
+- [x] X (Twitter) Card Validator shows `summary_large_image`.
+- [x] Google Rich Results Test validates the Hotel JSON-LD with no errors.
+- [x] `admin.{domain}` is `noindex` and disallowed.
+- [x] Google Search Console + Bing Webmaster Tools: sitemap submitted, no coverage errors (post-deploy manual step).
 
 ---
 

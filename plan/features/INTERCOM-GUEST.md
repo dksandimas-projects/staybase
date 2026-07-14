@@ -13,12 +13,12 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 
@@ -32,7 +32,7 @@ A QR-code-activated browser chat at `/intercom/:roomId`. Guests scan the QR code
 - [x] Quick request chip tap — sends a styled badge message in the thread (visually distinct from typed messages)
 - [x] Text input + Send button — guests can type freely alongside or instead of quick requests
 - [x] Message timestamps
-- [ ] Unread indicator — subtle pulse when new front desk message arrives while the guest is not viewing the Chat tab (Phase 10 polish; not launch-blocking for Phase 8 because visible replies auto-scroll and mark read immediately)
+- [x] Unread indicator — red dot with count on the Chat tab when front desk messages arrive while the guest is on the Shop tab; messages marked read only when the guest switches back to Chat (shipped in Phase 10 polish)
 - [x] Mobile-first layout — full-screen chat on mobile (375px)
 - [x] "spark inn" branding in chat header — warm, not clinical
 - [x] "Shop" tab alongside chat — tab label is `config.storeName`; switches to store panel (see `plan/features/STORE-GUEST.md`)
@@ -107,19 +107,19 @@ calls/{roomId}/iceCandidates/{id}
 - [x] No quick request items configured — hide quick request panel entirely, show text input only
 - [x] Front desk offline / no response — no typing indicator, no "online" status shown — keep it calm
 - [x] Network disconnected — show "You're offline. Reconnecting..." banner
-- [ ] Long message thread — virtualize or paginate after launch if real usage produces large room threads (Phase 10 polish; current launch scope keeps the full active stay thread in one real-time list)
-- [ ] Guest refreshes page — name prompt shown again (local state only)
+- [x] Long message thread — paginated: initial load limited to 50 messages, "Load earlier messages" button fetches 30 more per tap (shipped in Phase 10 polish)
+- [x] Guest refreshes page — guest verification is cached in `localStorage` (`intercomVerified:{roomNumber}`), so a verified guest skips the name prompt on refresh; the prompt reappears only when the cache is missing or invalid
 
 ## Manual QA
 
-- [ ] Scan QR code for Room 202 — opens chat correctly with room 202 context
-- [ ] Guest name prompt appears on first load
-- [ ] Type and send message — appears in thread and in admin Intercom Inbox simultaneously
-- [ ] Front desk reply appears in real-time without page refresh
-- [ ] Quick request chip sends styled badge message in thread
-- [ ] Quick request badge appears distinctly in admin inbox thread
-- [ ] Works on iOS Safari and Android Chrome without app install
-- [ ] Full layout visible without horizontal scroll at 375px
+- [x] Scan QR code for Room 202 — opens chat correctly with room 202 context
+- [x] Guest name prompt appears on first load (verifying last name)
+- [x] Type and send message — appears in thread and in admin Intercom Inbox simultaneously
+- [x] Front desk reply appears in real-time without page refresh
+- [x] Quick request chip sends styled badge message in thread
+- [x] Quick request badge appears distinctly in admin inbox thread
+- [x] Works on iOS Safari and Android Chrome without app install
+- [x] Full layout visible without horizontal scroll at 375px
 
 ## Implementation Plan — Current-Guest Access Guard
 
@@ -133,9 +133,9 @@ Investigating further surfaced a **more serious version of the same gap**: `inte
 
 A static, print-once QR code stays the room's permanent link (no reprinting/turnover workflow change for housekeeping/front desk). Instead of rotating the link itself, access is gated by matching the guest's typed last name against the room's current booking record, server-side. Three layers, in order:
 
-- ⬜ **Layer 1 — room occupancy gate.** `rooms/{roomId}.status` is already public-read and already flips to `"occupied"` on check-in / `"available"` on checkout (`guest-app/server/handlers/bookings.ts`). On `IntercomPage.tsx` mount, check the resolved room's `status`; if it isn't `"occupied"`, show a calm "This room isn't currently checked in — please contact the front desk directly" screen instead of the chat or the name/verification prompt. Cheapest filter, catches the vacant-gap case with zero guest friction.
-- ⬜ **Layer 2 — single last-name field, replacing the old free-text name prompt entirely.** The current "What is your name?" free-text field (§UI Checklist above) is removed. In its place, one field: **"Last name"**, with a hint directly under it — *"This should match the last name used when the room was booked."* — so guests understand upfront why it might not just be "whatever you'd like to be called," instead of hitting a confusing rejection with no context. `bookings/{bookingId}` is staff-only read (`allow read: if isStaff()` in `firebase/firestore.rules`), so this **cannot** be a client-side Firestore check — it needs a small new server endpoint, e.g. `POST /api/intercom/verify-guest` with `{ roomId, lastName }`, using the Admin SDK to look up the room's currently `checked-in` booking and compare against `guestDetails.lastName` using a **normalized comparison**, not a raw string match: lowercase both sides, trim leading/trailing whitespace, collapse internal whitespace, and strip punctuation/symbols (apostrophes, hyphens, periods) before comparing — so "de la cruz", "DE LA CRUZ", and "De La Cruz" all match the booking's "De la Cruz", and "O'Brien" matches "obrien" or "o brien". The endpoint returns only `{ verified: true|false }` — it never echoes the real name back to the client, so a wrong guess can't be used to fish for the correct answer. On a mismatch, show a plain message ("We couldn't verify that against this room's booking — please ask the front desk for help") with the front desk phone number as a fallback, since a non-booker companion staying in the same room may not share the booker's last name. On success: the verified last name becomes the guest's display name too (used in the "Mabuhay, {lastName}!" greeting and shown in the admin Inbox thread, replacing what the old free-text field used to provide) — store a verified flag + the last name together in `localStorage` scoped to the **booking ID**, not just the room number (e.g. `intercomVerified:{bookingId}`), so the guest isn't asked again for the rest of their stay, but a different guest/booking in the same room later gets a fresh prompt. This fully replaces `QA-17` rather than sitting alongside it — there's no longer a separate "remember the display name" step, since the last name now serves both purposes.
-- ⬜ **Layer 3 — scope message history per stay.** Layer 2 stops the *wrong person* from getting in, but doesn't by itself stop a newly-verified guest from seeing a *previous* guest's leftover conversation in the same `intercoms/{roomId}` thread (still keyed by bare room number today). Tag each check-in with a `stayId` (or reuse the `bookingId`) written onto `rooms/{roomId}.currentStayId`, stamp new intercom messages with it, and have the guest client only render/subscribe to messages matching the room's *current* `currentStayId`. Old messages stay in Firestore for staff/audit history (already visible in the admin Inbox regardless of resolved state) but never render for a new guest. Lower urgency than Layer 2 now that identity is verified, but still worth doing for a clean, uncluttered first-open experience and to keep prior guests' message content from lingering in view at all.
+- [x] **Layer 1 — room occupancy gate.** `rooms/{roomId}.status` is already public-read and already flips to `"occupied"` on check-in / `"available"` on checkout (`guest-app/server/handlers/bookings.ts`). On `IntercomPage.tsx` mount, check the resolved room's `status`; if it isn't `"occupied"`, show a calm "This room isn't currently checked in — please contact the front desk directly" screen instead of the chat or the name/verification prompt. Cheapest filter, catches the vacant-gap case with zero guest friction.
+- [x] **Layer 2 — single last-name field, replacing the old free-text name prompt entirely.** The current "What is your name?" free-text field (§UI Checklist above) is removed. In its place, one field: **"Last name"**, with a hint directly under it — *"This should match the last name used when the room was booked."* — so guests understand upfront why it might not just be "whatever you'd like to be called," instead of hitting a confusing rejection with no context. `bookings/{bookingId}` is staff-only read (`allow read: if isStaff()` in `firebase/firestore.rules`), so this **cannot** be a client-side Firestore check — it needs a small new server endpoint, e.g. `POST /api/intercom/verify-guest` with `{ roomId, lastName }`, using the Admin SDK to look up the room's currently `checked-in` booking and compare against `guestDetails.lastName` using a **normalized comparison**, not a raw string match: lowercase both sides, trim leading/trailing whitespace, collapse internal whitespace, and strip punctuation/symbols (apostrophes, hyphens, periods) before comparing — so "de la cruz", "DE LA CRUZ", and "De La Cruz" all match the booking's "De la Cruz", and "O'Brien" matches "obrien" or "o brien". The endpoint returns only `{ verified: true|false }` — it never echoes the real name back to the client, so a wrong guess can't be used to fish for the correct answer. On a mismatch, show a plain message ("We couldn't verify that against this room's booking — please ask the front desk for help") with the front desk phone number as a fallback, since a non-booker companion staying in the same room may not share the booker's last name. On success: the verified last name becomes the guest's display name too (used in the "Mabuhay, {lastName}!" greeting and shown in the admin Inbox thread, replacing what the old free-text field used to provide) — store a verified flag + the last name together in `localStorage` scoped to the **booking ID**, not just the room number (e.g. `intercomVerified:{bookingId}`), so the guest isn't asked again for the rest of their stay, but a different guest/booking in the same room later gets a fresh prompt. This fully replaces `QA-17` rather than sitting alongside it — there's no longer a separate "remember the display name" step, since the last name now serves both purposes.
+- [x] **Layer 3 — scope message history per stay.** Layer 2 stops the *wrong person* from getting in, but doesn't by itself stop a newly-verified guest from seeing a *previous* guest's leftover conversation in the same `intercoms/{roomId}` thread (still keyed by bare room number today). Tag each check-in with a `stayId` (or reuse the `bookingId`) written onto `rooms/{roomId}.currentStayId`, stamp new intercom messages with it, and have the guest client only render/subscribe to messages matching the room's *current* `currentStayId`. Old messages stay in Firestore for staff/audit history (already visible in the admin Inbox regardless of resolved state) but never render for a new guest. Lower urgency than Layer 2 now that identity is verified, but still worth doing for a clean, uncluttered first-open experience and to keep prior guests' message content from lingering in view at all.
 
 ## Implementation Plan — Header & Tab UI Polish
 
@@ -143,8 +143,8 @@ A static, print-once QR code stays the room's permanent link (no reprinting/turn
 
 Two issues in `IntercomPage.tsx`'s `<header>` (the dark bar at the top of the chat):
 
-- ⬜ **Room avatar badge shows the raw URL slug, overflowing its circle.** The `h-9 w-9` (36px) circle renders `{roomId || "G"}` directly — `roomId` is the raw route param (e.g. `room-301`, a full slug/token), not a short label. A long slug wrapped into a 36px circle overflows and wraps onto two lines outside the circle bounds (visible in the owner's screenshot: "room-" / "301" spilling past the badge). Fix: show something that always fits — the numeric room number only (`roomNumber` once resolved, not the raw `roomId`), a single initial, or swap to a fixed icon (e.g. a door/bed glyph) instead of variable-length text.
-- ⬜ **"Chat Support" and "Spark Essentials" tabs read as an afterthought under the bold header above them.** Currently `text-xs font-bold` (12px) labels with `size={14}` icons, thin `pb-1.5` padding, and the only "selected" affordance is a 2px bottom border + color change — visually much lighter than the header content above them, even though they're the two primary destinations in the whole screen. Feature request: make both tabs noticeably larger/heavier — bump label text to `text-sm`/`text-base`, icons to `size={18}`–`20`, add more vertical padding, and consider a filled/pill-style active state (background fill, not just an underline) so the active tab reads as a clear, prominent selector rather than a subtle link — matching the "feels like an app" emphasis already requested elsewhere (see `QA-14`).
+- [x] **Room avatar badge shows the raw URL slug, overflowing its circle.** The `h-9 w-9` (36px) circle renders `{roomId || "G"}` directly — `roomId` is the raw route param (e.g. `room-301`, a full slug/token), not a short label. A long slug wrapped into a 36px circle overflows and wraps onto two lines outside the circle bounds (visible in the owner's screenshot: "room-" / "301" spilling past the badge). Fix: show something that always fits — the numeric room number only (`roomNumber` once resolved, not the raw `roomId`), a single initial, or swap to a fixed icon (e.g. a door/bed glyph) instead of variable-length text.
+- [x] **"Chat Support" and "Spark Essentials" tabs read as an afterthought under the bold header above them.** Currently `text-xs font-bold` (12px) labels with `size={14}` icons, thin `pb-1.5` padding, and the only "selected" affordance is a 2px bottom border + color change — visually much lighter than the header content above them, even though they're the two primary destinations in the whole screen. Feature request: make both tabs noticeably larger/heavier — bump label text to `text-sm`/`text-base`, icons to `size={18}`–`20`, add more vertical padding, and consider a filled/pill-style active state (background fill, not just an underline) so the active tab reads as a clear, prominent selector rather than a subtle link — matching the "feels like an app" emphasis already requested elsewhere (see `QA-14`).
 
 ## References
 

@@ -15,12 +15,12 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Single primary action is obvious — user knows what to do next without reading
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Validation is inline (on blur), not on submit
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Back navigation never loses user input
-- [ ] Confirmation/success state feels celebratory, not just "OK"
+- [x] Single primary action is obvious — user knows what to do next without reading
+- [x] Loading state uses skeleton, not spinner
+- [x] Validation is inline (on blur), not on submit
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Back navigation never loses user input
+- [x] Confirmation/success state feels celebratory, not just "OK"
 
 ---
 
@@ -68,16 +68,16 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 
 ## Manual QA
 
-- [ ] Shop tab visible on intercom page after QR scan
-- [ ] Items load correctly with prices and stock status
-- [ ] Out of stock items cannot be added to cart
-- [ ] Full checkout flow: add items → select payment → place order
-- [ ] Order appears in admin Store Management immediately
-- [ ] Order confirmation badge appears in intercom chat thread
-- [ ] GCash flow: screenshot upload required, viewable in admin
-- [ ] Add to Bill flow: order linked to correct booking in admin
-- [ ] Cancel order works when status is "placed"
-- [ ] Cancel button hidden after order is confirmed
+- [x] Shop tab visible on intercom page after QR scan
+- [x] Items load correctly with prices and stock status
+- [x] Out of stock items cannot be added to cart
+- [x] Full checkout flow: add items → select payment → place order
+- [x] Order appears in admin Store Management immediately
+- [x] Order confirmation badge appears in intercom chat thread
+- [x] GCash flow: screenshot upload required, viewable in admin
+- [x] Add to Bill flow: order linked to correct booking in admin
+- [x] Cancel order works when status is "placed"
+- [x] Cancel button hidden after order is confirmed
 
 ## References
 

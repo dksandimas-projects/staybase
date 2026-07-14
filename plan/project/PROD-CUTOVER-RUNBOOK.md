@@ -75,15 +75,16 @@ full admin over production. Staging keeps its existing (separate) key.
 
 - [x] Project created, web app registered *(done 2026-07-14 — config above)*
 - [x] Service account key generated *(done 2026-07-14)*
-- [ ] Blaze plan enabled + **budget alert** configured
+- [x] Blaze plan enabled + **budget alert** configured *(done 2026-07-14
+  per owner console confirmation)*
 - [x] Region confirmed to match staging (both are `US-EAST1` / South Carolina) *(done 2026-07-14)*
-- [ ] Auth enabled: Email/Password **and Google** provider (console toggle
-  — same open item as the staging roadmap entry)
+- [x] Auth enabled: Email/Password **and Google** provider *(done
+  2026-07-14 per owner console confirmation)*
 - [x] Firestore + Storage enabled *(done 2026-07-14)*
-- [ ] Auth **authorized domains**: `www.sparkinnbohol.com`,
-  `admin.sparkinnbohol.com`
-- [ ] Browser API key restricted to the production domains (do it from day
-  one — open roadmap item on staging, don't repeat the gap)
+- [x] Auth **authorized domains**: `www.sparkinnbohol.com`,
+  `admin.sparkinnbohol.com` *(done 2026-07-14 per owner console
+  confirmation)*
+- [x] Browser API key restricted to the production domains (restricted by HTTP Referrers to production + localhost, and limited to only 4 essential APIs) *(done 2026-07-14)*
 - [x] Deploy rules + indexes *(done 2026-07-14 —
   `firebase deploy --only firestore,storage --project production`;
   required granting `dksandimas.projects@gmail.com` access to
@@ -94,25 +95,34 @@ full admin over production. Staging keeps its existing (separate) key.
   *(done 2026-07-14)*
 - [x] Storage CORS applied to the prod bucket *(done 2026-07-14 via
   `set-storage-cors.ts` with the prod env swap)*
-- [ ] **Scheduled backups / PITR enabled on Firestore** — non-negotiable
-  for the production finance ledger; staging never had it
+- [x] **Scheduled backups / PITR enabled on Firestore** *(done 2026-07-14,
+  verified live: PITR enabled; weekly backup schedule (Mondays, 14-week
+  retention); **delete protection enabled** on the `(default)` database)*
 
-## PC-03 — Seed production data
+## PC-03 — Seed production data ✅ (completed 2026-07-14)
 
-- [ ] Seed the 5 settings docs + rooms (`seed-firestore.ts` with prod
-  credentials), then overlay real config from staging: room types + rate
-  matrix, website content, payment methods, store catalog, breakfast +
-  rewards config
-- [ ] **Preserve room doc IDs and `qrToken`s** — copy room docs verbatim
-  from staging so the printed in-room QR codes keep working (fresh IDs =
-  reprint every room QR)
-- [ ] **Re-upload every Storage-hosted asset** through the admin UI (or
-  copy objects + rewrite URLs): branding images, payment-method QR images,
-  room-type photos, SEO/OG image. No Firestore doc may carry a
-  `spark-inn-stg-7a7ad.firebasestorage.app` URL — those break the day
-  staging is ever cleaned up.
+- [x] Settings + rooms copied to prod *(verified 2026-07-14: all 5
+  settings docs present; 14/14 rooms with **identical doc IDs and
+  `qrToken`s** to staging — printed in-room QR codes survive the cutover)*
+- [x] **Storage assets copied + URLs rewritten** *(done 2026-07-14: all
+  22 `assets/branding` objects copied staging → prod bucket with fresh
+  download tokens; the 5 staging-bucket URLs in `settings/websiteContent`
+  (navbar dark logo + 4 hero photos) rewritten to prod URLs; full re-scan
+  of all prod settings + rooms docs shows **0 staging-bucket URLs
+  remaining**; anonymous fetch of a rewritten URL returns 200)*
 - [x] Recreate staff accounts with role claims (copied via migration script) *(done 2026-07-14)*
 - [x] Run `scripts/finance-integrity-scan.ts` against prod (expect zero findings on a clean slate) *(done 2026-07-14 — 0 findings)*
+- [x] **Intentionally not copied** *(decided 2026-07-14, extending
+  decision #119 clean slate)*: `storeItems` (1 — test), `vouchers` (2 —
+  test), `corporateCodes` (1 — test), `corporateInquiries` (1 — test).
+  Booking/guest/intercom/store-order transaction data excluded per the
+  original decision; `counters` restart fresh.
+
+**Handover note (not a blocker):** room-type photos and payment-method QR
+images have never been uploaded in either environment (`hotelConfig`
+image/QR fields are empty in staging too). The owner should upload them
+via admin Settings on production post-cutover, and rebuild the store
+catalog + any real vouchers/corporate codes directly on prod when needed.
 
 
 ## PC-04 — Vercel environment split

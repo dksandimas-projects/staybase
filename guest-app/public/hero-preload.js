@@ -17,6 +17,20 @@
 // silently ignored — the runtime HeroImage preload fires as the
 // fallback.
 (function () {
+  // ─── Dynamic robots noindex injection for non-production environments ───
+  try {
+    var hostname = window.location.hostname;
+    var isStagingOrDev = hostname.indexOf("stg.") !== -1 || 
+                         hostname.indexOf("vercel.app") !== -1 || 
+                         hostname.indexOf("localhost") !== -1;
+    if (isStagingOrDev) {
+      var meta = document.createElement("meta");
+      meta.name = "robots";
+      meta.content = "noindex, nofollow";
+      document.head.appendChild(meta);
+    }
+  } catch (e) { /* best-effort */ }
+
   try {
     var raw = localStorage.getItem("publicSiteContent:v3");
     if (!raw) return;

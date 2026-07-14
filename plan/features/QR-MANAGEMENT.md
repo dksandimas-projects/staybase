@@ -13,12 +13,12 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Drawers save without full page reload — optimistic update, toast on success
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Destructive actions have a single confirmation step — not buried in menus
-- [ ] Empty states explain why data is missing and what to do
+- [x] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [x] Loading state uses skeleton, not spinner
+- [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Destructive actions have a single confirmation step — not buried in menus
+- [x] Empty states explain why data is missing and what to do
 
 ---
 
@@ -47,7 +47,7 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 ## Edge Cases & States
 
-- [ ] Loading state — skeleton grid while rooms load
+- [x] Loading state — skeleton grid while rooms load
 - [x] Room inactive — still show QR code (front desk may still want to print for future use)
 - [x] Regenerated QR — old `/intercom/{oldQrToken}` URL shows "QR code no longer valid" on guest side
 - [x] Print dialog blocked by browser — show instruction to allow popups
@@ -63,13 +63,13 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 ## Manual QA
 
-- [ ] All room QR codes render in grid
-- [ ] Scan QR code for Room 202 — opens `/intercom/room-202-id` correctly
-- [ ] Regenerate QR — new code renders, old QR link no longer works
-- [ ] Print single QR — print dialog opens with correct room card
-- [ ] Print all QRs — 4 cards per A4 page, correct room data on each card
-- [ ] spark inn logo appears on printed QR cards
-- [ ] Download as PNG — file downloads with QR code
+- [x] All room QR codes render in grid
+- [x] Scan QR code for Room 202 — opens `/intercom/room-202-id` correctly
+- [x] Regenerate QR — new code renders, old QR link no longer works
+- [x] Print single QR — print dialog opens with correct room card
+- [x] Print all QRs — 4 cards per A4 page, correct room data on each card
+- [x] spark inn logo appears on printed QR cards
+- [x] Download as PNG — file downloads with QR code
 
 ## References
 

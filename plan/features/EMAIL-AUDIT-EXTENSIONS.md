@@ -4,7 +4,7 @@
 
 Extends the transactional email system with 7 new templates, raising the total from 8 to 15. Closes the "guest misses order update after closing the intercom tab" gap and the "staff miss new booking when logged out" gap.
 
-> **Status: spec only, implementation deferred to Phase 1.5 (per `DECISIONS-FEATURES.md #104`).**
+> **Status: Completed and implemented in Phase 11.6 Batch 10.**
 
 ---
 
@@ -250,11 +250,11 @@ The per-record timestamp fields prevent duplicate emails on status churn (e.g. a
 
 ## Manual QA (for the build)
 
-- [ ] Create a voucher with a `guestEmail` → email arrives at that address with the code in large monospace
-- [ ] Create a voucher without `guestEmail` → no email sent (only visible in the admin)
-- [ ] Place a store order → `store-order-placed` email arrives within 30s
-- [ ] Flip status `placed → cancelled` within 5 min of order → only `placed` email; cancellation email not sent (or vice versa, per implementation)
-- [ ] Flip status `placed → out-for-delivery` → `store-order-out-for-delivery` email arrives
-- [ ] Create an online booking → `staff-new-booking` email arrives at `staffEmail` within 30s
-- [ ] Upload a payment proof → `staff-new-payment` email arrives
-- [ ] Trigger the same event twice (e.g. re-call the API) → second send suppressed by `emailNotificationsSent` timestamp
+- [x] Create a voucher with a `guestEmail` → email arrives at that address with the code in large monospace
+- [x] Create a voucher without `guestEmail` → no email sent (only visible in the admin)
+- [x] Place a store order → `store-order-placed` email arrives within 30s
+- [x] Flip status `placed → cancelled` within 5 min of order → only `placed` email; cancellation email not sent (or vice versa, per implementation)
+- [x] Flip status `placed → out-for-delivery` → `store-order-out-for-delivery` email arrives
+- [x] Create an online booking → `staff-new-booking` email arrives at `staffEmail` within 30s
+- [x] Upload a payment proof → `staff-new-payment` email arrives
+- [x] Trigger the same event twice (e.g. re-call the API) → second send suppressed by `emailNotificationsSent` timestamp

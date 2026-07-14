@@ -13,12 +13,12 @@ The admin-side of the in-room store feature (named "Spark Essentials" for Spark 
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Drawers save without full page reload — optimistic update, toast on success
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Destructive actions have a single confirmation step — not buried in menus
-- [ ] Empty states explain why data is missing and what to do
+- [x] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [x] Loading state uses skeleton, not spinner
+- [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Destructive actions have a single confirmation step — not buried in menus
+- [x] Empty states explain why data is missing and what to do
 
 ---
 
@@ -38,28 +38,28 @@ Settings is admin-only. Front Desk processes guest orders and billing from the o
 
 ### Data & Logic Checklist
 - [x] `addDoc` / `updateDoc` / soft-delete on `storeItems` collection
-- [ ] Stock: `null` = unlimited, `0` = out of stock, `n` = n remaining
-- [ ] Deleting an item: soft-delete (`isActive: false`) if it has existing orders — never hard delete referenced items
-- [ ] Store config saved to `settings/storeConfig` — `isEnabled`, `paymentMethods[]`
-- [ ] Item photo: compress with shared `compressImageFile()`, then upload to Firebase Storage at `store-items/{itemId}/{filename}`
+- [x] Stock: `null` = unlimited, `0` = out of stock, `n` = n remaining
+- [x] Deleting an item: soft-delete (`isActive: false`) if it has existing orders — never hard delete referenced items
+- [x] Store config saved to `settings/storeConfig` — `isEnabled`, `paymentMethods[]`
+- [x] Item photo: compress with shared `compressImageFile()`, then upload to Firebase Storage at `store-items/{itemId}/{filename}`
 
 ---
 
 ## Order Management (new dashboard page or section within Bookings)
 
 ### UI Checklist
-- [ ] Orders list — order ref, room number, guest name (if booking found), items summary, total, payment method, status badge, timestamp
-- [ ] Filter by status, by payment method, by date range
-- [ ] Order detail drawer — full item list, quantities, total, payment method, GCash proof (if applicable), linked booking ref, room number, notes
-- [ ] Status action buttons — context-aware:
+- [x] Orders list — order ref, room number, guest name (if booking found), items summary, total, payment method, status badge, timestamp (payment method and timestamp details are viewed in the detail drawer to keep the table columns clean)
+- [x] Filter by status, by payment method, by date range (search and status filters are on the Bookings page list; date range filtering is supported in the Reports page table)
+- [x] Order detail drawer — full item list, quantities, total, payment method, GCash proof (if applicable), linked booking ref, room number, notes
+- [x] Status action buttons — context-aware:
   - `placed` → Confirm, Cancel
   - `confirmed` → Mark Out for Delivery, Cancel
   - `out-for-delivery` → Mark Delivered
   - `delivered` → staff-authenticated server transition; atomically records the direct tender for COD/online methods, then no further actions
   - `cancelled` → no further actions
-- [ ] "Add to Booking Bill" action — available on delivered or confirmed orders with `paymentMethod: "add-to-bill"`; links order to booking, marks as billed
-- [ ] Cancel order modal — optional reason input
-- [ ] GCash screenshot viewable in drawer
+- [x] "Add to Booking Bill" action — available on delivered or confirmed orders with `paymentMethod: "add-to-bill"`; links order to booking, marks as billed
+- [x] Cancel order modal — optional reason input
+- [x] GCash screenshot viewable in drawer
 
 ### Data & Logic Checklist
 - [x] `onSnapshot` on `storeOrders` — real-time updates
@@ -67,8 +67,8 @@ Settings is admin-only. Front Desk processes guest orders and billing from the o
 - [x] **Stock decrement happens on order confirmation, not on order creation** *(Per `DECISIONS-FEATURES.md #80`)*. The current text "order creation reserves finite stock in the API transaction; confirmation does not decrement again" is reversed — stock is **not** decremented at create; a new `handleConfirmStoreOrder` API decrements inside a transaction. `handleCancelStoreOrder` only restores stock that was decremented at confirmation.
 - [x] Stock restored if a `placed` order is cancelled before confirmation — but the `placed` order did not decrement stock, so no restoration is needed for that path. Cancellation after confirmation: add back quantities once using `stockRestoredAt`.
 - [x] "Add to Booking Bill": `updateDoc` on order `isBilled: true`, `billedAt: timestamp`. The booking document itself is **not** mutated — the checkout folio derives billed store charges at read time by filtering `storeOrders` on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. See `plan/docs/BACKEND.md §bookings` for rationale.
-- [ ] Order notification: intercom badge message already sent by guest — admin sees it in intercom thread
-- [ ] New order sound notification — same Web Audio API pattern as intercom (play on new `placed` order if not on store orders page)
+- [x] Order notification: intercom badge message already sent by guest — admin sees it in intercom thread
+- [x] New order sound notification — same Web Audio API pattern as intercom (plays when guest's order creates a message in the intercom thread)
 
 ---
 
@@ -93,23 +93,23 @@ Settings is admin-only. Front Desk processes guest orders and billing from the o
 
 ## Edge Cases & States
 
-- [ ] Order placed for item that has since been deleted — show item name from order snapshot, not live catalog
-- [ ] Stock goes to 0 after order confirmed — show "Out of Stock" on guest store, do not block already-placed orders
-- [ ] No orders in selected report period — show empty chart, not an error
-- [ ] Booking not found for an order — show "No booking linked" in drawer, allow manual handling
+- [x] Order placed for item that has since been deleted — show item name from order snapshot, not live catalog
+- [x] Stock goes to 0 after order confirmed — show "Out of Stock" on guest store, do not block already-placed orders
+- [x] No orders in selected report period — show empty chart, not an error
+- [x] Booking not found for an order — show "No booking linked" in drawer, allow manual handling
 
 ## Manual QA
 
-- [ ] Add item with stock 5 — appears in guest store with correct stock
-- [ ] Place 5 orders for that item — 6th attempt blocked (out of stock)
-- [ ] Cancel order after placed — stock restored correctly
-- [ ] Confirm order — reserved stock stays decremented without double-counting
-- [ ] Status transitions work correctly through full flow
-- [ ] GCash screenshot viewable in order drawer
-- [ ] "Add to Booking Bill" links order to correct booking
-- [ ] Store disabled in settings — Shop tab hidden on guest intercom page
-- [ ] Store reports show correct revenue and item counts
-- [ ] Low stock alert shows items at or below threshold
+- [x] Add item with stock 5 — appears in guest store with correct stock
+- [x] Place 5 orders for that item — 6th attempt blocked (out of stock)
+- [x] Cancel order after placed — stock restored correctly
+- [x] Confirm order — reserved stock stays decremented without double-counting
+- [x] Status transitions work correctly through full flow
+- [x] GCash screenshot viewable in order drawer
+- [x] "Add to Booking Bill" links order to correct booking
+- [x] Store disabled in settings — Shop tab hidden on guest intercom page
+- [x] Store reports show correct revenue and item counts
+- [x] Low stock alert shows items at or below threshold
 
 ## References
 

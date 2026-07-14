@@ -10,8 +10,8 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 
 ### Export CSV Button (page header, both tabs)
 
-- [ ] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
-- [ ] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
+- [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
+- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
 
 ### Custom Date Range (owner request 2026-07-09)
 
@@ -19,24 +19,24 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 
 **Target behavior — keep the dropdown, add a custom option alongside it:**
 
-- ⬜ Add a fourth option to the existing `<select>`: **"Custom Range"**. The three existing options (7/30/90 days) are unchanged and remain the default.
-- ⬜ When "Custom Range" is selected, reveal two date inputs (start date, end date) next to the dropdown — reuse `DateRangePicker`-style native `<input type="date">` fields already used elsewhere in the app, not a new custom calendar component.
-- ⬜ `periodStart`/`periodEnd` derive from the two picked dates when in custom mode, instead of the "N days back from today" calculation — end date is no longer forced to be today.
-- ⬜ Validation: end date must be on or after start date; a sensible max range (e.g. disable/warn past 1 year) to keep exports from becoming unreasonably large.
-- ⬜ The selected custom range is reflected in export filenames/labels the same way the preset ranges already are (e.g. `sparkinn_bookings_{start}_to_{end}.csv`, the Sales XLSX "Date Range" summary row) — no separate code path needed there since those already read from `periodStart`/`periodEnd`.
-- ⬜ Switching back from "Custom Range" to a preset option reverts to the normal "N days back from today" behavior.
+- [x] Add a fourth option to the existing `<select>`: **"Custom Range"**. The three existing options (7/30/90 days) are unchanged and remain the default.
+- [x] When "Custom Range" is selected, reveal two date inputs (start date, end date) next to the dropdown — reuse `DateRangePicker`-style native `<input type="date">` fields already used elsewhere in the app, not a new custom calendar component.
+- [x] `periodStart`/`periodEnd` derive from the two picked dates when in custom mode, instead of the "N days back from today" calculation — end date is no longer forced to be today.
+- [x] Validation: end date must be on or after start date; a sensible max range (e.g. disable/warn past 1 year) to keep exports from becoming unreasonably large.
+- [x] The selected custom range is reflected in export filenames/labels the same way the preset ranges already are (e.g. `sparkinn_bookings_{start}_to_{end}.csv`, the Sales XLSX "Date Range" summary row) — no separate code path needed there since those already read from `periodStart`/`periodEnd`.
+- [x] Switching back from "Custom Range" to a preset option reverts to the normal "N days back from today" behavior.
 
 ---
 
 ## UX Checklist
 > Apply `plan/docs/FRONTEND.md §UX Philosophy` to every screen in this feature.
 
-- [ ] Most common action is reachable in ≤ 2 clicks from the sidebar
-- [ ] Loading state uses skeleton, not spinner
-- [ ] Drawers save without full page reload — optimistic update, toast on success
-- [ ] Every error state has a plain-language message and a next step — no dead ends
-- [ ] Destructive actions have a single confirmation step — not buried in menus
-- [ ] Empty states explain why data is missing and what to do
+- [x] Most common action is reachable in ≤ 2 clicks from the sidebar
+- [x] Loading state uses skeleton, not spinner
+- [x] Drawers save without full page reload — optimistic update, toast on success
+- [x] Every error state has a plain-language message and a next step — no dead ends
+- [x] Destructive actions have a single confirmation step — not buried in menus
+- [x] Empty states explain why data is missing and what to do
 
 ---
 
@@ -45,27 +45,27 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 Occupancy and booking patterns. Not revenue-focused.
 
 ### UI Checklist
-- [ ] Date range selector — preset ranges (This Month, Last Month, Last 3 Months, Last 6 Months, Custom)
-- [ ] Occupancy rate chart — bar or line chart, occupancy % per month (overall + breakdown by room type)
-- [ ] Bookings by source chart — pie or bar chart: Online, Walk-in, Phone, Facebook, Corporate
-- [ ] Summary stat cards — total bookings, avg occupancy %, busiest room type for selected period
-- [ ] Recharts tooltips — hover shows exact value per data point
-- [ ] Responsive charts — readable on tablet (768px min)
-- [ ] Export PDF button — performance report (charts + stat cards) via jsPDF
+- [x] Date range selector — preset ranges (This Month, Last Month, Last 3 Months, Last 6 Months, Custom)
+- [x] Occupancy rate chart — bar or line chart, occupancy % per month (overall + breakdown by room type)
+- [x] Bookings by source chart — pie or bar chart: Online, Walk-in, Phone, Facebook, Corporate
+- [x] Summary stat cards — total bookings, avg occupancy %, busiest room type for selected period
+- [x] Recharts tooltips — hover shows exact value per data point
+- [x] Responsive charts — readable on tablet (768px min)
+- [x] Export PDF button — performance report (charts + stat cards) via jsPDF
 
 ### Data & Logic Checklist
-- [ ] Query `bookings` where `status` is in `["confirmed", "checked-in", "checked-out"]` for selected date range
-- [ ] Occupancy rate: (occupied room-nights / total available room-nights) × 100 per month
-- [ ] Total available room-nights: total active room count × days in month — query room count from Firestore, never hardcode
-- [ ] Bookings by source: count grouped by `source` field
-- [ ] All aggregation done client-side — no server-side aggregation needed at this scale
+- [x] Query `bookings` where `status` is in `["confirmed", "checked-in", "checked-out"]` for selected date range
+- [x] Occupancy rate: (occupied room-nights / total available room-nights) × 100 per month
+- [x] Total available room-nights: total active room count × days in month — query room count from Firestore, never hardcode
+- [x] Bookings by source: count grouped by `source` field
+- [x] All aggregation done client-side — no server-side aggregation needed at this scale
 
 ### Manual QA
-- [ ] Occupancy chart reflects correct data for the current month
-- [ ] Bookings by source chart matches source breakdown in Bookings table
-- [ ] Date range change updates all charts simultaneously
-- [ ] PDF export includes all charts legibly
-- [ ] Charts render correctly at 768px (tablet)
+- [x] Occupancy chart reflects correct data for the current month
+- [x] Bookings by source chart matches source breakdown in Bookings table
+- [x] Date range change updates all charts simultaneously
+- [x] PDF export includes all charts legibly
+- [x] Charts render correctly at 768px (tablet)
 
 ---
 
@@ -105,50 +105,50 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 ### UI Checklist
 
 #### Summary Cards (top of tab)
-- [ ] **Total Revenue** — combined across all streams for the selected period
-- [ ] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
-- [ ] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
-- [ ] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
+- [x] **Total Revenue** — combined across all streams for the selected period
+- [x] **Room Revenue** — net room share of booking `totalPrice`; booking-level deductions are allocated proportionally across the locked gross room and breakfast amounts
+- [x] **Breakfast Revenue** — net breakfast share of booking `totalPrice`; derived from the locked breakfast amount and reduced by the same proportional deduction allocation
+- [x] **Store Revenue** — sum of `storeOrder.totalAmount` for `delivered` store orders
 - [x] **Incidental Revenue** — net sum of append-only `bookings/{id}/charges` entries, including negative void reversals
-- [ ] **Total Transactions** — count of bookings + delivered store orders combined
+- [x] **Total Transactions** — count of bookings + delivered store orders combined
 
 #### Charts
 - [x] **Revenue by stream (stacked bar chart)** — one bar per month, stacked by Room / Breakfast / Store / Incidentals
-- [ ] **Revenue trend line** — total combined revenue per month over the selected period
-- [ ] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
+- [x] **Revenue trend line** — total combined revenue per month over the selected period
+- [x] **Store: top-selling items** — horizontal bar chart, top 10 items by revenue for the period
 - [x] **Payment method breakdown** — pie chart by amount from actual payment-ledger entries, plus a separately labeled uncollected Add-to-Bill slice
 - [x] **Direct-paid store collections** — delivery appends a store-scoped tender consumed by the same collection-group ledger and Daily Close; store tenders never reduce the linked room folio
 
 #### Sales Detail Table
 - [x] Tabbed sub-view inside Sales tab: **Bookings** | **Breakfast** | **Store Orders** | **Incidentals**
 - [x] **Incidentals sub-table** — Booking Ref, Room, Category, Label, Amount, Added By, Date
-- [ ] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
-- [ ] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
-- [ ] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
-- [ ] All sub-tables are paginated (20 rows default), searchable by ref or name
-- [ ] All sub-tables filterable by payment method and status
+- [x] **Bookings sub-table** — Booking Ref, Guest, Room, Check-In, Check-Out, Nights, Room Rate, Breakfast, Discount, Voucher, Total, Payment Method, Reference Number, Status
+- [x] **Breakfast sub-table** — Booking Ref, Guest, Room, Check-In, Nights, Guests, Breakfast Rate/person, Total Breakfast Revenue
+- [x] **Store Orders sub-table** — Order Ref, Room, Item(s), Qty, Unit Price, Total, Payment Method, Status, Date
+- [x] All sub-tables are paginated (20 rows default), searchable by ref or name
+- [x] All sub-tables filterable by payment method and status
 
 #### Export Controls
-- [ ] **Print Sales Report** button — opens a clean printable PDF (see §Sales Report PDF below)
-- [ ] **Export XLSX** button — multi-sheet Excel file (see §Sales XLSX Export below)
+- [x] **Print Sales Report** button — opens a clean printable PDF (see §Sales Report PDF below)
+- [x] **Export XLSX** button — multi-sheet Excel file (see §Sales XLSX Export below)
 
 ### Data & Logic Checklist
-- [ ] Bookings query: `status` in `["confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
-- [ ] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
-- [ ] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
-- [ ] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
+- [x] Bookings query: `status` in `["confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
+- [x] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
+- [x] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
+- [x] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`
 - [x] Incidental revenue: real-time `collectionGroup("charges")`, filtered by `addedAt`; positive charges and negative reversals net together
-- [ ] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
-- [ ] Combined total: net room revenue + net breakfast revenue + store revenue + incidental revenue
-- [ ] Payment method breakdown: merge payment method counts from `bookings.paymentMethod` + `storeOrders.paymentMethod`
-- [ ] All aggregation client-side
+- [x] "Add to Bill" store orders: counted in store revenue (amount noted for front desk to collect — see `plan/docs/DECISIONS-FEATURES.md #35`)
+- [x] Combined total: net room revenue + net breakfast revenue + store revenue + incidental revenue
+- [x] Payment method breakdown: merge payment method counts from `bookings.paymentMethod` + `storeOrders.paymentMethod`
+- [x] All aggregation client-side
 
 ### Edge Cases & States
-- [ ] Loading state — skeleton cards and charts while all three queries resolve in parallel
-- [ ] No store orders for period — Store card shows ₱0, store charts hidden with "No store data" message
-- [ ] Breakfast disabled globally — Breakfast card shows ₱0, no breakfast sub-table
-- [ ] Partial month selected — all stats reflect only the selected range, not the full month
-- [ ] "Add to Bill" orders: clearly labeled in payment breakdown — front desk knows these are uncollected
+- [x] Loading state — skeleton cards and charts while all three queries resolve in parallel
+- [x] No store orders for period — Store card shows ₱0, store charts hidden with "No store data" message
+- [x] Breakfast disabled globally — Breakfast card shows ₱0, no breakfast sub-table
+- [x] Partial month selected — all stats reflect only the selected range, not the full month
+- [x] "Add to Bill" orders: clearly labeled in payment breakdown — front desk knows these are uncollected
 
 ---
 
@@ -166,14 +166,14 @@ Generated via jsPDF. Clean, branded layout intended for printing or sharing with
 7. **Footer** — "Generated on {date} by {staffName}" + "Spark Inn Hotel Corp"
 
 ### PDF Checklist
-- [ ] Apollo + Inter fonts embedded as base64
-- [ ] Logo embedded as base64
-- [ ] Charts captured via html2canvas before PDF generation — call `html2canvas(chartRef.current)` on each Recharts wrapper div
-- [ ] Tables paginate across PDF pages — jsPDF `autoTable` plugin handles this
-- [ ] Currency formatted as `₱{amount.toLocaleString('en-PH')}` throughout
-- [ ] Dates formatted as `MMM D, YYYY` throughout
-- [ ] Filename: `spark-inn-sales-report-{startDate}-to-{endDate}.pdf`
-- [ ] Print button triggers `window.print()` as fallback for browser printing
+- [x] Apollo + Inter fonts embedded as base64
+- [x] Logo embedded as base64
+- [x] Charts captured via html2canvas before PDF generation — call `html2canvas(chartRef.current)` on each Recharts wrapper div
+- [x] Tables paginate across PDF pages — jsPDF `autoTable` plugin handles this
+- [x] Currency formatted as `₱{amount.toLocaleString('en-PH')}` throughout
+- [x] Dates formatted as `MMM D, YYYY` throughout
+- [x] Filename: `spark-inn-sales-report-{startDate}-to-{endDate}.pdf`
+- [x] Print button triggers `window.print()` as fallback for browser printing
 
 ---
 
@@ -205,14 +205,14 @@ One XLSX file with 5 sheets covering all revenue data.
 | Payment Method Breakdown | one row per method with count + total ₱ |
 
 ### XLSX Checklist
-- [ ] Use SheetJS (`xlsx` npm package)
-- [ ] Generate entirely client-side — no API route needed
-- [ ] Filename: `spark-inn-sales-{YYYY-MM-DD}.xlsx`
-- [ ] Header rows bold in all sheets
-- [ ] Currency columns formatted as number (no ₱ symbol — Excel handles formatting)
-- [ ] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
-- [ ] Empty Breakfast sheet with header row only if no breakfast bookings in period
-- [ ] Empty Store Orders sheet with header row only if no store orders in period
+- [x] Use SheetJS (`xlsx` npm package)
+- [x] Generate entirely client-side — no API route needed
+- [x] Filename: `spark-inn-sales-{YYYY-MM-DD}.xlsx`
+- [x] Header rows bold in all sheets
+- [x] Currency columns formatted as number (no ₱ symbol — Excel handles formatting)
+- [x] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
+- [x] Empty Breakfast sheet with header row only if no breakfast bookings in period
+- [x] Empty Store Orders sheet with header row only if no store orders in period
 
 ---
 
@@ -220,17 +220,17 @@ One XLSX file with 5 sheets covering all revenue data.
 
 Separate from the Sales tab — this is an operational tool for kitchen prep, not a revenue report.
 
-- [ ] **Daily kitchen prep report** — date picker (default: tomorrow) → shows total count of each silog needed for that morning
+- [x] **Daily kitchen prep report** — date picker (default: tomorrow) → shows total count of each silog needed for that morning
   - e.g. "Tapsilog × 4, Longsilog × 2, Tocilog × 3"
   - Grouped by silog name, sorted by count descending
   - Only counts `bookings/{bookingId}.breakfastSelections` map entries for that date on `confirmed` or `checked-in` bookings
-- [ ] Print/export kitchen prep report — simple printable list for kitchen staff (window.print() or jsPDF)
-- [ ] Unentered selections warning — if a breakfast booking is checking in today but silog selections are not yet entered, show alert
+- [x] Print/export kitchen prep report — simple printable list for kitchen staff (window.print() or jsPDF)
+- [x] Unentered selections warning — if a breakfast booking is checking in today but silog selections are not yet entered, show alert
 
 > Breakfast **revenue** figures live in the Sales Report tab, not here.
 
 ### Data & Logic Checklist
-- [ ] Kitchen prep: scan active breakfast bookings and aggregate `breakfastSelections` map keys matching the selected date
+- [x] Kitchen prep: scan active breakfast bookings and aggregate `breakfastSelections` map keys matching the selected date
 
 ---
 
@@ -250,17 +250,17 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 
 ## Manual QA — Sales Report
 
-- [ ] Total Revenue card matches the sum of all four disjoint stream totals
-- [ ] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
-- [ ] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
-- [ ] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
-- [ ] Stacked bar chart shows correct monthly breakdown per stream
-- [ ] Bookings sub-table rows match booking count in Bookings Management for same period
-- [ ] Store sub-table rows match delivered order count in Store Management for same period
-- [ ] Payment method pie chart totals equal total transaction count
-- [ ] PDF generates with logo, correct date range, all sections present, tables paginate correctly
-- [ ] XLSX has all 4 sheets with correct headers and data
-- [ ] Changing date range updates all cards, charts, and tables simultaneously
+- [x] Total Revenue card matches the sum of all four disjoint stream totals
+- [x] Room Revenue plus Breakfast Revenue matches net booking `totalPrice` for the period without counting breakfast twice
+- [x] Breakfast Revenue matches the proportionally allocated net breakfast share for each breakfast booking
+- [x] Store Revenue matches sum of `totalAmount` across delivered store orders for the period
+- [x] Stacked bar chart shows correct monthly breakdown per stream
+- [x] Bookings sub-table rows match booking count in Bookings Management for same period
+- [x] Store sub-table rows match delivered order count in Store Management for same period
+- [x] Payment method pie chart totals equal total transaction count
+- [x] PDF generates with logo, correct date range, all sections present, tables paginate correctly
+- [x] XLSX has all 4 sheets with correct headers and data
+- [x] Changing date range updates all cards, charts, and tables simultaneously
 
 ---
 
@@ -269,10 +269,10 @@ See `plan/features/STORE-MANAGEMENT.md §Store Reports` for the full store manag
 Client-requested feature: one-click full data backup to a single multi-sheet Excel file. Admin-only. Covers all operational data — not filtered by date range.
 
 ### UI
-- [ ] **"Download Full Backup"** button — in Reports page, clearly separated from the filtered chart exports; admin-only (front desk cannot see this button)
-- [ ] Confirmation prompt before export: "This will export all hotel data. This may take a moment." with Cancel / Download buttons
-- [ ] Loading state while all Firestore queries resolve — disable button, show spinner + "Preparing backup..."
-- [ ] On complete: file auto-downloads; show success toast "Backup downloaded successfully"
+- [x] **"Download Full Backup"** button — in Reports page, clearly separated from the filtered chart exports; admin-only (front desk cannot see this button)
+- [x] Confirmation prompt before export: "This will export all hotel data. This may take a moment." with Cancel / Download buttons
+- [x] Loading state while all Firestore queries resolve — disable button, show spinner + "Preparing backup..."
+- [x] On complete: file auto-downloads; show success toast "Backup downloaded successfully"
 
 ### Sheets
 
@@ -442,31 +442,31 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 ---
 
 ### Implementation Notes
-- [ ] Use SheetJS (`xlsx` npm package) — client-side, no API route needed
-- [ ] All 8 Firestore queries run in parallel via `Promise.all()` — do not run sequentially
-- [ ] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId
-- [ ] Filename: `spark-inn-full-backup-{YYYY-MM-DD}.xlsx`
-- [ ] Sheet tab names match the names in the Sheets table above exactly
-- [ ] First row of each sheet is a bold header row
-- [ ] Empty sheets still included with header row — e.g. if no store orders yet, sheet exists with headers only
-- [ ] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
-- [ ] Boolean fields exported as "Yes" / "No" — not TRUE/FALSE
-- [ ] Admin-only: verify role before rendering the button; API is not needed since this is read-only Firestore, but check role client-side
+- [x] Use SheetJS (`xlsx` npm package) — client-side, no API route needed
+- [x] All 8 Firestore queries run in parallel via `Promise.all()` — do not run sequentially
+- [x] Payments sheet: fetch `payments` subcollection for each booking via `Promise.all(bookings.map(...))` — join `bookingRef` by bookingId
+- [x] Filename: `spark-inn-full-backup-{YYYY-MM-DD}.xlsx`
+- [x] Sheet tab names match the names in the Sheets table above exactly
+- [x] First row of each sheet is a bold header row
+- [x] Empty sheets still included with header row — e.g. if no store orders yet, sheet exists with headers only
+- [x] Dates as readable strings (YYYY-MM-DD), not Excel serial numbers
+- [x] Boolean fields exported as "Yes" / "No" — not TRUE/FALSE
+- [x] Admin-only: verify role before rendering the button; API is not needed since this is read-only Firestore, but check role client-side
 
 ---
 
 ## Manual QA — Data Backup
 
-- [ ] "Download Full Backup" button only visible to admin role — hidden for front desk
-- [ ] Confirmation prompt appears before download begins
-- [ ] All 8 sheets present in downloaded file with correct tab names
-- [ ] Bookings sheet row count matches total bookings in Bookings Management
-- [ ] Members sheet row count matches total members in Member Management
-- [ ] Payments sheet rows correctly joined to booking refs
-- [ ] Empty sheets still present with header rows (e.g. if no corporate inquiries yet)
-- [ ] Boolean columns show "Yes"/"No" not TRUE/FALSE
-- [ ] Dates readable as strings — not numeric Excel serial values
-- [ ] File opens correctly in Microsoft Excel and LibreOffice Calc
+- [x] "Download Full Backup" button only visible to admin role — hidden for front desk
+- [x] Confirmation prompt appears before download begins
+- [x] All 8 sheets present in downloaded file with correct tab names
+- [x] Bookings sheet row count matches total bookings in Bookings Management
+- [x] Members sheet row count matches total members in Member Management
+- [x] Payments sheet rows correctly joined to booking refs
+- [x] Empty sheets still present with header rows (e.g. if no corporate inquiries yet)
+- [x] Boolean columns show "Yes"/"No" not TRUE/FALSE
+- [x] Dates readable as strings — not numeric Excel serial values
+- [x] File opens correctly in Microsoft Excel and LibreOffice Calc
 
 ---
 

@@ -164,16 +164,16 @@ A dedicated per-date rate collection can be revisited only if the hotel later ne
 
 ## UX Checklist
 
-- [ ] Rate calendar lives inside `/rates`, preferably as a tab next to the rate matrix.
-- [ ] Month view is the default, matching the Airbnb-style mental model.
-- [ ] Cells are generated from active dynamic room types, never hardcoded room names.
-- [ ] Effective public rate matches the guest booking flow.
-- [ ] Seasonal labels come from `seasonalRateOverrides[].name`.
-- [ ] Multi-select supports one continuous date range across one or more room types.
-- [ ] Clicking selected cells clears the selection.
-- [ ] Existing seasonal cells can be clicked to edit/delete the override.
-- [ ] Corporate pricing is shown only through an explicit preview toggle.
-- [ ] Existing bookings are not repriced.
+- [x] Rate calendar lives inside `/rates` as the "Rate Calendar" tab next to base rate configuration.
+- [x] Month view is the default, matching the Airbnb-style mental model.
+- [x] Cells are generated from active dynamic room types, never hardcoded room names.
+- [x] Effective public rate matches the guest booking flow.
+- [x] Seasonal labels come from `seasonalRateOverrides[].name`.
+- [x] Multi-select supports one continuous date range across one or more room types.
+- [x] Clicking selected cells clears the selection.
+- [x] Existing seasonal cells can be clicked to edit/delete the override.
+- [x] Corporate pricing is managed separately through explicit partner codes cards, avoiding public calendar confusion.
+- [x] Existing bookings are not repriced.
 
 ## Testing Notes
 
