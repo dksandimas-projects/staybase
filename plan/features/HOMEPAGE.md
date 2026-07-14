@@ -108,17 +108,17 @@ The trade-off vs a per-photo JPEG LQIP is that the placeholder is a generic colo
 
 ## Manual QA
 
-- [ ] Hero answers "why stay here?" emotionally before reading any text
-- [ ] Availability checker is visible without scrolling on desktop and mobile
-- [ ] All 3 featured room cards render correctly with images
-- [ ] Amenities grid matches content set in Settings
-- [ ] Services section shows Tour Packages + Car Rentals cards with correct CTAs linking to `/contact`
-- [ ] Spark Rewards section shows "Join" CTA when logged out
-- [ ] Spark Rewards section shows "Welcome back" when logged in as a member
-- [ ] Map embed shows correct hotel location (J. Borja St, Tagbilaran City, Bohol)
-- [ ] Navbar goes transparent on hero, solid on scroll
-- [ ] Footer displays correct version string
-- [ ] Full page loads in under 3s on simulated 4G mobile
+- [x] Hero answers "why stay here?" emotionally before reading any text
+- [x] Availability checker is visible without scrolling on desktop and mobile
+- [x] All 3 featured room cards render correctly with images
+- [x] Amenities grid matches content set in Settings
+- [x] Services section shows Tour Packages + Car Rentals cards with correct CTAs linking to `/contact`
+- [x] Spark Rewards section shows "Join" CTA when logged out
+- [x] Spark Rewards section shows "Welcome back" when logged in as a member
+- [x] Map embed shows correct hotel location (J. Borja St, Tagbilaran City, Bohol)
+- [x] Navbar goes transparent on hero, solid on scroll
+- [x] Footer displays correct version string
+- [x] Full page loads in under 3s on simulated 4G mobile
 
 ## References
 
