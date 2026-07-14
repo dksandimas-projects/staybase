@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { assertRevenueFinanceInvariant } from "@spark-inn/shared";
 import { normalizePaymentMethodBucket, dateKeyInTimeZone, PAYMENT_BUCKETS, splitBookingRevenue } from "../utils/finance";
 
 const reports = readFileSync(resolve(__dirname, "../pages/ReportsPage.tsx"), "utf8");
@@ -65,6 +66,31 @@ describe("splitBookingRevenue", () => {
 
     expect(split).toEqual({ room: 5_000, breakfast: 1_000 });
     expect(split.room + split.breakfast).toBe(6_000);
+  });
+
+  it("reconciles all revenue categories while keeping ledger streams disjoint", () => {
+    const bookingRevenue = splitBookingRevenue({
+      totalPrice: 6_000,
+      ratePerNight: 2_500,
+      numNights: 2,
+      numGuests: 2,
+      hasBreakfast: true,
+      breakfastRate: 250,
+      rateBreakdown: { roomSubtotal: 5_000 }
+    });
+
+    assertRevenueFinanceInvariant({
+      roomRevenue: bookingRevenue.room,
+      breakfastRevenue: bookingRevenue.breakfast,
+      storeRevenue: 1_500,
+      incidentalRevenue: 500,
+      totalRevenue: 8_000,
+      streamEntryIds: {
+        revenue: ["booking:b1", "store:s1", "charge:c1"],
+        tenders: ["booking:b1/payment:p1", "store:s1/payment:delivery-tender"],
+        receivables: ["booking:b2/receivable"]
+      }
+    });
   });
 
   it("allocates discounts proportionally between room and breakfast", () => {

@@ -738,7 +738,7 @@ queries (selected period plus a buffer for the all-time Receivables tab,
 which can fall back to one-shot `getDocs`). Add the trigger condition to
 the roadmap so it isn't rediscovered by a slow Reports page.
 
-### FLR-04 — Shared finance invariant assertions in tests · `Open`
+### FLR-04 — Shared finance invariant assertions in tests · `Fixed 2026-07-14`
 
 **Why:** every SEV-1/SEV-2 in this audit was the same failure shape — two
 representations of the same money drifting (`totalPrice` vs
@@ -753,6 +753,20 @@ amounts finite, streams disjoint (room/breakfast/store/incidentals sum to
 Total Revenue on report fixtures). Call it from every handler test that
 writes pricing, so the next drift fails loudly regardless of which path
 introduced it.
+
+**Remediation:** `shared/utils/financeInvariants.ts` now exports
+`assertBookingFinanceInvariant` and `assertRevenueFinanceInvariant`. The
+booking assertion requires a canonical breakdown, verifies every monetary
+component is finite, reconciles room lines to `roomSubtotal`, reconciles
+add-ons/deductions to `finalTotal`, and compares `finalTotal` with
+`totalPrice` to cent precision. The report assertion reconciles the four
+revenue categories to Total Revenue and rejects any ledger entry ID appearing
+in more than one revenue/tender/receivable stream. Failure-case unit tests pin
+non-finite values, line drift, breakdown drift, booking-total drift, Total
+Revenue drift, and cross-stream double counting. Behavioral handler tests now
+apply the booking assertion to online, voucher, member, and walk-in creation;
+discount rejection; points redemption/undo; rate-breakdown rebuilds; and early
+checkout. The Reports finance fixture applies the revenue/stream assertion.
 
 ### FLR-05 — Operational handover items (owner-facing) · `Open`
 

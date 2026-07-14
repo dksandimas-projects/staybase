@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { assertBookingFinanceInvariant } from "@spark-inn/shared";
 import { rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../../server/lib/rate-breakdown";
 
 const lockedBreakdown = {
@@ -42,6 +43,7 @@ describe("rebuildRateBreakdown", () => {
       ],
       finalTotal: 3_550
     });
+    assertBookingFinanceInvariant({ totalPrice: 3_550, rateBreakdown: rebuilt });
   });
 
   test("removes only the points line when redemption is undone", () => {
@@ -68,6 +70,7 @@ describe("rebuildRateBreakdown", () => {
       { label: "Spark Rewards member discount (10%)", amount: 450 }
     ]);
     expect(rebuilt?.finalTotal).toBe(4_050);
+    assertBookingFinanceInvariant({ totalPrice: 4_050, rateBreakdown: rebuilt });
   });
 
   test("leaves legacy bookings on their documented fallback path", () => {
@@ -107,6 +110,7 @@ describe("rebuildEarlyCheckoutRateBreakdown", () => {
       - rebuilt.deductions.reduce((sum, line) => sum + line.amount, 0);
     expect(visibleTotal).toBe(rebuilt.finalTotal);
     expect(rebuilt.finalTotal).toBe(4_050);
+    assertBookingFinanceInvariant({ totalPrice: 4_050, rateBreakdown: rebuilt });
   });
 
   test("creates a transparent breakdown for legacy bookings", () => {
@@ -123,5 +127,6 @@ describe("rebuildEarlyCheckoutRateBreakdown", () => {
       amount: 4_000
     });
     expect(rebuilt.finalTotal).toBe(6_000);
+    assertBookingFinanceInvariant({ totalPrice: 6_000, rateBreakdown: rebuilt });
   });
 });
