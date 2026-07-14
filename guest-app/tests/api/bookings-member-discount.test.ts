@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { assertBookingFinanceInvariant } from "@spark-inn/shared";
 import handler from "../../server/apiRouter";
 
 // Per W2.2 / decision #90: the server is authoritative on the
@@ -316,6 +317,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     expect(bookingWrite.data.memberId).toBe("member_uid_1");
     expect(bookingWrite.data.memberDiscountPct).toBe(10);
     expect(bookingWrite.data.totalPrice).toBe(3600);
+    assertBookingFinanceInvariant(bookingWrite.data);
   });
 
   test("anonymous booking (no Authorization header) succeeds with no member discount", async () => {
@@ -349,6 +351,7 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     expect(bookingWrite.data.memberId).toBeNull();
     expect(bookingWrite.data.memberDiscountPct).toBe(0);
     expect(bookingWrite.data.totalPrice).toBe(4000);
+    assertBookingFinanceInvariant(bookingWrite.data);
   });
 
   test("invalid/expired ID token falls through to anonymous booking", async () => {
@@ -380,5 +383,6 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const bookingWrite = setCalls.find((c) => c.path === "bookings/bookingBf01E");
     expect(bookingWrite.data.memberId).toBeNull();
     expect(bookingWrite.data.totalPrice).toBe(4000);
+    assertBookingFinanceInvariant(bookingWrite.data);
   });
 });

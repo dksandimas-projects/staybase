@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 14, 2026 (Finance Lifecycle polish batch completed on `fix/finance-lifecycle-polish`: consistent pre-discount totals, rules-enforced charge safeguards, idempotent onsite payments, and correct receipt discount attribution. All 20 findings are fixed.)
+> Last updated: July 14, 2026 (Finance Lifecycle Recommendations FLR-01/FLR-02/FLR-04 closed. FLR-05 handover is prepared: the pre-FL-05 Daily Close convention is documented and accountant/owner staging sign-off checklists are ready, but the external confirmations remain pending. FLR-03 remains deliberately deferred. Earlier: all 20 Finance Lifecycle findings were fixed.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1153,6 +1153,22 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **FL-19 — `add-payment` lacks idempotency key** — client preallocates the payment document ID; the transaction creates it exactly once and safely replays matching retries.
 - ✅ **FL-20 — Receipt fallback folds member discount into Senior/PWD line** — government and member deductions are calculated and displayed separately.
 
+### Finance Lifecycle Recommendations — post-remediation follow-ups (2026-07-14)
+
+> Source: `plan/project/AUDIT-FINANCE-LIFECYCLE-2026-07-12.md
+> §Post-remediation recommendations` — added after all 20 FL findings were
+> verified fixed (8 batches merged, 1,096 tests green). The FL fixes are
+> forward-only and two structural risks sit outside the FL scope; these
+> five items close the remainder. `FLR-01`/`FLR-02` are the actionable
+> ones; `FLR-03` is a deliberate deferral with an explicit trigger;
+> `FLR-05` is owner-facing handover work, not code.
+
+- ✅ **FLR-01 — Historical finance data repair (one-off integrity scan)** — fixed 2026-07-14. `scripts/finance-integrity-scan.ts` provides review-first CSV output, guarded transactionally revalidated apply mode, append-only ledger repair, and Admin-only repair audit records. The owner-approved run appended the single missing pre-FL-05 ₱1,500 `delivery-tender`; a fresh read-only scan of 6 bookings + 1 store order returned zero findings.
+- ✅ **FLR-02 — `bookings` update rule field allowlist** — fixed 2026-07-14. Firestore now allows only the enumerated low-risk operational fields; `status`, all pricing/rate fields, and rewards fields are excluded. Uploaded-payment verification moved to authenticated transactional `/api/bookings/mark-payment-confirmed`, and server-returned finance payloads are no longer persisted back through the client.
+- ⏸ **FLR-03 — Bound the Reports ledger listeners** *(deferred with trigger)* — `collectionGroup("payments"/"charges")` listeners load the entire ledger history live on every Reports visit; fine at 14 rooms, linear growth forever on Blaze. **Trigger: revisit when the combined ledger passes a few thousand rows (~1 year of operation)** — switch to `recordedAt`-bounded queries; all-time Receivables can fall back to one-shot `getDocs`.
+- ✅ **FLR-04 — Shared finance invariant assertions in tests** — fixed 2026-07-14. `assertBookingFinanceInvariant` rejects non-finite values and reconciles room lines → room subtotal → add-ons/deductions → `finalTotal` → `totalPrice`; `assertRevenueFinanceInvariant` reconciles all four report revenue categories and rejects ledger IDs shared across revenue/tender/receivable streams. Behavioral pricing-writer and Reports fixture tests now call the shared assertions, with dedicated failure-case coverage for every drift class.
+- 🔄 **FLR-05 — Operational handover items** *(owner-facing, no code)* — handover prepared in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. The historical Daily Close convention is documented without editing locked closes, and the accountant VAT review plus isolated-staging money-path walkthrough now have explicit checklists/evidence records. **Remaining:** accountant confirmation and owner walkthrough/sign-off before the next `dev → main` milestone merge.
+
 ### Contract Compliance — Schedule A review (2026-07-11)
 
 > Source: review of the signed Software Development Agreement + Schedule A
@@ -1218,9 +1234,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Finance Lifecycle Audit (July 12) | 20 | 20 | 0 (all FL-01..FL-20 findings fixed — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
+| Finance Lifecycle Recommendations (July 14) | 5 | 3 | 2 (FLR-01/FLR-02/FLR-04 fixed; FLR-03 deferred, FLR-05 open) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **383** | **359** | **~124** |
+| **Total** | **388** | **362** | **~126** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { assertBookingFinanceInvariant } from "@spark-inn/shared";
 
 const {
   mockBookingDoc,
@@ -144,6 +145,8 @@ describe("/api/members/redeem-points", () => {
     expect(mockUpdate).toHaveBeenCalledWith({ path: "members/member_1" }, expect.objectContaining({
       rewardsPoints: 500
     }));
+    const bookingUpdate = mockUpdate.mock.calls.find(([ref]) => ref.path === "bookings/booking_1")?.[1];
+    assertBookingFinanceInvariant(bookingUpdate);
     expect(mockSet).toHaveBeenCalledWith({ path: "members/member_1/pointsHistory/history_1" }, expect.objectContaining({
       type: "redeem",
       points: -500,
@@ -233,6 +236,8 @@ describe("/api/members/redeem-points", () => {
     expect(mockUpdate).toHaveBeenCalledWith({ path: "members/member_1" }, expect.objectContaining({
       rewardsPoints: 1000
     }));
+    const bookingUpdate = mockUpdate.mock.calls.find(([ref]) => ref.path === "bookings/booking_1")?.[1];
+    assertBookingFinanceInvariant(bookingUpdate);
     expect(mockSet).toHaveBeenCalledWith({ path: "members/member_1/pointsHistory/history_1" }, expect.objectContaining({
       type: "manual",
       points: 500,

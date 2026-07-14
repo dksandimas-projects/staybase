@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { getManilaDateInfo } from "@spark-inn/shared";
+import { assertBookingFinanceInvariant, getManilaDateInfo } from "@spark-inn/shared";
 
 const { mockBookings, mockRooms, mockSettings, mockMembers, mockPayments, mockCharges, mockStoreOrders, mockPointsHistory, mockWrites, sendBookingTrigger } = vi.hoisted(() => {
   const mockWrites: Array<{ type: string; path: string; data: any }> = [];
@@ -456,5 +456,6 @@ describe("/api/bookings/checkout", () => {
       label: "Early departure — original total retained"
     }));
     expect(mockBookings["booking_1"].rateBreakdown.finalTotal).toBe(17500);
+    assertBookingFinanceInvariant(mockBookings["booking_1"]);
   });
 });

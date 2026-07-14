@@ -98,12 +98,12 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
 ### `bookings`
 - Read: staff/admin only in Firestore client rules; guest lookup is server-side by booking ref + email
 - Create: denied in Firestore client rules; all booking document creation is server-side via API route transaction
-- Update: staff/admin only for operational updates from the authenticated admin app
+- Update: staff/admin only for the explicit operational field allowlist enforced with `diff().affectedKeys().hasOnly(...)`; status, pricing, rewards, and other finance fields are excluded
 - Delete: admin only
 - **Critical:** Direct client booking creation is NOT allowed. Public/corporate booking creation uses `/api/bookings/create`; staff walk-in/manual creation uses `/api/bookings/create-walkin`. Both routes use Admin SDK transactions and bypass Firestore client rules.
 - **Guest-side availability UX query (per W4.7):** Firestore rules deny guest reads on `bookings`, so the booking page cannot subscribe to active bookings directly. The public endpoint `GET /api/rooms/availability?checkIn=...&checkOut=...` returns a PII-stripped list of overlapping active booked date ranges (`{ roomId, checkIn, checkOut, status }` only — no guest name, email, phone, or payment fields). Rate-limited to 30/IP/min. The actual double-booking prevention is the Firestore transaction in `/api/bookings/create`; this endpoint is a UX optimization only. **Never weaken Firestore rules to allow guest reads on `bookings` — the endpoint is the only sanctioned path.**
-- **Staff operational updates:** Authenticated staff/admin may update existing booking documents directly from the admin app for low-risk operational fields such as status progression, check-in/check-out registry fields, guest ID URL, breakfast selections, notes, `discountVerified`, and `handledBy`.
-- **Server-only booking mutations:** Use API routes for operations that require transactions, guest identity checks, audit records, or emails: booking creation, cancellation, discount rejection, onsite payment recording, points redemption/undo, and any future operation that changes totals or member balances.
+- **Staff operational updates:** Authenticated staff/admin may directly update only `guestIdPhotoUrl`, `guestRegistration`, `breakfastSelections`, `breakfastServed`, `paymentReferenceNumber`, `discountVerified`, `discountVerifiedBy`, `discountRejected`, `notes`, `specialRequests`, `handledBy`, and `updatedAt`.
+- **Server-only booking mutations:** Use API routes for every status transition and for operations that require transactions, guest identity checks, audit records, emails, pricing changes, or member-balance changes. Payment-proof verification uses `/api/bookings/mark-payment-confirmed`; direct client writes cannot change `status`, `totalPrice`, rate breakdowns, or rewards fields.
 - **Incidental charge invariants:** Staff-created `bookings/{id}/charges` entries are append-only, capped at an absolute 1,000,000, and negative reversals must use the deterministic document ID `void-{voidOf}`. This enforces at most one reversal for each original charge.
 
 ### `guests`
