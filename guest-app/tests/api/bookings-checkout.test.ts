@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { getManilaDateInfo } from "@spark-inn/shared";
 
 const { mockBookings, mockRooms, mockSettings, mockMembers, mockPayments, mockCharges, mockStoreOrders, mockPointsHistory, mockWrites, sendBookingTrigger } = vi.hoisted(() => {
   const mockWrites: Array<{ type: string; path: string; data: any }> = [];
@@ -420,23 +421,31 @@ describe("/api/bookings/checkout", () => {
   });
 
   test("rebuilds an early-checkout breakdown with an explicit retained-total line", async () => {
+    const { todayStr } = getManilaDateInfo();
+    const shiftDate = (days: number) => {
+      const date = new Date(`${todayStr}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + days);
+      return date.toISOString().slice(0, 10);
+    };
+    const checkIn = shiftDate(-2);
+    const checkOut = shiftDate(5);
     mockBookings["booking_1"] = {
       bookingRef: "SI-20260710-001",
       status: "checked-in",
-      totalPrice: 7500,
+      totalPrice: 17500,
       ratePerNight: 2500,
-      numNights: 3,
-      checkIn: new Date("2026-07-11T00:00:00Z"),
-      checkOut: new Date("2026-07-20T00:00:00Z"),
+      numNights: 7,
+      checkIn: new Date(`${checkIn}T00:00:00Z`),
+      checkOut: new Date(`${checkOut}T00:00:00Z`),
       roomId: "room_101",
       memberId: null,
       rateBreakdown: {
-        roomSubtotal: 7500,
-        roomLines: [{ source: "regular", label: "Regular rate", startDate: "2026-07-11", endDate: "2026-07-14", nights: 3, nightlyRate: 2500, subtotal: 7500 }],
-        addOns: [], deductions: [], finalTotal: 7500
+        roomSubtotal: 17500,
+        roomLines: [{ source: "regular", label: "Regular rate", startDate: checkIn, endDate: checkOut, nights: 7, nightlyRate: 2500, subtotal: 17500 }],
+        addOns: [], deductions: [], finalTotal: 17500
       }
     };
-    mockPayments.push({ amount: 7500 });
+    mockPayments.push({ amount: 17500 });
     mockRooms["room_101"] = { status: "occupied" };
 
     const res = mockResponse();
@@ -446,6 +455,6 @@ describe("/api/bookings/checkout", () => {
     expect(mockBookings["booking_1"].rateBreakdown.addOns).toContainEqual(expect.objectContaining({
       label: "Early departure — original total retained"
     }));
-    expect(mockBookings["booking_1"].rateBreakdown.finalTotal).toBe(7500);
+    expect(mockBookings["booking_1"].rateBreakdown.finalTotal).toBe(17500);
   });
 });

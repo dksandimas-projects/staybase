@@ -189531,6 +189531,7 @@ function getConfiguredBookingRefPrefix() {
 var ROOM_OCCUPYING_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest has not checked out yet.";
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
+var PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 function sumLedgerAmounts(snapshot) {
   return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
@@ -190004,7 +190005,7 @@ async function handleCreateBooking(req, res) {
       const afterVoucher = afterSeniorPwd - voucherDiscount;
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
@@ -190424,7 +190425,7 @@ async function handleCreateWalkin(req, res) {
         ratePerNight: typeBaseRate,
         totalPrice: finalTotalPrice,
         rateBreakdown,
-        originalTotalPrice: discountType || voucherCode ? pricingSubtotal : subtotal,
+        originalTotalPrice: pricingSubtotal,
         // Per H2 (hardening batch 2026-06-26): see the
         // matching field in `handleCreateBooking`. The
         // walkin flow writes a token too so the email
@@ -190798,9 +190799,12 @@ async function handleCancelBooking(req, res) {
   }
 }
 async function handleAddPayment(req, res) {
-  const { bookingId, amount, method, note } = req.body || {};
-  if (!bookingId || amount === void 0 || !method) {
-    return res.status(400).json({ success: false, error: "Booking ID, amount, and payment method are required." });
+  const { bookingId, paymentId, amount, method, note } = req.body || {};
+  if (!bookingId || !paymentId || amount === void 0 || !method) {
+    return res.status(400).json({ success: false, error: "Booking ID, payment ID, amount, and payment method are required." });
+  }
+  if (!PREALLOCATED_PAYMENT_ID_REGEX.test(String(paymentId))) {
+    return res.status(400).json({ success: false, error: "Invalid payment ID format." });
   }
   const numericAmount = Number(amount);
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
@@ -190830,6 +190834,7 @@ async function handleAddPayment(req, res) {
   let staffPaymentMarkerMissing = true;
   let bookingDataSnapshot = null;
   let loyaltyPointsAwarded = 0;
+  let idempotentReplay = false;
   try {
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -190846,6 +190851,18 @@ async function handleAddPayment(req, res) {
         const data = docSnap.data();
         return sum + Number(data.amount || 0);
       }, 0);
+      const existingPayment = paymentsSnapshot.docs.find((docSnap) => docSnap.id === paymentId);
+      if (existingPayment) {
+        const existingData = existingPayment.data();
+        const sameRequest = Number(existingData.amount) === numericAmount && String(existingData.method) === String(method) && String(existingData.note || "") === safeNote;
+        if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
+        idempotentReplay = true;
+        totalPaid = existingPaid;
+        totalPrice = Number(bookingData.totalPrice || 0);
+        fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
+        staffPaymentMarkerMissing = false;
+        return;
+      }
       totalPaid = existingPaid + numericAmount;
       totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
@@ -190901,12 +190918,15 @@ async function handleAddPayment(req, res) {
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
       }
-      const newPaymentRef = paymentsRef.doc();
-      transaction.set(newPaymentRef, paymentRecord);
+      const newPaymentRef = paymentsRef.doc(paymentId);
+      transaction.create(newPaymentRef, paymentRecord);
     });
   } catch (error) {
     if (error.message === "Booking not found") {
       return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error.message === "Payment ID has already been used for a different payment.") {
+      return res.status(409).json({ success: false, error: error.message });
     }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -190930,7 +190950,8 @@ async function handleAddPayment(req, res) {
       ...paymentRecord,
       totalPaid,
       status: bookingDataSnapshot?.status || null,
-      loyaltyPointsAwarded
+      loyaltyPointsAwarded,
+      idempotentReplay
     }
   });
 }
@@ -191541,7 +191562,7 @@ async function handleRescheduleBooking(req, res) {
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
       const finalTotalPrice = Math.max(totalPrice - (booking.pointsRedeemedValue || 0), 0);
-      const originalTotalPrice = discountPct > 0 ? subtotal : null;
+      const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,

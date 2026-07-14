@@ -11,10 +11,15 @@ describe("FIN-14 incidental charge ledger", () => {
     expect(rules).toMatch(/match \/charges\/\{chargeId\}[\s\S]+?allow read: if isStaff\(\);[\s\S]+?allow create: if isStaff\(\)[\s\S]+?allow update, delete: if false;/);
     expect(rules).toMatch(/request\.resource\.data\.addedAt == request\.time/);
     expect(rules).toMatch(/\.data\.amount == -request\.resource\.data\.amount/);
+    expect(rules).toMatch(/chargeId == "void-" \+ request\.resource\.data\.voidOf/);
+    expect(rules).toMatch(/request\.resource\.data\.amount <= 1000000/);
+    expect(rules).toMatch(/request\.resource\.data\.amount >= -1000000/);
     expect(bookings).toMatch(/amount: -Math\.abs\(chargeToVoid\.amount\)/);
     expect(bookings).toMatch(/voidOf: chargeToVoid\.id/);
     expect(bookings).toMatch(/`void-\$\{chargeToVoid\.id\}`/);
     expect(bookings).not.toMatch(/deleteDoc\([\s\S]*charges/);
+    expect(bookings).toMatch(/amount > 1_000_000/);
+    expect(bookings).toMatch(/max="1000000"/);
   });
 
   it("includes net charges in folio, checkout, and receipt math", () => {

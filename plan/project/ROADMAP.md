@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 13, 2026 (Finance Lifecycle checkout-policy batch shipped on `fix/finance-lifecycle-checkout-policy`: FL-10 transparent retained-total early departure and FL-11 settled-folio loyalty awards with unpaid-checkout audit stamps. 15 of 20 findings fixed; all SEV-1 through SEV-3 are closed and only FL-16..FL-20 polish remains.)
+> Last updated: July 14, 2026 (Finance Lifecycle polish batch completed on `fix/finance-lifecycle-polish`: consistent pre-discount totals, rules-enforced charge safeguards, idempotent onsite payments, and correct receipt discount attribution. All 20 findings are fixed.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1123,7 +1123,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 > July-11 FIN audit (missing features), these are arithmetic and
 > state-transition defects *inside* the shipped finance plumbing. The two
 > owner-policy findings, FL-10/FL-11, are resolved in decisions #117/#118;
-> only the five SEV-4 polish items remain.
+> the final five SEV-4 polish items are now closed.
 
 **SEV-1 — wrong money numbers (fix first, small isolated diffs):**
 - ✅ **FL-01 — Total Revenue double-counts breakfast** — fixed with proportional net allocation across disjoint room/breakfast streams; current/previous/monthly figures and ADR/RevPAR now use the split, with unit coverage.
@@ -1147,11 +1147,11 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **FL-15 — Reports period boundaries browser-local** — fixed by deriving inclusive report instants, booking overlap/proration, no-show cutoffs, and export labels from `config.timezone` calendar keys.
 
 **SEV-4 (polish batch):**
-- ⬜ **FL-16 — `originalTotalPrice` conventions differ across writers** — document one convention in `TYPES.md`; root cause of FL-03.
-- ⬜ **FL-17 — Rules allow duplicate void reversals** — enforce `void-{voidOf}` doc id in `firestore.rules`.
-- ⬜ **FL-18 — Incidental charges uncapped** — mirror the ₱1M payment cap in rules + form.
-- ⬜ **FL-19 — `add-payment` lacks idempotency key** — accept pre-allocated payment doc id.
-- ⬜ **FL-20 — Receipt fallback folds member discount into Senior/PWD line** — wrong attribution on an RA 9994/10754-relevant document (`BookingsPage.tsx:1537`).
+- ✅ **FL-16 — `originalTotalPrice` conventions differ across writers** — standardized as the always-written pre-discount pricing basis; `null` is legacy-only.
+- ✅ **FL-17 — Rules allow duplicate void reversals** — rules now require the deterministic `void-{voidOf}` document ID.
+- ✅ **FL-18 — Incidental charges uncapped** — mirrored the ₱1M cap in Firestore rules and the admin form.
+- ✅ **FL-19 — `add-payment` lacks idempotency key** — client preallocates the payment document ID; the transaction creates it exactly once and safely replays matching retries.
+- ✅ **FL-20 — Receipt fallback folds member discount into Senior/PWD line** — government and member deductions are calculated and displayed separately.
 
 ### Contract Compliance — Schedule A review (2026-07-11)
 
@@ -1217,10 +1217,10 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
 | 12 — Post-Launch | 16 | 13 | 3 deferred |
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
-| Finance Lifecycle Audit (July 12) | 20 | 15 | 5 (all SEV-1 through SEV-3 closed; only FL-16..FL-20 polish remains — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
+| Finance Lifecycle Audit (July 12) | 20 | 20 | 0 (all FL-01..FL-20 findings fixed — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **383** | **354** | **~129** |
+| **Total** | **383** | **359** | **~124** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 
