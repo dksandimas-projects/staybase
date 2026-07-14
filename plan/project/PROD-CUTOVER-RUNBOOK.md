@@ -82,8 +82,7 @@ full admin over production. Staging keeps its existing (separate) key.
 - [x] Firestore + Storage enabled *(done 2026-07-14)*
 - [ ] Auth **authorized domains**: `www.sparkinnbohol.com`,
   `admin.sparkinnbohol.com`
-- [ ] Browser API key restricted to the production domains (do it from day
-  one — open roadmap item on staging, don't repeat the gap)
+- [x] Browser API key restricted to the production domains (restricted by HTTP Referrers to production + localhost, and limited to only 4 essential APIs) *(done 2026-07-14)*
 - [x] Deploy rules + indexes *(done 2026-07-14 —
   `firebase deploy --only firestore,storage --project production`;
   required granting `dksandimas.projects@gmail.com` access to
