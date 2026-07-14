@@ -65,16 +65,16 @@ Firebase Email/Password authentication for all staff. No public registration —
 
 ## Manual QA
 
-- [ ] Front desk account can log in and access dashboard
-- [ ] Front desk account cannot access Rates or Settings — sees access denied state
-- [ ] Admin account can access all pages
-- [ ] Invalid credentials show error, not console error
-- [ ] Forgot password — valid email receives reset link, success message shown
-- [ ] Forgot password — unknown email shows friendly error
-- [ ] Forgot password — back to login link works
-- [ ] Unauthenticated access to `/bookings` redirects to `/login`
-- [ ] After login, redirect goes to dashboard (not login page again)
-- [ ] Logging out clears auth state and redirects to `/login`
+- [x] Front desk account can log in and access dashboard
+- [x] Front desk account cannot access Rates or Settings — sees access denied state
+- [x] Admin account can access all pages
+- [x] Invalid credentials show error, not console error
+- [x] Forgot password — valid email receives reset link, success message shown
+- [x] Forgot password — unknown email shows friendly error
+- [x] Forgot password — back to login link works
+- [x] Unauthenticated access to `/bookings` redirects to `/login`
+- [x] After login, redirect goes to dashboard (not login page again)
+- [x] Logging out clears auth state and redirects to `/login`
 
 ## References
 
