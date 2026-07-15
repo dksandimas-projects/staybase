@@ -326,7 +326,11 @@ export function DashboardPage() {
       </div>
       {/* Operational workflow sections */}
       <div className="space-y-6">
-        <section className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <section className={`grid gap-5 ${
+          overdueCheckouts.length > 0 || newCorporateInquiries.length > 0
+            ? "xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]"
+            : ""
+        }`}>
           <div className={`rounded-card p-5 shadow-sm ring-1 ${
             pendingPayments.length > 0
               ? "border border-amber-200 bg-amber-50 ring-amber-100"
@@ -403,104 +407,108 @@ export function DashboardPage() {
             </div>
           </div>
 
-          {overdueCheckouts.length > 0 && (
-            <div className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
-                  <AlertTriangle size={18} className="text-amber-700" />
-                  overdue check-outs
-                </h2>
-                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
-                  {overdueCheckouts.length} urgent
-                </span>
-              </div>
-              <div className="space-y-2">
-                {overdueCheckouts.map((booking) => {
-                  const daysOverdue = getDaysOverdue(booking.checkOut, todayKey);
-                  const overdueLabel = daysOverdue > 0
-                    ? `${daysOverdue} day${daysOverdue === 1 ? "" : "s"} overdue`
-                    : `checkout time passed (${configuredCheckOutTime})`;
-                  return (
-                    <button
-                      key={booking.id}
-                      type="button"
-                      onClick={() => openBooking(booking.id)}
-                      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/85 px-3 py-2 text-left shadow-sm hover:bg-white"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
-                        <span className="block text-[10px] font-semibold text-amber-800">
-                          Room {booking.roomNumber || "TBD"} · {overdueLabel}
+          {(overdueCheckouts.length > 0 || newCorporateInquiries.length > 0) && (
+            <div className="space-y-5">
+              {overdueCheckouts.length > 0 && (
+                <div className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
+                      <AlertTriangle size={18} className="text-amber-700" />
+                      overdue check-outs
+                    </h2>
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                      {overdueCheckouts.length} urgent
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {overdueCheckouts.map((booking) => {
+                      const daysOverdue = getDaysOverdue(booking.checkOut, todayKey);
+                      const overdueLabel = daysOverdue > 0
+                        ? `${daysOverdue} day${daysOverdue === 1 ? "" : "s"} overdue`
+                        : `checkout time passed (${configuredCheckOutTime})`;
+                      return (
+                        <button
+                          key={booking.id}
+                          type="button"
+                          onClick={() => openBooking(booking.id)}
+                          className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/85 px-3 py-2 text-left shadow-sm hover:bg-white"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-bold text-gray-900">{booking.guestName}</span>
+                            <span className="block text-[10px] font-semibold text-amber-800">
+                              Room {booking.roomNumber || "TBD"} · {overdueLabel}
+                            </span>
+                          </span>
+                          <ArrowRight size={14} className="shrink-0 text-amber-700" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {newCorporateInquiries.length > 0 && (
+                <section className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
+                      <Building2 size={18} className="text-amber-700" />
+                      new corporate inquiries
+                      <span className="relative inline-flex">
+                        <button
+                          type="button"
+                          onClick={() => setCorporateHelpOpen((open) => !open)}
+                          onBlur={() => setCorporateHelpOpen(false)}
+                          aria-expanded={corporateHelpOpen}
+                          aria-controls={corporateHelpId}
+                          aria-label="About new corporate inquiries"
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white/70 text-[11px] font-bold text-amber-800 hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary/40"
+                        >
+                          i
+                        </button>
+                        <span
+                          id={corporateHelpId}
+                          role="tooltip"
+                          className={
+                            "absolute right-0 top-8 z-20 w-64 rounded-lg bg-gray-950 px-3 py-2 font-body text-[11px] font-medium leading-relaxed text-white shadow-lg " +
+                            (corporateHelpOpen ? "block" : "hidden")
+                          }
+                        >
+                          {corporateHelpText}
                         </span>
                       </span>
-                      <ArrowRight size={14} className="shrink-0 text-amber-700" />
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/corporate")}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                    >
+                      View Pipeline
+                      <ArrowRight size={12} />
                     </button>
-                  );
-                })}
-              </div>
+                  </div>
+                  <div className="space-y-2">
+                    {newCorporateInquiries.slice(0, 6).map((inquiry) => (
+                      <button
+                        key={inquiry.id}
+                        type="button"
+                        onClick={() => navigate(`/corporate?inquiryId=${encodeURIComponent(inquiry.id)}`)}
+                        className="flex min-h-[58px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/85 px-3 py-2 text-left shadow-sm hover:bg-white"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-bold text-gray-900">{inquiry.companyName}</span>
+                          <span className="block truncate text-[10px] font-semibold text-amber-800">
+                            {inquiry.contactPerson} · {inquiry.numRooms} {inquiry.numRooms === 1 ? "room" : "rooms"}
+                          </span>
+                        </span>
+                        <ArrowRight size={14} className="shrink-0 text-amber-700" />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </section>
-
-        {newCorporateInquiries.length > 0 && (
-          <section className="rounded-card border border-amber-200 bg-amber-50 p-5 shadow-sm ring-1 ring-amber-100">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="flex items-center gap-2 text-lg font-heading text-amber-950 lowercase tracking-tight">
-                <Building2 size={18} className="text-amber-700" />
-                new corporate inquiries
-                <span className="relative inline-flex">
-                  <button
-                    type="button"
-                    onClick={() => setCorporateHelpOpen((open) => !open)}
-                    onBlur={() => setCorporateHelpOpen(false)}
-                    aria-expanded={corporateHelpOpen}
-                    aria-controls={corporateHelpId}
-                    aria-label="About new corporate inquiries"
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-white/70 text-[11px] font-bold text-amber-800 hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  >
-                    i
-                  </button>
-                  <span
-                    id={corporateHelpId}
-                    role="tooltip"
-                    className={
-                      "absolute left-1/2 top-8 z-20 w-64 -translate-x-1/2 rounded-lg bg-gray-950 px-3 py-2 font-body text-[11px] font-medium leading-relaxed text-white shadow-lg " +
-                      (corporateHelpOpen ? "block" : "hidden")
-                    }
-                  >
-                    {corporateHelpText}
-                  </span>
-                </span>
-              </h2>
-              <button
-                type="button"
-                onClick={() => navigate("/corporate")}
-                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
-              >
-                View Pipeline
-                <ArrowRight size={12} />
-              </button>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {newCorporateInquiries.slice(0, 6).map((inquiry) => (
-                <button
-                  key={inquiry.id}
-                  type="button"
-                  onClick={() => navigate(`/corporate?inquiryId=${encodeURIComponent(inquiry.id)}`)}
-                  className="flex min-h-[58px] w-full items-center justify-between gap-3 rounded-lg border border-amber-200 bg-white/85 px-3 py-2 text-left shadow-sm hover:bg-white"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-bold text-gray-900">{inquiry.companyName}</span>
-                    <span className="block truncate text-[10px] font-semibold text-amber-800">
-                      {inquiry.contactPerson} · {inquiry.numRooms} {inquiry.numRooms === 1 ? "room" : "rooms"}
-                    </span>
-                  </span>
-                  <ArrowRight size={14} className="shrink-0 text-amber-700" />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
 
         <section className="grid gap-5 lg:grid-cols-3">
           <div className={`rounded-card p-5 shadow-sm ring-1 ${

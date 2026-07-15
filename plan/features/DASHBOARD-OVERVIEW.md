@@ -26,7 +26,7 @@ The main dashboard at `/` — the first screen staff see after login. Designed f
 
 - [x] Stat cards row — Occupancy Rate (today), Bookings (this month), Revenue (this month), Pending Payments (count), Unread Messages (count); each card includes a leading icon, one line of available context, and state-aware tone so `0` alerts read muted. Occupancy, Bookings, and Revenue include info tooltips explaining their calculation.
 - [x] `StatsCard.tsx` — label, large value, optional context/trend, optional help tooltip, optional header action; hidden revenue displays a masked peso figure rather than the word "Hidden"
-- [x] Operational hierarchy — urgent/actionable cards lead the dashboard, daily ops sit in a compact middle band, guest chats sit below, and passive empty states are visually muted
+- [x] Operational hierarchy — urgent/actionable cards lead the dashboard; on desktop, pending payments use the main action column while overdue check-outs and new corporate inquiries share a compact right rail, eliminating unused horizontal space. Daily ops sit in a compact middle band, guest chats sit below, and passive empty states are visually muted
 - [x] Room status grid — one cell per room (all active rooms), shows room number, type, booking status badge, housekeeping status badge
 - [x] Housekeeping status toggle per room — Clean / Dirty / In Progress — tap/click cycles through states, instant Firestore update
 - [x] Pending payment alerts section — list of bookings with status `"payment-uploaded"`, guest name, room, date submitted, Confirm Payment CTA; warm attention styling when non-empty
