@@ -1,5 +1,6 @@
 import { generateStoreOrderRef, getEffectiveStorePaymentMethods, getManilaDateInfo } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
+import { writeNotification } from "../lib/notifications";
 import { sendStoreOrderTrigger } from "./email";
 
 interface StoreOrderItemInput {
@@ -369,6 +370,19 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       } catch (emailErr) {
         console.error("Failed to send store-order-placed email:", emailErr);
       }
+
+      // Per Phase 12 — Notification Center (decision #120):
+      // persist a `notifications` doc for the bell panel so
+      // the front desk sees the store order in the persistent
+      // log. Deep-links to /store-management via entityId.
+      void writeNotification({
+        type: "store-order",
+        title: `New store order — ${responseData.orderRef} (Room ${roomNumber})`,
+        entityType: "storeOrder",
+        entityId: responseData.orderId,
+        roomNumber,
+        bookingRef: null
+      });
     }
 
     return res.status(200).json({ success: true, data: responseData });

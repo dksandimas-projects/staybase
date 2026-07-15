@@ -193,6 +193,16 @@ Janitor routes are operational endpoints. They must not be called from guest-fac
 
 ---
 
+### Notification Routes (`/api/notifications/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/notifications/prune` | GET/POST | Cron secret | Hard-delete `notifications` docs older than 30 days (the FLR-03 retention trap). Optional body: `{ maxAgeMs?, batchSize? }` for manual testing. Daily Vercel Cron entry at `0 3 * * *` calls this endpoint. See `plan/features/NOTIFICATION-CENTER.md` and decision #120. |
+
+The bell + panel in the admin app read `notifications` via a **client-side `onSnapshot`** (bounded `limit(50)`, `orderBy("createdAt", "desc")`). No dedicated read endpoint exists — the Firestore rules cover it directly. Persisted notification writes are **not** exposed as a public API; they happen server-side from the existing booking / payment / check-in / check-out / store-order handlers via the `writeNotification` helper in `guest-app/server/lib/notifications.ts`.
+
+---
+
 ### Member Routes (`/api/members/*`)
 
 | Route | Method | Auth | Purpose |

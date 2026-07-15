@@ -15,6 +15,7 @@ import { handleVerifyIntercomGuest } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
+import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -1053,12 +1054,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // post-H2 bookings. Resumable (cursor persisted in
   // Firestore). CRON_SECRET-gated.
   if (domain === "janitor" && action === "h2-backfill" && (req.method === "POST" || req.method === "GET")) {
-    
+
     return await handleH2LookupTokenBackfill(req, res);
   }
   if (domain === "janitor" && action === "h2-status" && req.method === "GET") {
-    
+
     return await handleH2BackfillStatus(req, res);
+  }
+
+  // Per Phase 12 — Notification Center (decision #120):
+  // daily retention job that prunes `notifications` docs
+  // older than 30 days. Wired into `vercel.json` (see the
+  // `crons` array). CRON_SECRET-gated like the existing
+  // janitor sweep + check-in reminder.
+  if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
+
+    return await handleNotificationsPrune(req, res);
   }
 
   // Fallback 404
