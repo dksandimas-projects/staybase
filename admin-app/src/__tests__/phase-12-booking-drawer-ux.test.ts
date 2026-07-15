@@ -6,6 +6,7 @@ const repoRoot = resolve(__dirname, "../../..");
 const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
 const pageSrc = read("admin-app/src/pages/BookingsPage.tsx");
 const workspaceSrc = read("admin-app/src/components/BookingDrawerWorkspace.tsx");
+const drawerSrc = `${pageSrc}\n${workspaceSrc}`;
 
 describe("Phase 12 — booking drawer information architecture", () => {
   it("provides the four task-based sections with accessible tabs", () => {
@@ -36,11 +37,26 @@ describe("Phase 12 — booking drawer information architecture", () => {
     expect(workspaceSrc).toMatch(/Early check-in needs a decision/);
   });
 
+  it("keeps guest and payment context above the section tabs", () => {
+    const guestIndex = workspaceSrc.indexOf("Guest information");
+    const paymentIndex = workspaceSrc.indexOf("Payment reference number");
+    const navIndex = workspaceSrc.indexOf("Booking drawer sections");
+    expect(guestIndex).toBeGreaterThan(0);
+    expect(paymentIndex).toBeGreaterThan(guestIndex);
+    expect(navIndex).toBeGreaterThan(paymentIndex);
+    expect(pageSrc).toMatch(/onPaymentReferenceChange=\{\(value\) => persistSelectedBooking/);
+  });
+
+  it("keeps inactive panels hidden even when a responsive display class is present", () => {
+    expect(workspaceSrc).toMatch(/activeSection !== section && "!hidden"/);
+  });
+
   it("maps every existing drawer feature into a section", () => {
     for (const feature of [
       "Payment Proof",
-      "Guest Information",
-      "Payment Method & Reference",
+      "Guest information",
+      "Payment method",
+      "Payment reference number",
       "Check-in Registration",
       "Guest ID Attachment",
       "Stay & Accommodation",
@@ -57,7 +73,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
       "Checkout Folio Review",
       "Cancel Booking"
     ]) {
-      expect(pageSrc, `expected booking drawer feature: ${feature}`).toContain(feature);
+      expect(drawerSrc, `expected booking drawer feature: ${feature}`).toContain(feature);
     }
     expect(pageSrc.match(/<BookingDrawerSectionPanel/g)?.length).toBeGreaterThanOrEqual(12);
   });
