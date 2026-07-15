@@ -81,10 +81,17 @@ export async function writeNotification(input: WriteNotificationInput): Promise<
  * the number of docs deleted (and the IDs so the caller
  * can log them).
  *
+ * Per NC-03 (post-ship review 2026-07-15): deletes are
+ * issued via Firestore's `BulkWriter` so the work runs
+ * in parallel and retries transient failures
+ * automatically. The default `batchSize` is 500; the
+ * `BulkWriter` itself flushes at 500 ops by default, so
+ * one prune call prunes exactly one batch.
+ *
  * Auth-gated by the route's CRON_SECRET — this function
  * itself does no auth. The rule allows client `delete: if
  * false`; the Admin SDK bypasses the rule. Tests in
- * `notification-center-prune.test.ts` mock the Admin SDK
+ * `notification-center-writes.test.ts` mock the Admin SDK
  * and assert the bounded query + delete count.
  */
 export interface PruneNotificationsResult {
@@ -104,15 +111,38 @@ export async function pruneNotifications(maxAgeMs: number, batchSize = 500): Pro
     .get();
 
   const deletedIds: string[] = [];
-  for (const docSnap of snap.docs) {
-    await docSnap.ref.delete();
-    deletedIds.push(docSnap.id);
+  if (snap.docs.length === 0) {
+    return {
+      scanned: 0,
+      deleted: 0,
+      deletedIds,
+      cutoffIso: cutoff.toISOString()
+    };
   }
+
+  // Per NC-03: use a BulkWriter so deletes run in
+  // parallel and transient failures are retried
+  // automatically. Each per-doc promise resolves on
+  // success and rejects on terminal failure; we collect
+  // the successes into the returned `deletedIds`.
+  const writer = adminDb.bulkWriter();
+  const queue = snap.docs.map((docSnap) =>
+    writer
+      .delete(docSnap.ref)
+      .then(() => docSnap.id)
+      .catch((err) => {
+        console.error(`[notifications-prune] Failed to delete ${docSnap.id}:`, err);
+        return null;
+      })
+  );
+  await writer.close();
+  const settled = await Promise.all(queue);
+  const successful = settled.filter((id): id is string => id !== null);
 
   return {
     scanned: snap.docs.length,
-    deleted: deletedIds.length,
-    deletedIds,
+    deleted: successful.length,
+    deletedIds: successful,
     cutoffIso: cutoff.toISOString()
   };
 }

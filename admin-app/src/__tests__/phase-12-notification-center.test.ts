@@ -136,6 +136,129 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
     it("uses a bounded query (limit) so the cron can't OOM on a huge collection", () => {
       expect(notifLibSrc).toMatch(/\.limit\(batchSize\)/);
     });
+
+    it("NC-03: deletes via Firestore BulkWriter (parallel + auto-retry)", () => {
+      // The helper must use adminDb.bulkWriter() instead of
+      // a serial `for await ... delete` loop. The source
+      // wraps the delete call across lines, so we allow
+      // whitespace.
+      expect(notifLibSrc).toMatch(/adminDb\.bulkWriter\(\)/);
+      expect(notifLibSrc).toMatch(/writer[\s\S]*?\.delete\(/);
+      expect(notifLibSrc).toMatch(/await\s+writer\.close\(\)/);
+      // Partial-success: a per-doc failure must be caught
+      // and not crash the whole prune.
+      expect(notifLibSrc).toMatch(/\.catch\(\(err\) =>[\s\S]*?console\.error/);
+    });
+  });
+
+  describe("NC-01: server-side write sites use await (post-ship review)", () => {
+    // Per NC-01 (post-ship review 2026-07-15): every
+    // writeNotification call must be **awaited** so Vercel
+    // does not freeze the instance after `res.json()` and
+    // drop the doc. The helper swallows its own errors,
+    // so awaiting is safe.
+    it("handleCreateBooking awaits writeNotification (NC-01)", () => {
+      const block = bookingsHandlerSrc.match(
+        /handleCreateBooking[\s\S]*?export async function handleCreateWalkin/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+    });
+
+    it("handleCreateWalkin awaits writeNotification (NC-01)", () => {
+      const block = bookingsHandlerSrc.match(
+        /handleCreateWalkin[\s\S]*?export async function handleApplyBookingDiscount/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+    });
+
+    it("handleAddPayment awaits writeNotification (NC-01)", () => {
+      const block = bookingsHandlerSrc.match(
+        /handleAddPayment[\s\S]*?export async function handleAddRefund/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+    });
+
+    it("handleConfirmBooking awaits writeNotification (NC-01)", () => {
+      const block = bookingsHandlerSrc.match(
+        /handleConfirmBooking[\s\S]*?export async function handleCheckinBooking/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+    });
+
+    it("handleCheckinBooking awaits writeNotification (NC-01)", () => {
+      const block = bookingsHandlerSrc.match(
+        /handleCheckinBooking[\s\S]*?export async function handleCheckoutBooking/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+    });
+
+    it("handleCheckoutBooking awaits writeNotification BEFORE res.json (NC-01)", () => {
+      // The original code had the void writeNotification
+      // sitting AFTER the res.status(200).json(...) call.
+      // The fix moves the block above res.json so the
+      // instance can't be frozen before the write runs.
+      const block = bookingsHandlerSrc.match(
+        /handleCheckoutBooking[\s\S]*?export async function handleLookupBooking/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+      // The write must come BEFORE the res.json call.
+      const writeIdx = block![0].search(/await\s+writeNotification\(/);
+      const resIdx = block![0].search(/res\.status\(200\)\.json\(/);
+      expect(writeIdx).toBeGreaterThan(-1);
+      expect(resIdx).toBeGreaterThan(-1);
+      expect(writeIdx).toBeLessThan(resIdx);
+    });
+
+    it("handleCreateStoreOrder awaits writeNotification (NC-01)", () => {
+      const block = storeHandlerSrc.match(
+        /handleCreateStoreOrder[\s\S]*?export async function handleCancelStoreOrder/
+      );
+      expect(block).toBeTruthy();
+      expect(block![0]).toMatch(/await\s+writeNotification\(/);
+      expect(block![0]).not.toMatch(/void\s+writeNotification/);
+    });
+  });
+
+  describe("NC-02: firestore rules tighten the readBy update scope (post-ship review)", () => {
+    // Per NC-02: the original rule let any staff member
+    // rewrite the entire readBy map (clear/forge another
+    // staff member's read state). The fix asserts the
+    // request's readBy keys are a subset of (existing keys
+    // ∪ {writer's UID}) — the writer can only add or
+    // update their own UID.
+    it("requires the request's readBy keys to be a subset of (existing ∪ writer)", () => {
+      const block = firestoreRules.match(
+        /match\s+\/notifications\/\{notificationId\}\s*\{[\s\S]*?\}/
+      );
+      expect(block).toBeTruthy();
+      // Has the keys-hasOnly check that asserts the subset
+      // relationship: request.readBy.keys ⊆
+      // resource.readBy.keys ∪ {request.auth.uid}. The rule
+      // is multi-line; match the two halves independently.
+      expect(block![0]).toMatch(/readBy\.keys\(\)\.hasOnly\(/);
+      expect(block![0]).toMatch(/resource\.data\.readBy\.keys\(\)\.union\(\[request\.auth\.uid\]\)/);
+    });
+
+    it("requires the writer's own UID in readBy to be a timestamp", () => {
+      const block = firestoreRules.match(
+        /match\s+\/notifications\/\{notificationId\}\s*\{[\s\S]*?\}/
+      );
+      expect(block![0]).toMatch(
+        /request\.resource\.data\.readBy\[request\.auth\.uid\]\s+is\s+timestamp/
+      );
+    });
   });
 
   describe("server-side write sites", () => {

@@ -1142,10 +1142,16 @@ export async function handleCreateBooking(req: any, res: any) {
 
     // Per Phase 12 — Notification Center (decision #120):
     // persist a `notifications` doc for the bell panel. Best-effort;
-    // a failure here never fails the booking. The room number +
-    // booking ref are denormalized so the panel can render without
-    // a second Firestore round-trip.
-    void writeNotification({
+    // a failure here never fails the booking (the helper swallows
+    // its own errors internally). The room number + booking ref
+    // are denormalized so the panel can render without a second
+    // Firestore round-trip.
+    //
+    // Per NC-01 (post-ship review 2026-07-15): the write is
+    // **awaited** so Vercel does not freeze the serverless
+    // instance after `res.json()` flushes and drop the doc.
+    // Awaiting is safe — the helper never throws.
+    await writeNotification({
       type: "booking",
       title: `New booking — ${finalBookingRef} (Room ${assignedRoomNumber})`,
       entityType: "booking",
@@ -1550,8 +1556,13 @@ export async function handleCreateWalkin(req: any, res: any) {
     // are denormalized. The notification type is `booking`
     // for both online + walk-in (status here is `confirmed`
     // or `checked-in`, but the bell surfaces both).
+    //
+    // Per NC-01 (post-ship review 2026-07-15): awaited
+    // before `res.json()` so Vercel does not freeze the
+    // instance and drop the doc. Safe — the helper never
+    // throws.
     if (newBooking) {
-      void writeNotification({
+      await writeNotification({
         type: "booking",
         title: `New walk-in booking — ${finalBookingRef} (Room ${newBooking.roomNumber})`,
         entityType: "booking",
@@ -2185,11 +2196,16 @@ export async function handleAddPayment(req: any, res: any) {
   // `idempotentReplay` short-circuit avoids writing
   // duplicate notifications when the same payment is
   // re-sent with the same id.
+  //
+  // Per NC-01 (post-ship review 2026-07-15): awaited
+  // before `res.json()` so Vercel does not freeze the
+  // instance and drop the doc. Safe — the helper never
+  // throws.
   if (!idempotentReplay && bookingDataSnapshot) {
     const notifTitle = transitionedToPaymentConfirmed
       ? `Payment received — ${bookingDataSnapshot.bookingRef || bookingId} (full)`
       : `Payment added — ${bookingDataSnapshot.bookingRef || bookingId} (${numericAmount})`;
-    void writeNotification({
+    await writeNotification({
       type: "payment",
       title: notifTitle,
       entityType: "booking",
@@ -2394,7 +2410,12 @@ export async function handleConfirmBooking(req: any, res: any) {
     // in the persistent log. Distinct from the
     // `payment` notification (payment receipt) so the bell
     // surfaces both events.
-    void writeNotification({
+    //
+    // Per NC-01 (post-ship review 2026-07-15): awaited
+    // before `res.json()` so Vercel does not freeze the
+    // instance and drop the doc. Safe — the helper never
+    // throws.
+    await writeNotification({
       type: "booking",
       title: `Booking confirmed — ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
       entityType: "booking",
@@ -2484,10 +2505,16 @@ export async function handleCheckinBooking(req: any, res: any) {
     // The transaction above only updated the booking +
     // room; re-read here for the denormalized fields
     // (bookingRef, roomNumber).
+    //
+    // Per NC-01 (post-ship review 2026-07-15): awaited
+    // so Vercel does not freeze the instance after
+    // `res.json()` and drop the doc. The outer try/catch
+    // still covers a failed re-read so the request can
+    // still succeed (just without the notification).
     try {
       const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
       const fresh = freshSnap.data() || {};
-      void writeNotification({
+      await writeNotification({
         type: "arrival",
         title: `Guest checked in — ${fresh.bookingRef || bookingId} (Room ${fresh.roomNumber || ""})`.trim(),
         entityType: "booking",
@@ -2684,25 +2711,24 @@ export async function handleCheckoutBooking(req: any, res: any) {
       }
     });
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        status: "checked-out",
-        pointsAwarded,
-        memberId,
-        checkedOutWithBalance
-      }
-    });
-
     // Per Phase 12 — Notification Center (decision #120):
     // persist a `notifications` doc for the bell panel.
     // The booking doc is the source of truth for the
     // denormalized fields (bookingRef, roomNumber); re-read
     // after the transaction to capture the final values.
+    //
+    // Per NC-01 (post-ship review 2026-07-15): this MUST run
+    // **before** `res.json()` and be **awaited** so Vercel
+    // does not freeze the serverless instance after the
+    // response flushes and silently drop the doc. Safe —
+    // the helper never throws. The try/catch only protects
+    // against a failed re-read (the booking is already
+    // updated, so the request can still succeed without the
+    // notification rather than 500).
     try {
       const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
       const fresh = freshSnap.data() || {};
-      void writeNotification({
+      await writeNotification({
         type: "departure",
         title: `Guest checked out — ${fresh.bookingRef || bookingId} (Room ${fresh.roomNumber || ""})`.trim(),
         entityType: "booking",
@@ -2713,6 +2739,16 @@ export async function handleCheckoutBooking(req: any, res: any) {
     } catch (notifErr) {
       console.error("Failed to fetch booking for departure notification:", notifErr);
     }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "checked-out",
+        pointsAwarded,
+        memberId,
+        checkedOutWithBalance
+      }
+    });
   } catch (error: any) {
     console.error("Checkout booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });

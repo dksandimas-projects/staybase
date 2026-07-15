@@ -149,7 +149,7 @@ describe("Phase 12 — Notification Center writeNotification (decision #120)", (
 });
 
 describe("Phase 12 — pruneNotifications (decision #120)", () => {
-  it("queries with a bounded range filter and deletes the matched docs", async () => {
+  it("queries with a bounded range filter and deletes the matched docs via BulkWriter (NC-03)", async () => {
     const deleteCalls: string[] = [];
     const mockDocs = [
       { id: "n1", ref: { delete: async () => { deleteCalls.push("n1"); } } },
@@ -165,6 +165,18 @@ describe("Phase 12 — pruneNotifications (decision #120)", () => {
               })
             })
           })
+        }),
+        // Per NC-03: the prune now goes through a
+        // BulkWriter (parallel + auto-retry). The mock
+        // records every delete via the writer.delete
+        // path (the real BulkWriter queues + flushes
+        // once on close; the mock just records the call
+        // and resolves the per-doc promise — the close()
+        // is a no-op since the per-doc promise already
+        // ran the delete).
+        bulkWriter: () => ({
+          delete: (ref: { delete: () => Promise<void> }) => ref.delete(),
+          close: async () => undefined
         })
       },
       adminAuth: {},
@@ -191,6 +203,10 @@ describe("Phase 12 — pruneNotifications (decision #120)", () => {
               })
             })
           })
+        }),
+        bulkWriter: () => ({
+          delete: () => Promise.resolve(),
+          close: async () => undefined
         })
       },
       adminAuth: {},
@@ -203,5 +219,43 @@ describe("Phase 12 — pruneNotifications (decision #120)", () => {
     expect(result.scanned).toBe(0);
     expect(result.deleted).toBe(0);
     expect(result.deletedIds).toEqual([]);
+  });
+
+  it("returns partial success when a per-doc delete fails (NC-03 — BulkWriter resilience)", async () => {
+    // Per NC-03: BulkWriter auto-retries transient failures
+    // and the helper must report partial success. One doc
+    // throws a terminal error; the other succeeds. The
+    // returned `deleted` count + ids reflect only the
+    // successes.
+    const mockDocs = [
+      { id: "n_ok", ref: { delete: async () => undefined } },
+      { id: "n_fail", ref: { delete: async () => { throw new Error("Firestore down"); } } }
+    ];
+    vi.doMock("../../../guest-app/server/lib/firebase-admin", () => ({
+      adminDb: {
+        collection: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: () => ({
+                get: async () => ({ docs: mockDocs })
+              })
+            })
+          })
+        }),
+        bulkWriter: () => ({
+          delete: (ref: { delete: () => Promise<void> }) => ref.delete(),
+          close: async () => undefined
+        })
+      },
+      adminAuth: {},
+      adminStorage: {}
+    }));
+    const { pruneNotifications: prune } = await import(
+      "../../../guest-app/server/lib/notifications?prune3"
+    );
+    const result = await prune(30 * 24 * 60 * 60 * 1000);
+    expect(result.scanned).toBe(2);
+    expect(result.deleted).toBe(1);
+    expect(result.deletedIds).toEqual(["n_ok"]);
   });
 });

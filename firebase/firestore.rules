@@ -262,15 +262,26 @@ service cloud.firestore {
     // existing API routes (booking create / add-payment /
     // confirm / check-in / check-out / store order placed).
     // Guests must never read or write this collection.
-    // Staff can flip the `readBy` field (the per-staff read
-    // trail); create is Admin-SDK-only. The retention cron
-    // hard-deletes docs older than 30 days — runs as Admin
-    // SDK, so no client delete is allowed.
+    // Staff can mark their own UID in the `readBy` field
+    // (per-staff read trail); create is Admin-SDK-only. The
+    // retention cron hard-deletes docs older than 30 days —
+    // runs as Admin SDK, so no client delete is allowed.
+    //
+    // Per NC-02 (post-ship review 2026-07-15): the original
+    // rule let any staff member rewrite the whole `readBy`
+    // map (clear/forge another staff member's read state).
+    // Tightened so the request's readBy keys are a subset of
+    // (existing keys ∪ {writer's UID}) — the writer can only
+    // add or update their own UID.
     match /notifications/{notificationId} {
       allow read: if isStaff();
       allow create: if false;
       allow update: if isStaff()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readBy"]);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readBy"])
+        && request.resource.data.readBy.keys().hasOnly(
+          resource.data.readBy.keys().union([request.auth.uid])
+        )
+        && request.resource.data.readBy[request.auth.uid] is timestamp;
       allow delete: if false;
     }
     // ── collectionGroup rules ──────────────────────────────────────────────
