@@ -255,6 +255,56 @@ service cloud.firestore {
       allow create: if false;
       allow delete: if isAdmin();
     }
+
+    // Per Phase 12 — Notification Center (decision #120):
+    // persisted operational alerts for staff. One doc per
+    // event, written server-side via the Admin SDK from the
+    // existing API routes (booking create / add-payment /
+    // confirm / check-in / check-out / store order placed).
+    // Guests must never read or write this collection.
+    // Staff can mark their own UID in the `readBy` field
+    // (per-staff read trail); create is Admin-SDK-only. The
+    // retention cron hard-deletes docs older than 30 days —
+    // runs as Admin SDK, so no client delete is allowed.
+    //
+    // Per NC-02 / NC-02b / NC-02c (post-ship review
+    // 2026-07-15): the original rule let any staff member
+    // rewrite the whole `readBy` map (clear/forge another
+    // staff member's read state). The update rule below
+    // enforces two halves so the key set can only *grow by
+    // the writer's own UID*: (a) any added key (new keys
+    // minus existing keys) may only be the writer's UID;
+    // (b) every existing key must survive (no removal).
+    // NC-02c: (a) is expressed with `removeAll` (a List op)
+    // rather than `.union()` — `keys()` returns a List and
+    // `.union()` is Set-only, which the Firebase rules
+    // validator flagged as a type warning that errored the
+    // rule at evaluation time (would have denied all
+    // mark-read writes). Value-tampering on others' existing
+    // entries stays reachable (rules can't loop over map
+    // values to compare each unchanged) and is knowingly
+    // accepted at SEV-4 — trusted staff, worst case a wrong
+    // unread badge on a colleague's session.
+    match /notifications/{notificationId} {
+      allow read: if isStaff();
+      allow create: if false;
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readBy"])
+        // NC-02: any key being *added* (new keys minus existing keys)
+        // may only be the writer's own UID. `keys()` returns a List, so
+        // this uses `removeAll` (List op) — NOT `.union()`, which is a
+        // Set-only method and produced a validator type warning that
+        // errored the rule at evaluation time (NC-02c, 2026-07-15).
+        && request.resource.data.readBy.keys().removeAll(resource.data.readBy.keys()).hasOnly([request.auth.uid])
+        // NC-02b: every existing key must survive (no removal of another
+        // staff member's entry). Combined with the line above, the key
+        // set can only grow by the writer's own UID.
+        && resource.data.readBy.keys().hasOnly(
+          request.resource.data.readBy.keys()
+        )
+        && request.resource.data.readBy[request.auth.uid] is timestamp;
+      allow delete: if false;
+    }
     // ── collectionGroup rules ──────────────────────────────────────────────
     // Firestore requires explicit collectionGroup rules for cross-document
     // queries (collectionGroup(db, "charges") / "payments"). The nested

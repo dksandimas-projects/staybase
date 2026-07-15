@@ -318,4 +318,41 @@ export interface IntercomThread {
   resolved: boolean;
   updatedAt: Date;
   resolvedAt?: Date | null;
+  currentStayId?: string;
+}
+
+// Per Phase 12 — Notification Center (decision #120):
+// persisted operational alerts for staff. One document per
+// event, written **server-side via the Admin SDK** from the
+// existing API routes (booking create / add-payment / confirm
+// / check-in / check-out / store order placed) — guests never
+// create these directly. Live-derived from the `intercoms`
+// listener (B1) for chat alerts; the persisted collection
+// only covers actionable operational events.
+//
+// `readBy` is a map keyed by staff UID; the absence of my UID
+// = unread for me. The retention cron prunes docs older than
+// 30 days so the collection doesn't grow unbounded on Blaze
+// (the FLR-03 trap).
+export type NotificationType =
+  | "booking"
+  | "payment"
+  | "message"
+  | "arrival"
+  | "departure"
+  | "store-order";
+
+export type NotificationEntityType = "booking" | "storeOrder" | "intercom";
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  entityType: NotificationEntityType;
+  entityId: string;
+  roomNumber: string | null;
+  bookingRef: string | null;
+  readBy: Record<string, Date | null>;
+  createdBy: "system";
+  createdAt: Date;
 }

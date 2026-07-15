@@ -570,6 +570,48 @@ report, and full backup export on one canonical source. The map key is
 
 ---
 
+## Notifications (Phase 12 — Notification Center, decision #120)
+
+One `notifications` doc per operational event, written **server-side
+via the Admin SDK** from the existing API routes. The bell + panel in
+the admin app subscribe to this collection via `onSnapshot`, bounded
+to the most recent 50 docs (`orderBy("createdAt", "desc").limit(50)`).
+Guest chat messages are **not** persisted here — they remain
+live-derived from the `intercoms` listener (B1, per spec).
+
+| Field | Type | Notes |
+|---|---|---|
+| `type` | string | `"booking"` \| `"payment"` \| `"message"` \| `"arrival"` \| `"departure"` \| `"store-order"` |
+| `title` | string | Plain-language summary, e.g. `"New booking — SI-20260715-00001 (Room 202)"`. Capped at 160 chars server-side. |
+| `entityType` | string | `"booking"` \| `"storeOrder"` \| `"intercom"` — what the deep link targets |
+| `entityId` | string | Booking ID / store order ID / room number |
+| `roomNumber` | string \| null | Denormalized for display. Capped at 12 chars. **Never store guest email or payment data (Hard Rule: no PII).** |
+| `bookingRef` | string \| null | e.g. `"SI-20260715-00001"`. Capped at 40 chars. |
+| `readBy` | `Record<uid, timestamp>` | Per-staff read trail. Absence of my UID = unread for me. The Firestore rule restricts client updates to this field only. |
+| `createdBy` | `"system"` | Always `"system"` (Admin SDK); never a guest |
+| `createdAt` | timestamp | Server timestamp via `Timestamp.now()`; the panel orders by this desc |
+
+**Retention** — a daily Vercel Cron (`vercel.json` → `/api/notifications/prune`, `0 3 * * *`)
+hard-deletes docs older than 30 days. Without this, the collection
+grows linearly forever on Blaze (the FLR-03 trap). The cron is
+`CRON_SECRET`-gated like the existing janitor sweep + check-in
+reminder. Bounded query (default `batchSize = 500`) so a single run
+cannot OOM. Owner can run the prune manually by POSTing to
+`/api/notifications/prune` with `x-cron-secret` + (optionally) a
+shorter `maxAgeMs` for testing.
+
+**Deep links** — clicking a notification row navigates by `entityType`:
+- `booking` → `/bookings?bookingId={entityId}` (opens the booking drawer)
+- `storeOrder` → `/bookings?tab=store&orderId={entityId}` (opens the order drawer on the Store tab; the Store tab lives inside the Bookings page)
+- `intercom` → `/intercom?room={entityId}` (open the thread)
+
+Click also stamps my UID into `readBy` (per-staff read trail).
+"Mark all as read" stamps my UID into every currently-loaded unread
+doc. Read state is durable across reloads + follows the staff member
+across devices — the whole point of Option B (per spec).
+
+---
+
 ## Booking Reference Format
 
 `SI-YYYYMMDD-NNN` — e.g. `SI-20260601-001`
@@ -600,6 +642,7 @@ NNN is a zero-padded daily sequence. Generate and validate server-side via API r
 | `bookings/{id}/payments` | Staff/Admin only | Create = Staff/Admin via `/api/bookings/add-payment` using a client-preallocated document ID for idempotency; no updates or deletes |
 | `storeOrders/{id}/payments` | Staff/Admin only through the collection-group read rule | Create = Admin SDK via `/api/store/deliver-order`; no updates or deletes |
 | `settings/rewardsConfig` | Public via `settings/{documentId}` rule; non-sensitive booking/member display config | Admin only |
+| `notifications` | Staff/Admin only (bell + persistent panel in admin app) | Create = Admin SDK only, written from the existing API routes (booking create / add-payment / confirm / check-in / check-out / store order placed); Update = Staff/Admin but **only the `readBy` field** (per-staff read trail); Delete = Admin SDK only (retention cron hard-deletes docs > 30 days old). See `plan/features/NOTIFICATION-CENTER.md` and decision #120. |
 | `calls` | Open (no auth) — same as intercoms | Open (no auth) |
 | `settings/storeConfig` | Public (guests need payment methods) | Admin only |
 

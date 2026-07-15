@@ -189874,7 +189874,7 @@ async function handleCreateBooking(req, res) {
           const corpData = corpCodeDoc.data();
           const corpValidation = validateCorporateCode({
             isActive: corpData.isActive !== false,
-            expiresAt: corpData.expiresAt ? corpData.expiresAt.toDate() : null,
+            expiresAt: toDateOrNull(corpData.expiresAt),
             usageCap: corpData.usageCap ?? null,
             usageCount: corpData.usageCount || 0
           });
@@ -189959,8 +189959,9 @@ async function handleCreateBooking(req, res) {
         if (voucherDoc.exists) {
           const vData = voucherDoc.data();
           const now = /* @__PURE__ */ new Date();
+          const voucherExpiresAt = toDateOrNull(vData.expiresAt);
           const assignedTypeMatchesChosen = !roomType || roomData.type === roomType;
-          const isValid2 = vData.isActive !== false && (!vData.expiresAt || vData.expiresAt.toDate() >= now) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
+          const isValid2 = vData.isActive !== false && (!voucherExpiresAt || voucherExpiresAt >= now) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
           // empty-or-undefined case is covered by the optional
           // chaining below; drop the redundant `!vData.applicableRoomTypes`
           // short-circuit. The `length === 0` covers both the

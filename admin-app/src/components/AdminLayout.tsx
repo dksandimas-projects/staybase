@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Check, Lock, LogOut, MessageSquareText, PhoneCall, PhoneOff, Shield, User, Menu, Volume2, VolumeX, X } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { BottomTabBar } from "./BottomTabBar";
+import { NotificationBell } from "./NotificationBell";
 import { ToastProvider } from "./Toast";
 import { useAdmin } from "../context/AdminContext";
 import { useBreakpoint } from "../utils/useBreakpoint";
@@ -147,6 +148,13 @@ export function AdminLayout() {
 
           {/* Right zone */}
           <div className="flex items-center gap-2 sm:gap-4">
+            {/* Per Phase 12 — Notification Center (decision
+                #120): the bell is reachable from every admin
+                page (lives in the shared header) and surfaces
+                the persistent event log so staff know what
+                rang. The sound mute button below is unchanged. */}
+            <NotificationBell />
+
             <button
               type="button"
               onClick={() => setSoundsEnabled(!soundsEnabled)}

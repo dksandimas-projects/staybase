@@ -16,6 +16,8 @@ import {
   DEFAULT_ROOM_TYPES,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
+  Notification,
+  type NotificationType,
   PaymentMethodConfig,
   PROTECTED_PAYMENT_METHODS,
   StoreConfig,
@@ -31,7 +33,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { arrayUnion, collection, deleteField, doc, getDocs, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, deleteField, doc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -539,6 +541,13 @@ export interface AdminContextType {
   soundsEnabled: boolean;
   setSoundsEnabled: (enabled: boolean) => void;
   playSynthNotification: (type: "booking" | "payment" | "message" | "arrival" | "departure") => void;
+
+  // Notification Center (Phase 12 — decision #120)
+  notifications: Notification[];
+  notificationsLoading: boolean;
+  unreadNotificationCount: number;
+  markNotificationRead: (notificationId: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -2585,6 +2594,118 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // ── Notification Center (Phase 12 — decision #120) ──────────
+  // Live `onSnapshot` on `notifications`, bounded to the most
+  // recent 50 docs. Merges with the existing live-derived
+  // unread guest-message count from the `intercoms` listener
+  // (B1) so the bell badge sums both sources. The retention
+  // cron (`/api/notifications/prune`) hard-deletes docs
+  // older than 30 days so the collection stays bounded.
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setNotifications([]);
+      setNotificationsLoading(true);
+      return;
+    }
+    setNotificationsLoading(true);
+    // Bounded query — never the whole collection. Firestore
+    // requires an `orderBy` on the same field as any range
+    // filter; the retention cron reads with a range filter
+    // and orders ascending (see guest-app/server/lib/
+    // notifications.ts). The composite index `(createdAt
+    // desc)` is the only one this listener needs.
+    const notifRef = collection(db, "notifications");
+    const notifQuery = query(notifRef, orderBy("createdAt", "desc"), limit(50));
+    const unsubscribe = onSnapshot(
+      notifQuery,
+      (snapshot) => {
+        const docs: Notification[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          const readBy: Record<string, Date | null> = {};
+          if (data.readBy && typeof data.readBy === "object") {
+            Object.entries(data.readBy).forEach(([uid, ts]) => {
+              if (ts && typeof (ts as any).toDate === "function") {
+                readBy[uid] = (ts as any).toDate();
+              } else if (ts instanceof Date) {
+                readBy[uid] = ts;
+              } else if (ts === null) {
+                readBy[uid] = null;
+              } else {
+                readBy[uid] = null;
+              }
+            });
+          }
+          return {
+            id: docSnap.id,
+            type: (data.type as NotificationType) || "booking",
+            title: String(data.title || ""),
+            entityType: data.entityType || "booking",
+            entityId: String(data.entityId || ""),
+            roomNumber: data.roomNumber || null,
+            bookingRef: data.bookingRef || null,
+            readBy,
+            createdBy: "system",
+            createdAt: data.createdAt && typeof (data.createdAt as any).toDate === "function"
+              ? (data.createdAt as any).toDate()
+              : new Date(0)
+          };
+        });
+        setNotifications(docs);
+        setNotificationsLoading(false);
+      },
+      (error) => {
+        console.error("Error listening to notifications collection:", error);
+        setNotificationsLoading(false);
+      }
+    );
+    return unsubscribe;
+  }, [currentUser]);
+
+  const unreadNotificationCount = useMemo(() => {
+    if (!currentUser) return 0;
+    const myUid = currentUser.uid;
+    return notifications.reduce((count, n) => {
+      return !n.readBy[myUid] ? count + 1 : count;
+    }, 0);
+  }, [notifications, currentUser]);
+
+  // Per Phase 12 — Notification Center (decision #120):
+  // best-effort client-side mark-read. The Firestore rule
+  // restricts updates to the `readBy` field only, so a
+  // single-field `updateDoc` is the only legal write from
+  // the client. Failures are logged + swallowed — the bell
+  // re-renders on the next snapshot, so a missed write just
+  // shows the entry as unread for one more tick.
+  const markNotificationRead = useCallback(async (notificationId: string) => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, "notifications", notificationId), {
+        [`readBy.${currentUser.uid}`]: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Failed to mark notification read:", err);
+    }
+  }, [currentUser]);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    if (!currentUser) return;
+    const myUid = currentUser.uid;
+    const unread = notifications.filter((n) => !n.readBy[myUid]);
+    if (unread.length === 0) return;
+    try {
+      await Promise.all(unread.map((n) =>
+        updateDoc(doc(db, "notifications", n.id), {
+          [`readBy.${myUid}`]: serverTimestamp()
+        })
+      ));
+    } catch (err) {
+      console.error("Failed to mark all notifications read:", err);
+    }
+  }, [notifications, currentUser]);
+
   // Store Orders State — live from Firestore
   const [storeOrders, setStoreOrders] = useState<StoreOrder[]>([]);
 
@@ -4274,7 +4395,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         unreadIntercomCount,
         soundsEnabled,
         setSoundsEnabled,
-        playSynthNotification
+        playSynthNotification,
+        notifications,
+        notificationsLoading,
+        unreadNotificationCount,
+        markNotificationRead,
+        markAllNotificationsRead
       }}
     >
       {children}

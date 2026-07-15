@@ -51,3 +51,13 @@ npm run test:guest:api
 ```
 
 These tests must use emulator credentials only. Do not point integration tests at the live Firebase project.
+
+### Firestore security-rules tests
+
+`firebase/tests/*.rules.test.ts` load the real `firebase/firestore.rules` into the Firestore emulator and evaluate actual access decisions (unlike the source-pattern rule tests in the apps, which only grep the rule text). Run them with:
+
+```bash
+npm run test:rules
+```
+
+This wraps the suite in `firebase emulators:exec --only firestore`, so the emulator is started and torn down automatically — you do **not** need a separate terminal. Requires Java (the Firestore emulator dependency). These are intentionally **not** part of `npm test` because they need the emulator; run them whenever `firestore.rules` changes. NC-02d added the first of these (the `notifications` collection) after an invalid-but-present rule (`keys().union(...)`) shipped undetected by the grep-only tests.

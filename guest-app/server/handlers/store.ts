@@ -1,5 +1,6 @@
 import { generateStoreOrderRef, getEffectiveStorePaymentMethods, getManilaDateInfo } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
+import { writeNotification } from "../lib/notifications";
 import { sendStoreOrderTrigger } from "./email";
 
 interface StoreOrderItemInput {
@@ -369,6 +370,24 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       } catch (emailErr) {
         console.error("Failed to send store-order-placed email:", emailErr);
       }
+
+      // Per Phase 12 — Notification Center (decision #120):
+      // persist a `notifications` doc for the bell panel so
+      // the front desk sees the store order in the persistent
+      // log. Deep-links to /store-management via entityId.
+      //
+      // Per NC-01 (post-ship review 2026-07-15): awaited
+      // so Vercel does not freeze the instance after
+      // `res.json()` and drop the doc. Safe — the helper
+      // never throws.
+      await writeNotification({
+        type: "store-order",
+        title: `New store order — ${responseData.orderRef} (Room ${roomNumber})`,
+        entityType: "storeOrder",
+        entityId: responseData.orderId,
+        roomNumber,
+        bookingRef: null
+      });
     }
 
     return res.status(200).json({ success: true, data: responseData });
