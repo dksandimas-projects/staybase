@@ -267,31 +267,38 @@ service cloud.firestore {
     // retention cron hard-deletes docs older than 30 days —
     // runs as Admin SDK, so no client delete is allowed.
     //
-    // Per NC-02 + NC-02b (post-ship review 2026-07-15): the
-    // original rule let any staff member rewrite the whole
-    // `readBy` map (clear/forge another staff member's read
-    // state). NC-02 tightened the rule so the request's
-    // readBy keys are a subset of (existing keys ∪
-    // {writer's UID}) — the writer can only add or update
-    // their own UID. NC-02b adds the second half: the
-    // *existing* readBy keys must also be a subset of the
-    // *request's* readBy keys, so the writer cannot remove
-    // a pre-existing entry. Combined, the key set can only
-    // *grow by the writer's own UID* (or stay the same if
-    // the writer's UID was already there). Value-tampering
-    // on others' existing entries stays reachable
-    // (Firestore rules can't loop over map values to
-    // compare each unchanged) and is knowingly accepted at
-    // SEV-4 — trusted staff, worst case a wrong unread
-    // badge on a colleague's session.
+    // Per NC-02 / NC-02b / NC-02c (post-ship review
+    // 2026-07-15): the original rule let any staff member
+    // rewrite the whole `readBy` map (clear/forge another
+    // staff member's read state). The update rule below
+    // enforces two halves so the key set can only *grow by
+    // the writer's own UID*: (a) any added key (new keys
+    // minus existing keys) may only be the writer's UID;
+    // (b) every existing key must survive (no removal).
+    // NC-02c: (a) is expressed with `removeAll` (a List op)
+    // rather than `.union()` — `keys()` returns a List and
+    // `.union()` is Set-only, which the Firebase rules
+    // validator flagged as a type warning that errored the
+    // rule at evaluation time (would have denied all
+    // mark-read writes). Value-tampering on others' existing
+    // entries stays reachable (rules can't loop over map
+    // values to compare each unchanged) and is knowingly
+    // accepted at SEV-4 — trusted staff, worst case a wrong
+    // unread badge on a colleague's session.
     match /notifications/{notificationId} {
       allow read: if isStaff();
       allow create: if false;
       allow update: if isStaff()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readBy"])
-        && request.resource.data.readBy.keys().hasOnly(
-          resource.data.readBy.keys().union([request.auth.uid])
-        )
+        // NC-02: any key being *added* (new keys minus existing keys)
+        // may only be the writer's own UID. `keys()` returns a List, so
+        // this uses `removeAll` (List op) — NOT `.union()`, which is a
+        // Set-only method and produced a validator type warning that
+        // errored the rule at evaluation time (NC-02c, 2026-07-15).
+        && request.resource.data.readBy.keys().removeAll(resource.data.readBy.keys()).hasOnly([request.auth.uid])
+        // NC-02b: every existing key must survive (no removal of another
+        // staff member's entry). Combined with the line above, the key
+        // set can only grow by the writer's own UID.
         && resource.data.readBy.keys().hasOnly(
           request.resource.data.readBy.keys()
         )

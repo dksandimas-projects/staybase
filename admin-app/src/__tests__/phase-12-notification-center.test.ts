@@ -238,17 +238,29 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
     // request's readBy keys are a subset of (existing keys
     // ∪ {writer's UID}) — the writer can only add or
     // update their own UID.
-    it("requires the request's readBy keys to be a subset of (existing ∪ writer)", () => {
+    it("restricts any added readBy key to the writer's own UID (NC-02c: removeAll, not Set.union)", () => {
       const block = firestoreRules.match(
         /match\s+\/notifications\/\{notificationId\}\s*\{[\s\S]*?\}/
       );
       expect(block).toBeTruthy();
-      // Has the keys-hasOnly check that asserts the subset
-      // relationship: request.readBy.keys ⊆
-      // resource.readBy.keys ∪ {request.auth.uid}. The rule
-      // is multi-line; match the two halves independently.
-      expect(block![0]).toMatch(/readBy\.keys\(\)\.hasOnly\(/);
-      expect(block![0]).toMatch(/resource\.data\.readBy\.keys\(\)\.union\(\[request\.auth\.uid\]\)/);
+      // NC-02c (2026-07-15): the original NC-02 rule used
+      // `keys().union([request.auth.uid])`, but `keys()`
+      // returns a List and `.union()` is a Set-only method —
+      // the Firebase rules validator flagged it as a type
+      // warning that errored the rule at evaluation time
+      // (would have denied all mark-read writes). The
+      // corrected form asserts the keys being *added* (new
+      // minus existing) contain only the writer's UID, using
+      // the List op `removeAll`. Must NOT reference `.union(`.
+      // NOTE: this is a source-pattern (grep) assertion — it
+      // confirms the corrected clause is present, but does NOT
+      // evaluate the rule. An emulator-based rules test is the
+      // real guard (tracked as a follow-up); a negative
+      // `.union(` check is intentionally omitted here because
+      // it false-matches the explanatory comment in the rule.
+      expect(block![0]).toMatch(
+        /request\.resource\.data\.readBy\.keys\(\)\.removeAll\(resource\.data\.readBy\.keys\(\)\)\.hasOnly\(\[request\.auth\.uid\]\)/
+      );
     });
 
     it("requires the writer's own UID in readBy to be a timestamp", () => {
