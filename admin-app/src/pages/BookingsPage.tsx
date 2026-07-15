@@ -40,7 +40,8 @@ import {
   Loader2,
   Move,
   Info,
-  ChevronRight
+  ChevronRight,
+  Search
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
@@ -444,14 +445,38 @@ export function BookingsPage() {
     }
   };
 
-  // Main navigation tab
-  const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">(
-    searchParams.get("tab") === "store" ? "store" : "bookings"
-  );
+  // FSO-03: Canonical URL state for all filter/search/tab params
+  const readParam = (key: string, fallback: string) => searchParams.get(key) || fallback;
+  const writeParams = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [key, val] of Object.entries(updates)) {
+      if (val === null || val === "") next.delete(key); else next.set(key, val);
+    }
+    const q = next.toString();
+    setSearchParams(q ? `?${q}` : "", { replace: true });
+  };
 
-  // Booking Search and Filter States
-  const [searchText, setSearchText] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Main navigation tab
+  const activeMainTab = (readParam("tab", "bookings") === "store" ? "store" : "bookings") as "bookings" | "store";
+  const setActiveMainTab = (tab: "bookings" | "store") => writeParams({ tab: tab === "store" ? "store" : null });
+
+  // FSO-06: Booking quick views + filter state (synced to URL)
+  type BookingQuickView = "all" | "needs-attention" | "arrivals-today" | "departures-today" | "in-house" | "upcoming" | "balance-due" | "cancelled";
+  const bookingQuickView = readParam("bqv", "all") as BookingQuickView;
+  const setBookingQuickView = (v: BookingQuickView) => writeParams({ bqv: v === "all" ? null : v, bs: null });
+  const bookingSearch = readParam("bq", "");
+  const setBookingSearch = (v: string) => writeParams({ bq: v || null });
+  const bookingStatusFilter = readParam("bs", "all");
+  const setBookingStatusFilter = (v: string) => writeParams({ bs: v === "all" ? null : v, bqv: null });
+
+  // FSO-10: Store quick views + filter state (synced to URL)
+  type StoreQuickView = "all" | "needs-action" | "placed" | "preparing" | "out-for-delivery" | "delivered-today" | "add-to-bill" | "payment-pending" | "cancelled";
+  const storeQuickView = readParam("sqv", "all") as StoreQuickView;
+  const setStoreQuickView = (v: StoreQuickView) => writeParams({ sqv: v === "all" ? null : v, ss: null });
+  const storeSearch = readParam("sq", "");
+  const setStoreSearch = (v: string) => writeParams({ sq: v || null });
+  const storeStatusFilter = readParam("ss", "all");
+  const setStoreStatusFilter = (v: string) => writeParams({ ss: v === "all" ? null : v, sqv: null });
 
   // Booking Drawer States
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -462,21 +487,25 @@ export function BookingsPage() {
     setActiveBookingSection("overview");
   }, [selectedBooking?.id]);
 
-  // Store Order Search and Filter States
-  const [orderSearchText, setOrderSearchText] = useState("");
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
 
+  const processedLegacyRef = useRef<string>("");
   useEffect(() => {
-    if (searchParams.get("tab") !== "store") return;
+    const serialized = Array.from(searchParams.entries()).sort().join("&");
+    if (serialized === processedLegacyRef.current) return;
+    processedLegacyRef.current = serialized;
 
-    setActiveMainTab("store");
-    const orderRef = searchParams.get("orderRef");
-    if (orderRef) {
-      setOrderSearchText(orderRef);
+    // Migrate legacy `filter` param to canonical `bqv` param
+    const filter = searchParams.get("filter");
+    const filterToQv: Record<string, string> = { arrivals: "arrivals-today", departures: "departures-today", "in-house": "in-house" };
+    if (filter && filterToQv[filter] && !searchParams.get("bqv")) {
+      return void writeParams({ bqv: filterToQv[filter], filter: null });
     }
-    // Per Phase 12 — Notification Center (decision #120):
-    // bell deep-links with `?orderId=...` to open the
-    // matching store order drawer on the Store tab.
+    // Migrate legacy `orderRef` param to canonical `sq` param
+    const orderRef = searchParams.get("orderRef");
+    if (orderRef && !searchParams.get("sq")) {
+      return void writeParams({ sq: orderRef, orderRef: null });
+    }
+    // Open store order drawer from deep-link
     const orderId = searchParams.get("orderId");
     if (orderId) {
       const match = storeOrders.find((order) => order.id === orderId);
@@ -487,12 +516,13 @@ export function BookingsPage() {
     }
   }, [searchParams, storeOrders]);
 
+  const processedDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
     const bookingId = searchParams.get("bookingId");
-    if (!bookingId) return;
+    if (!bookingId || bookingId === processedDeepLinkRef.current) return;
+    processedDeepLinkRef.current = bookingId;
     const match = bookings.find((booking) => booking.id === bookingId);
     if (!match) return;
-    setActiveMainTab("bookings");
     setSelectedBooking(match);
     setIsDrawerOpen(true);
   }, [searchParams, bookings]);
@@ -795,46 +825,91 @@ export function BookingsPage() {
     }
   ];
 
-  // Operational filter — driven by the bottom tab bar via ?filter=...
-  // arrivals   = today's check-ins with status confirmed or checked-in
-  // departures = today's check-outs with status checked-in (per the
-  //              confirmed -> checked-in -> checked-out status flow)
-  // in-house   = status === "checked-in"
-  const operationalFilter = searchParams.get("filter");
+  // FSO-04/06/07: Quick-view predicates — reusable, server-aligned, consistent with drawer alerts
   const today = getManilaDateInfo(config.timezone).todayStr;
-  const matchesOperationalFilter = (booking: Booking) => {
-    if (!operationalFilter) return true;
-    if (operationalFilter === "arrivals") {
-      return booking.checkIn === today && (booking.status === "confirmed" || booking.status === "checked-in");
+  const bookingQuickViewPredicate = (booking: Booking, qv: BookingQuickView): boolean => {
+    const folio = getBookingFolio(booking);
+    switch (qv) {
+      case "needs-attention":
+        return (
+          booking.status === "payment-uploaded" ||
+          (booking.status === "confirmed" && booking.checkIn < today) ||
+          (booking.status === "pending" && booking.checkIn <= today) ||
+          (booking.earlyCheckIn?.status === "requested") ||
+          (booking.status === "checked-in" && booking.checkOut < today) ||
+          (booking.status === "checked-out" && folio.balance > 0)
+        );
+      case "arrivals-today":
+        return booking.checkIn === today && ["confirmed", "checked-in"].includes(booking.status);
+      case "departures-today":
+        return booking.checkOut === today && booking.status === "checked-in";
+      case "in-house":
+        return booking.status === "checked-in";
+      case "upcoming":
+        return booking.status === "confirmed" && booking.checkIn > today;
+      case "balance-due":
+        return folio.balance > 0;
+      case "cancelled":
+        return booking.status === "cancelled";
+      default:
+        return true;
     }
-    if (operationalFilter === "departures") {
-      return booking.checkOut === today && booking.status === "checked-in";
-    }
-    if (operationalFilter === "in-house") {
-      return booking.status === "checked-in";
-    }
-    return true;
   };
 
-  const filterLabels: Record<string, string> = {
-    arrivals: "Today's arrivals",
-    departures: "Today's departures",
-    "in-house": "Currently in-house"
+  // FSO-10/11: Store quick-view predicates
+  const storeQuickViewPredicate = (order: any, qv: StoreQuickView): boolean => {
+    switch (qv) {
+      case "needs-action":
+        return order.status === "placed" || (order.paymentProofUrl && order.status === "payment-uploaded");
+      case "placed":
+        return order.status === "placed";
+      case "preparing":
+        return order.status === "confirmed";
+      case "out-for-delivery":
+        return order.status === "out-for-delivery";
+      case "delivered-today":
+        return order.status === "delivered" && (order.deliveredAt || "").startsWith(today);
+      case "add-to-bill":
+        return order.status === "delivered" && !order.billedToRoom;
+      case "payment-pending":
+        return order.paymentProofUrl && order.status === "payment-uploaded";
+      case "cancelled":
+        return order.status === "cancelled";
+      default:
+        return true;
+    }
   };
-  const activeFilterLabel = operationalFilter ? filterLabels[operationalFilter] : null;
 
-  // Filtering Rows logic
-  const filteredRows = bookings.filter((booking) => {
-    const matchesSearch =
-      booking.guestName.toLowerCase().includes(searchText.toLowerCase()) ||
-      booking.bookingRef.toLowerCase().includes(searchText.toLowerCase()) ||
-      booking.roomNumber.includes(searchText);
+  // FSO-05: Sort — actionable/attention first, then by nearest stay/order time
+  const bookingSortScore = (booking: Booking): number => {
+    if (bookingQuickViewPredicate(booking, "needs-attention")) return 0;
+    if (booking.status === "checked-in" && booking.checkOut === today) return 1;
+    if (booking.status === "checked-in") return 2;
+    if (booking.status === "confirmed" && booking.checkIn === today) return 3;
+    if (booking.status === "checked-out") return 4;
+    return 5;
+  };
 
-    const matchesStatus = statusFilter === "all" || booking.status === statusFilter;
-    const matchesFilter = matchesOperationalFilter(booking);
-
-    return matchesSearch && matchesStatus && matchesFilter;
-  });
+  // FSO-04: Combined filtered + sorted booking rows
+  const filteredRows = useMemo(() => {
+    let rows = bookings.filter((booking) => {
+      const matchesSearch =
+        !bookingSearch ||
+        booking.guestName.toLowerCase().includes(bookingSearch.toLowerCase()) ||
+        booking.bookingRef.toLowerCase().includes(bookingSearch.toLowerCase()) ||
+        booking.roomNumber.includes(bookingSearch);
+      const matchesStatus = bookingStatusFilter === "all" || booking.status === bookingStatusFilter;
+      const matchesQV = bookingQuickView === "all" || bookingQuickViewPredicate(booking, bookingQuickView);
+      return matchesSearch && matchesStatus && matchesQV;
+    });
+    rows.sort((a, b) => {
+      const sa = bookingSortScore(a);
+      const sb = bookingSortScore(b);
+      if (sa !== sb) return sa - sb;
+      return (a.checkIn || "").localeCompare(b.checkIn || "");
+    });
+    return rows;
+  }, [bookings, bookingSearch, bookingStatusFilter, bookingQuickView]);
 
   const handleRowClick = (row: Booking) => {
     setSelectedBooking(row);
@@ -969,17 +1044,26 @@ export function BookingsPage() {
     </div>
   );
 
-  // Filtering store orders
-  const filteredOrders = storeOrders.filter((order) => {
-    const matchesSearch = 
-      order.guestName.toLowerCase().includes(orderSearchText.toLowerCase()) ||
-      order.orderRef.toLowerCase().includes(orderSearchText.toLowerCase()) ||
-      order.roomNumber.includes(orderSearchText);
-
-    const matchesStatus = orderStatusFilter === "all" || order.status === orderStatusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  // FSO-04/10: Combined filtered + sorted store orders
+  const filteredOrders = useMemo(() => {
+    let rows = storeOrders.filter((order) => {
+      const matchesSearch =
+        !storeSearch ||
+        order.guestName?.toLowerCase().includes(storeSearch.toLowerCase()) ||
+        order.orderRef?.toLowerCase().includes(storeSearch.toLowerCase()) ||
+        order.roomNumber?.includes(storeSearch);
+      const matchesStatus = storeStatusFilter === "all" || order.status === storeStatusFilter;
+      const matchesQV = storeQuickView === "all" || storeQuickViewPredicate(order, storeQuickView);
+      return matchesSearch && matchesStatus && matchesQV;
+    });
+    rows.sort((a: any, b: any) => {
+      const aAction = storeQuickViewPredicate(a, "needs-action") ? 0 : 1;
+      const bAction = storeQuickViewPredicate(b, "needs-action") ? 0 : 1;
+      if (aAction !== bAction) return aAction - bAction;
+      return (b.createdAt || "").localeCompare(a.createdAt || "");
+    });
+    return rows;
+  }, [storeOrders, storeSearch, storeStatusFilter, storeQuickView]);
 
   const handleOrderRowClick = (row: any) => {
     setSelectedOrder(row);
@@ -2283,31 +2367,78 @@ export function BookingsPage() {
     );
   };
 
+  const activeQuickView = activeMainTab === "bookings" ? bookingQuickView : storeQuickView;
+  const totalCount = activeMainTab === "bookings" ? bookings.length : storeOrders.length;
+  const resultCount = activeMainTab === "bookings" ? filteredRows.length : filteredOrders.length;
+
+  // Shared quick-view definitions for rendering chips
+  const bookingQuickViews: { id: BookingQuickView; label: string; desc: string }[] = [
+    { id: "all", label: "All bookings", desc: "All reservations" },
+    { id: "needs-attention", label: "Needs attention", desc: "Actionable records" },
+    { id: "arrivals-today", label: "Arrivals today", desc: "Checking in today" },
+    { id: "departures-today", label: "Departures today", desc: "Checking out today" },
+    { id: "in-house", label: "In house", desc: "Currently checked in" },
+    { id: "upcoming", label: "Upcoming", desc: "Future arrivals" },
+    { id: "balance-due", label: "Balance due", desc: "Outstanding folio" },
+    { id: "cancelled", label: "Cancelled", desc: "Cancelled reservations" }
+  ];
+
+  const storeQuickViews: { id: StoreQuickView; label: string; desc: string }[] = [
+    { id: "all", label: "All orders", desc: "All store orders" },
+    { id: "needs-action", label: "Needs action", desc: "Requires attention" },
+    { id: "placed", label: "Placed", desc: "Awaiting confirmation" },
+    { id: "preparing", label: "Preparing", desc: "Confirmed, in progress" },
+    { id: "out-for-delivery", label: "Out for delivery", desc: "On the way" },
+    { id: "delivered-today", label: "Delivered today", desc: "Completed today" },
+    { id: "add-to-bill", label: "Add to room bill", desc: "Not yet billed" },
+    { id: "payment-pending", label: "Payment pending", desc: "Proof uploaded" },
+    { id: "cancelled", label: "Cancelled", desc: "Cancelled orders" }
+  ];
+
+  const quickViewCount = (qvId: string, tab: "bookings" | "store"): number => {
+    if (tab === "bookings") {
+      return qvId === "all" ? bookings.length : bookings.filter((b) => bookingQuickViewPredicate(b, qvId as BookingQuickView)).length;
+    }
+    return qvId === "all" ? storeOrders.length : storeOrders.filter((o) => storeQuickViewPredicate(o, qvId as StoreQuickView)).length;
+  };
+
+  // FSO-02: Build active chips from current filter state
+  interface Chip { id: string; label: string; onRemove: () => void; }
+  const activeChips: Chip[] = [];
+  if (activeMainTab === "bookings") {
+    if (bookingQuickView !== "all") {
+      const def = bookingQuickViews.find((q) => q.id === bookingQuickView);
+      activeChips.push({ id: `qv-${bookingQuickView}`, label: def?.label || bookingQuickView, onRemove: () => setBookingQuickView("all") });
+    }
+    if (bookingSearch) {
+      activeChips.push({ id: "search", label: `Search: "${bookingSearch}"`, onRemove: () => setBookingSearch("") });
+    }
+    if (bookingStatusFilter !== "all") {
+      activeChips.push({ id: "status", label: `Status: ${bookingStatusFilter}`, onRemove: () => setBookingStatusFilter("all") });
+    }
+  } else {
+    if (storeQuickView !== "all") {
+      const def = storeQuickViews.find((q) => q.id === storeQuickView);
+      activeChips.push({ id: `qv-${storeQuickView}`, label: def?.label || storeQuickView, onRemove: () => setStoreQuickView("all") });
+    }
+    if (storeSearch) {
+      activeChips.push({ id: "search", label: `Search: "${storeSearch}"`, onRemove: () => setStoreSearch("") });
+    }
+    if (storeStatusFilter !== "all") {
+      activeChips.push({ id: "status", label: `Status: ${storeStatusFilter}`, onRemove: () => setStoreStatusFilter("all") });
+    }
+  }
+
+  const currentQVs = activeMainTab === "bookings" ? bookingQuickViews : storeQuickViews;
+  const setQV = activeMainTab === "bookings" ? setBookingQuickView : setStoreQuickView;
+
   return (
     <>
       <div className="space-y-8 font-body">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase font-medium">bookings & store orders</h1>
-          <p className="text-xs text-gray-500 mt-1">
-            {activeFilterLabel
-              ? activeFilterLabel
-              : "Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries."}
-          </p>
-          {activeFilterLabel && (
-            <button
-              type="button"
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                next.delete("filter");
-                const query = next.toString();
-                setSearchParams(query ? `?${query}` : "", { replace: true });
-              }}
-              className="mt-2 inline-flex min-h-[32px] items-center gap-1 rounded-full bg-primary/10 px-3 text-[10px] font-bold uppercase tracking-wider text-primary-dark"
-            >
-              Filter: {operationalFilter} <span aria-hidden="true">×</span> clear
-            </button>
-          )}
+          <p className="text-xs text-gray-500 mt-1">Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries.</p>
         </div>
         {activeMainTab === "bookings" && (
           <button
@@ -2328,7 +2459,7 @@ export function BookingsPage() {
         )}
       </header>
 
-      {/* Main navigation tabs */}
+      {/* FSO-01: Main navigation tabs */}
       <div className="flex gap-2 border-b border-gray-200 pb-3">
         <button
           onClick={() => setActiveMainTab("bookings")}
@@ -2353,39 +2484,88 @@ export function BookingsPage() {
         </button>
       </div>
 
+      {/* FSO-01/06/10: Quick-view chips (horizontally scrollable on mobile, compact on desktop) */}
+      <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex items-center gap-1.5 pb-1 sm:flex-wrap sm:pb-0" role="tablist" aria-label="Quick views">
+          {currentQVs.map((qv) => {
+            const active = activeQuickView === qv.id;
+            const count = quickViewCount(qv.id, activeMainTab);
+            return (
+              <button
+                key={qv.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => (setQV as (v: any) => void)(qv.id)}
+                className={`inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition sm:shrink ${
+                  active
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-gray-100 text-gray-650 hover:bg-gray-200 hover:text-gray-900"
+                }`}
+              >
+                <span className="truncate">{qv.label}</span>
+                <span className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 py-0 text-[10px] font-bold leading-tight ${
+                  active ? "bg-white/20 text-white" : "bg-gray-200 text-gray-600"
+                }`}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* FSO-01/02: Toolbar — search, filters button, result count */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            placeholder={activeMainTab === "bookings" ? "Search by Guest Name, Reference, Room..." : "Search orders by Guest, Reference, Room..."}
+            value={activeMainTab === "bookings" ? bookingSearch : storeSearch}
+            onChange={(e) => { const v = e.target.value; if (activeMainTab === "bookings") setBookingSearch(v); else setStoreSearch(v); }}
+            className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:bg-white"
+          />
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden text-xs text-gray-500 sm:inline">
+            {resultCount === totalCount
+              ? `${totalCount} records`
+              : `${resultCount} of ${totalCount}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (activeMainTab === "bookings" && activeChips.length > 0) {
+                setBookingQuickView("all"); setBookingSearch(""); setBookingStatusFilter("all");
+              } else if (activeMainTab === "store" && activeChips.length > 0) {
+                setStoreQuickView("all"); setStoreSearch(""); setStoreStatusFilter("all");
+              }
+            }}
+            disabled={activeChips.length === 0}
+            className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          >
+            Clear all
+          </button>
+        </div>
+      </div>
+
+      {/* FSO-02: Active chips row */}
+      {activeChips.length > 0 && (
+        <div className="-mt-1 flex flex-wrap items-center gap-1.5">
+          {activeChips.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={chip.onRemove}
+              className="inline-flex min-h-[32px] items-center gap-1 rounded-full bg-primary/10 px-3 text-[10px] font-bold uppercase tracking-wider text-primary-dark hover:bg-primary/20"
+            >
+              {chip.label} <span aria-hidden="true">×</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {activeMainTab === "bookings" ? (
         <>
-          {/* Filters Toolbar Bookings */}
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Search by Guest Name, Reference, Room..."
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              />
-            </div>
-            
-            <div className="w-full sm:w-48">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              >
-                <option value="all">All Statuses</option>
-                <option value="pending">Pending</option>
-                <option value="payment-uploaded">Payment Uploaded</option>
-                <option value="payment-confirmed">Payment Confirmed</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="checked-in">Checked In</option>
-                <option value="checked-out">Checked Out</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Main Table Bookings */}
           <DataTable
             columns={columns}
             rows={filteredRows}
@@ -2396,35 +2576,6 @@ export function BookingsPage() {
         </>
       ) : (
         <>
-          {/* Filters Toolbar Store Orders */}
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Search orders by Guest, Reference, Room..."
-                value={orderSearchText}
-                onChange={(e) => setOrderSearchText(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              />
-            </div>
-
-            <div className="w-full sm:w-48">
-              <select
-                value={orderStatusFilter}
-                onChange={(e) => setOrderStatusFilter(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              >
-                <option value="all">All Statuses</option>
-                <option value="placed">Placed</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="out-for-delivery">Out For Delivery</option>
-                <option value="delivered">Delivered</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Main Table Store Orders */}
           <DataTable
             columns={storeColumns}
             rows={filteredOrders}

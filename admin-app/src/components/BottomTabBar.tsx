@@ -11,9 +11,9 @@ interface TabSpec {
 }
 
 const BASE_TABS: TabSpec[] = [
-  { id: "arrivals", label: "Arrivals", path: "/bookings?filter=arrivals", icon: LogIn },
-  { id: "departures", label: "Departures", path: "/bookings?filter=departures", icon: LogOut },
-  { id: "in-house", label: "In-House", path: "/bookings?filter=in-house", icon: BedDouble }
+  { id: "arrivals", label: "Arrivals", path: "/bookings?bqv=arrivals-today", icon: LogIn },
+  { id: "departures", label: "Departures", path: "/bookings?bqv=departures-today", icon: LogOut },
+  { id: "in-house", label: "In-House", path: "/bookings?bqv=in-house", icon: BedDouble }
 ];
 
 const ALERTS_TAB: TabSpec = { id: "alerts", label: "Alerts", path: "/intercom", icon: Bell };
@@ -41,7 +41,8 @@ export function BottomTabBar({ variant = "bookings", unreadAlertCount = 0 }: Bot
     if (!query) return true;
     const currentParams = new URLSearchParams(location.search);
     const tabParams = new URLSearchParams(query);
-    return tabParams.get("filter") === currentParams.get("filter");
+    const key = tabParams.has("bqv") ? "bqv" : "filter";
+    return tabParams.get(key) === currentParams.get(key);
   };
 
   return (

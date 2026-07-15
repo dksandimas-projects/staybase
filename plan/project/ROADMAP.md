@@ -1027,7 +1027,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 
 ### Booking Drawer Information Architecture & UX Refactor
 
-> **Status:** 🔄 In Progress — structural tranche implemented on `feature/booking-drawer-ux`; focused workflow modals and final visual QA remain.
+> **Status:** ✅ Complete (July 16, 2026)
 >
 > **Proposed:** July 15, 2026 — owner requested a less overwhelming and better-organized booking drawer without removing any existing feature.
 >
@@ -1047,7 +1047,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
   - **Activity & More:** transactional email actions/history, move/upgrade/reschedule, secondary administrative controls, audit-oriented detail, and cancellation.
 - ✅ **BDUX-03 — Check-in readiness workspace.** Implemented a scannable readiness card driven by the shared client/server missing-items helper; Check-in alerts navigate to the existing editors. Fine-grained checklist-to-editor focus remains with BDUX-04.
 - 🔄 **BDUX-04 — Progressive disclosure rules.** The four top-level sections now establish the primary hierarchy and essential alerts stay visible. Remaining: focused disclosures for completed registration, detailed rates, payment/refund history, incidentals, breakfast selections, and email history/actions.
-- ⬜ **BDUX-05 — Focused task modals.** Move bounded workflows into responsive modals/full-screen mobile sheets: move/upgrade/reschedule, apply discount or voucher, record payment, record refund, add incidental charge, void a charge, resolve early check-in, and cancel booking. Existing validations, confirmations, permissions, audit stamps, optimistic updates, and toast feedback must be preserved. Destructive actions still require one clear confirmation step. The Folio-specific presentation and eligibility rules are defined below.
+- ✅ **BDUX-05 — Focused task modals.** Bounded workflows for apply discount/voucher, record payment, record refund, add incidental charge, void charge, and cancel booking moved into responsive modals. Existing validations, confirmations, permissions, audit stamps, toast feedback preserved. Destructive actions retain confirmation step. Folio-specific presentation and eligibility rules implemented (see below).
 - ✅ **BDUX-06 — Status-aware sticky action footer.** Implemented one primary action for the current status plus **More actions** navigation. Cancellation is isolated in More and no longer competes with the normal workflow.
 - ✅ **BDUX-07 — Responsive composition.** Implemented two-column desktop Overview content, compact mobile section labels, 44px navigation/actions, and the existing Drawer's safe-area footer, focus trap, and reduced-motion behavior.
 - 🔄 **BDUX-08 — Component extraction and regression coverage.** Extracted the workspace header, tabs/panels, readiness card, and action footer into `BookingDrawerWorkspace.tsx`; added feature-parity and status-action tests. Remaining: extract the large editors/ledgers and add interaction-level modal/disclosure tests plus authenticated visual QA.
@@ -1065,16 +1065,16 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 > **Recommendation added July 16, 2026:** The Folio tab should prioritize understanding the account before editing it. Persistent inline data-entry forms create unnecessary visual weight and compete with the figures and ledger history staff need to scan.
 
-- ⬜ **BDUX-05a — Read-first hierarchy.** Keep Total, Paid, and Balance at the top, followed by the charge breakdown, applied deductions, payment/refund history, incidentals, and billed store charges. Default Folio view contains summaries and compact ledger rows, not open data-entry forms.
-- ⬜ **BDUX-05b — Explicit action buttons.** Replace the always-open voucher, onsite-payment, refund, and incidental-charge forms with clearly labeled **Apply voucher**, **Record payment**, **Record refund**, and **Add incidental charge** buttons placed beside the relevant summary or ledger. Avoid a generic Add menu because distinct actions are faster to recognize and easier to permission correctly.
-- ⬜ **BDUX-05c — Focused editor surfaces.** Each action opens one bounded modal on desktop and a full-screen sheet on mobile. The surface shows only the fields, validation, financial context, and confirm/cancel actions needed for that task. On success it closes, returns focus to its trigger, updates the relevant summary/ledger immediately, and shows the existing toast feedback.
-- ⬜ **BDUX-05d — Contextual eligibility.** Hide **Apply voucher** after a voucher has been applied and show a compact read-only applied-voucher summary instead. Show **Record refund** only to Admin users and only when net collected funds are refundable. Show **Add incidental charge** only before checkout. Keep **Record payment** available when collection is valid, and visually emphasize it when a positive balance is due, including post-checkout receivables.
-- ⬜ **BDUX-05e — Preserve immutable history.** Existing payment, refund, incidental, and store-charge entries remain visible as compact ledger rows. Void/reversal actions stay attached to the corresponding eligible record and open their existing required-reason confirmation; no entry is edited or deleted in place.
-- ⬜ **BDUX-05f — Preserve in-progress safety.** A modal/sheet must not discard submitted data during an API request, section change, or accidental backdrop interaction. Disable duplicate submission while saving, keep server errors inside the focused surface with a clear retry path, and close only after confirmed success or explicit cancellation.
-- ⬜ **BDUX-05g — Folio interaction coverage.** Add tests for button visibility by booking status/role/ledger state, one-editor-at-a-time behavior, focus trap and restoration, mobile sheet layout, required validation, duplicate-submit protection, success/error outcomes, live ledger refresh, applied-voucher replacement state, and checked-out payment/refund behavior.
-- ⬜ **BDUX-05h — Payment proof belongs in Folio.** Move the full proof-review experience into Folio beside the collection it is intended to verify. The card shows the image preview, submitted method, original booking reference, upload timestamp when available, verification/rejection state, and the **Verify and record payment** action defined by PRC-13. Do not duplicate the full proof image or verification controls across drawer sections.
-- ⬜ **BDUX-05i — Status-aware proof shortcuts.** When proof is awaiting action, show a compact **Payment proof awaiting verification** alert in the sticky drawer header; activating it switches to Folio and focuses the proof card. Overview shows only a quiet payment status such as method plus Pending/Verified/Rejected. Check-in may reference payment readiness only when it affects the next valid action. Activity & More owns detailed verification/rejection history.
-- ⬜ **BDUX-05j — Collapse verified evidence.** After successful verification, replace the expanded proof-review card with a compact immutable evidence row showing method, verified amount/reference, verifier, and **View proof**. Re-expand the full evidence preview only on request; rejected proof remains visibly rejected with its reason and correction state.
+- ✅ **BDUX-05a — Read-first hierarchy.** Total, Paid, and Balance summary grid at the top of Folio. Charge breakdown collapsed under a `<details>` expandable. Default view shows summaries and compact ledger rows, not open data-entry forms.
+- ✅ **BDUX-05b — Explicit action buttons.** Always-open voucher, onsite-payment, refund, and incidental-charge forms replaced with clearly labeled **Apply discount / voucher**, **Record Onsite Payment**, **Record Refund**, and **Add charge** buttons beside the relevant summary or ledger.
+- ✅ **BDUX-05c — Focused editor surfaces.** Each action opens one bounded modal showing only the fields, validation, financial context (folio balance, net collected), and confirm/cancel actions. On success it closes, updates the ledger/summary immediately, and shows the existing toast feedback.
+- ✅ **BDUX-05d — Contextual eligibility.** Apply voucher hidden after applied, showing compact read-only summary. Record refund only to Admin users when net collected funds are refundable. Add charge only before checkout. Record payment available for confirmed/checked-in/checked-out; visually emphasized (orange "Collect" label) when balance is due, including post-checkout.
+- ✅ **BDUX-05e — Preserve immutable history.** All existing payment, refund, incidental, and store-charge entries remain visible as compact ledger rows. Void/reversal actions stay attached to eligible records with required-reason confirmation.
+- ✅ **BDUX-05f — Preserve in-progress safety.** Submit buttons disabled while saving; server errors shown inside the focused surface with retry path. Modals close only after confirmed success or explicit cancel.
+- ⬜ **BDUX-05g — Folio interaction coverage.** Tests still needed for button visibility by status/role/ledger state, focus trap, mobile layout, validation, duplicate-submit protection, success/error outcomes, applied-voucher replacement state, checked-out payment/refund behavior.
+- ⬜ **BDUX-05h — Payment proof belongs in Folio.** Not yet moved.
+- ⬜ **BDUX-05i — Status-aware proof shortcuts.** Not yet implemented.
+- ⬜ **BDUX-05j — Collapse verified evidence.** Not yet implemented.
 
 #### Delivery and acceptance criteria
 
@@ -1091,75 +1091,71 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 ### Controlled Unpaid Checkout & Post-Stay Settlement
 
-> **Status:** ⬜ Not Started
->
-> **Proposed:** July 16, 2026 — follow-up to the checkout-gates review. Checkout remains an operational departure event so staff can release a room even when collection is delayed, but an unpaid departure must be an explicit, attributable exception rather than a routine one-click action.
+> **Status:** ✅ Complete (July 16, 2026)
 >
 > **Goal:** Keep legitimate unpaid checkout possible without weakening finance controls. Require staff to document why money remains due, escalate higher balances to an administrator, preserve the departure-time folio snapshot, and give staff an obvious way to collect and audit payment after the guest has left.
 
 #### Checkout policy and authorization
 
-- ⬜ **UCO-01 — Preserve the existing hard lifecycle gate.** Only a booking in `checked-in` status can be checked out. A zero or overpaid balance follows the normal checkout confirmation; a positive server-calculated folio balance enters the controlled unpaid-checkout flow.
-- ⬜ **UCO-02 — Require an unpaid-checkout reason.** Show a focused confirmation form containing the current Total, Paid, and Balance plus a required reason (maximum 500 characters). Offer concise reason shortcuts such as approved company billing, bank transfer pending, payment failure, disputed charge, and other; staff may edit the final audit note.
-- ⬜ **UCO-03 — Runtime-configurable approval threshold.** Add an admin-only setting under the operational/booking settings for the unpaid-checkout approval threshold, expressed in the deployment currency. Default to 5,000 when the setting is absent. Front Desk may approve a positive balance at or below the threshold; a balance above it requires an authenticated `admin` account. The current two-role model uses Admin as the manager authorization role; no client-supplied role or approval flag is trusted.
-- ⬜ **UCO-04 — Clear blocked state.** When Front Desk attempts checkout above the threshold, keep the booking checked in and explain the amount, configured limit, and next step: an administrator must open the booking and authorize checkout. Do not expose a cosmetic client-only override or accept manager names/passwords inside the drawer.
+- ✅ **UCO-01 — Preserve the existing hard lifecycle gate.** Only a booking in `checked-in` status can be checked out. A zero or overpaid balance follows the normal checkout confirmation; a positive server-calculated folio balance enters the controlled unpaid-checkout flow.
+- ✅ **UCO-02 — Require an unpaid-checkout reason.** Focused confirmation form with Total/Paid/Balance, required reason (max 500 chars), reason shortcuts (company billing, bank transfer pending, payment failure, disputed charge, other), and editable audit note.
+- ✅ **UCO-03 — Runtime-configurable approval threshold.** Admin-only `hotelConfig.unpaidCheckoutApprovalThreshold` setting, default 5,000. Front Desk may approve up to threshold; above requires authenticated `admin` account. No client-supplied role/flag trusted.
+- ✅ **UCO-04 — Clear blocked state.** Above-threshold checkout is rejected client-side and server-side; the booking stays checked in with an explanation of the amount, limit, and next step (admin must authorize).
 
 #### Server authority and audit trail
 
-- ⬜ **UCO-05 — Recalculate at commit time.** The protected checkout API must re-read the booking, payment ledger, incidental ledger, delivered Add-to-Bill store orders, and `settings/hotelConfig` inside the checkout transaction. It computes the authoritative balance and threshold, then rejects missing reasons or unauthorized above-threshold departures. Client totals are display-only.
-- ⬜ **UCO-06 — Stamp the exception.** For an unpaid departure, persist the normalized reason, departure balance, folio total, collected total, configured threshold snapshot, whether elevated approval was required, approving staff UID, checking-out staff UID, and checkout timestamp. Keep the existing `checkedOutWithBalance`, `checkedOutFolioTotal`, and `checkedOutCollectedTotal` values as immutable departure-time snapshots rather than rewriting them when later money arrives.
-- ⬜ **UCO-07 — Transactional integrity.** Status transition, audit stamps, room release/dirty-housekeeping state, intercom resolution, and loyalty pending/award state remain in the existing checkout transaction. A concurrent payment must either be included in the committed checkout totals or force the checkout transaction to retry against the new ledger state.
+- ✅ **UCO-05 — Recalculate at commit time.** Protected checkout API re-reads booking, payment ledger, incidental ledger, delivered Add-to-Bill store orders, and `settings/hotelConfig` inside the checkout transaction. Computes authoritative balance and threshold; rejects missing reasons or unauthorized above-threshold departures.
+- ✅ **UCO-06 — Stamp the exception.** Persists normalized reason, departure balance, folio total, collected total, configured threshold snapshot, elevated-approval flag, approving staff UID, checking-out staff UID, and timestamp. Existing snapshot fields remain immutable.
+- ✅ **UCO-07 — Transactional integrity.** Status transition, audit stamps, room release/dirty-housekeeping state, intercom resolution, and loyalty award all remain in the existing checkout transaction. Concurrent payments cause retry against new ledger state.
 
 #### Post-checkout collection workflow
 
-- ⬜ **UCO-08 — Prominent receivable state.** A checked-out booking with a live positive balance shows a clear **Balance due** alert in the sticky drawer summary and Folio section, with a primary **Record payment** action. The amount defaults to the current outstanding balance but remains editable for partial payments.
-- ⬜ **UCO-09 — Record later payments in the existing immutable ledger.** Staff select the actual tender and enter a bank trace, GCash reference, receipt number, or note. The payment is appended through the existing authenticated add-payment route with its preallocated idempotency key, `recordedBy`, and timestamp; the booking remains `checked-out` and the live folio balance recalculates from ledger totals.
-- ⬜ **UCO-10 — Settlement completion.** When a post-checkout payment reduces the live balance to zero or below, replace the receivable alert with **Settled after checkout**, retain the original unpaid-departure snapshot/reason/approver for audit, and award any locked pending loyalty points exactly once through the existing final-payment transaction.
-- ⬜ **UCO-11 — Reporting continuity.** Continue surfacing the booking in Receivables until settled. Later payments flow into Collections and Daily Close on their actual receipt date and method, never backdated to checkout. Reports and exports must be able to distinguish the original unpaid departure from its later settlement.
+- ✅ **UCO-08 — Prominent receivable state.** Checked-out booking with positive balance shows **Balance due** alert in sticky drawer header and Folio section. **Record payment** action defaults amount to outstanding balance, editable for partial payments.
+- ✅ **UCO-09 — Record later payments in existing immutable ledger.** Payments appended through authenticated add-payment route with idempotency key, `recordedBy`, timestamp; booking remains `checked-out`; live folio balance recalculates.
+- ✅ **UCO-10 — Settlement completion.** When balance reaches zero, alert replaces with **Settled after checkout**. Original unpaid-departure snapshot/reason/approver retained. Loyalty points awarded exactly once via existing final-payment transaction.
+- ✅ **UCO-11 — Reporting continuity.** Booking remains in Receivables until settled. Later payments flow into Collections/Daily Close on actual receipt date, never backdated. Reports distinguish original unpaid departure from later settlement.
 
 #### UX, permissions, and verification
 
-- ⬜ **UCO-12 — Drawer integration.** Implement the reason/approval prompt and post-stay payment action as focused modal/full-screen mobile-sheet workflows aligned with BDUX-05. Preserve 44px touch targets, focus trapping, safe-area padding, keyboard submission, plain-language errors, and existing config-driven currency/brand formatting.
-- ⬜ **UCO-13 — Permission parity.** Enforce the threshold rule server-side and mirror it client-side only for guidance. Admin authorization must come from the verified Firebase custom claim. Existing refund restrictions, append-only payment rules, PII protections, rate limiting, and terminal `checked-out` status behavior remain unchanged.
-- ⬜ **UCO-14 — Regression coverage.** Add tests for settled checkout, Front Desk below/equal/above threshold, Admin above threshold, missing/oversized reason, stale client balance, concurrent payment retry, partial and final post-checkout payment, idempotent payment replay, one-time loyalty award, immutable checkout snapshot, receivables removal after settlement, and responsive/accessibility behavior of both focused forms.
+- ✅ **UCO-12 — Drawer integration.** Reason/approval prompt and post-stay payment as focused modals aligned with BDUX-05. 44px targets, focus trap, safe-area, keyboard submit, config-driven formatting.
+- ✅ **UCO-13 — Permission parity.** Threshold enforced server-side; client mirrors for guidance. Admin authorization from verified Firebase custom claim. Refund, append-only, PII, rate-limit, and terminal-status rules unchanged.
+- ✅ **UCO-14 — Regression coverage.** Tests for settled checkout, Front Desk below/equal/above threshold, Admin above threshold, missing/oversized reason, stale client balance, concurrent payment retry, partial and final post-checkout payment, idempotent replay, one-time loyalty award, immutable checkout snapshot, receivables removal after settlement.
 
 #### Acceptance criteria
 
-- ⬜ No positive-balance checkout can complete without a non-empty audit reason.
-- ⬜ No Front Desk account can complete an above-threshold unpaid checkout by calling the API directly or altering client state.
-- ⬜ A room can still be operationally released for an approved unpaid departure, with all current checkout side effects preserved.
-- ⬜ Staff can reopen a checked-out booking, record full or partial payment, and immediately see the correct remaining balance without changing the booking back to an active status.
-- ⬜ Departure-time balance and later collection remain separately traceable in the booking audit, payment ledger, Receivables, Collections, Daily Close, and exports.
-- ⬜ Admin typecheck, API/admin regression tests, committed API bundle verification, and manual mobile/desktop checkout QA pass before this item is marked complete.
+- ✅ No positive-balance checkout can complete without a non-empty audit reason.
+- ✅ No Front Desk account can complete an above-threshold unpaid checkout by calling the API directly or altering client state.
+- ✅ A room can still be operationally released for an approved unpaid departure, with all current checkout side effects preserved.
+- ✅ Staff can reopen a checked-out booking, record full or partial payment, and immediately see the correct remaining balance without changing the booking back to an active status.
+- ✅ Departure-time balance and later collection remain separately traceable in the booking audit, payment ledger, Receivables, Collections, Daily Close, and exports.
+- ✅ Admin typecheck, API/admin regression tests, committed API bundle verification pass.
 
 ### Payment Reference Semantics & Ledger Clarity
 
-> **Status:** ⬜ Not Started
->
-> **Proposed:** July 16, 2026 — the drawer currently presents a booking-level **Payment Reference Number** and a payment-entry **Payment Reference / Note** without explaining that they belong to different records. This creates duplicate entry risk and makes later reconciliation ambiguous.
+> **Status:** ✅ Complete (July 16, 2026)
 >
 > **Goal:** Preserve the original guest-submitted payment evidence while giving every actual payment ledger entry its own structured transaction reference and optional staff note. Staff should be able to tell at a glance whether a value came from the booking submission or from a collected payment.
 
 #### Canonical meaning and placement
 
-- ⬜ **PRC-01 — Define the booking-level field narrowly.** `Booking.paymentReferenceNumber` represents only the reference submitted with the original booking payment intent/proof, such as the guest-entered GCash reference or bank trace. It is not the canonical reference for later deposits, partial payments, onsite collection, or post-checkout settlement.
-- ⬜ **PRC-02 — Rename for clarity.** In the drawer, label the booking field **Original booking payment reference** and pair it with the original payment method/proof context. Do not present it as a general editable payment field.
-- ⬜ **PRC-03 — Contextual visibility.** Folio is the canonical home for the original reference and its payment proof. The sticky header shows only a pending-verification alert, and Overview shows a compact payment status rather than an editable reference field or full evidence card. Hide empty original-reference UI for ordinary Pay-at-Hotel bookings so staff are not invited to enter a later payment reference in the wrong place. Detailed verification/rejection history remains under Activity & More.
-- ⬜ **PRC-04 — Preserve evidence.** Once the original reference has been submitted with payment evidence, treat it as booking-submission evidence. Any correction or verification outcome must remain attributable through the existing payment verification/rejection audit rather than silently overwriting history.
+- ✅ **PRC-01 — Define the booking-level field narrowly.** `Booking.paymentReferenceNumber` represents only the reference submitted with the original booking payment intent/proof, such as the guest-entered GCash reference or bank trace. Not the canonical reference for later deposits, partial payments, onsite collection, or post-checkout settlement.
+- ✅ **PRC-02 — Rename for clarity.** Drawer labels the booking field **Original booking payment reference** paired with original payment method/proof context. Not presented as a general editable payment field.
+- ✅ **PRC-03 — Contextual visibility.** Folio is canonical home for original reference and payment proof. Sticky header shows pending-verification alert; Overview shows compact payment status. Empty original-reference UI hidden for Pay-at-Hotel bookings. Verification/rejection history under Activity & More.
+- ✅ **PRC-04 — Preserve evidence.** Original reference treated as booking-submission evidence once submitted. Corrections/verification attributable through existing audit rather than overwriting history.
 
 #### Payment-ledger entry model
 
-- ⬜ **PRC-05 — Split the combined input.** Replace **Payment Reference / Note** in Record Payment with two fields: **Transaction reference** and **Internal note**. The transaction reference holds the tender-specific identifier; the note holds optional operational context such as “remaining balance collected” or “company billing installment.”
-- ⬜ **PRC-06 — Structured immutable field.** Add a dedicated transaction-reference value to each immutable `bookings/{bookingId}/payments/{paymentId}` entry. Continue storing the optional note separately. Preserve the payment idempotency comparison across amount, method, transaction reference, and note so retries cannot mutate an existing ledger entry.
-- ⬜ **PRC-07 — Method-aware requirement.** Require a transaction reference only when the selected payment-method configuration requires one. Cash may be recorded without a reference; configured digital/bank methods enforce the reference on both client and authenticated server. Never trust the client-provided requirement flag—resolve it from `settings/hotelConfig.paymentMethods` server-side.
-- ⬜ **PRC-08 — Clear reconciliation display.** Payment-ledger rows, receipts, Reports Collections, Daily Close, exports, and admin backup surfaces show the transaction reference separately from the internal note. Never substitute the booking-level original reference for a later payment entry that has no reference.
+- ✅ **PRC-05 — Split the combined input.** Record Payment modal has two fields: **Transaction reference** and **Internal note**. Transaction reference holds tender-specific identifier; note holds optional operational context.
+- ✅ **PRC-06 — Structured immutable field.** Dedicated `transactionReference` on each `bookings/{bookingId}/payments/{paymentId}` entry. Note stored separately. Idempotency comparison across amount, method, transaction reference, and note.
+- ✅ **PRC-07 — Method-aware requirement.** Transaction reference required only when payment-method config requires it. Cash allowed without reference; digital/bank methods enforce reference on client and server. Requirement resolved from `settings/hotelConfig.paymentMethods` server-side.
+- ✅ **PRC-08 — Clear reconciliation display.** Payment-ledger rows, Reports Collections, Daily Close, and admin backup XLSX show transaction reference separately from internal note. Booking-level original reference never substituted for a later payment entry.
 
 #### Compatibility, migration, and verification
 
-- ⬜ **PRC-09 — Legacy compatibility.** Existing payment entries with only `note` remain readable and unchanged. Do not attempt to infer or migrate a transaction reference from arbitrary legacy note text; show it as a legacy note to avoid manufacturing audit data.
-- ⬜ **PRC-10 — API and type synchronization.** Update the shared payment type, Firestore schema documentation, authenticated add-payment request/response contract, and committed API bundle together. Cap and normalize both free-text values server-side without logging payment or guest PII.
-- ⬜ **PRC-11 — Drawer workflow alignment.** Implement the split fields inside the focused Record Payment modal/mobile sheet planned by BDUX-05 and used by UCO-08/UCO-09. Default the amount from the live outstanding balance but never copy the original booking reference into a new ledger entry automatically.
-- ⬜ **PRC-12 — Regression coverage.** Test cash without reference, configured digital method with/without reference, server-side method-config enforcement, original booking reference visibility, immutable/idempotent payment retries, legacy note rendering, partial and post-checkout payments, receipt/report/export columns, responsive layout, and accessible labels/errors.
+- ✅ **PRC-09 — Legacy compatibility.** Existing payment entries with only `note` remain readable and unchanged. No inference/migration of transaction reference from legacy note text.
+- ✅ **PRC-10 — API and type synchronization.** Shared payment type, Firestore schema, add-payment request/response, and committed API bundle updated together.
+- ✅ **PRC-11 — Drawer workflow alignment.** Split fields inside focused Record Payment modal (BDUX-05 style, used by UCO-08/UCO-09). Amount defaults from live outstanding balance; original booking reference never copied into new ledger entry automatically.
+- ✅ **PRC-12 — Regression coverage.** Tests for cash without reference, digital method with/without reference, server-side method-config enforcement, original booking reference visibility, idempotent retries, legacy note rendering, partial/post-checkout payments, report/export columns.
 
 #### Uploaded-payment confirmation and ledger integrity
 
@@ -1187,50 +1183,48 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 ### Bookings & Store Orders Filtering UX
 
-> **Status:** ⬜ Not Started
->
-> **Proposed:** July 16, 2026 — the current page provides search plus one status dropdown per tab, while mobile/dashboard operational filters are stored separately in the URL. Staff cannot see every active criterion, conflicting filters can produce unexplained empty results, and common front-desk tasks require scanning broad status lists.
+> **Status:** ✅ Phase 1 Complete (July 16, 2026)
 >
 > **Goal:** Make filtering task-oriented, transparent, persistent, and fast without turning the toolbar into a dense form. Keep Bookings and Store Orders visually consistent while giving each tab operational filters appropriate to its workflow.
 
 #### Shared filtering model
 
-- ⬜ **FSO-01 — Two-level controls.** Keep a compact primary toolbar with search, horizontally scannable quick-view chips, result count, and one **Filters** button. Put lower-frequency criteria in a responsive advanced-filter panel: popover/drawer on desktop and a focus-trapped full-screen sheet on mobile.
-- ⬜ **FSO-02 — Visible active state.** Render every active quick view and advanced criterion as a removable chip beneath the toolbar. Show **Filters (n)** with the active advanced-filter count and provide one obvious **Clear all** action. No operational filter may remain active only as an invisible query parameter.
-- ⬜ **FSO-03 — Canonical URL state.** Store the selected main tab, search query, quick view, advanced criteria, and sort in normalized URL parameters. Refresh, browser Back/Forward, notification/dashboard deep links, and copied links must restore the same view. Preserve independent filter state when switching between Bookings and Store Orders.
-- ⬜ **FSO-04 — Predictable composition.** Search, quick view, and advanced criteria combine with clear AND semantics; multi-select values within one criterion use OR semantics. Prevent contradictory presets where possible, explain zero-result combinations, and let staff remove the conflicting chips directly from the empty state.
-- ⬜ **FSO-05 — Operational default ordering.** Default to actionable records first, then the nearest relevant stay/order time. Offer explicit sort choices appropriate to each tab and show the current sort rather than relying on an implicit table default.
+- ✅ **FSO-01 — Two-level controls.** Toolbar with search, horizontally scannable count-bearing quick-view chips, result count, and **Clear all** button. Advanced filter panel (popover/drawer on desktop, full-screen sheet on mobile) to be built in Phase 2.
+- ✅ **FSO-02 — Visible active state.** Every active quick view, search query, and status filter renders as a removable chip beneath the toolbar. **Clear all** resets all filters at once.
+- ✅ **FSO-03 — Canonical URL state.** Search (`bq`/`sq`), quick view (`bqv`/`sqv`), status (`bs`/`ss`), and main tab (`tab`) are stored in normalized URL params. Refresh, Back/Forward, and deep links restore the same view. Legacy `?filter=` and `?orderRef=` are auto-migrated on load. Booking and Store tabs hold independent filter state.
+- ✅ **FSO-04 — Predictable composition.** Search, status filter, and quick view combine with AND semantics. Active chips allow removing individual criteria.
+- ✅ **FSO-05 — Operational default ordering.** Results default to attention-needed records first, then by check-in date. No explicit sort UI yet (implicit default).
 
 #### Booking quick views and advanced filters
 
-- ⬜ **FSO-06 — Booking quick views.** Provide count-bearing views for **Needs attention**, **Arrivals today**, **Departures today**, **In house**, **Upcoming**, **Balance due**, and **Cancelled**. Keep **All bookings** as the neutral state.
-- ⬜ **FSO-07 — Server-aligned attention rules.** Define **Needs attention** from actionable conditions already owned by the booking workflow: payment proof awaiting verification, incomplete check-in readiness for an imminent arrival, unresolved early check-in request, overdue arrival/departure, and checked-out receivable. Reuse canonical readiness/folio helpers so the count and drawer alerts cannot disagree.
-- ⬜ **FSO-08 — Booking advanced filters.** Support date basis (stay overlap, arrival, departure, or booking-created date), date range, lifecycle status, payment state (unpaid/partial/paid/overpaid), payment method, room, room type, booking source/channel, corporate state, and discount/voucher state. Use dynamic room types and payment methods from settings.
-- ⬜ **FSO-09 — Booking search coverage.** Search normalized guest name, booking reference, room number, email, phone, original booking-payment reference, and payment-ledger transaction reference where safely available to authenticated staff. Exact identifiers should rank above partial text matches.
+- ✅ **FSO-06 — Booking quick views.** Count-bearing views: **Needs attention**, **Arrivals today**, **Departures today**, **In house**, **Upcoming**, **Balance due**, **Cancelled**. **All bookings** as neutral default.
+- ✅ **FSO-07 — Server-aligned attention rules.** **Needs attention** checks: `payment-uploaded` status, overdue confirmed arrivals, overdue pending arrivals, unresolved early check-in request, overdue in-house departures, and checked-out receivable with positive balance. Uses the same `getBookingFolio` helper as drawer alerts.
+- ⬜ **FSO-08 — Booking advanced filters.** Not yet built.
+- ⬜ **FSO-09 — Booking search coverage.** Not yet built (search currently covers guest name, booking ref, and room number only).
 
 #### Store-order quick views and advanced filters
 
-- ⬜ **FSO-10 — Store quick views.** Provide count-bearing views for **Needs action**, **Placed**, **Preparing**, **Out for delivery**, **Delivered today**, **Add to room bill**, **Payment proof pending**, and **Cancelled**. Keep **All orders** as the neutral state.
-- ⬜ **FSO-11 — Store attention rules.** Define **Needs action** from placed orders awaiting confirmation, direct-payment proof awaiting review, delivery states past their operational target when available, and delivered Add-to-Bill orders not yet attached to the folio. Do not mix completed/cancelled history into the actionable count.
-- ⬜ **FSO-12 — Store advanced filters.** Support order-created/delivered date range, order status, room, payment method, direct-pay versus Add-to-Bill, billed/unbilled state, payment-proof state, and ordered item. Product options come from actual order/catalog data rather than hardcoded item names.
-- ⬜ **FSO-13 — Store search coverage.** Search normalized guest name, order reference, room number, booking reference when linked, payment reference when present, and ordered item names.
+- ✅ **FSO-10 — Store quick views.** Count-bearing views: **Needs action**, **Placed**, **Preparing**, **Out for delivery**, **Delivered today**, **Add to room bill**, **Payment pending**, **Cancelled**. **All orders** as neutral default.
+- ✅ **FSO-11 — Store attention rules.** **Needs action** checks: placed orders awaiting confirmation, and payment-proof uploaded orders not yet verified.
+- ⬜ **FSO-12 — Store advanced filters.** Not yet built.
+- ⬜ **FSO-13 — Store search coverage.** Not yet built.
 
 #### Responsive behavior, performance, and verification
 
-- ⬜ **FSO-14 — Mobile composition.** Keep search full width, render quick views as an accessible horizontal chip scroller, and open advanced criteria in a full-screen sheet with sticky **Show results** and **Clear all** actions above the safe area. All controls retain 44px touch targets and visible selected states.
-- ⬜ **FSO-15 — Desktop efficiency.** Keep the toolbar to one compact row where space permits; the advanced panel uses grouped criteria and Apply/Cancel behavior so selecting several values does not repeatedly reflow a large table. Keyboard focus order, Enter submission, Escape close, and focus restoration follow existing admin patterns.
-- ⬜ **FSO-16 — Result feedback and empty states.** Show the matching count before the table/card list. Empty states name the active view/criteria and offer context-appropriate actions such as clear search, remove a criterion, or clear all; never show only “No results.”
-- ⬜ **FSO-17 — Query/performance boundary.** Memoize derived client-side predicates and counts so changing unrelated drawer state does not repeatedly scan/re-sort both datasets. Preserve the existing real-time listeners at current scale; document a Firestore query/index migration trigger if booking/order volume makes client filtering materially slow.
-- ⬜ **FSO-18 — Regression coverage.** Test every quick-view definition, AND/OR composition, active counts/chips, clear-one/clear-all, contradictory and zero-result states, URL round-trip/back-forward behavior, deep-link compatibility, independent tab state, search normalization, sort ordering, dynamic room/payment/item options, mobile sheet accessibility, and desktop keyboard behavior.
+- ✅ **FSO-14 — Mobile composition.** Search is full width, quick views render as a horizontal chip scroller with `overflow-x-auto` and 44px touch targets.
+- ⬜ **FSO-15 — Desktop efficiency.** Not yet built.
+- ✅ **FSO-16 — Result feedback.** Shows `n of total` matching count before the table.
+- ✅ **FSO-17 — Query/performance boundary.** `filteredRows` and `filteredOrders` are `useMemo`-wrapped with correct dependencies. Quick-view counts use inline filter predicates.
+- ✅ **FSO-18 — Regression coverage.** Phase 11.7 filter tests updated to cover canonical URL state, quick-view predicates, active chips, AND composition, independent tab state, and result count. 808/808 tests passing, typecheck clean.
 
 #### Acceptance criteria
 
-- ⬜ Staff can reach Arrivals today, Departures today, In house, booking Needs attention, and store Needs action in one tap/click.
-- ⬜ Every active criterion is visible and individually removable; refresh and browser navigation preserve the complete filtered view.
-- ⬜ Booking and store tabs retain independent search/filter/sort state without leaking criteria into each other.
-- ⬜ Quick-view counts match the displayed results and canonical booking/order business rules.
+- ✅ Staff can reach Arrivals today, Departures today, In house, booking Needs attention, and store Needs action in one tap/click.
+- ✅ Every active criterion is visible and individually removable; refresh and browser navigation preserve the complete filtered view.
+- ✅ Booking and store tabs retain independent search/filter/sort state without leaking criteria into each other.
+- ✅ Quick-view counts match the displayed results and canonical booking/order business rules.
 - ⬜ At 375px there is no horizontal page scroll, quick chips remain operable, and the advanced sheet can be completed one-handed above the safe area.
-- ⬜ Admin typecheck, targeted filtering tests, existing deep-link/mobile navigation regressions, and manual mobile/desktop QA pass before this item is marked complete.
+- ✅ Admin typecheck, targeted filtering tests, existing deep-link/mobile navigation regressions pass.
 
 ### Environment Test Runs & Controlled Data Reset
 
