@@ -91,6 +91,23 @@ describe("POST /api/email/preview handler", () => {
     expect(res.send).toHaveBeenCalledWith(expect.stringContaining("Acme Tech Solutions Inc."));
   });
 
+  test.each([
+    ["corporate-inquiry-confirmation", "Acme Tech Solutions Inc."],
+    ["contact-inquiry", "Airport transfer availability"],
+    ["contact-confirmation", "Airport transfer availability"]
+  ])("returns rendered HTML for %s template", async (template, expectedContent) => {
+    const req: any = {
+      method: "POST",
+      staff: { success: true },
+      body: { template }
+    };
+    const res = mockResponse();
+    await handleEmailPreview(req, res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "text/html");
+    expect(res.send).toHaveBeenCalledWith(expect.stringContaining(expectedContent));
+  });
+
   test("rejects unknown templates", async () => {
     const req: any = {
       method: "POST",

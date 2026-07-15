@@ -1225,6 +1225,14 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
     specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
   };
 
+  const mockContactInquiry = {
+    name: "Maria Santos",
+    email: "maria.santos@example.com",
+    phone: "+63 917 555 0123",
+    subject: "Airport transfer availability",
+    message: "Do you offer airport pickup for two guests arriving in the afternoon?"
+  };
+
   const mockEarlyCheckinRequest = {
     requestedCheckInTime: "10:30 AM",
     notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
@@ -1291,6 +1299,15 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         break;
       case "corporate-inquiry":
         html = corporateInquiryEmail(mockInquiry);
+        break;
+      case "corporate-inquiry-confirmation":
+        html = corporateInquiryConfirmationEmail(mockInquiry);
+        break;
+      case "contact-inquiry":
+        html = contactInquiryEmail(mockContactInquiry);
+        break;
+      case "contact-confirmation":
+        html = contactConfirmationEmail(mockContactInquiry);
         break;
       case "early-checkin-request":
         html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
