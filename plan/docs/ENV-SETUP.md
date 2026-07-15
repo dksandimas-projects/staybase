@@ -75,6 +75,13 @@ TURNSTILE_SECRET_KEY=
 
 # Vercel Cron (server-side only — never prefix with VITE_)
 CRON_SECRET=
+
+# CORS allow-list escape hatch (server-side only; optional). Comma-separated
+# absolute origins for any admin/guest surface that isn't the production
+# config.domain/adminDomain or the auto-derived stg./stg-admin. staging hosts.
+# Only needed for white-label clients whose staging hosts don't follow that
+# convention — Spark Inn staging is covered automatically on Vercel Preview.
+EXTRA_ALLOWED_ORIGINS=
 ```
 
 ---
