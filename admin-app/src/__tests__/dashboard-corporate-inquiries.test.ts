@@ -17,6 +17,12 @@ describe("Dashboard corporate inquiry updates", () => {
     expect(dashboardSrc).toMatch(/About new corporate inquiries/);
   });
 
+  it("uses the available desktop action rail for corporate alerts", () => {
+    expect(dashboardSrc).toMatch(/xl:grid-cols-\[minmax\(0,1\.25fr\)_minmax\(320px,0\.75fr\)\]/);
+    expect(dashboardSrc).toMatch(/overdueCheckouts\.length > 0 \|\| newCorporateInquiries\.length > 0/);
+    expect(dashboardSrc).toMatch(/<div className="space-y-5">/);
+  });
+
   it("opens the corporate inquiry drawer from the dashboard deep link", () => {
     expect(inquiriesSrc).toMatch(/useSearchParams/);
     expect(inquiriesSrc).toMatch(/searchParams\.get\("inquiryId"\)/);
