@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { adminAuth } from "./lib/firebase-admin";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRescheduleBooking, handleResolveEarlyCheckin } from "./handlers/bookings";
+import { adminAuth, adminDb } from "./lib/firebase-admin";
+import { sendBookingTrigger } from "./handlers/email";
+import { writeNotification } from "./lib/notifications";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -478,8 +480,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleRejectDiscount(req, res);
+  }
+
+  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Verification (2026-07-15): staff can reject a pending
+  // payment proof from the dashboard pending-payments
+  // alerts. The booking bounces back to `pending` (room
+  // stays held), the reason is stamped on the booking +
+  // emailed to the guest so they can re-upload a corrected
+  // proof. Rate-limited at the same 30/min as the other
+  // staff confirm/checkout routes since this is a fast
+  // tap-and-confirm action.
+  if (domain === "bookings" && action === "reject-payment" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reject-payment:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many reject requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    // Capture the booking snapshot before the handler
+    // bounces the status to `pending` so the post-response
+    // email + notification have the original
+    // `paymentReferenceNumber` + `paymentProofUrl` to
+    // surface to the guest.
+    const bookingId = String((req.body || {}).bookingId || "").trim();
+    let preRejectSnapshot: any = null;
+    if (bookingId) {
+      const snap = await adminDb.collection("bookings").doc(bookingId).get();
+      if (snap.exists) preRejectSnapshot = snap.data() || null;
+    }
+
+    // Only fire side effects when the handler actually
+    // bounces the booking (the handler updates the doc
+    // only when the status was `payment-uploaded`).
+    const wasEligible = preRejectSnapshot?.status === "payment-uploaded";
+
+    const result = await handleRejectPayment(req, res);
+
+    if (wasEligible) {
+      try {
+        const emailBooking = {
+          ...preRejectSnapshot,
+          status: "pending",
+          paymentRejectionReason: (req.body || {}).reason
+        };
+        await sendBookingTrigger("payment-rejected", emailBooking);
+      } catch (emailErr) {
+        console.error("Failed to send payment-rejected email:", emailErr);
+      }
+      try {
+        await writeNotification({
+          type: "payment",
+          title: `Payment proof rejected — ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: preRejectSnapshot.roomNumber || null,
+          bookingRef: preRejectSnapshot.bookingRef || null
+        });
+      } catch (notifErr) {
+        console.error("Failed to write payment-rejection notification:", notifErr);
+      }
+    }
+
+    return result;
   }
 
   if (domain === "bookings" && action === "apply-discount" && req.method === "POST") {

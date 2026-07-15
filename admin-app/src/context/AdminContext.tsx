@@ -170,6 +170,12 @@ export interface Booking {
   hasBreakfast: boolean;
   breakfastRate: number;
   paymentReferenceNumber?: string | null;
+  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Verification (2026-07-15): stamped by the
+  // `/api/bookings/reject-payment` handler.
+  paymentRejectionReason?: string | null;
+  paymentRejectedAt?: string | null;
+  paymentRejectedBy?: string | null;
   rescheduleHistory?: any[];
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
@@ -389,6 +395,12 @@ export interface AdminContextType {
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
+  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Verification (2026-07-15). Bounces a `payment-uploaded`
+  // booking back to `pending` (room stays held), emails
+  // the guest with the reason, and writes a `payment`
+  // notification for the bell.
+  rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
   updateRoomBlock: (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string }>;
@@ -1521,6 +1533,40 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       console.error(`Error resending email trigger ${action}:`, err);
       return { success: false, error: err.message };
+    }
+  };
+
+  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Verification (2026-07-15). Bounces a `payment-uploaded`
+  // booking back to `pending` via
+  // `/api/bookings/reject-payment`. The server emails the
+  // guest + writes a `payment` notification; the local
+  // `bookings` snapshot updates via the existing
+  // `onSnapshot` listener so the dashboard card flips to
+  // `pending` on the next frame.
+  const rejectPayment = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string }> => {
+    const safeReason = String(reason || "").trim().slice(0, 500);
+    if (!safeReason) {
+      return { success: false, error: "A rejection reason is required so the guest can fix the issue." };
+    }
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/reject-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, reason: safeReason })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to reject payment." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error rejecting payment:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
 
@@ -4327,6 +4373,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         addOnsitePayment,
         addWalkinBooking,
         resendBookingEmail,
+        rejectPayment,
         roomBlocks,
         createRoomBlock,
         updateRoomBlock,

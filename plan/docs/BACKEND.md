@@ -118,7 +118,11 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `specialRequests` | string | |
 | `status` | string | `"pending"` \| `"payment-uploaded"` \| `"payment-confirmed"` \| `"confirmed"` \| `"checked-in"` \| `"checked-out"` \| `"cancelled"` |
 | `paymentMethod` | string | `"pay-at-hotel"` \| `"gcash"` \| `"paypal"` \| other |
-| `paymentProofUrl` | string | Firebase Storage URL |
+| `paymentProofUrl` | string \| null | Firebase Storage URL. `null` is the canonical "no proof" value (not `""`) per BF-45. |
+| `paymentReferenceNumber` | string \| null | Guest-entered reference (GCash/bank ref #) for staff cross-check. Displayed in the dashboard pending payment alerts. Per Phase 12 — Dashboard Payment Rejection & Reference Verification (2026-07-15). |
+| `paymentRejectionReason` | string \| null | Staff reason when a pending payment proof is rejected from the dashboard. Bounces the booking back to `pending` (room stays held) and emails the guest with the reason. Per Phase 12 — Dashboard Payment Rejection & Reference Verification (2026-07-15). |
+| `paymentRejectedAt` | timestamp \| null | Server timestamp set by `/api/bookings/reject-payment`. |
+| `paymentRejectedBy` | string \| null | Staff UID who rejected. |
 | `source` | string | `"online"` \| `"walk-in"` \| `"phone"` \| `"facebook"` \| `"corporate"` |
 | `notes` | string | Internal staff notes |
 | `handledBy` | string | Staff UID |

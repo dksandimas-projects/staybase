@@ -82,6 +82,32 @@ Front desk currently has no single, guided place to see "who ordered breakfast t
 4. ✅ Wire the toggle to `updateDoc` on `bookings/{bookingId}`, setting `breakfastServed.{key} = true/false`.
 5. ✅ Reuse the same data for the Reports kitchen-prep view where useful, so "today" in both places is always consistent.
 
+## Implementation Plan — Payment Rejection & Reference Verification ✅ *(shipped 2026-07-15 on `feature/dashboard-payment-reject`)*
+
+**Chosen option: A (bounce → `pending`, room stays held).** Full rejection email sent; stale proof kept for audit.
+
+### What was built
+
+| Piece | File(s) | Notes |
+|---|---|---|
+| **Server handler** | `guest-app/server/handlers/bookings.ts` → `handleRejectPayment` | Validates `payment-uploaded` status, updates to `pending`, stamps `paymentRejectionReason` + `paymentRejectedAt` + `paymentRejectedBy` via `adminDb.runTransaction`. Keeps stale `paymentProofUrl` / `paymentReferenceNumber`. |
+| **API route** | `guest-app/server/apiRouter.ts` | `domain === "bookings" && action === "reject-pending"` catches a pre-reject snapshot, dispatches handler, then fires best-effort `payment-rejected` email + `payment` notification. Staff auth + 30 req/min rate limit. |
+| **Email template** | `guest-app/server/handlers/email.ts` → `paymentRejectedEmail()` | Displays rejection reason + kept reference number + CTA to re-upload. Wired as `"payment-rejected"` action in `sendBookingTrigger`. |
+| **AdminContext** | `admin-app/src/context/AdminContext.tsx` → `rejectPayment(bookingId, reason)` | Calls `POST /api/bookings/reject-payment`. |
+| **Dashboard UI** | `admin-app/src/pages/DashboardPage.tsx` | Pending-payment card now shows `paymentReferenceNumber` as an amber badge. New **Reject** button opens a modal with 3 canned-reason presets + free-text textarea (500 char max, required). |
+| **Guest lookup** | `guest-app/src/pages/BookingLookupPage.tsx` | Red banner with `paymentRejectionReason` when field is non-null and booking is `pending`. |
+| **Shared types** | `shared/types/index.ts:Booking` | Three new fields: `paymentRejectionReason`, `paymentRejectedAt`, `paymentRejectedBy`. |
+| **Backend docs** | `plan/docs/BACKEND.md §bookings` | Schema rows for the three new fields. |
+| **Roadmap** | `plan/project/ROADMAP.md` | Item marked ✅. |
+
+### Key design decisions
+
+1. **Option A (bounce to `pending`)** — room stays held, guest re-uploads through existing guest lookup UI. No new status enum needed.
+2. **Full rejection email** — the server sends a `payment-rejected` email (via the existing `sendBookingTrigger` / Resend pipeline) with the reason + kept reference number + "re-upload your proof" CTA.
+3. **Stale proof kept for audit** — `paymentProofUrl` and `paymentReferenceNumber` remain on the doc. Guest lookup shows the rejection reason as a callout so they know to re-upload.
+4. **Notification** — a `type: "payment"` notification is written so the bell badge on every admin page alerts staff that a rejection happened.
+5. **Required reason** — the server rejects a `POST` with an empty reason; the UI enforces it client-side too (`reason` button disabled when textarea is blank).
+
 ## Edge Cases & States
 
 - [x] Loading state — skeleton for each section independently (sections load as data arrives)

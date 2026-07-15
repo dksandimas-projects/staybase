@@ -1795,6 +1795,80 @@ export async function handleRejectDiscount(req: any, res: any) {
   }
 }
 
+// Per Phase 12 — Dashboard Payment Rejection & Reference
+// Verification (2026-07-15). Staff reject a pending
+// payment proof from the dashboard; the booking is
+// bounced back to `pending` (room stays held — see
+// AVAILABILITY-LOCKING.md, only `cancelled` frees the
+// room), `paymentRejectionReason` + `paymentRejectedAt`
+// + `paymentRejectedBy` are stamped on the booking, and
+// a `payment-rejected` email goes to the guest so they
+// can re-upload a corrected proof from the existing
+// `pending` UI. Stale `paymentProofUrl` +
+// `paymentReferenceNumber` are **kept** for audit per the
+// implementation plan.
+const MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
+
+export async function handleRejectPayment(req: any, res: any) {
+  const { bookingId, reason } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  const safeReason = typeof reason === "string"
+    ? reason.trim().slice(0, MAX_PAYMENT_REJECTION_REASON_LENGTH)
+    : "";
+  if (!safeReason) {
+    return res.status(400).json({ success: false, error: "A rejection reason is required so the guest can fix the issue." });
+  }
+
+  // Staff UID per the audit-collection PII convention
+  // (BF-15). `req.staff.uid` is guaranteed by the
+  // dispatcher's `authenticateStaff` guard.
+  const paymentRejectedBy = req.staff?.uid || "staff";
+
+  let bookingData: any = null;
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef.get();
+    if (!bookingDoc.exists) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    const data = bookingDoc.data()!;
+    if (data.status !== "payment-uploaded") {
+      return res.status(400).json({
+        success: false,
+        error: `Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`
+      });
+    }
+    bookingData = data;
+
+    const updatedAt = new Date();
+    await bookingRef.update({
+      status: "pending",
+      paymentRejectionReason: safeReason,
+      paymentRejectedAt: updatedAt,
+      paymentRejectedBy,
+      // Per the implementation plan: stale proof state is
+      // kept for audit. The re-upload is guest-driven via
+      // the existing `pending` UI on the lookup page.
+      updatedAt
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "pending",
+        paymentRejectionReason: safeReason,
+        paymentRejectedAt: updatedAt,
+        paymentRejectedBy
+      }
+    });
+  } catch (error: any) {
+    console.error("Payment rejection handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
 export async function handleCancelBooking(req: any, res: any) {
   const { bookingId, bookingRef, guestEmail, reason } = req.body;
 
