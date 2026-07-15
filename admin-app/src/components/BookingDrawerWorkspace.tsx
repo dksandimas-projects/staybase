@@ -139,7 +139,7 @@ export function BookingDrawerWorkspaceHeader({
 
         {(needsPaymentReview || needsEarlyCheckInReview || needsCheckInWork) && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3" aria-label="Booking alerts">
-            {needsPaymentReview && <AlertChip label="Payment proof needs review" onClick={() => onSectionChange("overview")} />}
+            {needsPaymentReview && <AlertChip label="Payment proof awaiting verification" onClick={() => onSectionChange("folio")} />}
             {needsEarlyCheckInReview && <AlertChip label="Early check-in needs a decision" onClick={() => onSectionChange("overview")} />}
             {needsCheckInWork && (
               <AlertChip

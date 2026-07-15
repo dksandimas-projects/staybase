@@ -1072,9 +1072,9 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ **BDUX-05e — Preserve immutable history.** All existing payment, refund, incidental, and store-charge entries remain visible as compact ledger rows. Void/reversal actions stay attached to eligible records with required-reason confirmation.
 - ✅ **BDUX-05f — Preserve in-progress safety.** Submit buttons disabled while saving; server errors shown inside the focused surface with retry path. Modals close only after confirmed success or explicit cancel.
 - ⬜ **BDUX-05g — Folio interaction coverage.** Tests still needed for button visibility by status/role/ledger state, focus trap, mobile layout, validation, duplicate-submit protection, success/error outcomes, applied-voucher replacement state, checked-out payment/refund behavior.
-- ⬜ **BDUX-05h — Payment proof belongs in Folio.** Not yet moved.
-- ⬜ **BDUX-05i — Status-aware proof shortcuts.** Not yet implemented.
-- ⬜ **BDUX-05j — Collapse verified evidence.** Not yet implemented.
+- ✅ **BDUX-05h — Payment proof belongs in Folio.** Full proof-review card with image preview, method, ref, upload timestamp, and **Verify & Record Payment** action lives in Folio. Overview shows only compact payment status (method + Pending/Verified/Rejected badge). Sticky footer links to Folio for review. No duplication across sections.
+- ✅ **BDUX-05i — Status-aware proof shortcuts.** Compact **Payment proof awaiting verification** alert in sticky drawer header; clicking switches to Folio. Overview shows quiet payment status only.
+- ✅ **BDUX-05j — Collapse verified evidence.** After successful verification (`payment-confirmed`, `confirmed`, or rejected), proof card collapses to compact immutable evidence row showing method, reference, and **View proof** button. Expanded card with verify action visible only while `payment-uploaded`.
 
 #### Delivery and acceptance criteria
 
@@ -1199,20 +1199,20 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 - ✅ **FSO-06 — Booking quick views.** Count-bearing views: **Needs attention**, **Arrivals today**, **Departures today**, **In house**, **Upcoming**, **Balance due**, **Cancelled**. **All bookings** as neutral default.
 - ✅ **FSO-07 — Server-aligned attention rules.** **Needs attention** checks: `payment-uploaded` status, overdue confirmed arrivals, overdue pending arrivals, unresolved early check-in request, overdue in-house departures, and checked-out receivable with positive balance. Uses the same `getBookingFolio` helper as drawer alerts.
-- ⬜ **FSO-08 — Booking advanced filters.** Not yet built.
-- ⬜ **FSO-09 — Booking search coverage.** Not yet built (search currently covers guest name, booking ref, and room number only).
+- ✅ **FSO-08 — Booking advanced filters.** Date basis (stay/arrival/departure/created), date range, payment state (unpaid/partial/paid/overpaid), payment method (from settings), room, room type, source/channel, corporate state, and discount/voucher state. Opened via **Filters** button in toolbar; shows active filter count.
+- ✅ **FSO-09 — Booking search coverage.** Search covers guest name, booking ref, room number, email, phone, original booking-payment reference, and payment-ledger transaction references.
 
 #### Store-order quick views and advanced filters
 
 - ✅ **FSO-10 — Store quick views.** Count-bearing views: **Needs action**, **Placed**, **Preparing**, **Out for delivery**, **Delivered today**, **Add to room bill**, **Payment pending**, **Cancelled**. **All orders** as neutral default.
 - ✅ **FSO-11 — Store attention rules.** **Needs action** checks: placed orders awaiting confirmation, and payment-proof uploaded orders not yet verified.
-- ⬜ **FSO-12 — Store advanced filters.** Not yet built.
-- ⬜ **FSO-13 — Store search coverage.** Not yet built.
+- ✅ **FSO-12 — Store advanced filters.** Date range, room, payment method, billing type (direct pay / add-to-bill), billed/unbilled state, and payment-proof state.
+- ✅ **FSO-13 — Store search coverage.** Search covers guest name, order ref, room number, booking ID, notes, and ordered item names.
 
 #### Responsive behavior, performance, and verification
 
 - ✅ **FSO-14 — Mobile composition.** Search is full width, quick views render as a horizontal chip scroller with `overflow-x-auto` and 44px touch targets.
-- ⬜ **FSO-15 — Desktop efficiency.** Not yet built.
+- ✅ **FSO-15 — Desktop efficiency.** Single compact toolbar row with search, result count, active filter count badge, Filters button, and Clear all. Advanced filter panel uses grouped controls with Apply/Cancel per section.
 - ✅ **FSO-16 — Result feedback.** Shows `n of total` matching count before the table.
 - ✅ **FSO-17 — Query/performance boundary.** `filteredRows` and `filteredOrders` are `useMemo`-wrapped with correct dependencies. Quick-view counts use inline filter predicates.
 - ✅ **FSO-18 — Regression coverage.** Phase 11.7 filter tests updated to cover canonical URL state, quick-view predicates, active chips, AND composition, independent tab state, and result count. 808/808 tests passing, typecheck clean.

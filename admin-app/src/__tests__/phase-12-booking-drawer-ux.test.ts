@@ -33,7 +33,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
     expect(workspaceSrc).toMatch(/SummaryMetric label="Total"/);
     expect(workspaceSrc).toMatch(/SummaryMetric label="Paid"/);
     expect(workspaceSrc).toMatch(/aria-label="Booking lifecycle"/);
-    expect(workspaceSrc).toMatch(/Payment proof needs review/);
+    expect(workspaceSrc).toMatch(/Payment proof awaiting verification/);
     expect(workspaceSrc).toMatch(/Early check-in needs a decision/);
   });
 

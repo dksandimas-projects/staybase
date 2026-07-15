@@ -478,6 +478,46 @@ export function BookingsPage() {
   const storeStatusFilter = readParam("ss", "all");
   const setStoreStatusFilter = (v: string) => writeParams({ ss: v === "all" ? null : v, sqv: null });
 
+  // FSO-08: Booking advanced filter state (synced to URL)
+  const bDateBasis = readParam("bdb", "stay") as "stay" | "arrival" | "departure" | "created";
+  const setBDateBasis = (v: string) => writeParams({ bdb: v === "stay" ? null : v });
+  const bDateFrom = readParam("bdf", "");
+  const setBDateFrom = (v: string) => writeParams({ bdf: v || null });
+  const bDateTo = readParam("bdt", "");
+  const setBDateTo = (v: string) => writeParams({ bdt: v || null });
+  const bPayState = readParam("bps", "");
+  const setBPayState = (v: string) => writeParams({ bps: v || null });
+  const bPaymentMethod = readParam("bpm", "");
+  const setBPaymentMethod = (v: string) => writeParams({ bpm: v || null });
+  const bRoom = readParam("br", "");
+  const setBRoom = (v: string) => writeParams({ br: v || null });
+  const bRoomType = readParam("brt", "");
+  const setBRoomType = (v: string) => writeParams({ brt: v || null });
+  const bSource = readParam("bsrc", "");
+  const setBSource = (v: string) => writeParams({ bsrc: v || null });
+  const bCorp = readParam("bc", "");
+  const setBCorp = (v: string) => writeParams({ bc: v || null });
+  const bDiscount = readParam("bd", "");
+  const setBDiscount = (v: string) => writeParams({ bd: v || null });
+  const [showBookingFilters, setShowBookingFilters] = useState(false);
+
+  // FSO-12: Store advanced filter state (synced to URL)
+  const sDateFrom = readParam("sdf", "");
+  const setSDateFrom = (v: string) => writeParams({ sdf: v || null });
+  const sDateTo = readParam("sdt", "");
+  const setSDateTo = (v: string) => writeParams({ sdt: v || null });
+  const sRoom = readParam("sr", "");
+  const setSRoom = (v: string) => writeParams({ sr: v || null });
+  const sPaymentMethod = readParam("spm", "");
+  const setSPaymentMethod = (v: string) => writeParams({ spm: v || null });
+  const sBilling = readParam("sbl", "");
+  const setSBilling = (v: string) => writeParams({ sbl: v || null });
+  const sBilled = readParam("sbd", "");
+  const setSBilled = (v: string) => writeParams({ sbd: v || null });
+  const sPayProof = readParam("spp", "");
+  const setSPayProof = (v: string) => writeParams({ spp: v || null });
+  const [showStoreFilters, setShowStoreFilters] = useState(false);
+
   // Booking Drawer States
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -890,17 +930,56 @@ export function BookingsPage() {
     return 5;
   };
 
+  // FSO-08/09: Advanced filter predicates
+  const matchesBookingAdvanced = (booking: Booking): boolean => {
+    const folio = getBookingFolio(booking);
+    // Payment state
+    if (bPayState) {
+      const totalPayments = folio.paymentsTotal;
+      if (bPayState === "unpaid" && totalPayments > 0) return false;
+      if (bPayState === "partial" && (totalPayments <= 0 || totalPayments >= booking.totalPrice)) return false;
+      if (bPayState === "paid" && totalPayments < booking.totalPrice) return false;
+      if (bPayState === "overpaid" && totalPayments <= booking.totalPrice) return false;
+    }
+    // Payment method
+    if (bPaymentMethod && booking.paymentMethod !== bPaymentMethod) return false;
+    // Room
+    if (bRoom && booking.roomNumber !== bRoom) return false;
+    // Room type
+    if (bRoomType && booking.roomType !== bRoomType) return false;
+    // Source
+    if (bSource && booking.source !== bSource) return false;
+    // Corporate
+    if (bCorp === "yes" && !booking.isCorporate) return false;
+    if (bCorp === "no" && booking.isCorporate) return false;
+    // Discount/voucher
+    if (bDiscount === "yes" && !booking.discountType && !booking.voucherCode) return false;
+    if (bDiscount === "no" && (booking.discountType || booking.voucherCode)) return false;
+    // Date basis/range
+    const dateField: Record<string, string> = { stay: booking.checkIn, arrival: booking.checkIn, departure: booking.checkOut, created: booking.createdAt };
+    const bookingDate = dateField[bDateBasis] || booking.checkIn;
+    if (bDateFrom && bookingDate < bDateFrom) return false;
+    if (bDateTo && bookingDate > bDateTo) return false;
+    return true;
+  };
+
   // FSO-04: Combined filtered + sorted booking rows
   const filteredRows = useMemo(() => {
     let rows = bookings.filter((booking) => {
-      const matchesSearch =
-        !bookingSearch ||
-        booking.guestName.toLowerCase().includes(bookingSearch.toLowerCase()) ||
-        booking.bookingRef.toLowerCase().includes(bookingSearch.toLowerCase()) ||
-        booking.roomNumber.includes(bookingSearch);
+      const s = bookingSearch.toLowerCase().trim();
+      const matchesSearch = !s || (
+        booking.guestName.toLowerCase().includes(s) ||
+        booking.bookingRef.toLowerCase().includes(s) ||
+        booking.roomNumber.includes(s) ||
+        booking.guestEmail.toLowerCase().includes(s) ||
+        booking.guestPhone.includes(s) ||
+        (booking.paymentReferenceNumber || "").toLowerCase().includes(s) ||
+        (booking.onsitePayments || []).some((p) => (p.transactionReference || "").toLowerCase().includes(s))
+      );
       const matchesStatus = bookingStatusFilter === "all" || booking.status === bookingStatusFilter;
       const matchesQV = bookingQuickView === "all" || bookingQuickViewPredicate(booking, bookingQuickView);
-      return matchesSearch && matchesStatus && matchesQV;
+      const matchesAdvanced = matchesBookingAdvanced(booking);
+      return matchesSearch && matchesStatus && matchesQV && matchesAdvanced;
     });
     rows.sort((a, b) => {
       const sa = bookingSortScore(a);
@@ -909,7 +988,7 @@ export function BookingsPage() {
       return (a.checkIn || "").localeCompare(b.checkIn || "");
     });
     return rows;
-  }, [bookings, bookingSearch, bookingStatusFilter, bookingQuickView]);
+  }, [bookings, bookingSearch, bookingStatusFilter, bookingQuickView, bDateBasis, bDateFrom, bDateTo, bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount]);
 
   const handleRowClick = (row: Booking) => {
     setSelectedBooking(row);
@@ -1044,17 +1123,37 @@ export function BookingsPage() {
     </div>
   );
 
+  // FSO-12/13: Store advanced filter predicates
+  const matchesStoreAdvanced = (order: any): boolean => {
+    if (sRoom && order.roomNumber !== sRoom) return false;
+    if (sPaymentMethod && order.paymentMethod !== sPaymentMethod) return false;
+    if (sBilling === "direct" && order.paymentMethod === "add-to-bill") return false;
+    if (sBilling === "add-to-bill" && order.paymentMethod !== "add-to-bill") return false;
+    if (sBilled === "billed" && !order.isBilled) return false;
+    if (sBilled === "unbilled" && order.isBilled) return false;
+    if (sPayProof === "uploaded" && !order.paymentProofUrl) return false;
+    if (sPayProof === "verified" && order.status !== "payment-confirmed") return false;
+    if (sDateFrom && (order.createdAt || "") < sDateFrom) return false;
+    if (sDateTo && (order.createdAt || "") > sDateTo) return false;
+    return true;
+  };
+
   // FSO-04/10: Combined filtered + sorted store orders
   const filteredOrders = useMemo(() => {
     let rows = storeOrders.filter((order) => {
-      const matchesSearch =
-        !storeSearch ||
-        order.guestName?.toLowerCase().includes(storeSearch.toLowerCase()) ||
-        order.orderRef?.toLowerCase().includes(storeSearch.toLowerCase()) ||
-        order.roomNumber?.includes(storeSearch);
+      const s = storeSearch.toLowerCase().trim();
+      const matchesSearch = !s || (
+        order.guestName?.toLowerCase().includes(s) ||
+        order.orderRef?.toLowerCase().includes(s) ||
+        order.roomNumber?.includes(s) ||
+        (order.bookingId || "").toLowerCase().includes(s) ||
+        (order.notes || "").toLowerCase().includes(s) ||
+        (order.items || []).some((i: any) => (i.name || "").toLowerCase().includes(s))
+      );
       const matchesStatus = storeStatusFilter === "all" || order.status === storeStatusFilter;
       const matchesQV = storeQuickView === "all" || storeQuickViewPredicate(order, storeQuickView);
-      return matchesSearch && matchesStatus && matchesQV;
+      const matchesAdvanced = matchesStoreAdvanced(order);
+      return matchesSearch && matchesStatus && matchesQV && matchesAdvanced;
     });
     rows.sort((a: any, b: any) => {
       const aAction = storeQuickViewPredicate(a, "needs-action") ? 0 : 1;
@@ -1063,7 +1162,7 @@ export function BookingsPage() {
       return (b.createdAt || "").localeCompare(a.createdAt || "");
     });
     return rows;
-  }, [storeOrders, storeSearch, storeStatusFilter, storeQuickView]);
+  }, [storeOrders, storeSearch, storeStatusFilter, storeQuickView, sRoom, sPaymentMethod, sBilling, sBilled, sPayProof, sDateFrom, sDateTo]);
 
   const handleOrderRowClick = (row: any) => {
     setSelectedOrder(row);
@@ -2293,10 +2392,10 @@ export function BookingsPage() {
       return (
         <button
           type="button"
-          onClick={() => { setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+          onClick={() => setActiveBookingSection("folio")}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
         >
-          Verify & Record Payment
+          Review proof in Folio
         </button>
       );
     }
@@ -2416,6 +2515,14 @@ export function BookingsPage() {
     if (bookingStatusFilter !== "all") {
       activeChips.push({ id: "status", label: `Status: ${bookingStatusFilter}`, onRemove: () => setBookingStatusFilter("all") });
     }
+    if (bPayState) activeChips.push({ id: "bPayState", label: `Payment: ${bPayState}`, onRemove: () => setBPayState("") });
+    if (bPaymentMethod) activeChips.push({ id: "bPaymentMethod", label: `Method: ${bPaymentMethod}`, onRemove: () => setBPaymentMethod("") });
+    if (bRoom) activeChips.push({ id: "bRoom", label: `Room: ${bRoom}`, onRemove: () => setBRoom("") });
+    if (bRoomType) activeChips.push({ id: "bRoomType", label: `Type: ${bRoomType}`, onRemove: () => setBRoomType("") });
+    if (bSource) activeChips.push({ id: "bSource", label: `Source: ${bSource}`, onRemove: () => setBSource("") });
+    if (bCorp) activeChips.push({ id: "bCorp", label: bCorp === "yes" ? "Corporate" : "Non-corporate", onRemove: () => setBCorp("") });
+    if (bDiscount) activeChips.push({ id: "bDiscount", label: bDiscount === "yes" ? "With discount" : "No discount", onRemove: () => setBDiscount("") });
+    if (bDateFrom || bDateTo) activeChips.push({ id: "bDate", label: `Dates: ${bDateFrom || "any"} – ${bDateTo || "any"}`, onRemove: () => { setBDateFrom(""); setBDateTo(""); } });
   } else {
     if (storeQuickView !== "all") {
       const def = storeQuickViews.find((q) => q.id === storeQuickView);
@@ -2427,7 +2534,17 @@ export function BookingsPage() {
     if (storeStatusFilter !== "all") {
       activeChips.push({ id: "status", label: `Status: ${storeStatusFilter}`, onRemove: () => setStoreStatusFilter("all") });
     }
+    if (sRoom) activeChips.push({ id: "sRoom", label: `Room: ${sRoom}`, onRemove: () => setSRoom("") });
+    if (sPaymentMethod) activeChips.push({ id: "sPaymentMethod", label: `Method: ${sPaymentMethod}`, onRemove: () => setSPaymentMethod("") });
+    if (sBilling) activeChips.push({ id: "sBilling", label: sBilling === "direct" ? "Direct pay" : "Add to bill", onRemove: () => setSBilling("") });
+    if (sBilled) activeChips.push({ id: "sBilled", label: sBilled === "billed" ? "Billed" : "Unbilled", onRemove: () => setSBilled("") });
+    if (sPayProof) activeChips.push({ id: "sPayProof", label: `Proof: ${sPayProof}`, onRemove: () => setSPayProof("") });
+    if (sDateFrom || sDateTo) activeChips.push({ id: "sDate", label: `Dates: ${sDateFrom || "any"} – ${sDateTo || "any"}`, onRemove: () => { setSDateFrom(""); setSDateTo(""); } });
   }
+
+  const advancedCount = activeMainTab === "bookings"
+    ? [bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount, bDateFrom || bDateTo ? "dates" : ""].filter(Boolean).length
+    : [sRoom, sPaymentMethod, sBilling, sBilled, sPayProof, sDateFrom || sDateTo ? "dates" : ""].filter(Boolean).length;
 
   const currentQVs = activeMainTab === "bookings" ? bookingQuickViews : storeQuickViews;
   const setQV = activeMainTab === "bookings" ? setBookingQuickView : setStoreQuickView;
@@ -2513,12 +2630,12 @@ export function BookingsPage() {
         </div>
       </div>
 
-      {/* FSO-01/02: Toolbar — search, filters button, result count */}
+      {/* FSO-01/02/08/15: Toolbar — search, filters button, result count, clear all */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <input
             type="text"
-            placeholder={activeMainTab === "bookings" ? "Search by Guest Name, Reference, Room..." : "Search orders by Guest, Reference, Room..."}
+            placeholder={activeMainTab === "bookings" ? "Search by guest, ref, room, email, payment ref..." : "Search by guest, ref, room, item, booking ref..."}
             value={activeMainTab === "bookings" ? bookingSearch : storeSearch}
             onChange={(e) => { const v = e.target.value; if (activeMainTab === "bookings") setBookingSearch(v); else setStoreSearch(v); }}
             className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:bg-white"
@@ -2531,13 +2648,28 @@ export function BookingsPage() {
               ? `${totalCount} records`
               : `${resultCount} of ${totalCount}`}
           </span>
+          {advancedCount > 0 && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary-dark">
+              {advancedCount} active filters
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { if (activeMainTab === "bookings") setShowBookingFilters(true); else setShowStoreFilters(true); }}
+            className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            {activeMainTab === "bookings" ? "Filters" : "Filters"}
+            {advancedCount > 0 && ` (${advancedCount})`}
+          </button>
           <button
             type="button"
             onClick={() => {
-              if (activeMainTab === "bookings" && activeChips.length > 0) {
+              if (activeMainTab === "bookings") {
                 setBookingQuickView("all"); setBookingSearch(""); setBookingStatusFilter("all");
-              } else if (activeMainTab === "store" && activeChips.length > 0) {
+                setBPayState(""); setBPaymentMethod(""); setBRoom(""); setBRoomType(""); setBSource(""); setBCorp(""); setBDiscount(""); setBDateFrom(""); setBDateTo("");
+              } else {
                 setStoreQuickView("all"); setStoreSearch(""); setStoreStatusFilter("all");
+                setSRoom(""); setSPaymentMethod(""); setSBilling(""); setSBilled(""); setSPayProof(""); setSDateFrom(""); setSDateTo("");
               }
             }}
             disabled={activeChips.length === 0}
@@ -2561,6 +2693,163 @@ export function BookingsPage() {
               {chip.label} <span aria-hidden="true">×</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* FSO-08/15: Booking advanced filters panel */}
+      {showBookingFilters && (
+        <div className="relative">
+          <div className="absolute left-0 right-0 z-20 rounded-xl border border-gray-200 bg-white p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Advanced filters — bookings</h3>
+              <button type="button" onClick={() => setShowBookingFilters(false)} className="min-h-[36px] rounded-lg border border-gray-250 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Date basis
+                <select value={bDateBasis} onChange={(e) => setBDateBasis(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="stay">Stay overlap</option>
+                  <option value="arrival">Arrival date</option>
+                  <option value="departure">Departure date</option>
+                  <option value="created">Booking created</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                From
+                <input type="date" value={bDateFrom} onChange={(e) => setBDateFrom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                To
+                <input type="date" value={bDateTo} onChange={(e) => setBDateTo(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment state
+                <select value={bPayState} onChange={(e) => setBPayState(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="partial">Partially paid</option>
+                  <option value="paid">Fully paid</option>
+                  <option value="overpaid">Overpaid</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment method
+                <select value={bPaymentMethod} onChange={(e) => setBPaymentMethod(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {onsitePaymentMethodOptions.map((m: any) => <option key={m.method} value={m.method}>{m.label || m.method}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Room
+                <select value={bRoom} onChange={(e) => setBRoom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {rooms.map((r: any) => <option key={r.id} value={r.roomNumber}>{r.roomNumber}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Room type
+                <select value={bRoomType} onChange={(e) => setBRoomType(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {roomTypes.map((rt: any) => <option key={rt.id} value={rt.id}>{rt.name || rt.id}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Source / channel
+                <select value={bSource} onChange={(e) => setBSource(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="online">Online</option>
+                  <option value="walk-in">Walk-in</option>
+                  <option value="phone">Phone</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="corporate">Corporate</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Corporate
+                <select value={bCorp} onChange={(e) => setBCorp(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="yes">Corporate</option>
+                  <option value="no">Non-corporate</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Discount / Voucher
+                <select value={bDiscount} onChange={(e) => setBDiscount(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="yes">Has discount or voucher</option>
+                  <option value="no">No discount or voucher</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
+              <button type="button" onClick={() => { setBPayState(""); setBPaymentMethod(""); setBRoom(""); setBRoomType(""); setBSource(""); setBCorp(""); setBDiscount(""); setBDateFrom(""); setBDateTo(""); }} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
+              <button type="button" onClick={() => setShowBookingFilters(false)} className="min-h-[36px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark">Apply filters</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FSO-12/15: Store advanced filters panel */}
+      {showStoreFilters && (
+        <div className="relative">
+          <div className="absolute left-0 right-0 z-20 rounded-xl border border-gray-200 bg-white p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Advanced filters — store orders</h3>
+              <button type="button" onClick={() => setShowStoreFilters(false)} className="min-h-[36px] rounded-lg border border-gray-250 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                From
+                <input type="date" value={sDateFrom} onChange={(e) => setSDateFrom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                To
+                <input type="date" value={sDateTo} onChange={(e) => setSDateTo(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Room
+                <select value={sRoom} onChange={(e) => setSRoom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {rooms.map((r: any) => <option key={r.id} value={r.roomNumber}>{r.roomNumber}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment method
+                <select value={sPaymentMethod} onChange={(e) => setSPaymentMethod(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {onsitePaymentMethodOptions.map((m: any) => <option key={m.method} value={m.method}>{m.label || m.method}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Billing type
+                <select value={sBilling} onChange={(e) => setSBilling(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="direct">Direct pay</option>
+                  <option value="add-to-bill">Add to room bill</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Billed state
+                <select value={sBilled} onChange={(e) => setSBilled(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="billed">Billed to room</option>
+                  <option value="unbilled">Not yet billed</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment proof
+                <select value={sPayProof} onChange={(e) => setSPayProof(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="uploaded">Uploaded</option>
+                  <option value="verified">Verified</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
+              <button type="button" onClick={() => { setSDateFrom(""); setSDateTo(""); setSRoom(""); setSPaymentMethod(""); setSBilling(""); setSBilled(""); setSPayProof(""); }} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
+              <button type="button" onClick={() => setShowStoreFilters(false)} className="min-h-[36px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark">Apply filters</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2615,32 +2904,33 @@ export function BookingsPage() {
             />
 
             <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
-            {selectedBooking.paymentProofUrl && (
-              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
-                <p className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
-                  <CreditCard size={13} className="text-primary" />
-                  Payment: {selectedBooking.paymentMethod || "Not specified"}
+            {selectedBooking.paymentProofUrl ? (
+              <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-2.5">
+                <div className="flex items-center gap-2 text-xs">
+                  <CreditCard size={14} className="text-gray-400" />
+                  <span className="text-gray-700">{selectedBooking.paymentMethod || "Online payment"}</span>
                   {selectedBooking.status === "payment-uploaded" && (
-                    <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
                   )}
                   {selectedBooking.status === "payment-confirmed" && (
-                    <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">Confirmed</span>
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">Verified</span>
                   )}
-                </p>
-                {selectedBooking.paymentReferenceNumber && (
-                  <p className="mt-1 text-[10px] text-gray-400">
-                    Ref: {selectedBooking.paymentReferenceNumber}
-                  </p>
+                  {selectedBooking.paymentRejectionReason && (
+                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-700">Rejected</span>
+                  )}
+                </div>
+                {selectedBooking.paymentProofUrl && (
+                  <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[32px] rounded-lg border border-gray-250 bg-white px-2.5 text-[10px] font-semibold text-gray-600 hover:bg-gray-100">
+                    View proof
+                  </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setActiveBookingSection("folio")}
-                  className="mt-1 text-[10px] font-semibold text-primary hover:text-primary-dark"
-                >
-                  View full proof in Folio →
-                </button>
               </div>
-            )}
+            ) : selectedBooking.paymentMethod !== "pay-at-hotel" && selectedBooking.paymentMethod ? (
+              <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
+                <CreditCard size={14} className="text-gray-400" />
+                {selectedBooking.paymentMethod} — no proof uploaded
+              </div>
+            ) : null}
             </BookingDrawerSectionPanel>
 
             {/* Check-in registration workstation */}
@@ -3036,51 +3326,68 @@ export function BookingsPage() {
                     <CreditCard size={14} className="text-primary" />
                     Payment Proof
                   </h3>
-                  <div className="rounded-lg border border-gray-200 bg-white p-4">
-                    <div className="grid gap-4 sm:grid-cols-[112px_1fr]">
-                      <button
-                        type="button"
-                        onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
-                        className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
-                      >
-                        <img
-                          src={selectedBooking.paymentProofUrl}
-                          alt={`Payment proof for ${selectedBooking.bookingRef}`}
-                          className="h-28 w-full object-cover"
-                        />
+                  {selectedBooking.status === "payment-confirmed" || selectedBooking.status === "confirmed" || selectedBooking.paymentRejectionReason ? (
+                    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="space-y-0.5 text-xs">
+                        <p className="font-semibold text-gray-800">
+                          {selectedBooking.paymentMethod} · {selectedBooking.paymentReferenceNumber || "No reference"}
+                        </p>
+                        <p className="text-[10px] text-gray-400">
+                          {selectedBooking.status === "payment-confirmed" ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50">
+                        <Eye size={13} className="inline mr-1" />
+                        View proof
                       </button>
-                      <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
-                        <p>
-                          Review the uploaded payment screenshot before confirming this booking.
-                        </p>
-                        <p className="font-semibold text-gray-900">
-                          Method: {selectedBooking.paymentMethod || "Not specified"}
-                        </p>
-                        {selectedBooking.paymentReferenceNumber && (
-                          <p className="font-semibold text-gray-900">
-                            Ref: {selectedBooking.paymentReferenceNumber}
-                          </p>
-                        )}
-                        <a
-                          href={selectedBooking.paymentProofUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
-                        >
-                          <Eye size={13} />
-                          Open Full Size
-                        </a>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="grid gap-4 sm:grid-cols-[112px_1fr]">
                         <button
                           type="button"
                           onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
-                          className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
+                          className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
                         >
-                          <Eye size={13} />
-                          Preview
+                          <img
+                            src={selectedBooking.paymentProofUrl}
+                            alt={`Payment proof for ${selectedBooking.bookingRef}`}
+                            className="h-28 w-full object-cover"
+                          />
                         </button>
+                        <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                          <p className="font-semibold text-gray-900">
+                            Method: {selectedBooking.paymentMethod || "Not specified"}
+                          </p>
+                          {selectedBooking.paymentReferenceNumber && (
+                            <p className="font-semibold text-gray-900">
+                              Ref: {selectedBooking.paymentReferenceNumber}
+                            </p>
+                          )}
+                          {selectedBooking.status === "payment-uploaded" && (
+                            <button
+                              type="button"
+                              onClick={() => { setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+                              className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 text-[10px] font-bold text-white transition hover:bg-green-700"
+                            >
+                              <ShieldCheck size={13} />
+                              Verify & Record Payment
+                            </button>
+                          )}
+                          <div className="flex gap-2">
+                            <a href={selectedBooking.paymentProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50">
+                              <Eye size={13} />
+                              Open Full Size
+                            </a>
+                            <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="inline-flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark">
+                              <Eye size={13} />
+                              Preview
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
