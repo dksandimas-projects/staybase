@@ -375,7 +375,12 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       // persist a `notifications` doc for the bell panel so
       // the front desk sees the store order in the persistent
       // log. Deep-links to /store-management via entityId.
-      void writeNotification({
+      //
+      // Per NC-01 (post-ship review 2026-07-15): awaited
+      // so Vercel does not freeze the instance after
+      // `res.json()` and drop the doc. Safe — the helper
+      // never throws.
+      await writeNotification({
         type: "store-order",
         title: `New store order — ${responseData.orderRef} (Room ${roomNumber})`,
         entityType: "storeOrder",
