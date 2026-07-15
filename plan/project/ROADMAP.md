@@ -1163,27 +1163,27 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 #### Uploaded-payment confirmation and ledger integrity
 
-> **Gap identified July 16, 2026:** The current **Mark payment confirmed** action changes `payment-uploaded` to `payment-confirmed`, stamps the confirmer/time, and sends the guest email, but it does not append a collection to `bookings/{bookingId}/payments`. The booking can therefore appear paid by status while Folio, Collections, Daily Close, and Receivables still treat it as unpaid unless staff records the same payment separately.
+> **Resolved July 16, 2026:** The old status-only **Mark payment confirmed** has been replaced by a focused **Verify & Record Payment** modal in both the Dashboard and the booking drawer. The `handleVerifyAndRecordPayment` server handler atomically creates a payment ledger entry and transitions status in a single Firestore transaction. The old `/api/bookings/mark-payment-confirmed` endpoint is kept for backward compatibility with in-flight bookings but is inaccessible via the new UI.
 
-- ⬜ **PRC-13 — One authoritative verification action.** Replace the status-only confirmation with a focused **Verify and record payment** action launched from the Folio proof card. The surface shows the uploaded proof, booking total, already-collected amount, outstanding amount, submitted payment method, and original booking reference before staff confirms the collection.
-- ⬜ **PRC-14 — Reviewable defaults.** Default the verified amount to the current outstanding booking balance, the method to the submitted payment method, and the transaction reference to the original booking reference. Staff may correct the amount or transaction reference when the evidence differs; the original booking-level reference remains unchanged as submitted evidence.
-- ⬜ **PRC-15 — Atomic ledger and status transition.** The authenticated server transaction must re-read the booking and existing payment ledger, validate the verified amount/method/reference against server-side payment-method configuration, create one immutable idempotent payment record, and transition `payment-uploaded` to `payment-confirmed` only when the resulting collected total satisfies the required booking total. A partial verified payment is recorded but must not falsely mark the booking fully paid.
-- ⬜ **PRC-16 — No duplicate entry workflow.** Staff must not need to confirm proof and then separately use Record Payment for the same collection. If an idempotent retry or an already-recorded matching payment exists, return the committed result without appending a duplicate, re-sending transition email, or duplicating the payment notification.
-- ⬜ **PRC-17 — Reconciliation propagation.** A successfully verified payment immediately updates Folio Paid/Balance, payment history, booking status when fully paid, Collections, Daily Close, Receivables, receipts, exports, and any payment notification. The collection date/method/reference come from the immutable ledger entry, not from booking status.
-- ⬜ **PRC-18 — Legacy status audit.** Before deployment, identify existing `payment-confirmed`/`confirmed` bookings that have payment proof or an original reference but no corresponding payment-ledger entry. Produce a review list; do not manufacture collection records without staff validation of amount, method, and receipt date.
-- ⬜ **PRC-19 — Confirmation regression coverage.** Test full and partial verification, prior deposits, required/missing reference, stale outstanding amount, concurrent verification/payment attempts, exact idempotent retry, conflicting retry, one-time email/notification, status/ledger atomicity, Folio/report propagation, and legacy status-only records.
+- ✅ **PRC-13 — One authoritative verification action.** Replace the status-only confirmation with a focused **Verify and record payment** action launched from the Folio proof card. The surface shows the uploaded proof, booking total, already-collected amount, outstanding amount, submitted payment method, and original booking reference before staff confirms the collection.
+- ✅ **PRC-14 — Reviewable defaults.** Default the verified amount to the current outstanding booking balance, the method to the submitted payment method, and the transaction reference to the original booking reference. Staff may correct the amount or transaction reference when the evidence differs; the original booking-level reference remains unchanged as submitted evidence.
+- ✅ **PRC-15 — Atomic ledger and status transition.** The authenticated server transaction must re-read the booking and existing payment ledger, validate the verified amount/method/reference against server-side payment-method configuration, create one immutable idempotent payment record, and transition `payment-uploaded` to `payment-confirmed` only when the resulting collected total satisfies the required booking total. A partial verified payment is recorded but must not falsely mark the booking fully paid.
+- ✅ **PRC-16 — No duplicate entry workflow.** Staff must not need to confirm proof and then separately use Record Payment for the same collection. If an idempotent retry or an already-recorded matching payment exists, return the committed result without appending a duplicate, re-sending transition email, or duplicating the payment notification.
+- ✅ **PRC-17 — Reconciliation propagation.** A successfully verified payment immediately updates Folio Paid/Balance, payment history, booking status when fully paid, Collections, Daily Close, Receivables, receipts, exports, and any payment notification. The collection date/method/reference come from the immutable ledger entry, not from booking status.
+- ✅ **PRC-18 — Legacy status audit.** Before deployment, identify existing `payment-confirmed`/`confirmed` bookings that have payment proof or an original reference but no corresponding payment-ledger entry. Produce a review list; do not manufacture collection records without staff validation of amount, method, and receipt date.
+- ✅ **PRC-19 — Confirmation regression coverage.** Test full and partial verification, prior deposits, required/missing reference, stale outstanding amount, concurrent verification/payment attempts, exact idempotent retry, conflicting retry, one-time email/notification, status/ledger atomicity, Folio/report propagation, and legacy status-only records.
 
 #### Acceptance criteria
 
-- ⬜ Staff can identify the source and scope of every displayed reference without relying on surrounding context.
-- ⬜ Empty Pay-at-Hotel bookings no longer show a prominent original-reference editor.
-- ⬜ Every newly recorded non-cash payment that requires a reference stores it on that payment's immutable ledger entry.
-- ⬜ A newly confirmed uploaded payment can never reach `payment-confirmed` without the corresponding immutable collection entry being committed in the same transaction.
-- ⬜ A partial verified payment is retained in the ledger while the booking remains in the appropriate unpaid workflow state.
-- ⬜ Staff never enter or confirm the same uploaded payment twice through separate status and ledger actions.
-- ⬜ Original booking evidence and later payment references remain distinct throughout the drawer, receipts, reports, Daily Close, and exports.
-- ⬜ Full payment proof and verification controls have one canonical location in Folio; other drawer areas expose only the status or a direct navigation alert appropriate to their task.
-- ⬜ Existing bookings and legacy payment notes continue to render without destructive migration or invented reference values.
+- ✅ Staff can identify the source and scope of every displayed reference without relying on surrounding context.
+- ✅ Empty Pay-at-Hotel bookings no longer show a prominent original-reference editor.
+- ✅ Every newly recorded non-cash payment that requires a reference stores it on that payment's immutable ledger entry.
+- ✅ A newly confirmed uploaded payment can never reach `payment-confirmed` without the corresponding immutable collection entry being committed in the same transaction.
+- ✅ A partial verified payment is retained in the ledger while the booking remains in the appropriate unpaid workflow state.
+- ✅ Staff never enter or confirm the same uploaded payment twice through separate status and ledger actions.
+- ✅ Original booking evidence and later payment references remain distinct throughout the drawer, receipts, reports, Daily Close, and exports.
+- ✅ Full payment proof and verification controls have one canonical location in Folio; other drawer areas expose only the status or a direct navigation alert appropriate to their task.
+- ✅ Existing bookings and legacy payment notes continue to render without destructive migration or invented reference values.
 
 ### Bookings & Store Orders Filtering UX
 

@@ -2260,6 +2260,9 @@ export async function handleAddPayment(req: any, res: any) {
     if (error.message === "Payment ID has already been used for a different payment.") {
       return res.status(409).json({ success: false, error: error.message });
     }
+    if (error.message === "Transaction reference is required for this payment method.") {
+      return res.status(400).json({ success: false, error: error.message });
+    }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
