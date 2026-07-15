@@ -62,6 +62,7 @@ interface ReportPayment {
   guestName: string;
   amount: number;
   method: string;
+  transactionReference?: string | null;
   note: string;
   reason: string | null;
   approvedBy: string | null;
@@ -290,6 +291,7 @@ export function ReportsPage() {
           guestName: isStoreTender ? String(data.guestName || "") : "",
           amount: Number(data.amount || 0),
           method: String(data.method || "unknown"),
+          transactionReference: data.transactionReference ? String(data.transactionReference) : null,
           note: String(data.note || ""),
           reason: data.reason ? String(data.reason) : null,
           approvedBy: data.approvedBy ? String(data.approvedBy) : null,
@@ -1121,6 +1123,7 @@ export function ReportsPage() {
               Type: payment.type || (Number(payment.amount || 0) < 0 ? "refund" : "payment"),
               Amount: payment.amount || 0,
               Method: payment.method || "",
+              "Transaction Reference": payment.transactionReference || "",
               Note: payment.note || "",
               Reason: payment.reason || "",
               "Approved By": payment.approvedBy || "",
@@ -1439,7 +1442,7 @@ export function ReportsPage() {
       charge.voidOf || ""
     ]);
 
-    const collectionHeaders = ["Date", "Booking Ref", "Guest", "Room", "Type", "Amount", "Method", "Recorded By", "Approved By", "Reason / Note"];
+    const collectionHeaders = ["Date", "Booking Ref", "Guest", "Room", "Type", "Amount", "Method", "Transaction Reference", "Recorded By", "Approved By", "Reason / Note"];
     const collectionRows = filteredPayments.map((payment) => [
       payment.recordedAt?.toISOString() || "",
       payment.bookingRef,
@@ -1448,6 +1451,7 @@ export function ReportsPage() {
       payment.type,
       payment.amount,
       PAYMENT_LABELS[payment.method] || payment.method,
+      (payment as any).transactionReference || "",
       payment.recordedBy,
       payment.approvedBy || "",
       payment.reason || payment.note
@@ -2433,7 +2437,7 @@ function SalesTab(props: {
         <div className="overflow-x-auto rounded-lg border border-gray-150">
           <table className="min-w-full text-xs">
             <thead className="bg-gray-50 text-left">
-              <tr>{["Date", "Booking", "Guest / Room", "Type", "Method", "Staff", "Amount"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr>
+              <tr>{["Date", "Booking", "Guest / Room", "Type", "Method", "Transaction Ref", "Staff", "Amount"].map((heading) => <th key={heading} className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredPayments.slice(0, 50).map((payment) => (
@@ -2443,6 +2447,7 @@ function SalesTab(props: {
                   <td className="px-3 py-2 text-gray-600">{payment.guestName || "—"} · Room {payment.roomNumber || "—"}</td>
                   <td className={`px-3 py-2 font-semibold capitalize ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{payment.type}</td>
                   <td className="px-3 py-2 text-gray-600">{PAYMENT_LABELS[payment.method] || payment.method}</td>
+                  <td className="px-3 py-2 text-gray-500">{(payment as any).transactionReference || "—"}</td>
                   <td className="px-3 py-2 text-gray-600">{payment.recordedBy}</td>
                   <td className={`px-3 py-2 text-right font-bold ${payment.type === "refund" ? "text-red-600" : "text-emerald-700"}`}>{formatPrice(payment.amount)}</td>
                 </tr>

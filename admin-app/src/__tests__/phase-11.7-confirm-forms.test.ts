@@ -115,7 +115,7 @@ describe("Phase 11.7 — confirm/prompt → inline forms + AdminContext migratio
 
     it("uses useTwoClickConfirm for destructive confirmations", () => {
       expect(bookingsSrc).toMatch(/const\s+discountApproveConfirm\s*=\s*useTwoClickConfirm/);
-      expect(bookingsSrc).toMatch(/const\s+checkoutWithBalanceConfirm\s*=\s*useTwoClickConfirm/);
+      expect(bookingsSrc).toMatch(/showUnpaidCheckoutForm/);
     });
 
     it("uses ConfirmForm for the destructive forms that need a reason", () => {

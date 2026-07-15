@@ -48,7 +48,7 @@ describe("Admin audit 2026-07-07 SEV-2 fixes", () => {
     expect(dashboardSrc).toMatch(/todaysArrivals/);
     expect(dashboardSrc).toMatch(/todaysDepartures/);
     expect(dashboardSrc).toMatch(/recentBookings/);
-    expect(dashboardSrc).toMatch(/updateBookingStatus\(bookingId,\s*["']confirmed["']\)/);
+    expect(dashboardSrc).toMatch(/verifyAndRecordPayment/);
     expect(dashboardSrc).not.toMatch(/\+8% from last week/);
   });
 });

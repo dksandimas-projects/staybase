@@ -210,6 +210,18 @@ export interface Booking {
   // comparison.
   paymentProofUrl: string | null;
   paymentReferenceNumber?: string | null;
+  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Verification (2026-07-15): staff can reject a pending
+  // payment proof from the dashboard, bouncing the
+  // booking back to `pending` with a required reason.
+  // The guest is emailed + sees the reason in the lookup
+  // page. `paymentProofUrl` / `paymentReferenceNumber`
+  // are intentionally **kept** (not cleared) for audit
+  // trail — the re-upload flow is guest-driven via the
+  // existing pending UI.
+  paymentRejectionReason?: string | null;
+  paymentRejectedAt?: Date | null;
+  paymentRejectedBy?: string | null;
   rescheduleHistory?: any[];
   // Per H2 (hardening batch 2026-06-26): 32-char hex
   // random token generated at booking-create time. The
@@ -277,6 +289,10 @@ export interface PaymentEntry {
   amount: number;
   method: string;
   note: string;
+  /** Distinct from Booking.paymentReferenceNumber — this is the
+   *  tender-specific identifier for this individual ledger entry
+   *  (e.g. GCash ref, bank trace). Not set for cash or legacy notes. */
+  transactionReference?: string | null;
   reason: string | null;
   approvedBy: string | null;
   recordedBy: string;

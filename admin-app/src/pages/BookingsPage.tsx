@@ -8,13 +8,18 @@ import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
+import {
+  BookingCheckInReadiness,
+  BookingDrawerActionFooter,
+  BookingDrawerSectionPanel,
+  BookingDrawerWorkspaceHeader,
+  type BookingDrawerSection
+} from "../components/BookingDrawerWorkspace";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { formatPrice } from "../utils/format";
 import {
   Calendar,
-  User,
-  Phone,
   Mail,
   Plus,
   Eye,
@@ -34,7 +39,9 @@ import {
   XCircle,
   Loader2,
   Move,
-  Info
+  Info,
+  ChevronRight,
+  Search
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
@@ -377,11 +384,26 @@ export function BookingsPage() {
     vouchers,
     corporateCodes,
     paymentMethods,
-    currentUser
+    currentUser,
+    verifyAndRecordPayment
   } = useAdmin();
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
-  const checkoutWithBalanceConfirm = useTwoClickConfirm<"confirm">();
+
+  // UCO-02/03: unpaid checkout reason modal state
+  const [showUnpaidCheckoutForm, setShowUnpaidCheckoutForm] = useState(false);
+  const [unpaidCheckoutReason, setUnpaidCheckoutReason] = useState("");
+  const [unpaidCheckoutError, setUnpaidCheckoutError] = useState<string | null>(null);
+  const [unpaidCheckoutSubmitting, setUnpaidCheckoutSubmitting] = useState(false);
+  const UNPAID_REASON_SHORTCUTS = [
+    { label: "Company billing", value: "approved company billing" },
+    { label: "Bank transfer pending", value: "bank transfer pending" },
+    { label: "Payment failure", value: "payment failure" },
+    { label: "Disputed charge", value: "disputed charge" },
+    { label: "Other", value: "other" }
+  ];
+  const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
+  const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const brandRgb = hexToRgb(config.colors.primary);
   const getApiBaseUrl = () => {
     if (typeof window === "undefined") return "";
@@ -391,6 +413,10 @@ export function BookingsPage() {
   };
 
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
+  const [showDiscountForm, setShowDiscountForm] = useState(false);
+  const [discountError, setDiscountError] = useState<string | null>(null);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [chargeError, setChargeError] = useState<string | null>(null);
   const [showBookingCancelForm, setShowBookingCancelForm] = useState(false);
   const [showOrderCancelForm, setShowOrderCancelForm] = useState(false);
   const [chargeToVoid, setChargeToVoid] = useState<IncidentalCharge | null>(null);
@@ -419,34 +445,107 @@ export function BookingsPage() {
     }
   };
 
-  // Main navigation tab
-  const [activeMainTab, setActiveMainTab] = useState<"bookings" | "store">(
-    searchParams.get("tab") === "store" ? "store" : "bookings"
-  );
+  // FSO-03: Canonical URL state for all filter/search/tab params
+  const readParam = (key: string, fallback: string) => searchParams.get(key) || fallback;
+  const writeParams = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [key, val] of Object.entries(updates)) {
+      if (val === null || val === "") next.delete(key); else next.set(key, val);
+    }
+    const q = next.toString();
+    setSearchParams(q ? `?${q}` : "", { replace: true });
+  };
 
-  // Booking Search and Filter States
-  const [searchText, setSearchText] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Main navigation tab
+  const activeMainTab = (readParam("tab", "bookings") === "store" ? "store" : "bookings") as "bookings" | "store";
+  const setActiveMainTab = (tab: "bookings" | "store") => writeParams({ tab: tab === "store" ? "store" : null });
+
+  // FSO-06: Booking quick views + filter state (synced to URL)
+  type BookingQuickView = "all" | "needs-attention" | "arrivals-today" | "departures-today" | "in-house" | "upcoming" | "balance-due" | "cancelled";
+  const bookingQuickView = readParam("bqv", "all") as BookingQuickView;
+  const setBookingQuickView = (v: BookingQuickView) => writeParams({ bqv: v === "all" ? null : v, bs: null });
+  const bookingSearch = readParam("bq", "");
+  const setBookingSearch = (v: string) => writeParams({ bq: v || null });
+  const bookingStatusFilter = readParam("bs", "all");
+  const setBookingStatusFilter = (v: string) => writeParams({ bs: v === "all" ? null : v, bqv: null });
+
+  // FSO-10: Store quick views + filter state (synced to URL)
+  type StoreQuickView = "all" | "needs-action" | "placed" | "preparing" | "out-for-delivery" | "delivered-today" | "add-to-bill" | "payment-pending" | "cancelled";
+  const storeQuickView = readParam("sqv", "all") as StoreQuickView;
+  const setStoreQuickView = (v: StoreQuickView) => writeParams({ sqv: v === "all" ? null : v, ss: null });
+  const storeSearch = readParam("sq", "");
+  const setStoreSearch = (v: string) => writeParams({ sq: v || null });
+  const storeStatusFilter = readParam("ss", "all");
+  const setStoreStatusFilter = (v: string) => writeParams({ ss: v === "all" ? null : v, sqv: null });
+
+  // FSO-08: Booking advanced filter state (synced to URL)
+  const bDateBasis = readParam("bdb", "stay") as "stay" | "arrival" | "departure" | "created";
+  const setBDateBasis = (v: string) => writeParams({ bdb: v === "stay" ? null : v });
+  const bDateFrom = readParam("bdf", "");
+  const setBDateFrom = (v: string) => writeParams({ bdf: v || null });
+  const bDateTo = readParam("bdt", "");
+  const setBDateTo = (v: string) => writeParams({ bdt: v || null });
+  const bPayState = readParam("bps", "");
+  const setBPayState = (v: string) => writeParams({ bps: v || null });
+  const bPaymentMethod = readParam("bpm", "");
+  const setBPaymentMethod = (v: string) => writeParams({ bpm: v || null });
+  const bRoom = readParam("br", "");
+  const setBRoom = (v: string) => writeParams({ br: v || null });
+  const bRoomType = readParam("brt", "");
+  const setBRoomType = (v: string) => writeParams({ brt: v || null });
+  const bSource = readParam("bsrc", "");
+  const setBSource = (v: string) => writeParams({ bsrc: v || null });
+  const bCorp = readParam("bc", "");
+  const setBCorp = (v: string) => writeParams({ bc: v || null });
+  const bDiscount = readParam("bd", "");
+  const setBDiscount = (v: string) => writeParams({ bd: v || null });
+  const [showBookingFilters, setShowBookingFilters] = useState(false);
+
+  // FSO-12: Store advanced filter state (synced to URL)
+  const sDateFrom = readParam("sdf", "");
+  const setSDateFrom = (v: string) => writeParams({ sdf: v || null });
+  const sDateTo = readParam("sdt", "");
+  const setSDateTo = (v: string) => writeParams({ sdt: v || null });
+  const sRoom = readParam("sr", "");
+  const setSRoom = (v: string) => writeParams({ sr: v || null });
+  const sPaymentMethod = readParam("spm", "");
+  const setSPaymentMethod = (v: string) => writeParams({ spm: v || null });
+  const sBilling = readParam("sbl", "");
+  const setSBilling = (v: string) => writeParams({ sbl: v || null });
+  const sBilled = readParam("sbd", "");
+  const setSBilled = (v: string) => writeParams({ sbd: v || null });
+  const sPayProof = readParam("spp", "");
+  const setSPayProof = (v: string) => writeParams({ spp: v || null });
+  const [showStoreFilters, setShowStoreFilters] = useState(false);
 
   // Booking Drawer States
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  // Store Order Search and Filter States
-  const [orderSearchText, setOrderSearchText] = useState("");
-  const [orderStatusFilter, setOrderStatusFilter] = useState<string>("all");
+  const [activeBookingSection, setActiveBookingSection] = useState<BookingDrawerSection>("overview");
 
   useEffect(() => {
-    if (searchParams.get("tab") !== "store") return;
+    setActiveBookingSection("overview");
+  }, [selectedBooking?.id]);
 
-    setActiveMainTab("store");
-    const orderRef = searchParams.get("orderRef");
-    if (orderRef) {
-      setOrderSearchText(orderRef);
+
+  const processedLegacyRef = useRef<string>("");
+  useEffect(() => {
+    const serialized = Array.from(searchParams.entries()).sort().join("&");
+    if (serialized === processedLegacyRef.current) return;
+    processedLegacyRef.current = serialized;
+
+    // Migrate legacy `filter` param to canonical `bqv` param
+    const filter = searchParams.get("filter");
+    const filterToQv: Record<string, string> = { arrivals: "arrivals-today", departures: "departures-today", "in-house": "in-house" };
+    if (filter && filterToQv[filter] && !searchParams.get("bqv")) {
+      return void writeParams({ bqv: filterToQv[filter], filter: null });
     }
-    // Per Phase 12 — Notification Center (decision #120):
-    // bell deep-links with `?orderId=...` to open the
-    // matching store order drawer on the Store tab.
+    // Migrate legacy `orderRef` param to canonical `sq` param
+    const orderRef = searchParams.get("orderRef");
+    if (orderRef && !searchParams.get("sq")) {
+      return void writeParams({ sq: orderRef, orderRef: null });
+    }
+    // Open store order drawer from deep-link
     const orderId = searchParams.get("orderId");
     if (orderId) {
       const match = storeOrders.find((order) => order.id === orderId);
@@ -457,12 +556,13 @@ export function BookingsPage() {
     }
   }, [searchParams, storeOrders]);
 
+  const processedDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
     const bookingId = searchParams.get("bookingId");
-    if (!bookingId) return;
+    if (!bookingId || bookingId === processedDeepLinkRef.current) return;
+    processedDeepLinkRef.current = bookingId;
     const match = bookings.find((booking) => booking.id === bookingId);
     if (!match) return;
-    setActiveMainTab("bookings");
     setSelectedBooking(match);
     setIsDrawerOpen(true);
   }, [searchParams, bookings]);
@@ -472,14 +572,26 @@ export function BookingsPage() {
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
 
   // Payment Form States
+  const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false);
+  const paymentSubmissionIdRef = useRef<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentTransactionReference, setPaymentTransactionReference] = useState("");
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
-  const paymentSubmissionIdRef = useRef<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundMethod, setRefundMethod] = useState("cash");
   const [refundReason, setRefundReason] = useState("");
+
+  const [showVerifyPaymentModal, setShowVerifyPaymentModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [verifyAmount, setVerifyAmount] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState("gcash");
+  const [verifyReference, setVerifyReference] = useState("");
+  const [verifyNote, setVerifyNote] = useState("");
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
@@ -575,6 +687,7 @@ export function BookingsPage() {
   const [chargeAmount, setChargeAmount] = useState("");
   const [chargeNote, setChargeNote] = useState("");
   const [isSavingCharge, setIsSavingCharge] = useState(false);
+  const [showChargeModal, setShowChargeModal] = useState(false);
 
   useEffect(() => {
     if (!selectedBooking?.id) {
@@ -752,46 +865,130 @@ export function BookingsPage() {
     }
   ];
 
-  // Operational filter — driven by the bottom tab bar via ?filter=...
-  // arrivals   = today's check-ins with status confirmed or checked-in
-  // departures = today's check-outs with status checked-in (per the
-  //              confirmed -> checked-in -> checked-out status flow)
-  // in-house   = status === "checked-in"
-  const operationalFilter = searchParams.get("filter");
+  // FSO-04/06/07: Quick-view predicates — reusable, server-aligned, consistent with drawer alerts
   const today = getManilaDateInfo(config.timezone).todayStr;
-  const matchesOperationalFilter = (booking: Booking) => {
-    if (!operationalFilter) return true;
-    if (operationalFilter === "arrivals") {
-      return booking.checkIn === today && (booking.status === "confirmed" || booking.status === "checked-in");
+  const bookingQuickViewPredicate = (booking: Booking, qv: BookingQuickView): boolean => {
+    const folio = getBookingFolio(booking);
+    switch (qv) {
+      case "needs-attention":
+        return (
+          booking.status === "payment-uploaded" ||
+          (booking.status === "confirmed" && booking.checkIn < today) ||
+          (booking.status === "pending" && booking.checkIn <= today) ||
+          (booking.earlyCheckIn?.status === "requested") ||
+          (booking.status === "checked-in" && booking.checkOut < today) ||
+          (booking.status === "checked-out" && folio.balance > 0)
+        );
+      case "arrivals-today":
+        return booking.checkIn === today && ["confirmed", "checked-in"].includes(booking.status);
+      case "departures-today":
+        return booking.checkOut === today && booking.status === "checked-in";
+      case "in-house":
+        return booking.status === "checked-in";
+      case "upcoming":
+        return booking.status === "confirmed" && booking.checkIn > today;
+      case "balance-due":
+        return folio.balance > 0;
+      case "cancelled":
+        return booking.status === "cancelled";
+      default:
+        return true;
     }
-    if (operationalFilter === "departures") {
-      return booking.checkOut === today && booking.status === "checked-in";
+  };
+
+  // FSO-10/11: Store quick-view predicates
+  const storeQuickViewPredicate = (order: any, qv: StoreQuickView): boolean => {
+    switch (qv) {
+      case "needs-action":
+        return order.status === "placed" || (order.paymentProofUrl && order.status === "payment-uploaded");
+      case "placed":
+        return order.status === "placed";
+      case "preparing":
+        return order.status === "confirmed";
+      case "out-for-delivery":
+        return order.status === "out-for-delivery";
+      case "delivered-today":
+        return order.status === "delivered" && (order.deliveredAt || "").startsWith(today);
+      case "add-to-bill":
+        return order.status === "delivered" && !order.billedToRoom;
+      case "payment-pending":
+        return order.paymentProofUrl && order.status === "payment-uploaded";
+      case "cancelled":
+        return order.status === "cancelled";
+      default:
+        return true;
     }
-    if (operationalFilter === "in-house") {
-      return booking.status === "checked-in";
+  };
+
+  // FSO-05: Sort — actionable/attention first, then by nearest stay/order time
+  const bookingSortScore = (booking: Booking): number => {
+    if (bookingQuickViewPredicate(booking, "needs-attention")) return 0;
+    if (booking.status === "checked-in" && booking.checkOut === today) return 1;
+    if (booking.status === "checked-in") return 2;
+    if (booking.status === "confirmed" && booking.checkIn === today) return 3;
+    if (booking.status === "checked-out") return 4;
+    return 5;
+  };
+
+  // FSO-08/09: Advanced filter predicates
+  const matchesBookingAdvanced = (booking: Booking): boolean => {
+    const folio = getBookingFolio(booking);
+    // Payment state
+    if (bPayState) {
+      const totalPayments = folio.paymentsTotal;
+      if (bPayState === "unpaid" && totalPayments > 0) return false;
+      if (bPayState === "partial" && (totalPayments <= 0 || totalPayments >= booking.totalPrice)) return false;
+      if (bPayState === "paid" && totalPayments < booking.totalPrice) return false;
+      if (bPayState === "overpaid" && totalPayments <= booking.totalPrice) return false;
     }
+    // Payment method
+    if (bPaymentMethod && booking.paymentMethod !== bPaymentMethod) return false;
+    // Room
+    if (bRoom && booking.roomNumber !== bRoom) return false;
+    // Room type
+    if (bRoomType && booking.roomType !== bRoomType) return false;
+    // Source
+    if (bSource && booking.source !== bSource) return false;
+    // Corporate
+    if (bCorp === "yes" && !booking.isCorporate) return false;
+    if (bCorp === "no" && booking.isCorporate) return false;
+    // Discount/voucher
+    if (bDiscount === "yes" && !booking.discountType && !booking.voucherCode) return false;
+    if (bDiscount === "no" && (booking.discountType || booking.voucherCode)) return false;
+    // Date basis/range
+    const dateField: Record<string, string> = { stay: booking.checkIn, arrival: booking.checkIn, departure: booking.checkOut, created: booking.createdAt };
+    const bookingDate = dateField[bDateBasis] || booking.checkIn;
+    if (bDateFrom && bookingDate < bDateFrom) return false;
+    if (bDateTo && bookingDate > bDateTo) return false;
     return true;
   };
 
-  const filterLabels: Record<string, string> = {
-    arrivals: "Today's arrivals",
-    departures: "Today's departures",
-    "in-house": "Currently in-house"
-  };
-  const activeFilterLabel = operationalFilter ? filterLabels[operationalFilter] : null;
-
-  // Filtering Rows logic
-  const filteredRows = bookings.filter((booking) => {
-    const matchesSearch =
-      booking.guestName.toLowerCase().includes(searchText.toLowerCase()) ||
-      booking.bookingRef.toLowerCase().includes(searchText.toLowerCase()) ||
-      booking.roomNumber.includes(searchText);
-
-    const matchesStatus = statusFilter === "all" || booking.status === statusFilter;
-    const matchesFilter = matchesOperationalFilter(booking);
-
-    return matchesSearch && matchesStatus && matchesFilter;
-  });
+  // FSO-04: Combined filtered + sorted booking rows
+  const filteredRows = useMemo(() => {
+    let rows = bookings.filter((booking) => {
+      const s = bookingSearch.toLowerCase().trim();
+      const matchesSearch = !s || (
+        booking.guestName.toLowerCase().includes(s) ||
+        booking.bookingRef.toLowerCase().includes(s) ||
+        booking.roomNumber.includes(s) ||
+        booking.guestEmail.toLowerCase().includes(s) ||
+        booking.guestPhone.includes(s) ||
+        (booking.paymentReferenceNumber || "").toLowerCase().includes(s) ||
+        (booking.onsitePayments || []).some((p) => (p.transactionReference || "").toLowerCase().includes(s))
+      );
+      const matchesStatus = bookingStatusFilter === "all" || booking.status === bookingStatusFilter;
+      const matchesQV = bookingQuickView === "all" || bookingQuickViewPredicate(booking, bookingQuickView);
+      const matchesAdvanced = matchesBookingAdvanced(booking);
+      return matchesSearch && matchesStatus && matchesQV && matchesAdvanced;
+    });
+    rows.sort((a, b) => {
+      const sa = bookingSortScore(a);
+      const sb = bookingSortScore(b);
+      if (sa !== sb) return sa - sb;
+      return (a.checkIn || "").localeCompare(b.checkIn || "");
+    });
+    return rows;
+  }, [bookings, bookingSearch, bookingStatusFilter, bookingQuickView, bDateBasis, bDateFrom, bDateTo, bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount]);
 
   const handleRowClick = (row: Booking) => {
     setSelectedBooking(row);
@@ -926,17 +1123,46 @@ export function BookingsPage() {
     </div>
   );
 
-  // Filtering store orders
-  const filteredOrders = storeOrders.filter((order) => {
-    const matchesSearch = 
-      order.guestName.toLowerCase().includes(orderSearchText.toLowerCase()) ||
-      order.orderRef.toLowerCase().includes(orderSearchText.toLowerCase()) ||
-      order.roomNumber.includes(orderSearchText);
+  // FSO-12/13: Store advanced filter predicates
+  const matchesStoreAdvanced = (order: any): boolean => {
+    if (sRoom && order.roomNumber !== sRoom) return false;
+    if (sPaymentMethod && order.paymentMethod !== sPaymentMethod) return false;
+    if (sBilling === "direct" && order.paymentMethod === "add-to-bill") return false;
+    if (sBilling === "add-to-bill" && order.paymentMethod !== "add-to-bill") return false;
+    if (sBilled === "billed" && !order.isBilled) return false;
+    if (sBilled === "unbilled" && order.isBilled) return false;
+    if (sPayProof === "uploaded" && !order.paymentProofUrl) return false;
+    if (sPayProof === "verified" && order.status !== "payment-confirmed") return false;
+    if (sDateFrom && (order.createdAt || "") < sDateFrom) return false;
+    if (sDateTo && (order.createdAt || "") > sDateTo) return false;
+    return true;
+  };
 
-    const matchesStatus = orderStatusFilter === "all" || order.status === orderStatusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
+  // FSO-04/10: Combined filtered + sorted store orders
+  const filteredOrders = useMemo(() => {
+    let rows = storeOrders.filter((order) => {
+      const s = storeSearch.toLowerCase().trim();
+      const matchesSearch = !s || (
+        order.guestName?.toLowerCase().includes(s) ||
+        order.orderRef?.toLowerCase().includes(s) ||
+        order.roomNumber?.includes(s) ||
+        (order.bookingId || "").toLowerCase().includes(s) ||
+        (order.notes || "").toLowerCase().includes(s) ||
+        (order.items || []).some((i: any) => (i.name || "").toLowerCase().includes(s))
+      );
+      const matchesStatus = storeStatusFilter === "all" || order.status === storeStatusFilter;
+      const matchesQV = storeQuickView === "all" || storeQuickViewPredicate(order, storeQuickView);
+      const matchesAdvanced = matchesStoreAdvanced(order);
+      return matchesSearch && matchesStatus && matchesQV && matchesAdvanced;
+    });
+    rows.sort((a: any, b: any) => {
+      const aAction = storeQuickViewPredicate(a, "needs-action") ? 0 : 1;
+      const bAction = storeQuickViewPredicate(b, "needs-action") ? 0 : 1;
+      if (aAction !== bAction) return aAction - bAction;
+      return (b.createdAt || "").localeCompare(a.createdAt || "");
+    });
+    return rows;
+  }, [storeOrders, storeSearch, storeStatusFilter, storeQuickView, sRoom, sPaymentMethod, sBilling, sBilled, sPayProof, sDateFrom, sDateTo]);
 
   const handleOrderRowClick = (row: any) => {
     setSelectedOrder(row);
@@ -1929,11 +2155,12 @@ export function BookingsPage() {
       setIsRecordingPayment(true);
       let paymentCompleted = false;
       try {
-        const result = await addOnsitePayment(selectedBooking.id, paymentId, amount, paymentMethod, paymentNote);
+        const result = await addOnsitePayment(selectedBooking.id, paymentId, amount, paymentMethod, paymentNote, paymentTransactionReference || undefined);
         if (result.success) {
           paymentCompleted = true;
           setPaymentAmount("");
           setPaymentNote("");
+          setPaymentTransactionReference("");
           toast.success("Payment recorded", `${formatPrice(amount)} via ${getOnsitePaymentMethodLabel(paymentMethod)}`);
         } else {
           toast.error("Failed to record payment", result.error);
@@ -2144,31 +2371,191 @@ export function BookingsPage() {
     }
   };
 
+  const selectedBookingFolio = selectedBooking ? getBookingFolio(selectedBooking) : null;
+
+  const renderBookingPrimaryAction = () => {
+    if (!selectedBooking) return null;
+
+    if (selectedBooking.status === "pending") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("confirmed")}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+        >
+          Confirm pay-at-hotel booking
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "payment-uploaded") {
+      return (
+        <button
+          type="button"
+          onClick={() => setActiveBookingSection("folio")}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+        >
+          Review proof in Folio
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "payment-confirmed") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("confirmed")}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          Confirm booking
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "confirmed") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("checked-in")}
+          disabled={!selectedBookingCheckInReadiness?.ready}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
+        >
+          {selectedBookingCheckInReadiness?.ready ? "Verify guest ID & check in" : "Complete check-in requirements"}
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "checked-in") {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            const folio = getBookingFolio(selectedBooking);
+            if (folio.balance > 0) {
+              setUnpaidCheckoutReason("");
+              setUnpaidCheckoutError(null);
+              setUnpaidCheckoutBlocked(false);
+              setUnpaidCheckoutBlockMessage("");
+              setShowUnpaidCheckoutForm(true);
+            } else {
+              handleStatusTransition("checked-out");
+            }
+          }}
+          className={`inline-flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 text-xs font-bold text-white shadow-sm transition active:scale-95 ${
+            selectedBookingFolio && selectedBookingFolio.balance > 0
+              ? "bg-orange-600 hover:bg-orange-700"
+              : "bg-gray-900 hover:bg-black"
+          }`}
+        >
+          {selectedBookingFolio && selectedBookingFolio.balance > 0
+            ? `Check out — ${formatPrice(selectedBookingFolio.balance)} due`
+            : "Review folio & check out"}
+        </button>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={printBookingReceiptPDF}
+        className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+      >
+        <FileText size={15} aria-hidden="true" />
+        View / print receipt
+      </button>
+    );
+  };
+
+  const activeQuickView = activeMainTab === "bookings" ? bookingQuickView : storeQuickView;
+  const totalCount = activeMainTab === "bookings" ? bookings.length : storeOrders.length;
+  const resultCount = activeMainTab === "bookings" ? filteredRows.length : filteredOrders.length;
+
+  // Shared quick-view definitions for rendering chips
+  const bookingQuickViews: { id: BookingQuickView; label: string; desc: string }[] = [
+    { id: "all", label: "All bookings", desc: "All reservations" },
+    { id: "needs-attention", label: "Needs attention", desc: "Actionable records" },
+    { id: "arrivals-today", label: "Arrivals today", desc: "Checking in today" },
+    { id: "departures-today", label: "Departures today", desc: "Checking out today" },
+    { id: "in-house", label: "In house", desc: "Currently checked in" },
+    { id: "upcoming", label: "Upcoming", desc: "Future arrivals" },
+    { id: "balance-due", label: "Balance due", desc: "Outstanding folio" },
+    { id: "cancelled", label: "Cancelled", desc: "Cancelled reservations" }
+  ];
+
+  const storeQuickViews: { id: StoreQuickView; label: string; desc: string }[] = [
+    { id: "all", label: "All orders", desc: "All store orders" },
+    { id: "needs-action", label: "Needs action", desc: "Requires attention" },
+    { id: "placed", label: "Placed", desc: "Awaiting confirmation" },
+    { id: "preparing", label: "Preparing", desc: "Confirmed, in progress" },
+    { id: "out-for-delivery", label: "Out for delivery", desc: "On the way" },
+    { id: "delivered-today", label: "Delivered today", desc: "Completed today" },
+    { id: "add-to-bill", label: "Add to room bill", desc: "Not yet billed" },
+    { id: "payment-pending", label: "Payment pending", desc: "Proof uploaded" },
+    { id: "cancelled", label: "Cancelled", desc: "Cancelled orders" }
+  ];
+
+  const quickViewCount = (qvId: string, tab: "bookings" | "store"): number => {
+    if (tab === "bookings") {
+      return qvId === "all" ? bookings.length : bookings.filter((b) => bookingQuickViewPredicate(b, qvId as BookingQuickView)).length;
+    }
+    return qvId === "all" ? storeOrders.length : storeOrders.filter((o) => storeQuickViewPredicate(o, qvId as StoreQuickView)).length;
+  };
+
+  // FSO-02: Build active chips from current filter state
+  interface Chip { id: string; label: string; onRemove: () => void; }
+  const activeChips: Chip[] = [];
+  if (activeMainTab === "bookings") {
+    if (bookingQuickView !== "all") {
+      const def = bookingQuickViews.find((q) => q.id === bookingQuickView);
+      activeChips.push({ id: `qv-${bookingQuickView}`, label: def?.label || bookingQuickView, onRemove: () => setBookingQuickView("all") });
+    }
+    if (bookingSearch) {
+      activeChips.push({ id: "search", label: `Search: "${bookingSearch}"`, onRemove: () => setBookingSearch("") });
+    }
+    if (bookingStatusFilter !== "all") {
+      activeChips.push({ id: "status", label: `Status: ${bookingStatusFilter}`, onRemove: () => setBookingStatusFilter("all") });
+    }
+    if (bPayState) activeChips.push({ id: "bPayState", label: `Payment: ${bPayState}`, onRemove: () => setBPayState("") });
+    if (bPaymentMethod) activeChips.push({ id: "bPaymentMethod", label: `Method: ${bPaymentMethod}`, onRemove: () => setBPaymentMethod("") });
+    if (bRoom) activeChips.push({ id: "bRoom", label: `Room: ${bRoom}`, onRemove: () => setBRoom("") });
+    if (bRoomType) activeChips.push({ id: "bRoomType", label: `Type: ${bRoomType}`, onRemove: () => setBRoomType("") });
+    if (bSource) activeChips.push({ id: "bSource", label: `Source: ${bSource}`, onRemove: () => setBSource("") });
+    if (bCorp) activeChips.push({ id: "bCorp", label: bCorp === "yes" ? "Corporate" : "Non-corporate", onRemove: () => setBCorp("") });
+    if (bDiscount) activeChips.push({ id: "bDiscount", label: bDiscount === "yes" ? "With discount" : "No discount", onRemove: () => setBDiscount("") });
+    if (bDateFrom || bDateTo) activeChips.push({ id: "bDate", label: `Dates: ${bDateFrom || "any"} – ${bDateTo || "any"}`, onRemove: () => { setBDateFrom(""); setBDateTo(""); } });
+  } else {
+    if (storeQuickView !== "all") {
+      const def = storeQuickViews.find((q) => q.id === storeQuickView);
+      activeChips.push({ id: `qv-${storeQuickView}`, label: def?.label || storeQuickView, onRemove: () => setStoreQuickView("all") });
+    }
+    if (storeSearch) {
+      activeChips.push({ id: "search", label: `Search: "${storeSearch}"`, onRemove: () => setStoreSearch("") });
+    }
+    if (storeStatusFilter !== "all") {
+      activeChips.push({ id: "status", label: `Status: ${storeStatusFilter}`, onRemove: () => setStoreStatusFilter("all") });
+    }
+    if (sRoom) activeChips.push({ id: "sRoom", label: `Room: ${sRoom}`, onRemove: () => setSRoom("") });
+    if (sPaymentMethod) activeChips.push({ id: "sPaymentMethod", label: `Method: ${sPaymentMethod}`, onRemove: () => setSPaymentMethod("") });
+    if (sBilling) activeChips.push({ id: "sBilling", label: sBilling === "direct" ? "Direct pay" : "Add to bill", onRemove: () => setSBilling("") });
+    if (sBilled) activeChips.push({ id: "sBilled", label: sBilled === "billed" ? "Billed" : "Unbilled", onRemove: () => setSBilled("") });
+    if (sPayProof) activeChips.push({ id: "sPayProof", label: `Proof: ${sPayProof}`, onRemove: () => setSPayProof("") });
+    if (sDateFrom || sDateTo) activeChips.push({ id: "sDate", label: `Dates: ${sDateFrom || "any"} – ${sDateTo || "any"}`, onRemove: () => { setSDateFrom(""); setSDateTo(""); } });
+  }
+
+  const advancedCount = activeMainTab === "bookings"
+    ? [bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount, bDateFrom || bDateTo ? "dates" : ""].filter(Boolean).length
+    : [sRoom, sPaymentMethod, sBilling, sBilled, sPayProof, sDateFrom || sDateTo ? "dates" : ""].filter(Boolean).length;
+
+  const currentQVs = activeMainTab === "bookings" ? bookingQuickViews : storeQuickViews;
+  const setQV = activeMainTab === "bookings" ? setBookingQuickView : setStoreQuickView;
+
   return (
     <>
       <div className="space-y-8 font-body">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-3xl text-gray-950 lowercase font-medium">bookings & store orders</h1>
-          <p className="text-xs text-gray-500 mt-1">
-            {activeFilterLabel
-              ? activeFilterLabel
-              : "Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries."}
-          </p>
-          {activeFilterLabel && (
-            <button
-              type="button"
-              onClick={() => {
-                const next = new URLSearchParams(searchParams);
-                next.delete("filter");
-                const query = next.toString();
-                setSearchParams(query ? `?${query}` : "", { replace: true });
-              }}
-              className="mt-2 inline-flex min-h-[32px] items-center gap-1 rounded-full bg-primary/10 px-3 text-[10px] font-bold uppercase tracking-wider text-primary-dark"
-            >
-              Filter: {operationalFilter} <span aria-hidden="true">×</span> clear
-            </button>
-          )}
+          <p className="text-xs text-gray-500 mt-1">Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries.</p>
         </div>
         {activeMainTab === "bookings" && (
           <button
@@ -2189,7 +2576,7 @@ export function BookingsPage() {
         )}
       </header>
 
-      {/* Main navigation tabs */}
+      {/* FSO-01: Main navigation tabs */}
       <div className="flex gap-2 border-b border-gray-200 pb-3">
         <button
           onClick={() => setActiveMainTab("bookings")}
@@ -2214,39 +2601,260 @@ export function BookingsPage() {
         </button>
       </div>
 
-      {activeMainTab === "bookings" ? (
-        <>
-          {/* Filters Toolbar Bookings */}
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Search by Guest Name, Reference, Room..."
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              />
-            </div>
-            
-            <div className="w-full sm:w-48">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
+      {/* FSO-01/06/10: Quick-view chips (horizontally scrollable on mobile, compact on desktop) */}
+      <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex items-center gap-1.5 pb-1 sm:flex-wrap sm:pb-0" role="tablist" aria-label="Quick views">
+          {currentQVs.map((qv) => {
+            const active = activeQuickView === qv.id;
+            const count = quickViewCount(qv.id, activeMainTab);
+            return (
+              <button
+                key={qv.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => (setQV as (v: any) => void)(qv.id)}
+                className={`inline-flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition sm:shrink ${
+                  active
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-gray-100 text-gray-650 hover:bg-gray-200 hover:text-gray-900"
+                }`}
               >
-                <option value="all">All Statuses</option>
-                <option value="pending">Pending</option>
-                <option value="payment-uploaded">Payment Uploaded</option>
-                <option value="payment-confirmed">Payment Confirmed</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="checked-in">Checked In</option>
-                <option value="checked-out">Checked Out</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
+                <span className="truncate">{qv.label}</span>
+                <span className={`inline-flex min-w-[18px] items-center justify-center rounded-full px-1 py-0 text-[10px] font-bold leading-tight ${
+                  active ? "bg-white/20 text-white" : "bg-gray-200 text-gray-600"
+                }`}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* FSO-01/02/08/15: Toolbar — search, filters button, result count, clear all */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            placeholder={activeMainTab === "bookings" ? "Search by guest, ref, room, email, payment ref..." : "Search by guest, ref, room, item, booking ref..."}
+            value={activeMainTab === "bookings" ? bookingSearch : storeSearch}
+            onChange={(e) => { const v = e.target.value; if (activeMainTab === "bookings") setBookingSearch(v); else setStoreSearch(v); }}
+            className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:bg-white"
+          />
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden text-xs text-gray-500 sm:inline">
+            {resultCount === totalCount
+              ? `${totalCount} records`
+              : `${resultCount} of ${totalCount}`}
+          </span>
+          {advancedCount > 0 && (
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary-dark">
+              {advancedCount} active filters
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { if (activeMainTab === "bookings") setShowBookingFilters(true); else setShowStoreFilters(true); }}
+            className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            {activeMainTab === "bookings" ? "Filters" : "Filters"}
+            {advancedCount > 0 && ` (${advancedCount})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (activeMainTab === "bookings") {
+                setBookingQuickView("all"); setBookingSearch(""); setBookingStatusFilter("all");
+                setBPayState(""); setBPaymentMethod(""); setBRoom(""); setBRoomType(""); setBSource(""); setBCorp(""); setBDiscount(""); setBDateFrom(""); setBDateTo("");
+              } else {
+                setStoreQuickView("all"); setStoreSearch(""); setStoreStatusFilter("all");
+                setSRoom(""); setSPaymentMethod(""); setSBilling(""); setSBilled(""); setSPayProof(""); setSDateFrom(""); setSDateTo("");
+              }
+            }}
+            disabled={activeChips.length === 0}
+            className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          >
+            Clear all
+          </button>
+        </div>
+      </div>
+
+      {/* FSO-02: Active chips row */}
+      {activeChips.length > 0 && (
+        <div className="-mt-1 flex flex-wrap items-center gap-1.5">
+          {activeChips.map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={chip.onRemove}
+              className="inline-flex min-h-[32px] items-center gap-1 rounded-full bg-primary/10 px-3 text-[10px] font-bold uppercase tracking-wider text-primary-dark hover:bg-primary/20"
+            >
+              {chip.label} <span aria-hidden="true">×</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* FSO-08/15: Booking advanced filters panel */}
+      {showBookingFilters && (
+        <div className="relative">
+          <div className="absolute left-0 right-0 z-20 rounded-xl border border-gray-200 bg-white p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Advanced filters — bookings</h3>
+              <button type="button" onClick={() => setShowBookingFilters(false)} className="min-h-[36px] rounded-lg border border-gray-250 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Date basis
+                <select value={bDateBasis} onChange={(e) => setBDateBasis(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="stay">Stay overlap</option>
+                  <option value="arrival">Arrival date</option>
+                  <option value="departure">Departure date</option>
+                  <option value="created">Booking created</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                From
+                <input type="date" value={bDateFrom} onChange={(e) => setBDateFrom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                To
+                <input type="date" value={bDateTo} onChange={(e) => setBDateTo(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment state
+                <select value={bPayState} onChange={(e) => setBPayState(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="unpaid">Unpaid</option>
+                  <option value="partial">Partially paid</option>
+                  <option value="paid">Fully paid</option>
+                  <option value="overpaid">Overpaid</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment method
+                <select value={bPaymentMethod} onChange={(e) => setBPaymentMethod(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {onsitePaymentMethodOptions.map((m: any) => <option key={m.method} value={m.method}>{m.label || m.method}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Room
+                <select value={bRoom} onChange={(e) => setBRoom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {rooms.map((r: any) => <option key={r.id} value={r.roomNumber}>{r.roomNumber}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Room type
+                <select value={bRoomType} onChange={(e) => setBRoomType(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {roomTypes.map((rt: any) => <option key={rt.id} value={rt.id}>{rt.name || rt.id}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Source / channel
+                <select value={bSource} onChange={(e) => setBSource(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="online">Online</option>
+                  <option value="walk-in">Walk-in</option>
+                  <option value="phone">Phone</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="corporate">Corporate</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Corporate
+                <select value={bCorp} onChange={(e) => setBCorp(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="yes">Corporate</option>
+                  <option value="no">Non-corporate</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Discount / Voucher
+                <select value={bDiscount} onChange={(e) => setBDiscount(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="yes">Has discount or voucher</option>
+                  <option value="no">No discount or voucher</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
+              <button type="button" onClick={() => { setBPayState(""); setBPaymentMethod(""); setBRoom(""); setBRoomType(""); setBSource(""); setBCorp(""); setBDiscount(""); setBDateFrom(""); setBDateTo(""); }} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
+              <button type="button" onClick={() => setShowBookingFilters(false)} className="min-h-[36px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark">Apply filters</button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Main Table Bookings */}
+      {/* FSO-12/15: Store advanced filters panel */}
+      {showStoreFilters && (
+        <div className="relative">
+          <div className="absolute left-0 right-0 z-20 rounded-xl border border-gray-200 bg-white p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Advanced filters — store orders</h3>
+              <button type="button" onClick={() => setShowStoreFilters(false)} className="min-h-[36px] rounded-lg border border-gray-250 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                From
+                <input type="date" value={sDateFrom} onChange={(e) => setSDateFrom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                To
+                <input type="date" value={sDateTo} onChange={(e) => setSDateTo(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Room
+                <select value={sRoom} onChange={(e) => setSRoom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {rooms.map((r: any) => <option key={r.id} value={r.roomNumber}>{r.roomNumber}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment method
+                <select value={sPaymentMethod} onChange={(e) => setSPaymentMethod(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  {onsitePaymentMethodOptions.map((m: any) => <option key={m.method} value={m.method}>{m.label || m.method}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Billing type
+                <select value={sBilling} onChange={(e) => setSBilling(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="direct">Direct pay</option>
+                  <option value="add-to-bill">Add to room bill</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Billed state
+                <select value={sBilled} onChange={(e) => setSBilled(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="billed">Billed to room</option>
+                  <option value="unbilled">Not yet billed</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Payment proof
+                <select value={sPayProof} onChange={(e) => setSPayProof(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="">Any</option>
+                  <option value="uploaded">Uploaded</option>
+                  <option value="verified">Verified</option>
+                </select>
+              </label>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
+              <button type="button" onClick={() => { setSDateFrom(""); setSDateTo(""); setSRoom(""); setSPaymentMethod(""); setSBilling(""); setSBilled(""); setSPayProof(""); }} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
+              <button type="button" onClick={() => setShowStoreFilters(false)} className="min-h-[36px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark">Apply filters</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeMainTab === "bookings" ? (
+        <>
           <DataTable
             columns={columns}
             rows={filteredRows}
@@ -2257,35 +2865,6 @@ export function BookingsPage() {
         </>
       ) : (
         <>
-          {/* Filters Toolbar Store Orders */}
-          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Search orders by Guest, Reference, Room..."
-                value={orderSearchText}
-                onChange={(e) => setOrderSearchText(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              />
-            </div>
-
-            <div className="w-full sm:w-48">
-              <select
-                value={orderStatusFilter}
-                onChange={(e) => setOrderStatusFilter(e.target.value)}
-                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-sm outline-none transition focus:border-primary focus:bg-white"
-              >
-                <option value="all">All Statuses</option>
-                <option value="placed">Placed</option>
-                <option value="confirmed">Confirmed</option>
-                <option value="out-for-delivery">Out For Delivery</option>
-                <option value="delivered">Delivered</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Main Table Store Orders */}
           <DataTable
             columns={storeColumns}
             rows={filteredOrders}
@@ -2300,129 +2879,68 @@ export function BookingsPage() {
 
       {/* Booking Detail Drawer (D-01) */}
       <Drawer
-        title={selectedBooking ? `Reference: ${selectedBooking.bookingRef}` : ""}
+        title={selectedBooking ? `Booking ${selectedBooking.bookingRef}` : ""}
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         className="max-w-[1120px]"
+        footer={selectedBooking ? (
+          <BookingDrawerActionFooter
+            primaryAction={renderBookingPrimaryAction()}
+            onMoreActions={() => setActiveBookingSection("more")}
+            moreActionsActive={activeBookingSection === "more"}
+          />
+        ) : undefined}
       >
         {selectedBooking && (
           <div className="space-y-6 text-sm">
-            {/* Status overview */}
-            <div className="grid gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2">
-              <div>
-                <p className="text-[10px] uppercase font-bold text-gray-400">Current Status</p>
-                <div className="mt-1">
-                  <StatusBadge label={selectedBooking.status.replace("-", " ")} status={selectedBooking.status} />
-                </div>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase font-bold text-gray-400 sm:text-right">Channel</p>
-                <p className="text-xs font-bold text-gray-900 mt-1 uppercase sm:text-right">{selectedBooking.source}</p>
-              </div>
-            </div>
+            <BookingDrawerWorkspaceHeader
+              booking={selectedBooking}
+              activeSection={activeBookingSection}
+              onSectionChange={setActiveBookingSection}
+              totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
+              balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
+              missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
+              onPaymentReferenceChange={(value) => persistSelectedBooking({ paymentReferenceNumber: value || null })}
+            />
 
-            {selectedBooking.paymentProofUrl && (
-              <div className="space-y-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                  <CreditCard size={14} className="text-primary" />
-                  Payment Proof
-                </h3>
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
-                    <button
-                      type="button"
-                      onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
-                      className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
-                    >
-                      <img
-                        src={selectedBooking.paymentProofUrl}
-                        alt={`Payment proof for ${selectedBooking.bookingRef}`}
-                        className="h-44 w-full object-cover"
-                      />
-                    </button>
-                    <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
-                      <p>
-                        Review the uploaded payment screenshot before confirming this booking.
-                      </p>
-                      <p className="font-semibold text-gray-900">
-                        Method: {selectedBooking.paymentMethod || "Not specified"}
-                      </p>
-                      <a
-                        href={selectedBooking.paymentProofUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
-                      >
-                        <Eye size={13} />
-                        Open Full Size
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
-                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
-                      >
-                        <Eye size={13} />
-                        Preview
-                      </button>
-                    </div>
-                  </div>
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
+            {selectedBooking.paymentProofUrl ? (
+              <div className="flex items-center justify-between rounded-lg bg-gray-50 px-4 py-2.5">
+                <div className="flex items-center gap-2 text-xs">
+                  <CreditCard size={14} className="text-gray-400" />
+                  <span className="text-gray-700">{selectedBooking.paymentMethod || "Online payment"}</span>
+                  {selectedBooking.status === "payment-uploaded" && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
+                  )}
+                  {selectedBooking.status === "payment-confirmed" && (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">Verified</span>
+                  )}
+                  {selectedBooking.paymentRejectionReason && (
+                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-700">Rejected</span>
+                  )}
                 </div>
+                {selectedBooking.paymentProofUrl && (
+                  <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[32px] rounded-lg border border-gray-250 bg-white px-2.5 text-[10px] font-semibold text-gray-600 hover:bg-gray-100">
+                    View proof
+                  </button>
+                )}
               </div>
-            )}
-
-            {/* Guest details card */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Guest Information</h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2.5">
-                <p className="flex items-center gap-2 text-gray-800">
-                  <User size={16} className="text-primary shrink-0" />
-                  <span>{selectedBooking.guestName}</span>
-                </p>
-                <p className="flex items-center gap-2 text-gray-600 text-xs">
-                  <Mail size={16} className="text-gray-400 shrink-0" />
-                  <span>{selectedBooking.guestEmail}</span>
-                </p>
-                <p className="flex items-center gap-2 text-gray-600 text-xs">
-                  <Phone size={16} className="text-gray-400 shrink-0" />
-                  <span>{selectedBooking.guestPhone}</span>
-                </p>
+            ) : selectedBooking.paymentMethod !== "pay-at-hotel" && selectedBooking.paymentMethod ? (
+              <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
+                <CreditCard size={14} className="text-gray-400" />
+                {selectedBooking.paymentMethod} — no proof uploaded
               </div>
-            </div>
-
-            {/* Payment method & Reference number workstation */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                <CreditCard size={14} className="text-primary" />
-                Payment Method & Reference
-              </h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="text-[10px] uppercase font-bold text-gray-400">Payment Method</p>
-                    <p className="text-xs font-bold text-gray-900 mt-1 uppercase">
-                      {selectedBooking.paymentMethod || "Not specified"}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Payment Reference Number
-                      <input
-                        type="text"
-                        value={selectedBooking.paymentReferenceNumber || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          persistSelectedBooking({ paymentReferenceNumber: val || null });
-                        }}
-                        placeholder="e.g. GCash Ref # or Bank Trace #"
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800 font-medium"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
+            ) : null}
+            </BookingDrawerSectionPanel>
 
             {/* Check-in registration workstation */}
+            <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection} primary>
+            {selectedBookingCheckInReadiness && (
+              <BookingCheckInReadiness
+                ready={selectedBookingCheckInReadiness.ready}
+                missingItems={selectedBookingCheckInReadiness.missingItems}
+              />
+            )}
             {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
@@ -2599,8 +3117,10 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
             {/* Room stay details */}
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection} primary>
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Stay & Accommodation</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
@@ -2626,7 +3146,10 @@ export function BookingsPage() {
                   <div className="border-t border-gray-100 pt-3">
                     <button
                       type="button"
-                      onClick={() => setShowMoveForm(!showMoveForm)}
+                      onClick={() => {
+                        setShowMoveForm(!showMoveForm);
+                        setActiveBookingSection("more");
+                      }}
                       className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition hover:bg-gray-50 active:scale-95"
                     >
                       <Move size={14} className="text-primary" />
@@ -2636,8 +3159,10 @@ export function BookingsPage() {
                 )}
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Move booking form */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection}>
             {selectedBooking && showMoveForm && (
               <div className="space-y-3">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -2745,35 +3270,131 @@ export function BookingsPage() {
                 </form>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
             {/* Financial totals */}
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} primary>
             <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Financial Breakdown</h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
-                {selectedBooking.rateBreakdown ? (
-                  <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
-                ) : (
-                  <>
-                    <div className="flex justify-between">
-                      <span>Room Charge ({selectedBooking.numNights} nights)</span>
-                      <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
-                    </div>
-                    {selectedBooking.hasBreakfast && (
-                      <div className="flex justify-between text-gray-500">
-                        <span>Breakfast Service charge</span>
-                        <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between border-t border-gray-150 pt-2.5 text-sm font-bold text-gray-950">
-                      <span>Total Bill Amount:</span>
-                      <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
-                    </div>
-                  </>
-                )}
+              {/* BDUX-05a: Read-first Total / Paid / Balance summary */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-center">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Total</p>
+                  <p className="mt-0.5 text-base font-heading font-bold text-gray-950">{formatPrice(selectedBooking.totalPrice)}</p>
+                </div>
+                <div className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-center">
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Paid</p>
+                  <p className="mt-0.5 text-base font-heading font-bold text-emerald-700">{formatPrice(selectedBookingFolio?.paymentsTotal ?? 0)}</p>
+                </div>
+                <div className="rounded-lg px-3.5 py-2.5 text-center" style={{ backgroundColor: (selectedBookingFolio?.balance ?? 0) > 0 ? "#fef2f2" : "#f0fdf4" }}>
+                  <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: (selectedBookingFolio?.balance ?? 0) > 0 ? "#991b1b" : "#166534" }}>Balance</p>
+                  <p className="mt-0.5 text-base font-heading font-bold" style={{ color: (selectedBookingFolio?.balance ?? 0) > 0 ? "#dc2626" : "#16a34a" }}>{formatPrice(Math.max(0, selectedBookingFolio?.balance ?? 0))}</p>
+                </div>
               </div>
+
+              <details className="group">
+                <summary className="flex cursor-pointer items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 hover:text-gray-600">
+                  <span>Charge breakdown</span>
+                  <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="mt-2 rounded-lg border border-gray-200 bg-white p-4 space-y-1.5 text-xs">
+                  {selectedBooking.rateBreakdown ? (
+                    <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
+                  ) : (
+                    <>
+                      <div className="flex justify-between">
+                        <span>Room Charge ({selectedBooking.numNights} nights)</span>
+                        <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
+                      </div>
+                      {selectedBooking.hasBreakfast && (
+                        <div className="flex justify-between text-gray-500">
+                          <span>Breakfast Service charge</span>
+                          <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t border-gray-150 pt-1.5 text-sm font-bold text-gray-950">
+                        <span>Total Bill Amount:</span>
+                        <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </details>
+
+              {selectedBooking.paymentProofUrl && (
+                <div className="space-y-3">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <CreditCard size={14} className="text-primary" />
+                    Payment Proof
+                  </h3>
+                  {selectedBooking.status === "payment-confirmed" || selectedBooking.status === "confirmed" || selectedBooking.paymentRejectionReason ? (
+                    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
+                      <div className="space-y-0.5 text-xs">
+                        <p className="font-semibold text-gray-800">
+                          {selectedBooking.paymentMethod} · {selectedBooking.paymentReferenceNumber || "No reference"}
+                        </p>
+                        <p className="text-[10px] text-gray-400">
+                          {selectedBooking.status === "payment-confirmed" ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50">
+                        <Eye size={13} className="inline mr-1" />
+                        View proof
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="grid gap-4 sm:grid-cols-[112px_1fr]">
+                        <button
+                          type="button"
+                          onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
+                          className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                        >
+                          <img
+                            src={selectedBooking.paymentProofUrl}
+                            alt={`Payment proof for ${selectedBooking.bookingRef}`}
+                            className="h-28 w-full object-cover"
+                          />
+                        </button>
+                        <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                          <p className="font-semibold text-gray-900">
+                            Method: {selectedBooking.paymentMethod || "Not specified"}
+                          </p>
+                          {selectedBooking.paymentReferenceNumber && (
+                            <p className="font-semibold text-gray-900">
+                              Ref: {selectedBooking.paymentReferenceNumber}
+                            </p>
+                          )}
+                          {selectedBooking.status === "payment-uploaded" && (
+                            <button
+                              type="button"
+                              onClick={() => { setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+                              className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 text-[10px] font-bold text-white transition hover:bg-green-700"
+                            >
+                              <ShieldCheck size={13} />
+                              Verify & Record Payment
+                            </button>
+                          )}
+                          <div className="flex gap-2">
+                            <a href={selectedBooking.paymentProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50">
+                              <Eye size={13} />
+                              Open Full Size
+                            </a>
+                            <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="inline-flex min-h-[36px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark">
+                              <Eye size={13} />
+                              Preview
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Breakfast selections */}
+            <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
             {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -2825,32 +3446,46 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
-            {!selectedBooking.discountType && !selectedBooking.voucherCode && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
-              <form onSubmit={handleApplyStaffDiscount} className="rounded-card border border-primary/20 bg-primary-light/20 p-4 space-y-3">
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">Apply discount / voucher</h3>
-                  <p className="mt-1 text-[11px] text-gray-600">Use after sighting a valid Senior/PWD ID, or enter a promo code. Pricing is recalculated and audited by the server.</p>
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
+            {(() => {
+              const hasVoucherOrDiscount = selectedBooking.discountType || selectedBooking.voucherCode;
+              return (
+                <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <ShieldCheck size={14} className="text-primary" />
+                    Discount / Voucher
+                  </h3>
+                  {hasVoucherOrDiscount ? (
+                    <div className="space-y-1 text-xs">
+                      {selectedBooking.discountType && (
+                        <p className="font-semibold text-gray-800">
+                          {selectedBooking.discountType === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
+                          {selectedBooking.discountVerified ? <span className="ml-1 text-emerald-600">✓ Verified</span> : <span className="ml-1 text-amber-600">Pending</span>}
+                        </p>
+                      )}
+                      {selectedBooking.voucherCode && (
+                        <p className="font-semibold text-gray-800">Voucher: {selectedBooking.voucherCode}</p>
+                      )}
+                    </div>
+                  ) : RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
+                    <button
+                      type="button"
+                      onClick={() => { setStaffDiscountType(""); setStaffVoucherCode(""); setShowDiscountForm(true); }}
+                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                    >
+                      <Plus size={14} />
+                      Apply discount / voucher
+                    </button>
+                  )}
                 </div>
-                <label className="block text-xs font-semibold text-gray-700">
-                  Government discount
-                  <select value={staffDiscountType} onChange={(e) => setStaffDiscountType(e.target.value as "" | "senior" | "pwd")} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
-                    <option value="">None</option>
-                    <option value="senior">Senior Citizen (20%)</option>
-                    <option value="pwd">PWD (20%)</option>
-                  </select>
-                </label>
-                <label className="block text-xs font-semibold text-gray-700">
-                  Voucher code
-                  <input value={staffVoucherCode} onChange={(e) => setStaffVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional promo code" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
-                </label>
-                <button type="submit" disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="min-h-[44px] w-full rounded-lg bg-primary px-4 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
-                  {isApplyingStaffDiscount ? "Applying..." : "Apply and reprice booking"}
-                </button>
-              </form>
-            )}
+              );
+            })()}
+            </BookingDrawerSectionPanel>
 
             {/* Government discount verification */}
+            <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
             {selectedBooking.discountType && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -2983,7 +3618,9 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
             {selectedBooking.memberId && ["confirmed", "checked-in", "checked-out"].includes(selectedBooking.status) && (
               <div className="rounded-card border border-primary/20 bg-primary-light/30 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3060,7 +3697,11 @@ export function BookingsPage() {
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
                           <p className="font-semibold text-gray-800">{pay.type === "refund" ? `Refund — ${pay.reason || pay.note}` : pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}{pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}</p>
+                          <p className="text-[9px] text-gray-400">
+                            {pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}
+                            {pay.transactionReference ? ` · Ref: ${pay.transactionReference}` : ""}
+                            {pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}
+                          </p>
                         </div>
                         <span className={`font-bold ${pay.type === "refund" ? "text-red-600" : "text-green-700"}`}>{pay.amount >= 0 ? "+" : ""}{formatPrice(pay.amount)}</span>
                       </div>
@@ -3080,85 +3721,38 @@ export function BookingsPage() {
                   );
                 })()}
 
-                {/* Inline form to record payments */}
-                <form onSubmit={handleAddPaymentSubmit} className="rounded-lg border border-gray-150 p-4 space-y-3 bg-white">
-                  <p className="text-xs font-bold text-gray-750">Record Onsite Payment</p>
-                  
-                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1.6fr_auto]">
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Amount (PHP)
-                      <input
-                        type="number"
-                        required
-                        value={paymentAmount}
-                        onChange={(e) => setPaymentAmount(e.target.value)}
-                        placeholder="e.g. 500"
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      />
-                    </label>
-                    
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Payment Method
-                      <select
-                        value={paymentMethod}
-                        onChange={(e) => setPaymentMethod(e.target.value)}
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      >
-                        {onsitePaymentMethodOptions.map((method) => (
-                          <option key={method.method} value={method.method}>
-                            {method.label || method.method}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Payment Reference / Note
-                      <input
-                        type="text"
-                        value={paymentNote}
-                        onChange={(e) => setPaymentNote(e.target.value)}
-                        placeholder="e.g. Downpayment deposit"
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      />
-                    </label>
-                  
+                {/* BDUX-05d: Record Payment — visible when collection is valid; emphasized when balance is due */}
+                {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (() => {
+                  const folioBalance = getBookingFolio(selectedBooking).balance;
+                  const isDue = folioBalance > 0;
+                  return (
                     <button
-                      type="submit"
-                      disabled={isRecordingPayment}
-                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark disabled:opacity-60"
+                      type="button"
+                      onClick={() => { setShowRecordPaymentModal(true); setPaymentAmount(String(Math.max(0, folioBalance))); setPaymentMethod("cash"); setPaymentTransactionReference(""); setPaymentNote(""); setPaymentError(null); }}
+                      className={`inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg px-4 text-xs font-bold text-white shadow-sm ${isDue ? "bg-orange-600 hover:bg-orange-700" : "bg-primary hover:bg-primary-dark"}`}
                     >
-                      {isRecordingPayment ? "Recording..." : "Record payment"}
+                      <CreditCard size={13} />
+                      {isDue ? `Collect ${formatPrice(folioBalance)}` : "Record Onsite Payment"}
                     </button>
-                  </div>
-                </form>
+                  );
+                })()}
 
                 {currentUser?.role === "admin" && selectedBookingPayments.some((payment) => payment.amount > 0) && (
-                  <form onSubmit={handleRefundSubmit} className="rounded-lg border border-red-100 bg-red-50/40 p-4 space-y-3">
-                    <div>
-                      <p className="text-xs font-bold text-red-800">Record Refund</p>
-                      <p className="mt-1 text-[10px] text-red-700">Creates an immutable negative payment entry. Refunds cannot exceed net collected funds.</p>
-                    </div>
-                    <label className="block text-[10px] font-semibold text-gray-600">
-                      Refund amount
-                      <input type="number" min="0.01" step="0.01" required value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-red-100 bg-white px-3 text-xs" />
-                    </label>
-                    <label className="block text-[10px] font-semibold text-gray-600">
-                      Refund method
-                      <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-red-100 bg-white px-3 text-xs">
-                        {onsitePaymentMethodOptions.map((method) => <option key={method.method} value={method.method}>{method.label}</option>)}
-                      </select>
-                    </label>
-                    <label className="block text-[10px] font-semibold text-gray-600">
-                      Reason
-                      <textarea required maxLength={500} rows={2} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Required approval and audit context" className="mt-1 w-full rounded-lg border border-red-100 bg-white p-3 text-xs" />
-                    </label>
-                    <button type="submit" disabled={isRefunding} className="min-h-[44px] w-full rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">{isRefunding ? "Recording refund..." : "Approve and record refund"}</button>
-                  </form>
+                  <button
+                    type="button"
+                    onClick={() => { setRefundAmount(""); setRefundMethod("cash"); setRefundReason(""); setShowRefundModal(true); }}
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-4 text-xs font-bold text-red-700 shadow-sm hover:bg-red-100"
+                  >
+                    <CreditCard size={13} />
+                    Record Refund
+                  </button>
                 )}
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Early Check-In Request Panel */}
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
             {selectedBooking.earlyCheckIn && ["confirmed", "checked-in"].includes(selectedBooking.status) && (() => {
               const eci = selectedBooking.earlyCheckIn!;
               const isResolved = eci.status === "approved" || eci.status === "declined";
@@ -3330,8 +3924,10 @@ export function BookingsPage() {
                 </div>
               );
             })()}
+            </BookingDrawerSectionPanel>
 
             {/* Email Actions Panel */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} primary>
             <div className="space-y-3">
               <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
                 <Mail size={14} className="text-primary" />
@@ -3394,7 +3990,9 @@ export function BookingsPage() {
                 </div>
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
             {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -3428,35 +4026,14 @@ export function BookingsPage() {
                   )}
 
                   {selectedBooking.status !== "checked-out" && (
-                    <form onSubmit={handleAddChargeSubmit} className="space-y-3 rounded-lg bg-gray-50 p-3">
-                      <p className="text-xs font-bold text-gray-750">Add charge</p>
-                      <label className="block text-[10px] font-semibold text-gray-600">
-                        Category
-                        <select value={chargeCategory} onChange={(e) => setChargeCategory(e.target.value as IncidentalChargeCategory)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs">
-                          <option value="late-checkout">Late checkout</option>
-                          <option value="early-checkin">Early check-in</option>
-                          <option value="extra-person">Extra person / bed</option>
-                          <option value="damage">Damage</option>
-                          <option value="laundry">Laundry</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </label>
-                      <label className="block text-[10px] font-semibold text-gray-600">
-                        Label
-                        <input required maxLength={120} value={chargeLabel} onChange={(e) => setChargeLabel(e.target.value)} placeholder="e.g. Late checkout until 2 PM" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
-                      </label>
-                      <label className="block text-[10px] font-semibold text-gray-600">
-                        Amount ({config.currencySymbol})
-                        <input required type="number" min="0.01" max="1000000" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
-                      </label>
-                      <label className="block text-[10px] font-semibold text-gray-600">
-                        Note (optional)
-                        <input maxLength={300} value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} placeholder="Operational context for the audit trail" className="mt-1 min-h-[44px] w-full rounded-lg border border-gray-200 bg-white px-3 text-xs" />
-                      </label>
-                      <button type="submit" disabled={isSavingCharge} className="min-h-[44px] w-full rounded-lg bg-primary px-4 text-xs font-bold text-white disabled:opacity-60">
-                        {isSavingCharge ? "Adding charge..." : "Add to folio"}
-                      </button>
-                    </form>
+                    <button
+                      type="button"
+                      onClick={() => { setChargeCategory("other"); setChargeLabel(""); setChargeAmount(""); setChargeNote(""); setShowChargeModal(true); }}
+                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50"
+                    >
+                      <Plus size={14} />
+                      Add charge
+                    </button>
                   )}
                 </div>
               </div>
@@ -3476,6 +4053,49 @@ export function BookingsPage() {
                 onCancel={() => setChargeToVoid(null)}
               />
             ) : null}
+
+            {/* UCO-08/UCO-10: post-checkout receivable state */}
+            {selectedBooking.status === "checked-out" && (() => {
+              const folio = getBookingFolio(selectedBooking);
+              const hasLiveBalance = folio.balance > 0;
+              const hasUnpaidCheckoutReason = selectedBooking.unpaidCheckoutReason;
+              if (hasLiveBalance) {
+                return (
+                  <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-2">
+                    <p className="flex items-center gap-1.5 text-xs font-bold text-orange-800">
+                      <CreditCard size={14} />
+                      {hasUnpaidCheckoutReason ? "Balance due — unpaid departure" : "Balance due"}
+                    </p>
+                    <p className="text-[10px] text-orange-700">
+                      Outstanding: {formatPrice(folio.balance)} · Record a payment to settle.
+                    </p>
+                    {selectedBooking.unpaidCheckoutReason && (
+                      <p className="rounded bg-orange-100/50 px-2 py-1 text-[10px] text-orange-800">
+                        Reason: {selectedBooking.unpaidCheckoutReason}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-orange-600">
+                      Original folio: {formatPrice(selectedBooking.checkedOutFolioTotal || folio.grandTotal)} ·
+                      Collected at checkout: {formatPrice(selectedBooking.checkedOutCollectedTotal || folio.paymentsTotal)}
+                    </p>
+                  </div>
+                );
+              }
+              if (folio.balance <= 0 && folio.paymentsTotal > 0 && selectedBooking.checkedOutWithBalance && selectedBooking.checkedOutWithBalance > 0) {
+                return (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+                      <CreditCard size={14} />
+                      Settled after checkout
+                    </p>
+                    <p className="mt-1 text-[10px] text-emerald-700">
+                      Originally departed with {formatPrice(selectedBooking.checkedOutWithBalance)} due. Now fully settled.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Checkout folio */}
             {(selectedBooking.status === "checked-in" || selectedBooking.status === "checked-out") && (
@@ -3538,6 +4158,16 @@ export function BookingsPage() {
                           <span>{folio.balance > 0 ? "Balance due at checkout" : folio.balance < 0 ? "Overpaid amount" : "Fully settled"}</span>
                           <span>{formatPrice(Math.abs(folio.balance))}</span>
                         </div>
+                        {folio.balance > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => { setShowRecordPaymentModal(true); setPaymentAmount(String(folio.balance)); setPaymentMethod("cash"); setPaymentTransactionReference(""); setPaymentNote(""); setPaymentError(null); }}
+                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-orange-700"
+                          >
+                            <CreditCard size={13} />
+                            Collect {formatPrice(folio.balance)}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={printBookingReceiptPDF}
@@ -3571,89 +4201,18 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
-            {/* Allowed transitions buttons */}
-            <div className="grid gap-2 border-t border-gray-150 pt-4 sm:grid-cols-2">
-              {selectedBooking.status === "pending" && (
+            {/* Secondary and destructive booking actions */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} className="border-t border-gray-150 pt-4">
+              {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showMoveForm && (
                 <button
-                  onClick={() => handleStatusTransition("confirmed")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
+                  type="button"
+                  onClick={() => setShowMoveForm(true)}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
                 >
-                  Confirm Pay-at-Hotel Booking
-                </button>
-              )}
-
-              {selectedBooking.status === "payment-uploaded" && (
-                <button
-                  onClick={() => handleStatusTransition("payment-confirmed")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
-                >
-                  Mark Payment Confirmed
-                </button>
-              )}
-
-              {selectedBooking.status === "payment-confirmed" && (
-                <button
-                  onClick={() => handleStatusTransition("confirmed")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
-                >
-                  Confirm Booking
-                </button>
-              )}
-
-              {(selectedBooking.status === "confirmed" || selectedBooking.status === "payment-confirmed") && selectedBookingCheckInReadiness && (
-                <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold text-gray-900">Ready for check-in</p>
-                      <p className="mt-0.5 text-[11px] text-gray-600">
-                        Guest ID, registration details, and signature must be saved first.
-                      </p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
-                      selectedBookingCheckInReadiness.ready
-                        ? "bg-status-green-bg text-status-green-text"
-                        : "bg-amber-50 text-amber-700"
-                    }`}>
-                      {selectedBookingCheckInReadiness.ready ? "Ready" : "Missing items"}
-                    </span>
-                  </div>
-                  {!selectedBookingCheckInReadiness.ready ? (
-                    <ul className="mt-3 grid gap-1 text-[11px] font-medium text-amber-800 sm:grid-cols-2">
-                      {selectedBookingCheckInReadiness.missingItems.map((item) => (
-                        <li key={item} className="flex items-center gap-1.5">
-                          <XCircle size={12} className="shrink-0" />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <button
-                    onClick={() => handleStatusTransition("checked-in")}
-                    disabled={!selectedBookingCheckInReadiness.ready}
-                    className="mt-3 min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
-                  >
-                    Verify Guest ID & Check In
-                  </button>
-                </div>
-              )}
-
-              {selectedBooking.status === "checked-in" && (
-                <button
-                  onClick={() => {
-                    const folio = getBookingFolio(selectedBooking);
-                    if (folio.balance > 0 && !checkoutWithBalanceConfirm.arm("confirm")) return;
-                    handleStatusTransition("checked-out");
-                  }}
-                  className={`min-h-[44px] w-full inline-flex items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm transition active:scale-95 ${
-                    getBookingFolio(selectedBooking).balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
-                      ? "bg-orange-600 hover:bg-orange-700"
-                      : "bg-gray-900 hover:bg-black"
-                  }`}
-                >
-                  {checkoutWithBalanceConfirm.isPending("confirm")
-                    ? `Confirm — ${formatPrice(getBookingFolio(selectedBooking).balance)} still due`
-                    : "Check Out Room Folio"}
+                  <Move size={15} className="text-primary" aria-hidden="true" />
+                  Move / upgrade room
                 </button>
               )}
 
@@ -3679,7 +4238,7 @@ export function BookingsPage() {
                   </button>
                 )
               )}
-            </div>
+            </BookingDrawerSectionPanel>
           </div>
         )}
       </Drawer>
@@ -4140,6 +4699,436 @@ export function BookingsPage() {
           </div>
         </form>
       </Modal>
+      <Modal
+        title="Unpaid checkout — reason required"
+        open={showUnpaidCheckoutForm}
+        onClose={() => setShowUnpaidCheckoutForm(false)}
+        className="max-w-lg"
+      >
+        {selectedBooking && (() => {
+          const folio = getBookingFolio(selectedBooking);
+          return (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                <p className="text-xs font-semibold text-amber-900">
+                  Outstanding balance: <span className="text-base">{formatPrice(folio.balance)}</span>
+                </p>
+                <p className="mt-1 text-[10px] text-amber-700">
+                  Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+                </p>
+              </div>
+
+              {unpaidCheckoutBlocked ? (
+                <div className="space-y-3">
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                    <p className="text-xs font-bold text-red-800">Front Desk approval limit exceeded</p>
+                    <p className="mt-1 text-[10px] text-red-700">{unpaidCheckoutBlockMessage}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowUnpaidCheckoutForm(false)}
+                    className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label htmlFor="unpaid-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                      Reason for unpaid checkout <span className="text-red-500">*</span>
+                    </label>
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {UNPAID_REASON_SHORTCUTS.map((shortcut) => (
+                        <button
+                          key={shortcut.value}
+                          type="button"
+                          onClick={() => setUnpaidCheckoutReason(shortcut.value)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
+                            unpaidCheckoutReason === shortcut.value
+                              ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          }`}
+                        >
+                          {shortcut.label}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      id="unpaid-reason"
+                      value={unpaidCheckoutReason}
+                      onChange={(e) => setUnpaidCheckoutReason(e.target.value)}
+                      placeholder="Describe why the balance remains unpaid..."
+                      rows={3}
+                      maxLength={500}
+                      className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <p className="mt-1 text-right text-[10px] text-gray-400">{unpaidCheckoutReason.length}/500</p>
+                  </div>
+
+                  {unpaidCheckoutError && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{unpaidCheckoutError}</p>
+                  )}
+
+                  <div className="flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowUnpaidCheckoutForm(false)}
+                      disabled={unpaidCheckoutSubmitting}
+                      className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selectedBooking) return;
+                        const reason = unpaidCheckoutReason.trim();
+                        if (!reason) {
+                          setUnpaidCheckoutError("A reason is required for unpaid checkout.");
+                          return;
+                        }
+                        setUnpaidCheckoutSubmitting(true);
+                        setUnpaidCheckoutError(null);
+                        try {
+                          await updateBookingStatus(selectedBooking.id, "checked-out", {
+                            unpaidCheckoutReason: reason
+                          } as any);
+                          setSelectedBooking(prev => prev ? { ...prev, status: "checked-out", unpaidCheckoutReason: reason } as any : null);
+                          setShowUnpaidCheckoutForm(false);
+                        } catch (err: any) {
+                          if (err.message?.includes("Front Desk cannot complete")) {
+                            setUnpaidCheckoutBlocked(true);
+                            setUnpaidCheckoutBlockMessage(err.message);
+                          } else {
+                            setUnpaidCheckoutError(err.message || "Failed to checkout.");
+                          }
+                        } finally {
+                          setUnpaidCheckoutSubmitting(false);
+                        }
+                      }}
+                      disabled={unpaidCheckoutSubmitting || !unpaidCheckoutReason.trim()}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-50"
+                    >
+                      {unpaidCheckoutSubmitting ? (
+                        <>
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          Checking out…
+                        </>
+                      ) : (
+                        `Check out with ${formatPrice(folio.balance)} due`
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
+      {/* PRC-11: Focused Record Payment modal */}
+      <Modal
+        title="Record Onsite Payment"
+        open={showRecordPaymentModal}
+        onClose={() => setShowRecordPaymentModal(false)}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg bg-gray-50 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Folio balance</p>
+              <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking ? getBookingFolio(selectedBooking).balance : 0)}</p>
+            </div>
+          </div>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Amount (PHP)
+            <input type="number" required min="0.01" step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Payment Method
+            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900">
+              {onsitePaymentMethodOptions.map((m) => (<option key={m.method} value={m.method}>{m.label || m.method}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Transaction Reference
+            <input type="text" value={paymentTransactionReference} onChange={(e) => setPaymentTransactionReference(e.target.value)} placeholder="e.g. GCash ref or bank trace #" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Internal Note <span className="font-normal text-gray-400">(optional)</span>
+            <input type="text" value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} placeholder="e.g. Downpayment deposit" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+          </label>
+          {paymentError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{paymentError}</p>}
+          <div className="flex items-center justify-end gap-3">
+            <button type="button" onClick={() => setShowRecordPaymentModal(false)} disabled={isRecordingPayment} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => void (async () => { setPaymentError(null); await handleAddPaymentSubmit(new Event("submit") as unknown as React.FormEvent); setShowRecordPaymentModal(false); })()} disabled={isRecordingPayment || !paymentAmount || parseFloat(paymentAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
+              {isRecordingPayment ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Record Payment"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* PRC-13: Verify & Record Payment modal (replaces old status-only mark-payment-confirmed) */}
+      <Modal
+        title={selectedBooking ? `Verify payment — ${selectedBooking.bookingRef}` : "Verify payment"}
+        open={showVerifyPaymentModal}
+        onClose={() => setShowVerifyPaymentModal(false)}
+        className="max-w-lg"
+      >
+        {selectedBooking && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-600">
+              Review the uploaded proof and confirm the collection. This atomically creates a payment ledger entry
+              and transitions the booking status.
+            </p>
+            {selectedBooking.paymentProofUrl && (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="block w-full overflow-hidden rounded-lg border border-gray-200">
+                  <img src={selectedBooking.paymentProofUrl} alt="Payment proof" className="max-h-48 w-full object-contain" />
+                </button>
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}</p>
+              </div>
+            </div>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Verified amount
+              <input type="number" required min="0.01" step="0.01" value={verifyAmount} onChange={(e) => setVerifyAmount(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Payment method
+              <select value={verifyMethod} onChange={(e) => setVerifyMethod(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900">
+                <option value="gcash">GCash</option>
+                <option value="maya">Maya</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="paypal">PayPal</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Transaction reference
+              <input type="text" value={verifyReference} onChange={(e) => setVerifyReference(e.target.value)} placeholder="GCash ref or bank trace #" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Internal note <span className="font-normal text-gray-400">(optional)</span>
+              <input type="text" value={verifyNote} onChange={(e) => setVerifyNote(e.target.value)} placeholder="e.g. Full payment via GCash" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+            </label>
+            {verifyError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{verifyError}</p>}
+            <div className="flex items-center justify-end gap-3">
+              <button type="button" onClick={() => setShowVerifyPaymentModal(false)} disabled={verifyPending} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+              <button type="button" onClick={() => void (async () => {
+                setVerifyError(null);
+                const amount = parseFloat(verifyAmount);
+                if (!Number.isFinite(amount) || amount <= 0) { setVerifyError("Enter a valid positive amount."); return; }
+                setVerifyPending(true);
+                const result = await verifyAndRecordPayment(selectedBooking.id, amount, verifyMethod, verifyReference.trim() || undefined, verifyNote.trim() || undefined);
+                setVerifyPending(false);
+                if (!result.success) { setVerifyError(result.error || "Failed to verify payment."); return; }
+                setShowVerifyPaymentModal(false);
+              })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
+                {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* BDUX-05: Discount / Voucher modal */}
+      <Modal
+        title={selectedBooking ? `Apply discount — ${selectedBooking.bookingRef}` : "Apply discount / voucher"}
+        open={showDiscountForm}
+        onClose={() => setShowDiscountForm(false)}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-600">Apply after sighting a valid Senior/PWD ID, or enter a promo code. Pricing is recalculated and audited by the server.</p>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Government discount
+            <select value={staffDiscountType} onChange={(e) => setStaffDiscountType(e.target.value as "" | "senior" | "pwd")} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs">
+              <option value="">None</option>
+              <option value="senior">Senior Citizen (20%)</option>
+              <option value="pwd">PWD (20%)</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Voucher code
+            <input value={staffVoucherCode} onChange={(e) => setStaffVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional promo code" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs uppercase" />
+          </label>
+          {discountError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{discountError}</p>}
+          <div className="flex items-center justify-end gap-3">
+            <button type="button" onClick={() => setShowDiscountForm(false)} disabled={isApplyingStaffDiscount} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => void (async () => {
+              if (!selectedBooking || (!staffDiscountType && !staffVoucherCode.trim())) return;
+              setDiscountError(null);
+              setIsApplyingStaffDiscount(true);
+              try {
+                const token = await auth.currentUser?.getIdToken(true);
+                const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/apply-discount`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+                  body: JSON.stringify({ bookingId: selectedBooking.id, discountType: staffDiscountType, voucherCode: staffVoucherCode.trim() })
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to apply discount.");
+                syncSelectedBooking(payload.data);
+                setStaffDiscountType("");
+                setStaffVoucherCode("");
+                setShowDiscountForm(false);
+                toast.success("Booking repriced", `New total: ${formatPrice(payload.data.totalPrice)}`);
+              } catch (error: any) {
+                setDiscountError(error.message || "Please check the details and try again.");
+              } finally {
+                setIsApplyingStaffDiscount(false);
+              }
+            })()} disabled={isApplyingStaffDiscount || (!staffDiscountType && !staffVoucherCode.trim())} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
+              {isApplyingStaffDiscount ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Applying…</> : "Apply and reprice booking"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* BDUX-05: Refund modal */}
+      <Modal
+        title={selectedBooking ? `Record refund — ${selectedBooking.bookingRef}` : "Record refund"}
+        open={showRefundModal}
+        onClose={() => setShowRefundModal(false)}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-red-700">Creates an immutable negative payment entry. Refunds cannot exceed net collected funds.</p>
+          <div className="rounded-lg bg-gray-50 px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Net collected</p>
+            <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBookingPayments.reduce((s, p) => s + p.amount, 0))}</p>
+          </div>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Refund amount
+            <input type="number" min="0.01" step="0.01" value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Refund method
+            <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs">
+              {onsitePaymentMethodOptions.map((method) => <option key={method.method} value={method.method}>{method.label}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Reason
+            <textarea required maxLength={500} rows={2} value={refundReason} onChange={(e) => setRefundReason(e.target.value)} placeholder="Required approval and audit context" className="rounded-lg border border-gray-200 p-3 text-xs" />
+          </label>
+          {refundError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{refundError}</p>}
+          <div className="flex items-center justify-end gap-3">
+            <button type="button" onClick={() => setShowRefundModal(false)} disabled={isRefunding} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => void (async () => {
+              if (!selectedBooking || currentUser?.role !== "admin") return;
+              const amount = Number(refundAmount);
+              if (!Number.isFinite(amount) || amount <= 0 || !refundReason.trim()) {
+                toast.warning("Check refund details", "Enter a positive amount and a required refund reason.");
+                return;
+              }
+              setRefundError(null);
+              setIsRefunding(true);
+              try {
+                const token = await auth.currentUser?.getIdToken(true);
+                const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-refund`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "" },
+                  body: JSON.stringify({ bookingId: selectedBooking.id, amount, method: refundMethod, reason: refundReason.trim() })
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.success) throw new Error(payload.error || "Unable to record refund.");
+                setRefundAmount("");
+                setRefundReason("");
+                setShowRefundModal(false);
+                toast.success("Refund recorded", `${formatPrice(amount)} returned via ${getOnsitePaymentMethodLabel(refundMethod)}.`);
+              } catch (error: any) {
+                setRefundError(error.message || "Please try again.");
+              } finally {
+                setIsRefunding(false);
+              }
+            })()} disabled={isRefunding || !refundAmount || Number(refundAmount) <= 0 || !refundReason.trim()} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">
+              {isRefunding ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Approve and record refund"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* BDUX-05: Add charge modal */}
+      <Modal
+        title={selectedBooking ? `Add charge — ${selectedBooking.bookingRef}` : "Add incidental charge"}
+        open={showChargeModal}
+        onClose={() => setShowChargeModal(false)}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Category
+            <select value={chargeCategory} onChange={(e) => setChargeCategory(e.target.value as IncidentalChargeCategory)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs">
+              <option value="late-checkout">Late checkout</option>
+              <option value="early-checkin">Early check-in</option>
+              <option value="extra-person">Extra person / bed</option>
+              <option value="damage">Damage</option>
+              <option value="laundry">Laundry</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Label
+            <input required maxLength={120} value={chargeLabel} onChange={(e) => setChargeLabel(e.target.value)} placeholder="e.g. Late checkout until 2 PM" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Amount ({config.currencySymbol})
+            <input required type="number" min="0.01" max="1000000" step="0.01" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Note (optional)
+            <input maxLength={300} value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} placeholder="Operational context for the audit trail" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs" />
+          </label>
+          {chargeError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{chargeError}</p>}
+          <div className="flex items-center justify-end gap-3">
+            <button type="button" onClick={() => setShowChargeModal(false)} disabled={isSavingCharge} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => void (async () => {
+              if (!selectedBooking) return;
+              const amount = Number(chargeAmount);
+              if (!chargeLabel.trim() || !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+                toast.warning("Check charge details", "Enter a label and an amount between 0.01 and 1,000,000.");
+                return;
+              }
+              setChargeError(null);
+              setIsSavingCharge(true);
+              try {
+                await addDoc(collection(db, "bookings", selectedBooking.id, "charges"), {
+                  label: chargeLabel.trim(),
+                  amount,
+                  category: chargeCategory,
+                  note: chargeNote.trim(),
+                  addedBy: currentUser?.uid || "staff",
+                  addedAt: serverTimestamp(),
+                  voidOf: null
+                });
+                setChargeLabel("");
+                setChargeAmount("");
+                setChargeNote("");
+                setChargeCategory("other");
+                setShowChargeModal(false);
+                toast.success("Charge added", `${formatPrice(amount)} added to the booking folio.`);
+              } catch (error: any) {
+                setChargeError(error.message || "Please try again.");
+              } finally {
+                setIsSavingCharge(false);
+              }
+            })()} disabled={isSavingCharge || !chargeLabel.trim() || !chargeAmount || Number(chargeAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
+              {isSavingCharge ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Adding…</> : "Add to folio"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}

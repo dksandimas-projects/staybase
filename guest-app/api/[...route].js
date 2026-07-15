@@ -1066,6 +1066,121 @@ var require_browser = __commonJS({
   }
 });
 
+// ../node_modules/has-flag/index.js
+var require_has_flag = __commonJS({
+  "../node_modules/has-flag/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = (flag, argv = process.argv) => {
+      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
+      const position = argv.indexOf(prefix + flag);
+      const terminatorPosition = argv.indexOf("--");
+      return position !== -1 && (terminatorPosition === -1 || position < terminatorPosition);
+    };
+  }
+});
+
+// ../node_modules/supports-color/index.js
+var require_supports_color = __commonJS({
+  "../node_modules/supports-color/index.js"(exports2, module2) {
+    "use strict";
+    var os2 = require("os");
+    var tty = require("tty");
+    var hasFlag = require_has_flag();
+    var { env } = process;
+    var forceColor;
+    if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false") || hasFlag("color=never")) {
+      forceColor = 0;
+    } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
+      forceColor = 1;
+    }
+    if ("FORCE_COLOR" in env) {
+      if (env.FORCE_COLOR === "true") {
+        forceColor = 1;
+      } else if (env.FORCE_COLOR === "false") {
+        forceColor = 0;
+      } else {
+        forceColor = env.FORCE_COLOR.length === 0 ? 1 : Math.min(parseInt(env.FORCE_COLOR, 10), 3);
+      }
+    }
+    function translateLevel(level) {
+      if (level === 0) {
+        return false;
+      }
+      return {
+        level,
+        hasBasic: true,
+        has256: level >= 2,
+        has16m: level >= 3
+      };
+    }
+    function supportsColor(haveStream, streamIsTTY) {
+      if (forceColor === 0) {
+        return 0;
+      }
+      if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
+        return 3;
+      }
+      if (hasFlag("color=256")) {
+        return 2;
+      }
+      if (haveStream && !streamIsTTY && forceColor === void 0) {
+        return 0;
+      }
+      const min = forceColor || 0;
+      if (env.TERM === "dumb") {
+        return min;
+      }
+      if (process.platform === "win32") {
+        const osRelease = os2.release().split(".");
+        if (Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
+          return Number(osRelease[2]) >= 14931 ? 3 : 2;
+        }
+        return 1;
+      }
+      if ("CI" in env) {
+        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI", "GITHUB_ACTIONS", "BUILDKITE"].some((sign) => sign in env) || env.CI_NAME === "codeship") {
+          return 1;
+        }
+        return min;
+      }
+      if ("TEAMCITY_VERSION" in env) {
+        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env.TEAMCITY_VERSION) ? 1 : 0;
+      }
+      if (env.COLORTERM === "truecolor") {
+        return 3;
+      }
+      if ("TERM_PROGRAM" in env) {
+        const version6 = parseInt((env.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
+        switch (env.TERM_PROGRAM) {
+          case "iTerm.app":
+            return version6 >= 3 ? 3 : 2;
+          case "Apple_Terminal":
+            return 2;
+        }
+      }
+      if (/-256(color)?$/i.test(env.TERM)) {
+        return 2;
+      }
+      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env.TERM)) {
+        return 1;
+      }
+      if ("COLORTERM" in env) {
+        return 1;
+      }
+      return min;
+    }
+    function getSupportLevel(stream) {
+      const level = supportsColor(stream, stream && stream.isTTY);
+      return translateLevel(level);
+    }
+    module2.exports = {
+      supportsColor: getSupportLevel,
+      stdout: translateLevel(supportsColor(true, tty.isatty(1))),
+      stderr: translateLevel(supportsColor(true, tty.isatty(2)))
+    };
+  }
+});
+
 // ../node_modules/debug/src/node.js
 var require_node = __commonJS({
   "../node_modules/debug/src/node.js"(exports2, module2) {
@@ -1084,7 +1199,7 @@ var require_node = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = require("supports-color");
+      const supportsColor = require_supports_color();
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports2.colors = [
           20,
@@ -188634,6 +188749,24 @@ function discountRejectedEmail(booking) {
     ctaUrl: lookupUrl(booking)
   });
 }
+function paymentRejectedEmail(booking) {
+  const reason = booking.paymentRejectionReason ? `Reason: ${escapeHtml(booking.paymentRejectionReason)}` : "We could not verify the uploaded payment proof against our records.";
+  const hasRef = Boolean(booking.paymentReferenceNumber);
+  return emailLayout({
+    preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
+    eyebrow: "Payment needs your attention",
+    title: "We couldn't verify your payment proof",
+    intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
+    body: `
+      ${callout("red", "Payment not verified", reason)}
+      ${hasRef ? callout("warm", "Reference we received", `You entered: <strong>${escapeHtml(String(booking.paymentReferenceNumber))}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
+      <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below \u2014 your booking ref <strong>${escapeHtml(booking.bookingRef)}</strong> and email are all you need.</p>
+      ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Re-upload payment proof",
+    ctaUrl: lookupUrl(booking)
+  });
+}
 function corporateInquiryEmail(inquiry) {
   const safeInquiry = {
     companyName: inquiry.companyName || "Not provided",
@@ -189129,6 +189262,10 @@ async function sendBookingTrigger(action, booking) {
     "booking-rescheduled": {
       subject: `[${hotel_config_default.brandName}] Booking updated: ${booking.bookingRef}`,
       html: bookingRescheduledEmail(booking)
+    },
+    "payment-rejected": {
+      subject: `[${hotel_config_default.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
+      html: paymentRejectedEmail(booking)
     }
   };
   const template = templates[action];
@@ -189277,6 +189414,13 @@ async function handleEmailPreview(req, res) {
     preferredDates: "Oct 12 - Oct 15, 2026",
     specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
   };
+  const mockContactInquiry = {
+    name: "Maria Santos",
+    email: "maria.santos@example.com",
+    phone: "+63 917 555 0123",
+    subject: "Airport transfer availability",
+    message: "Do you offer airport pickup for two guests arriving in the afternoon?"
+  };
   const mockEarlyCheckinRequest = {
     requestedCheckInTime: "10:30 AM",
     notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
@@ -189331,8 +189475,24 @@ async function handleEmailPreview(req, res) {
       case "discount-rejected":
         html = discountRejectedEmail(mockBooking);
         break;
+      case "payment-rejected":
+        html = paymentRejectedEmail({
+          ...mockBooking,
+          paymentReferenceNumber: "1234567890",
+          paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
+        });
+        break;
       case "corporate-inquiry":
         html = corporateInquiryEmail(mockInquiry);
+        break;
+      case "corporate-inquiry-confirmation":
+        html = corporateInquiryConfirmationEmail(mockInquiry);
+        break;
+      case "contact-inquiry":
+        html = contactInquiryEmail(mockContactInquiry);
+        break;
+      case "contact-confirmation":
+        html = contactConfirmationEmail(mockContactInquiry);
         break;
       case "early-checkin-request":
         html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);
@@ -189386,6 +189546,69 @@ async function handleEmailPreview(req, res) {
     const message = error instanceof Error ? error.message : "Unable to generate preview. Please try again.";
     return res.status(500).json({ success: false, error: message });
   }
+}
+
+// server/lib/notifications.ts
+var MAX_TITLE_LENGTH = 160;
+var MAX_ID_LENGTH = 64;
+var MAX_ROOM_LENGTH = 12;
+var MAX_REF_LENGTH = 40;
+async function writeNotification(input) {
+  try {
+    const title = String(input.title || "").trim().slice(0, MAX_TITLE_LENGTH);
+    const entityId = String(input.entityId || "").trim().slice(0, MAX_ID_LENGTH);
+    if (!title || !entityId) {
+      console.warn("[notifications] Skipping write \u2014 missing required field:", {
+        hasTitle: !!title,
+        hasEntityId: !!entityId
+      });
+      return;
+    }
+    const roomNumber = input.roomNumber != null ? String(input.roomNumber).trim().slice(0, MAX_ROOM_LENGTH) : null;
+    const bookingRef = input.bookingRef != null ? String(input.bookingRef).trim().slice(0, MAX_REF_LENGTH) : null;
+    await adminDb.collection("notifications").add({
+      type: input.type,
+      title,
+      entityType: input.entityType,
+      entityId,
+      roomNumber: roomNumber || null,
+      bookingRef: bookingRef || null,
+      readBy: {},
+      createdBy: "system",
+      createdAt: Timestamp.now()
+    });
+  } catch (err) {
+    console.error("[notifications] Failed to write notification:", err);
+  }
+}
+async function pruneNotifications(maxAgeMs, batchSize = 500) {
+  const cutoff = new Date(Date.now() - maxAgeMs);
+  const snap = await adminDb.collection("notifications").where("createdAt", "<", Timestamp.fromDate(cutoff)).orderBy("createdAt", "asc").limit(batchSize).get();
+  const deletedIds = [];
+  if (snap.docs.length === 0) {
+    return {
+      scanned: 0,
+      deleted: 0,
+      deletedIds,
+      cutoffIso: cutoff.toISOString()
+    };
+  }
+  const writer = adminDb.bulkWriter();
+  const queue = snap.docs.map(
+    (docSnap) => writer.delete(docSnap.ref).then(() => docSnap.id).catch((err) => {
+      console.error(`[notifications-prune] Failed to delete ${docSnap.id}:`, err);
+      return null;
+    })
+  );
+  await writer.close();
+  const settled = await Promise.all(queue);
+  const successful = settled.filter((id) => id !== null);
+  return {
+    scanned: snap.docs.length,
+    deleted: successful.length,
+    deletedIds: successful,
+    cutoffIso: cutoff.toISOString()
+  };
 }
 
 // server/lib/rate-breakdown.ts
@@ -190182,6 +190405,14 @@ async function handleCreateBooking(req, res) {
     } catch (staffEmailErr) {
       console.error("Failed to send staff-new-booking email:", staffEmailErr);
     }
+    await writeNotification({
+      type: "booking",
+      title: `New booking \u2014 ${finalBookingRef} (Room ${assignedRoomNumber})`,
+      entityType: "booking",
+      entityId: bookingId,
+      roomNumber: assignedRoomNumber,
+      bookingRef: finalBookingRef
+    });
     return res.status(200).json({
       success: true,
       data: {
@@ -190493,6 +190724,16 @@ async function handleCreateWalkin(req, res) {
         console.error("Failed to send walk-in booking confirmation email:", emailErr);
       }
     }
+    if (newBooking) {
+      await writeNotification({
+        type: "booking",
+        title: `New walk-in booking \u2014 ${finalBookingRef} (Room ${newBooking.roomNumber})`,
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: newBooking.roomNumber,
+        bookingRef: finalBookingRef
+      });
+    }
     return res.status(200).json({
       success: true,
       data: {
@@ -190672,6 +190913,57 @@ async function handleRejectDiscount(req, res) {
     return res.status(200).json({ success: true, data: updates });
   } catch (error) {
     console.error("Discount rejection handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+var MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
+async function handleRejectPayment(req, res) {
+  const { bookingId, reason } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, MAX_PAYMENT_REJECTION_REASON_LENGTH) : "";
+  if (!safeReason) {
+    return res.status(400).json({ success: false, error: "A rejection reason is required so the guest can fix the issue." });
+  }
+  const paymentRejectedBy = req.staff?.uid || "staff";
+  let bookingData = null;
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef.get();
+    if (!bookingDoc.exists) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    const data = bookingDoc.data();
+    if (data.status !== "payment-uploaded") {
+      return res.status(400).json({
+        success: false,
+        error: `Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`
+      });
+    }
+    bookingData = data;
+    const updatedAt = /* @__PURE__ */ new Date();
+    await bookingRef.update({
+      status: "pending",
+      paymentRejectionReason: safeReason,
+      paymentRejectedAt: updatedAt,
+      paymentRejectedBy,
+      // Per the implementation plan: stale proof state is
+      // kept for audit. The re-upload is guest-driven via
+      // the existing `pending` UI on the lookup page.
+      updatedAt
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "pending",
+        paymentRejectionReason: safeReason,
+        paymentRejectedAt: updatedAt,
+        paymentRejectedBy
+      }
+    });
+  } catch (error) {
+    console.error("Payment rejection handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
@@ -190945,6 +191237,17 @@ async function handleAddPayment(req, res) {
   } catch (emailErr) {
     console.error("Failed to send payment confirmation email:", emailErr);
   }
+  if (!idempotentReplay && bookingDataSnapshot) {
+    const notifTitle = transitionedToPaymentConfirmed ? `Payment received \u2014 ${bookingDataSnapshot.bookingRef || bookingId} (full)` : `Payment added \u2014 ${bookingDataSnapshot.bookingRef || bookingId} (${numericAmount})`;
+    await writeNotification({
+      type: "payment",
+      title: notifTitle,
+      entityType: "booking",
+      entityId: bookingId,
+      roomNumber: bookingDataSnapshot.roomNumber || null,
+      bookingRef: bookingDataSnapshot.bookingRef || null
+    });
+  }
   return res.status(200).json({
     success: true,
     data: {
@@ -191098,6 +191401,14 @@ async function handleConfirmBooking(req, res) {
     } catch (emailErr) {
       console.error("Failed to send booking confirmation email:", emailErr);
     }
+    await writeNotification({
+      type: "booking",
+      title: `Booking confirmed \u2014 ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
+      entityType: "booking",
+      entityId: bookingId,
+      roomNumber: bookingData.roomNumber || null,
+      bookingRef: bookingData.bookingRef || null
+    });
     return res.status(200).json({ success: true, data: { status: "confirmed" } });
   } catch (error) {
     if (error?.message === "BOOKING_NOT_FOUND") {
@@ -191164,6 +191475,20 @@ async function handleCheckinBooking(req, res) {
         updatedAt: /* @__PURE__ */ new Date()
       });
     });
+    try {
+      const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
+      const fresh = freshSnap.data() || {};
+      await writeNotification({
+        type: "arrival",
+        title: `Guest checked in \u2014 ${fresh.bookingRef || bookingId} (Room ${fresh.roomNumber || ""})`.trim(),
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: fresh.roomNumber || null,
+        bookingRef: fresh.bookingRef || null
+      });
+    } catch (notifErr) {
+      console.error("Failed to fetch booking for arrival notification:", notifErr);
+    }
     return res.status(200).json({ success: true, data: { status: "checked-in" } });
   } catch (error) {
     if (error?.message?.startsWith("Booking is not ready for check-in.") || error?.message?.startsWith("Assigned room") || error?.message === "Booking not found." || error?.message === "Booking has no assigned room.") {
@@ -191305,6 +191630,20 @@ async function handleCheckoutBooking(req, res) {
         });
       }
     });
+    try {
+      const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
+      const fresh = freshSnap.data() || {};
+      await writeNotification({
+        type: "departure",
+        title: `Guest checked out \u2014 ${fresh.bookingRef || bookingId} (Room ${fresh.roomNumber || ""})`.trim(),
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: fresh.roomNumber || null,
+        bookingRef: fresh.bookingRef || null
+      });
+    } catch (notifErr) {
+      console.error("Failed to fetch booking for departure notification:", notifErr);
+    }
     return res.status(200).json({
       success: true,
       data: {
@@ -193654,6 +193993,14 @@ async function handleCreateStoreOrder(req, res) {
       } catch (emailErr) {
         console.error("Failed to send store-order-placed email:", emailErr);
       }
+      await writeNotification({
+        type: "store-order",
+        title: `New store order \u2014 ${responseData.orderRef} (Room ${roomNumber})`,
+        entityType: "storeOrder",
+        entityId: responseData.orderId,
+        roomNumber,
+        bookingRef: null
+      });
     }
     return res.status(200).json({ success: true, data: responseData });
   } catch (error) {
@@ -194165,6 +194512,45 @@ async function handlePublishSeo(req, res) {
   });
 }
 
+// server/handlers/notifications-prune.ts
+function isAuthorizedCronRequest2(req) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) return false;
+  const headerSecret = req.headers["x-cron-secret"];
+  if (typeof headerSecret === "string" && headerSecret === expected) return true;
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ") && authHeader.slice("Bearer ".length) === expected) {
+    return true;
+  }
+  return false;
+}
+var NOTIFICATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1e3;
+async function handleNotificationsPrune(req, res) {
+  if (req.method !== "POST" && req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  if (!process.env.CRON_SECRET) {
+    return res.status(500).json({ success: false, error: "CRON_SECRET is not configured on the server." });
+  }
+  if (!isAuthorizedCronRequest2(req)) {
+    return res.status(401).json({ success: false, error: "Unauthorized cron request." });
+  }
+  const requestedMaxAgeMs = Number(req.body?.maxAgeMs);
+  const maxAgeMs = Number.isFinite(requestedMaxAgeMs) && requestedMaxAgeMs > 0 ? Math.min(requestedMaxAgeMs, NOTIFICATION_RETENTION_MS) : NOTIFICATION_RETENTION_MS;
+  const requestedBatch = Number(req.body?.batchSize);
+  const batchSize = Number.isFinite(requestedBatch) && requestedBatch > 0 ? Math.min(requestedBatch, 2e3) : 500;
+  try {
+    const result = await pruneNotifications(maxAgeMs, batchSize);
+    console.log(
+      `[notifications-prune] scanned=${result.scanned} deleted=${result.deleted} cutoffIso=${result.cutoffIso}`
+    );
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    console.error("Notifications prune failed:", err);
+    return res.status(500).json({ success: false, error: "Notifications prune failed." });
+  }
+}
+
 // server/apiRouter.ts
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
@@ -194495,6 +194881,49 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRejectDiscount(req, res);
+  }
+  if (domain === "bookings" && action === "reject-payment" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reject-payment:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many reject requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const bookingId = String((req.body || {}).bookingId || "").trim();
+    let preRejectSnapshot = null;
+    if (bookingId) {
+      const snap = await adminDb.collection("bookings").doc(bookingId).get();
+      if (snap.exists) preRejectSnapshot = snap.data() || null;
+    }
+    const wasEligible = preRejectSnapshot?.status === "payment-uploaded";
+    const result = await handleRejectPayment(req, res);
+    if (wasEligible) {
+      try {
+        const emailBooking = {
+          ...preRejectSnapshot,
+          status: "pending",
+          paymentRejectionReason: (req.body || {}).reason
+        };
+        await sendBookingTrigger("payment-rejected", emailBooking);
+      } catch (emailErr) {
+        console.error("Failed to send payment-rejected email:", emailErr);
+      }
+      try {
+        await writeNotification({
+          type: "payment",
+          title: `Payment proof rejected \u2014 ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: preRejectSnapshot.roomNumber || null,
+          bookingRef: preRejectSnapshot.bookingRef || null
+        });
+      } catch (notifErr) {
+        console.error("Failed to write payment-rejection notification:", notifErr);
+      }
+    }
+    return result;
   }
   if (domain === "bookings" && action === "apply-discount" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
@@ -194913,6 +195342,9 @@ async function handler(req, res) {
   }
   if (domain === "janitor" && action === "h2-status" && req.method === "GET") {
     return await handleH2BackfillStatus(req, res);
+  }
+  if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
+    return await handleNotificationsPrune(req, res);
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }

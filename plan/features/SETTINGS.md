@@ -101,7 +101,8 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 
 - [x] From email address (Resend sender — `sparkinn.dev@gmail.com`)
 - [x] Admin notification email (for new corporate inquiries)
-- [x] Preview of each email trigger type (read-only label list)
+- [x] Complete preview catalog for all 22 server-side templates, grouped into Bookings & Payments, Requests & Promotions, In-room Store, and Staff Alerts
+- [x] Every template card has an accessible 44px preview action and renders against safe mock data; the catalog includes payment rejection, public-form confirmations, voucher delivery, the full store lifecycle, and staff alerts
 - [x] Source: `api/.env` — note to admin: "Email settings require a code deploy to change"
 - [x] These fields may be read-only in UI if managed via env vars
 

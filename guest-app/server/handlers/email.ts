@@ -22,6 +22,7 @@ type EmailAction =
   | "discount-rejected"
   | "early-checkin-request"
   | "booking-rescheduled"
+  | "payment-rejected"
   // Per W4.4 / decision #104 / audit-email-extensions: 8 new
   // server-triggered templates. Voucher-issued is admin-driven;
   // store-order-* are guest status updates; staff-* notify the
@@ -437,6 +438,36 @@ function discountRejectedEmail(booking: any) {
       ${card("Updated booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
     ctaLabel: "View my booking",
+    ctaUrl: lookupUrl(booking)
+  });
+}
+
+// Per Phase 12 — Dashboard Payment Rejection & Reference
+// Verification (2026-07-15): when staff reject a pending
+// payment proof from the dashboard, the booking is
+// bounced back to `pending` (room stays held) and the
+// guest is emailed with the rejection reason so they
+// can re-upload a corrected proof. Stale
+// `paymentProofUrl` + `paymentReferenceNumber` are kept
+// for audit; the re-upload is guest-driven via the
+// existing pending UI.
+function paymentRejectedEmail(booking: any) {
+  const reason = booking.paymentRejectionReason
+    ? `Reason: ${escapeHtml(booking.paymentRejectionReason)}`
+    : "We could not verify the uploaded payment proof against our records.";
+  const hasRef = Boolean(booking.paymentReferenceNumber);
+  return emailLayout({
+    preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
+    eyebrow: "Payment needs your attention",
+    title: "We couldn't verify your payment proof",
+    intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
+    body: `
+      ${callout("red", "Payment not verified", reason)}
+      ${hasRef ? callout("warm", "Reference we received", `You entered: <strong>${escapeHtml(String(booking.paymentReferenceNumber))}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
+      <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below — your booking ref <strong>${escapeHtml(booking.bookingRef)}</strong> and email are all you need.</p>
+      ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Re-upload payment proof",
     ctaUrl: lookupUrl(booking)
   });
 }
@@ -1009,6 +1040,10 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     "booking-rescheduled": {
       subject: `[${config.brandName}] Booking updated: ${booking.bookingRef}`,
       html: bookingRescheduledEmail(booking)
+    },
+    "payment-rejected": {
+      subject: `[${config.brandName}] Action needed: payment proof rejected for ${booking.bookingRef}`,
+      html: paymentRejectedEmail(booking)
     }
   };
 
@@ -1190,6 +1225,14 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
     specialRequirements: "Requires high-speed Wi-Fi, early breakfast setup, and project room space."
   };
 
+  const mockContactInquiry = {
+    name: "Maria Santos",
+    email: "maria.santos@example.com",
+    phone: "+63 917 555 0123",
+    subject: "Airport transfer availability",
+    message: "Do you offer airport pickup for two guests arriving in the afternoon?"
+  };
+
   const mockEarlyCheckinRequest = {
     requestedCheckInTime: "10:30 AM",
     notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
@@ -1247,8 +1290,24 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
       case "discount-rejected":
         html = discountRejectedEmail(mockBooking);
         break;
+      case "payment-rejected":
+        html = paymentRejectedEmail({
+          ...mockBooking,
+          paymentReferenceNumber: "1234567890",
+          paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
+        });
+        break;
       case "corporate-inquiry":
         html = corporateInquiryEmail(mockInquiry);
+        break;
+      case "corporate-inquiry-confirmation":
+        html = corporateInquiryConfirmationEmail(mockInquiry);
+        break;
+      case "contact-inquiry":
+        html = contactInquiryEmail(mockContactInquiry);
+        break;
+      case "contact-confirmation":
+        html = contactConfirmationEmail(mockContactInquiry);
         break;
       case "early-checkin-request":
         html = earlyCheckinRequestEmail(mockBooking, mockEarlyCheckinRequest);

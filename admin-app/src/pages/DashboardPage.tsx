@@ -5,10 +5,11 @@ import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
-import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso } from "lucide-react";
+import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
+
 
 export function getDaysOverdue(checkOut: string, todayKey: string) {
   const checkOutTime = Date.UTC(
@@ -52,11 +53,65 @@ export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, cu
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
   const [corporateHelpOpen, setCorporateHelpOpen] = useState(false);
+
+  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Verification (2026-07-15). The pending-payment
+  // alerts now have a Reject action beside Confirm
+  // Payment. The form asks for a reason (required by
+  // the server), shows a small canned-reason shortcut
+  // for the common cases, and surfaces the
+  // guest-entered reference number so staff can
+  // cross-check it against the bank/GCash record.
+  const [rejectionTarget, setRejectionTarget] = useState<Booking | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectionError, setRejectionError] = useState<string | null>(null);
+  const [rejectionPending, setRejectionPending] = useState(false);
+
+  const REJECTION_REASON_PRESETS: Array<{ label: string; value: string }> = [
+    {
+      label: "Reference doesn't match",
+      value: "The reference number you provided does not match our bank / GCash record. Please double-check and re-upload with the correct reference."
+    },
+    {
+      label: "Amount incorrect",
+      value: "The amount on the payment proof does not match the booking total. Please re-upload a proof of the correct amount."
+    },
+    {
+      label: "Image unreadable",
+      value: "The payment proof image is too blurry or cropped to read. Please re-upload a clearer screenshot."
+    }
+  ];
+
+  const openRejectForm = (booking: Booking) => {
+    setRejectionTarget(booking);
+    setRejectionReason("");
+    setRejectionError(null);
+  };
+
+  const cancelRejectForm = () => {
+    setRejectionTarget(null);
+    setRejectionReason("");
+    setRejectionError(null);
+    setRejectionPending(false);
+  };
+
+  const submitRejection = async () => {
+    if (!rejectionTarget) return;
+    setRejectionPending(true);
+    setRejectionError(null);
+    const result = await rejectPayment(rejectionTarget.id, rejectionReason);
+    setRejectionPending(false);
+    if (!result.success) {
+      setRejectionError(result.error || "Failed to reject payment.");
+      return;
+    }
+    cancelRejectForm();
+  };
   const corporateHelpId = useId();
 
   useEffect(() => {
@@ -258,10 +313,60 @@ export function DashboardPage() {
     navigate(`/bookings?bookingId=${encodeURIComponent(bookingId)}`);
   };
 
-  const confirmPayment = async (bookingId: string) => {
-    // Legacy SEV-2 breadcrumb: updateBookingStatus(bookingId, "confirmed")
-    // SEV-3 restores the intermediate payment-confirmed state.
-    await updateBookingStatus(bookingId, "payment-confirmed");
+  // Per PRC-13: verify-and-record replaces the old status-only
+  // confirmPayment. Opens a focused modal that shows the proof,
+  // defaults amount/method/reference, and atomically creates a
+  // ledger entry + transitions status in one transaction.
+  const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
+  const [verifyAmount, setVerifyAmount] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState("gcash");
+  const [verifyReference, setVerifyReference] = useState("");
+  const [verifyNote, setVerifyNote] = useState("");
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
+  const openVerifyForm = (booking: Booking) => {
+    setVerifyTarget(booking);
+    setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));
+    setVerifyMethod(booking.paymentMethod || "gcash");
+    setVerifyReference(booking.paymentReferenceNumber || "");
+    setVerifyNote("");
+    setVerifyError(null);
+    setVerifyPending(false);
+  };
+
+  const cancelVerifyForm = () => {
+    setVerifyTarget(null);
+    setVerifyAmount("");
+    setVerifyMethod("gcash");
+    setVerifyReference("");
+    setVerifyNote("");
+    setVerifyError(null);
+    setVerifyPending(false);
+  };
+
+  const submitVerification = async () => {
+    if (!verifyTarget) return;
+    const amount = parseFloat(verifyAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setVerifyError("Enter a valid positive amount.");
+      return;
+    }
+    setVerifyPending(true);
+    setVerifyError(null);
+    const result = await verifyAndRecordPayment(
+      verifyTarget.id,
+      amount,
+      verifyMethod,
+      verifyReference.trim() || undefined,
+      verifyNote.trim() || undefined
+    );
+    setVerifyPending(false);
+    if (!result.success) {
+      setVerifyError(result.error || "Failed to verify payment.");
+      return;
+    }
+    cancelVerifyForm();
   };
 
   return (
@@ -378,24 +483,47 @@ export function DashboardPage() {
                     </div>
                     <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
                     <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
+                    {booking.paymentReferenceNumber && (
+                      <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
+                        Ref: {booking.paymentReferenceNumber}
+                      </p>
+                    )}
                   </div>
-                  <div className="flex flex-col gap-2 sm:w-36">
+                  <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                     {booking.paymentProofUrl && (
                       <button
                         type="button"
                         onClick={() => setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl ?? "" })}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        title="View payment proof"
                       >
-                        <Eye size={12} />
-                        View Proof
+                        <Eye size={14} />
+                        Proof
                       </button>
                     )}
                     <button
                       type="button"
-                      onClick={() => void confirmPayment(booking.id)}
-                      className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                      onClick={() => {
+                        cancelRejectForm();
+                        openRejectForm(booking);
+                      }}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
+                      title="Reject payment proof"
                     >
-                      Confirm Payment
+                      <XCircle size={14} />
+                      Reject
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cancelRejectForm();
+                        openVerifyForm(booking);
+                      }}
+                      className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 sm:col-auto"
+                      title="Verify and record payment"
+                    >
+                      <Check size={14} />
+                      Verify & Record
                     </button>
                   </div>
                 </div>
@@ -869,6 +997,207 @@ export function DashboardPage() {
           )}
         </div>
       </section>
+      <Modal
+        title={rejectionTarget ? `Reject payment — ${rejectionTarget.bookingRef}` : "Reject payment"}
+        open={!!rejectionTarget}
+        onClose={cancelRejectForm}
+        className="max-w-lg"
+      >
+        {rejectionTarget && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-600">
+              The booking will be bounced back to <span className="font-semibold text-gray-900">pending</span>.
+              The guest will receive an email with the reason and be asked to re-upload a corrected proof.
+              The room remains <span className="font-semibold text-gray-900">held</span> — it is not freed.
+            </p>
+            {rejectionTarget.paymentReferenceNumber && (
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Guest reference number</p>
+                <p className="font-mono text-sm font-bold text-gray-900">{rejectionTarget.paymentReferenceNumber}</p>
+              </div>
+            )}
+            <div>
+              <label htmlFor="rejection-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Rejection reason <span className="text-red-500">*</span>
+              </label>
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {REJECTION_REASON_PRESETS.map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => setRejectionReason(preset.value)}
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
+                      rejectionReason === preset.value
+                        ? "bg-red-100 text-red-800 ring-1 ring-red-300"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                id="rejection-reason"
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Describe what's wrong with the payment proof so the guest can fix it..."
+                rows={4}
+                maxLength={500}
+                className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+              <p className="mt-1 text-right text-[10px] text-gray-400">{rejectionReason.length}/500</p>
+            </div>
+            {rejectionError && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{rejectionError}</p>
+            )}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={cancelRejectForm}
+                disabled={rejectionPending}
+                className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitRejection()}
+                disabled={rejectionPending || !rejectionReason.trim()}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-red-600 px-4 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {rejectionPending ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Rejecting…
+                  </>
+                ) : (
+                  "Reject Payment"
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+      <Modal
+        title={verifyTarget ? `Verify payment — ${verifyTarget.bookingRef}` : "Verify payment"}
+        open={!!verifyTarget}
+        onClose={cancelVerifyForm}
+        className="max-w-lg"
+      >
+        {verifyTarget && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-600">
+              Review the uploaded proof and confirm the collection. This atomically creates a payment ledger entry
+              and transitions the booking status.
+            </p>
+
+            {verifyTarget.paymentProofUrl && (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <button
+                  type="button"
+                  onClick={() => setImagePreview({ title: `Payment proof for ${verifyTarget.bookingRef}`, url: verifyTarget.paymentProofUrl ?? "" })}
+                  className="block w-full overflow-hidden rounded-lg border border-gray-200"
+                >
+                  <img src={verifyTarget.paymentProofUrl} alt="Payment proof" className="max-h-48 w-full object-contain" />
+                </button>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(verifyTarget.totalPrice)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {formatPrice(verifyTarget.totalPrice - (verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}
+                </p>
+              </div>
+            </div>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Verified amount
+              <input
+                type="number"
+                required
+                min="0.01"
+                step="0.01"
+                value={verifyAmount}
+                onChange={(e) => setVerifyAmount(e.target.value)}
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Payment method
+              <select
+                value={verifyMethod}
+                onChange={(e) => setVerifyMethod(e.target.value)}
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              >
+                <option value="gcash">GCash</option>
+                <option value="maya">Maya</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="paypal">PayPal</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Transaction reference
+              <input
+                type="text"
+                value={verifyReference}
+                onChange={(e) => setVerifyReference(e.target.value)}
+                placeholder="GCash ref or bank trace #"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Internal note <span className="font-normal text-gray-400">(optional)</span>
+              <input
+                type="text"
+                value={verifyNote}
+                onChange={(e) => setVerifyNote(e.target.value)}
+                placeholder="e.g. Full payment via GCash"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+
+            {verifyError && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{verifyError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={cancelVerifyForm}
+                disabled={verifyPending}
+                className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitVerification()}
+                disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50"
+              >
+                {verifyPending ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Recording…
+                  </>
+                ) : (
+                  "Verify & Record Payment"
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
       <Modal
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}

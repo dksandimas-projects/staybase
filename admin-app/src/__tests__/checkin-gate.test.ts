@@ -7,15 +7,18 @@ const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
 
 describe("BookingsPage check-in gate", () => {
   const pageSrc = read("admin-app/src/pages/BookingsPage.tsx");
+  const workspaceSrc = read("admin-app/src/components/BookingDrawerWorkspace.tsx");
   const handlerSrc = read("guest-app/server/handlers/bookings.ts");
   const sharedSrc = read("shared/utils/checkin.ts");
 
   it("uses the shared check-in readiness helper in the admin drawer", () => {
     expect(pageSrc).toMatch(/getCheckInReadiness/);
     expect(pageSrc).toMatch(/selectedBookingCheckInReadiness/);
-    expect(pageSrc).toMatch(/Ready for check-in/);
-    expect(pageSrc).toMatch(/selectedBookingCheckInReadiness\.missingItems\.map/);
-    expect(pageSrc).toMatch(/disabled=\{!selectedBookingCheckInReadiness\.ready\}/);
+    expect(pageSrc).toMatch(/<BookingCheckInReadiness/);
+    expect(pageSrc).toMatch(/missingItems=\{selectedBookingCheckInReadiness\.missingItems\}/);
+    expect(pageSrc).toMatch(/disabled=\{!selectedBookingCheckInReadiness\?\.ready\}/);
+    expect(workspaceSrc).toMatch(/Check-in readiness/);
+    expect(workspaceSrc).toMatch(/missingItems\.map/);
   });
 
   it("uses the same readiness helper in the server check-in handler", () => {

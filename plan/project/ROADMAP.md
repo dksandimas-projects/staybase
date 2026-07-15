@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 15, 2026 (Notification Center — **NC-02c fixed** on `fix/notification-center-nc-02c`: the NC-02 `readBy` rule used `keys().union(...)` which is invalid — `keys()` is a List, `.union()` is Set-only — so the Firebase rules validator errored it and staff could not mark notifications read in production; replaced with a List-only `removeAll(...).hasOnly([uid])` clause, validator now clean; grep test updated; follow-up NC-02d open (add an emulator-based rules test / `firebase validate` in CI, since grep tests can't catch an invalid-but-present rule). Earlier: post-ship review closed on `fix/notification-center-nc-02b` — NC-01 SEV-2 (awaited all 7 write sites + moved checkout block above `res.json`); **NC-02** SEV-4 (readBy rule tightened — key set subset + own-value-is-timestamp); **NC-02b** SEV-4 (added inverse `resource.data.readBy.keys().hasOnly(request.readBy.keys())` so existing keys must survive — closes the removal vector; value-tampering on others' existing entries knowingly accepted at SEV-4); NC-03 SEV-4 (prune now goes through `BulkWriter` for parallel + auto-retry deletes). 11 new tests added; 1,301 total green; typecheck clean. Earlier: Notification Center shipped on `feature/notification-center` per Phase 12 — spec `plan/features/NOTIFICATION-CENTER.md`; owner chose **Option B** — a persisted `notifications` collection (durable, cross-device, per-staff `readBy` read-state) written server-side from existing API routes, with guest chat alerts live-derived (B1) since the no-Cloud-Functions stack has no DB trigger; build includes rules + retention cron. Bell + panel live in every admin page header; deep links wire to `/bookings?bookingId=`, `/bookings?tab=store&orderId=`, and `/intercom?room=`; `vercel.json` adds a daily `0 3 * * *` `/api/notifications/prune` cron; 53 new tests + 1,164 total green; typecheck clean. Earlier: PC-02 + PC-03 completed — production Firebase fully provisioned with verified rules/indexes/CORS and live-verified disaster recovery (PITR + weekly backups + delete protection); settings/rooms copied verbatim, 22 branding assets migrated to the prod bucket with zero staging-URL leaks remaining; test data (storeItems, vouchers, corporate codes/inquiries) intentionally excluded per decision #119. Remaining before owner handoff: PC-05 archive export + PC-06 cutover smoke test. Earlier: Production Environment Split queued — PC-01..PC-06 from `plan/project/PROD-CUTOVER-RUNBOOK.md`: demote `spark-inn-stg-7a7ad` to staging behind `stg.`/`stg-admin.sparkinnbohol.com` on the `dev` branch, cut production over to the clean-slate `spark-inn-prod` project. PC-02 in progress (project + web app + service-account key created); one open decision blocks PC-05 (active/future bookings carry-over). Earlier: Finance Lifecycle Recommendations FLR-01/FLR-02/FLR-04 closed. FLR-05 handover is prepared: the pre-FL-05 Daily Close convention is documented and accountant/owner staging sign-off checklists are ready, but the external confirmations remain pending. FLR-03 remains deliberately deferred. Earlier: all 20 Finance Lifecycle findings were fixed.)
+> Last updated: July 16, 2026 (Roadmap — revised **Environment Test Runs & Controlled Data Reset** so **Refresh staging from production** includes a default-on sanitization checkbox that Admin may turn off for exact reproduction; disabling it automatically converts staging into a narrowly scoped, expiring Restricted Diagnostic Mode with access lock, outbound suppression, sensitive-file opt-in, audit, cleanup, and restoration. The plan also includes staging reset, production test runs/scoped cleanup, and the guarded pre-live reset. Other improvements are documented below.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1023,6 +1023,307 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 - ✅ **Post-booking discount & voucher application (drawer + walk-in)** *(owner request 2026-07-11)* — staff can apply a Senior/PWD discount **or a promo voucher** to an existing booking at/before check-in, and the walk-in modal gains discount + voucher fields. Today neither exists: the drawer's verification panel only renders for bookings that claimed online (`BookingsPage.tsx:2590`), and walk-ins hardcode `discountPct: 0` / `voucherDiscount: 0` — so a senior presenting a valid ID at the desk (legally entitled to 20% under RA 9994/10754) gets honored **off the books**, making collected cash diverge from `totalPrice` and guaranteeing false shortfalls in the planned FIN-01/FIN-13 collections & variance reports. Server-authoritative route re-prices with the canonical stacking order (Senior/PWD → voucher → member), snapshots `originalTotalPrice`, stamps `discountVerifiedBy`; vouchers validated with the same server rules as online (expiry/cap/room-type scope) + atomic `usageCount` increment. Not gated by `seniorPwdOnlineEnabled` — the front-desk path is the legally mandated one. Full spec: `plan/features/BOOKINGS-MANAGEMENT.md §Implementation Plan — Post-Booking Discount & Voucher Application`.
 - ✅ **Incidental charges — folio charge ledger (FIN-14)** *(owner request 2026-07-11)* — staff can add ad-hoc charges (late checkout, early check-in fee, extra person/bed, damage, laundry, other) to a booking's folio. Today the folio is a closed list (room + breakfast + add-to-bill store orders — `getBookingFolio`, `BookingsPage.tsx:1659`) with no charge mechanism, so incidentals are collected off the books → unexplained cash overages once FIN-01/FIN-13 land. Design: `bookings/{id}/charges` subcollection mirroring the payments pattern — categorized, `addedBy`/`addedAt` stamped, **append-only at the rules level** (void = negative reversal entry with `voidOf`, never delete). Wired end-to-end: folio grandTotal/balance, checkout gate, receipt PDF, Sales tab as a 4th revenue stream + Incidentals sub-table, Sales XLSX + Full Backup "Charges" sheets, FIN-01 billed-side reconciliation, FIN-04 receivables, `TYPES.md`/`BACKEND.md`/`REPORTS.md` doc sync. Build before or with FIN-01 so the collections report's billed side is complete from day one. Full spec + wiring checklist: `plan/features/BOOKINGS-MANAGEMENT.md §Implementation Plan — Incidental Charges (Folio Charge Ledger)`.
 - ✅ **Notification Center** *(proposed 2026-07-15 — owner question: "so that every time the admin app rings, the admin or front desk knows what it was")* — the app already **rings** globally for 5 event types (booking / payment / message / arrival / departure) via `AdminContext.playSynthNotification`, but the ring is **ephemeral** — no record of what happened if staff look away. Shipped on `feature/notification-center` with a persistent header **bell + unread badge + panel** that logs the same events (type, room #/booking ref, timestamp, deep link to the relevant page). Owner chose **Option B** — a persisted `notifications` Firestore collection (durable, cross-device, per-staff `readBy` read-state), *not* the session-only ring buffer. Written **server-side via Admin SDK from the existing API routes** (booking/payment/confirm/checkin/checkout/store-order placed) — one doc per event; guest chat alerts stay live-derived from the `intercoms` listener (**B1, decided 2026-07-15** — B2 server-relay rejected) since there is no server route for guest messages and the stack has **no Cloud Functions** to trigger on. **Build includes:** `notifications` rules (staff read, Admin-SDK create, `readBy`-only update), a `Notification` shared type, a daily retention cron (`/api/notifications/prune`, `0 3 * * *`) so the collection doesn't grow unbounded on Blaze (the FLR-03 trap), per-staff mark-read + "Mark all as read", deep links (`/bookings?bookingId=`, `/bookings?tab=store&orderId=`, `/intercom?room=`), mobile-friendly panel (drawer on `<768px`, dropdown on desktop per ADMIN-MOBILE.md), and respect for the sound-mute setting (Decision #97) as visual-only mode. **MD sync:** `BACKEND.md` (schema + rules row), `TYPES.md`, `API-ROUTES.md`, `vercel.json` cron, decision #120 — all done. 53 new tests (9 API + 44 admin) + 1,164 total green; typecheck clean.
+- ✅ **Payment Rejection & Reference Verification** *(2026-07-15 — *owner request*) — shipped as Option A (bounce → `pending`, room stays held). Handler `POST /api/bookings/reject-payment` validates `payment-uploaded` status, updates to `pending`, stamps `paymentRejectionReason` + `paymentRejectedAt` + `paymentRejectedBy` (keeps stale proof/reference for audit). Server sends `payment-rejected` email + writes `payment` notification. Dashboard pending-payment cards now display the guest's `paymentReferenceNumber` + a Reject button that opens a modal with canned-reason presets + free-text textarea (500 char max, required). Guest lookup page shows `paymentRejectionReason` as a red banner when set. Three new fields on `shared/types/index.ts:Booking`. Built on `feature/dashboard-payment-reject`.
+
+### Booking Drawer Information Architecture & UX Refactor
+
+> **Status:** ✅ Complete (July 16, 2026)
+>
+> **Proposed:** July 15, 2026 — owner requested a less overwhelming and better-organized booking drawer without removing any existing feature.
+>
+> **Goal:** Turn the booking detail drawer from one continuous stack of summaries, forms, ledgers, and actions into a status-aware front-desk workspace. Preserve feature parity and existing booking rules; this is an information-architecture and interaction refactor, not a scope reduction or data-model rewrite.
+
+#### Non-negotiable feature preservation
+
+The refactor must retain all current drawer capabilities: booking status and channel; guest contact details; payment proof preview; payment method and reference editing; guest registration and PDF; guest ID attachment; stay details; move/upgrade/reschedule; locked-rate financial breakdown; breakfast selections; staff-applied Senior/PWD discount and voucher; government discount verification; Spark Rewards redemption; onsite payment and refund ledger; early check-in approval/decline; transactional email resend actions; incidental charge add/void ledger; store charges billed to room; checkout folio; receipt preview/printing; check-in readiness enforcement; all allowed status transitions; and booking cancellation.
+
+#### Target information architecture
+
+- ✅ **BDUX-01 — Sticky booking header and lifecycle context.** Implemented compact booking context, lifecycle, total/paid/balance summary, actionable payment/early-check-in/readiness alerts, and persistent guest contact plus editable payment reference above the section tabs.
+- ✅ **BDUX-02 — Four task-based sections.** Implemented **Overview**, **Check-in**, **Folio**, and **Activity & More** with desktop/mobile labels. Panels remain mounted while hidden so switching sections does not discard local form input.
+  - **Overview:** guest information, room and dates, guest count, breakfast inclusion, payment method/reference, compact payment-proof review, early check-in alert, and high-level financial summary.
+  - **Check-in:** readiness checklist, guest registration, signature, guest ID, government discount verification, and breakfast selections.
+  - **Folio:** total/paid/balance summary, locked-rate breakdown, discounts/voucher, Rewards redemption, onsite payments, refunds, incidentals, store charges, checkout folio, and receipt actions.
+  - **Activity & More:** transactional email actions/history, move/upgrade/reschedule, secondary administrative controls, audit-oriented detail, and cancellation.
+- ✅ **BDUX-03 — Check-in readiness workspace.** Implemented a scannable readiness card driven by the shared client/server missing-items helper; Check-in alerts navigate to the existing editors. Fine-grained checklist-to-editor focus remains with BDUX-04.
+- 🔄 **BDUX-04 — Progressive disclosure rules.** The four top-level sections now establish the primary hierarchy and essential alerts stay visible. Remaining: focused disclosures for completed registration, detailed rates, payment/refund history, incidentals, breakfast selections, and email history/actions.
+- ✅ **BDUX-05 — Focused task modals.** Bounded workflows for apply discount/voucher, record payment, record refund, add incidental charge, void charge, and cancel booking moved into responsive modals. Existing validations, confirmations, permissions, audit stamps, toast feedback preserved. Destructive actions retain confirmation step. Folio-specific presentation and eligibility rules implemented (see below).
+- ✅ **BDUX-06 — Status-aware sticky action footer.** Implemented one primary action for the current status plus **More actions** navigation. Cancellation is isolated in More and no longer competes with the normal workflow.
+- ✅ **BDUX-07 — Responsive composition.** Implemented two-column desktop Overview content, compact mobile section labels, 44px navigation/actions, and the existing Drawer's safe-area footer, focus trap, and reduced-motion behavior.
+- 🔄 **BDUX-08 — Component extraction and regression coverage.** Extracted the workspace header, tabs/panels, readiness card, and action footer into `BookingDrawerWorkspace.tsx`; added feature-parity and status-action tests. Remaining: extract the large editors/ledgers and add interaction-level modal/disclosure tests plus authenticated visual QA.
+
+#### Interaction and visual rules
+
+- Payment proof becomes a compact alert/review card with thumbnail, method/reference, preview, and full-size actions instead of dominating the drawer width.
+- Folio opens with three scannable values — **Total**, **Paid**, and **Balance** — before showing detailed line items and ledgers.
+- Unresolved operational items receive emphasis; completed or historical information becomes quieter and collapsible.
+- Forms should not all render open simultaneously. Opening a focused editor must make its current values and save/cancel outcome obvious.
+- Existing status eligibility, server-authoritative pricing, check-in/checkout gates, staff-role restrictions, PII protections, and immutable ledger behavior must not change as part of this UI refactor.
+- All styling continues to use config-driven brand tokens; no hardcoded hotel name, currency, locale, timezone, colors, room types, or booking-reference prefix.
+
+#### Folio read-first action model
+
+> **Recommendation added July 16, 2026:** The Folio tab should prioritize understanding the account before editing it. Persistent inline data-entry forms create unnecessary visual weight and compete with the figures and ledger history staff need to scan.
+
+- ✅ **BDUX-05a — Read-first hierarchy.** Total, Paid, and Balance summary grid at the top of Folio. Charge breakdown collapsed under a `<details>` expandable. Default view shows summaries and compact ledger rows, not open data-entry forms.
+- ✅ **BDUX-05b — Explicit action buttons.** Always-open voucher, onsite-payment, refund, and incidental-charge forms replaced with clearly labeled **Apply discount / voucher**, **Record Onsite Payment**, **Record Refund**, and **Add charge** buttons beside the relevant summary or ledger.
+- ✅ **BDUX-05c — Focused editor surfaces.** Each action opens one bounded modal showing only the fields, validation, financial context (folio balance, net collected), and confirm/cancel actions. On success it closes, updates the ledger/summary immediately, and shows the existing toast feedback.
+- ✅ **BDUX-05d — Contextual eligibility.** Apply voucher hidden after applied, showing compact read-only summary. Record refund only to Admin users when net collected funds are refundable. Add charge only before checkout. Record payment available for confirmed/checked-in/checked-out; visually emphasized (orange "Collect" label) when balance is due, including post-checkout.
+- ✅ **BDUX-05e — Preserve immutable history.** All existing payment, refund, incidental, and store-charge entries remain visible as compact ledger rows. Void/reversal actions stay attached to eligible records with required-reason confirmation.
+- ✅ **BDUX-05f — Preserve in-progress safety.** Submit buttons disabled while saving; server errors shown inside the focused surface with retry path. Modals close only after confirmed success or explicit cancel.
+- ⬜ **BDUX-05g — Folio interaction coverage.** Tests still needed for button visibility by status/role/ledger state, focus trap, mobile layout, validation, duplicate-submit protection, success/error outcomes, applied-voucher replacement state, checked-out payment/refund behavior.
+- ✅ **BDUX-05h — Payment proof belongs in Folio.** Full proof-review card with image preview, method, ref, upload timestamp, and **Verify & Record Payment** action lives in Folio. Overview shows only compact payment status (method + Pending/Verified/Rejected badge). Sticky footer links to Folio for review. No duplication across sections.
+- ✅ **BDUX-05i — Status-aware proof shortcuts.** Compact **Payment proof awaiting verification** alert in sticky drawer header; clicking switches to Folio. Overview shows quiet payment status only.
+- ✅ **BDUX-05j — Collapse verified evidence.** After successful verification (`payment-confirmed`, `confirmed`, or rejected), proof card collapses to compact immutable evidence row showing method, reference, and **View proof** button. Expanded card with verify action visible only while `payment-uploaded`.
+
+#### Delivery and acceptance criteria
+
+- ✅ Inventory every current booking-drawer control before extraction and maintain a feature-parity checklist during implementation.
+- ✅ Implement the structural shell first: sticky header, lifecycle, section navigation, and sticky footer; then migrate one existing feature group at a time.
+- ⬜ Verify representative bookings in every status and conditional combination: payment proof, breakfast, Senior/PWD, voucher, Rewards, early check-in, onsite payments/refunds, incidentals, store charges, corporate source, checked-out, and cancelled.
+- ⬜ At 1440px, staff can understand guest, stay, payment state, outstanding balance, and next action without scrolling the default Overview.
+- ⬜ At 375px, there is no horizontal page scroll; all features remain reachable; the primary action stays usable above the safe area; modal/sheet focus and close behavior remain accessible.
+- ⬜ The default Folio view contains no expanded voucher, payment, refund, or incidental entry form; each remains reachable through one clearly labeled action.
+- ⬜ Opening and completing any Folio action leaves the user on the Folio tab with the updated Total, Paid, Balance, and ledger state visible.
+- ⬜ Pending payment proof can be reached from the sticky header in one action, while verified proof remains accessible without dominating the default Folio layout.
+- ⬜ No action requires more navigation steps than the current drawer for its common operational path, and the next valid status action remains reachable in one tap/click from any section.
+- ⬜ Run admin typecheck, booking/admin regression tests, and targeted manual visual QA across mobile, tablet, and desktop before marking complete.
+
+### Controlled Unpaid Checkout & Post-Stay Settlement
+
+> **Status:** ✅ Complete (July 16, 2026)
+>
+> **Goal:** Keep legitimate unpaid checkout possible without weakening finance controls. Require staff to document why money remains due, escalate higher balances to an administrator, preserve the departure-time folio snapshot, and give staff an obvious way to collect and audit payment after the guest has left.
+
+#### Checkout policy and authorization
+
+- ✅ **UCO-01 — Preserve the existing hard lifecycle gate.** Only a booking in `checked-in` status can be checked out. A zero or overpaid balance follows the normal checkout confirmation; a positive server-calculated folio balance enters the controlled unpaid-checkout flow.
+- ✅ **UCO-02 — Require an unpaid-checkout reason.** Focused confirmation form with Total/Paid/Balance, required reason (max 500 chars), reason shortcuts (company billing, bank transfer pending, payment failure, disputed charge, other), and editable audit note.
+- ✅ **UCO-03 — Runtime-configurable approval threshold.** Admin-only `hotelConfig.unpaidCheckoutApprovalThreshold` setting, default 5,000. Front Desk may approve up to threshold; above requires authenticated `admin` account. No client-supplied role/flag trusted.
+- ✅ **UCO-04 — Clear blocked state.** Above-threshold checkout is rejected client-side and server-side; the booking stays checked in with an explanation of the amount, limit, and next step (admin must authorize).
+
+#### Server authority and audit trail
+
+- ✅ **UCO-05 — Recalculate at commit time.** Protected checkout API re-reads booking, payment ledger, incidental ledger, delivered Add-to-Bill store orders, and `settings/hotelConfig` inside the checkout transaction. Computes authoritative balance and threshold; rejects missing reasons or unauthorized above-threshold departures.
+- ✅ **UCO-06 — Stamp the exception.** Persists normalized reason, departure balance, folio total, collected total, configured threshold snapshot, elevated-approval flag, approving staff UID, checking-out staff UID, and timestamp. Existing snapshot fields remain immutable.
+- ✅ **UCO-07 — Transactional integrity.** Status transition, audit stamps, room release/dirty-housekeeping state, intercom resolution, and loyalty award all remain in the existing checkout transaction. Concurrent payments cause retry against new ledger state.
+
+#### Post-checkout collection workflow
+
+- ✅ **UCO-08 — Prominent receivable state.** Checked-out booking with positive balance shows **Balance due** alert in sticky drawer header and Folio section. **Record payment** action defaults amount to outstanding balance, editable for partial payments.
+- ✅ **UCO-09 — Record later payments in existing immutable ledger.** Payments appended through authenticated add-payment route with idempotency key, `recordedBy`, timestamp; booking remains `checked-out`; live folio balance recalculates.
+- ✅ **UCO-10 — Settlement completion.** When balance reaches zero, alert replaces with **Settled after checkout**. Original unpaid-departure snapshot/reason/approver retained. Loyalty points awarded exactly once via existing final-payment transaction.
+- ✅ **UCO-11 — Reporting continuity.** Booking remains in Receivables until settled. Later payments flow into Collections/Daily Close on actual receipt date, never backdated. Reports distinguish original unpaid departure from later settlement.
+
+#### UX, permissions, and verification
+
+- ✅ **UCO-12 — Drawer integration.** Reason/approval prompt and post-stay payment as focused modals aligned with BDUX-05. 44px targets, focus trap, safe-area, keyboard submit, config-driven formatting.
+- ✅ **UCO-13 — Permission parity.** Threshold enforced server-side; client mirrors for guidance. Admin authorization from verified Firebase custom claim. Refund, append-only, PII, rate-limit, and terminal-status rules unchanged.
+- ✅ **UCO-14 — Regression coverage.** Tests for settled checkout, Front Desk below/equal/above threshold, Admin above threshold, missing/oversized reason, stale client balance, concurrent payment retry, partial and final post-checkout payment, idempotent replay, one-time loyalty award, immutable checkout snapshot, receivables removal after settlement.
+
+#### Acceptance criteria
+
+- ✅ No positive-balance checkout can complete without a non-empty audit reason.
+- ✅ No Front Desk account can complete an above-threshold unpaid checkout by calling the API directly or altering client state.
+- ✅ A room can still be operationally released for an approved unpaid departure, with all current checkout side effects preserved.
+- ✅ Staff can reopen a checked-out booking, record full or partial payment, and immediately see the correct remaining balance without changing the booking back to an active status.
+- ✅ Departure-time balance and later collection remain separately traceable in the booking audit, payment ledger, Receivables, Collections, Daily Close, and exports.
+- ✅ Admin typecheck, API/admin regression tests, committed API bundle verification pass.
+
+### Payment Reference Semantics & Ledger Clarity
+
+> **Status:** ✅ Complete (July 16, 2026)
+>
+> **Goal:** Preserve the original guest-submitted payment evidence while giving every actual payment ledger entry its own structured transaction reference and optional staff note. Staff should be able to tell at a glance whether a value came from the booking submission or from a collected payment.
+
+#### Canonical meaning and placement
+
+- ✅ **PRC-01 — Define the booking-level field narrowly.** `Booking.paymentReferenceNumber` represents only the reference submitted with the original booking payment intent/proof, such as the guest-entered GCash reference or bank trace. Not the canonical reference for later deposits, partial payments, onsite collection, or post-checkout settlement.
+- ✅ **PRC-02 — Rename for clarity.** Drawer labels the booking field **Original booking payment reference** paired with original payment method/proof context. Not presented as a general editable payment field.
+- ✅ **PRC-03 — Contextual visibility.** Folio is canonical home for original reference and payment proof. Sticky header shows pending-verification alert; Overview shows compact payment status. Empty original-reference UI hidden for Pay-at-Hotel bookings. Verification/rejection history under Activity & More.
+- ✅ **PRC-04 — Preserve evidence.** Original reference treated as booking-submission evidence once submitted. Corrections/verification attributable through existing audit rather than overwriting history.
+
+#### Payment-ledger entry model
+
+- ✅ **PRC-05 — Split the combined input.** Record Payment modal has two fields: **Transaction reference** and **Internal note**. Transaction reference holds tender-specific identifier; note holds optional operational context.
+- ✅ **PRC-06 — Structured immutable field.** Dedicated `transactionReference` on each `bookings/{bookingId}/payments/{paymentId}` entry. Note stored separately. Idempotency comparison across amount, method, transaction reference, and note.
+- ✅ **PRC-07 — Method-aware requirement.** Transaction reference required only when payment-method config requires it. Cash allowed without reference; digital/bank methods enforce reference on client and server. Requirement resolved from `settings/hotelConfig.paymentMethods` server-side.
+- ✅ **PRC-08 — Clear reconciliation display.** Payment-ledger rows, Reports Collections, Daily Close, and admin backup XLSX show transaction reference separately from internal note. Booking-level original reference never substituted for a later payment entry.
+
+#### Compatibility, migration, and verification
+
+- ✅ **PRC-09 — Legacy compatibility.** Existing payment entries with only `note` remain readable and unchanged. No inference/migration of transaction reference from legacy note text.
+- ✅ **PRC-10 — API and type synchronization.** Shared payment type, Firestore schema, add-payment request/response, and committed API bundle updated together.
+- ✅ **PRC-11 — Drawer workflow alignment.** Split fields inside focused Record Payment modal (BDUX-05 style, used by UCO-08/UCO-09). Amount defaults from live outstanding balance; original booking reference never copied into new ledger entry automatically.
+- ✅ **PRC-12 — Regression coverage.** Tests for cash without reference, digital method with/without reference, server-side method-config enforcement, original booking reference visibility, idempotent retries, legacy note rendering, partial/post-checkout payments, report/export columns.
+
+#### Uploaded-payment confirmation and ledger integrity
+
+> **Resolved July 16, 2026:** The old status-only **Mark payment confirmed** has been replaced by a focused **Verify & Record Payment** modal in both the Dashboard and the booking drawer. The `handleVerifyAndRecordPayment` server handler atomically creates a payment ledger entry and transitions status in a single Firestore transaction. The old `/api/bookings/mark-payment-confirmed` endpoint is kept for backward compatibility with in-flight bookings but is inaccessible via the new UI.
+
+- ✅ **PRC-13 — One authoritative verification action.** Replace the status-only confirmation with a focused **Verify and record payment** action launched from the Folio proof card. The surface shows the uploaded proof, booking total, already-collected amount, outstanding amount, submitted payment method, and original booking reference before staff confirms the collection.
+- ✅ **PRC-14 — Reviewable defaults.** Default the verified amount to the current outstanding booking balance, the method to the submitted payment method, and the transaction reference to the original booking reference. Staff may correct the amount or transaction reference when the evidence differs; the original booking-level reference remains unchanged as submitted evidence.
+- ✅ **PRC-15 — Atomic ledger and status transition.** The authenticated server transaction must re-read the booking and existing payment ledger, validate the verified amount/method/reference against server-side payment-method configuration, create one immutable idempotent payment record, and transition `payment-uploaded` to `payment-confirmed` only when the resulting collected total satisfies the required booking total. A partial verified payment is recorded but must not falsely mark the booking fully paid.
+- ✅ **PRC-16 — No duplicate entry workflow.** Staff must not need to confirm proof and then separately use Record Payment for the same collection. If an idempotent retry or an already-recorded matching payment exists, return the committed result without appending a duplicate, re-sending transition email, or duplicating the payment notification.
+- ✅ **PRC-17 — Reconciliation propagation.** A successfully verified payment immediately updates Folio Paid/Balance, payment history, booking status when fully paid, Collections, Daily Close, Receivables, receipts, exports, and any payment notification. The collection date/method/reference come from the immutable ledger entry, not from booking status.
+- ✅ **PRC-18 — Legacy status audit.** Before deployment, identify existing `payment-confirmed`/`confirmed` bookings that have payment proof or an original reference but no corresponding payment-ledger entry. Produce a review list; do not manufacture collection records without staff validation of amount, method, and receipt date.
+- ✅ **PRC-19 — Confirmation regression coverage.** Test full and partial verification, prior deposits, required/missing reference, stale outstanding amount, concurrent verification/payment attempts, exact idempotent retry, conflicting retry, one-time email/notification, status/ledger atomicity, Folio/report propagation, and legacy status-only records.
+
+#### Acceptance criteria
+
+- ✅ Staff can identify the source and scope of every displayed reference without relying on surrounding context.
+- ✅ Empty Pay-at-Hotel bookings no longer show a prominent original-reference editor.
+- ✅ Every newly recorded non-cash payment that requires a reference stores it on that payment's immutable ledger entry.
+- ✅ A newly confirmed uploaded payment can never reach `payment-confirmed` without the corresponding immutable collection entry being committed in the same transaction.
+- ✅ A partial verified payment is retained in the ledger while the booking remains in the appropriate unpaid workflow state.
+- ✅ Staff never enter or confirm the same uploaded payment twice through separate status and ledger actions.
+- ✅ Original booking evidence and later payment references remain distinct throughout the drawer, receipts, reports, Daily Close, and exports.
+- ✅ Full payment proof and verification controls have one canonical location in Folio; other drawer areas expose only the status or a direct navigation alert appropriate to their task.
+- ✅ Existing bookings and legacy payment notes continue to render without destructive migration or invented reference values.
+
+### Bookings & Store Orders Filtering UX
+
+> **Status:** ✅ Phase 1 Complete (July 16, 2026)
+>
+> **Goal:** Make filtering task-oriented, transparent, persistent, and fast without turning the toolbar into a dense form. Keep Bookings and Store Orders visually consistent while giving each tab operational filters appropriate to its workflow.
+
+#### Shared filtering model
+
+- ✅ **FSO-01 — Two-level controls.** Toolbar with search, horizontally scannable count-bearing quick-view chips, result count, and **Clear all** button. Advanced filter panel (popover/drawer on desktop, full-screen sheet on mobile) to be built in Phase 2.
+- ✅ **FSO-02 — Visible active state.** Every active quick view, search query, and status filter renders as a removable chip beneath the toolbar. **Clear all** resets all filters at once.
+- ✅ **FSO-03 — Canonical URL state.** Search (`bq`/`sq`), quick view (`bqv`/`sqv`), status (`bs`/`ss`), and main tab (`tab`) are stored in normalized URL params. Refresh, Back/Forward, and deep links restore the same view. Legacy `?filter=` and `?orderRef=` are auto-migrated on load. Booking and Store tabs hold independent filter state.
+- ✅ **FSO-04 — Predictable composition.** Search, status filter, and quick view combine with AND semantics. Active chips allow removing individual criteria.
+- ✅ **FSO-05 — Operational default ordering.** Results default to attention-needed records first, then by check-in date. No explicit sort UI yet (implicit default).
+
+#### Booking quick views and advanced filters
+
+- ✅ **FSO-06 — Booking quick views.** Count-bearing views: **Needs attention**, **Arrivals today**, **Departures today**, **In house**, **Upcoming**, **Balance due**, **Cancelled**. **All bookings** as neutral default.
+- ✅ **FSO-07 — Server-aligned attention rules.** **Needs attention** checks: `payment-uploaded` status, overdue confirmed arrivals, overdue pending arrivals, unresolved early check-in request, overdue in-house departures, and checked-out receivable with positive balance. Uses the same `getBookingFolio` helper as drawer alerts.
+- ✅ **FSO-08 — Booking advanced filters.** Date basis (stay/arrival/departure/created), date range, payment state (unpaid/partial/paid/overpaid), payment method (from settings), room, room type, source/channel, corporate state, and discount/voucher state. Opened via **Filters** button in toolbar; shows active filter count.
+- ✅ **FSO-09 — Booking search coverage.** Search covers guest name, booking ref, room number, email, phone, original booking-payment reference, and payment-ledger transaction references.
+
+#### Store-order quick views and advanced filters
+
+- ✅ **FSO-10 — Store quick views.** Count-bearing views: **Needs action**, **Placed**, **Preparing**, **Out for delivery**, **Delivered today**, **Add to room bill**, **Payment pending**, **Cancelled**. **All orders** as neutral default.
+- ✅ **FSO-11 — Store attention rules.** **Needs action** checks: placed orders awaiting confirmation, and payment-proof uploaded orders not yet verified.
+- ✅ **FSO-12 — Store advanced filters.** Date range, room, payment method, billing type (direct pay / add-to-bill), billed/unbilled state, and payment-proof state.
+- ✅ **FSO-13 — Store search coverage.** Search covers guest name, order ref, room number, booking ID, notes, and ordered item names.
+
+#### Responsive behavior, performance, and verification
+
+- ✅ **FSO-14 — Mobile composition.** Search is full width, quick views render as a horizontal chip scroller with `overflow-x-auto` and 44px touch targets.
+- ✅ **FSO-15 — Desktop efficiency.** Single compact toolbar row with search, result count, active filter count badge, Filters button, and Clear all. Advanced filter panel uses grouped controls with Apply/Cancel per section.
+- ✅ **FSO-16 — Result feedback.** Shows `n of total` matching count before the table.
+- ✅ **FSO-17 — Query/performance boundary.** `filteredRows` and `filteredOrders` are `useMemo`-wrapped with correct dependencies. Quick-view counts use inline filter predicates.
+- ✅ **FSO-18 — Regression coverage.** Phase 11.7 filter tests updated to cover canonical URL state, quick-view predicates, active chips, AND composition, independent tab state, and result count. 808/808 tests passing, typecheck clean.
+
+#### Acceptance criteria
+
+- ✅ Staff can reach Arrivals today, Departures today, In house, booking Needs attention, and store Needs action in one tap/click.
+- ✅ Every active criterion is visible and individually removable; refresh and browser navigation preserve the complete filtered view.
+- ✅ Booking and store tabs retain independent search/filter/sort state without leaking criteria into each other.
+- ✅ Quick-view counts match the displayed results and canonical booking/order business rules.
+- ⬜ At 375px there is no horizontal page scroll, quick chips remain operable, and the advanced sheet can be completed one-handed above the safe area.
+- ✅ Admin typecheck, targeted filtering tests, existing deep-link/mobile navigation regressions pass.
+
+### Environment Test Runs & Controlled Data Reset
+
+> **Status:** ⬜ Not Started
+>
+> **Proposed:** July 16, 2026 — production will receive final end-to-end testing before real hotel operations begin. A permanent Settings button that deletes every booking/order is too dangerous, while identifying tests from names or emails is unreliable. The environment needs explicit server-authoritative test classification, run-scoped cleanup, and one carefully controlled clean-slate operation before go-live.
+>
+> **Goal:** Allow realistic production smoke testing and deterministic cleanup without risking untagged live data. Keep broad/destructive testing in staging, limit production to authorized test runs, and permanently disable full production reset after owner go-live sign-off.
+
+#### Environment Testing settings surface
+
+- ⬜ **ETR-01 — Admin-only Environment Testing section.** Add a clearly separated Settings area showing the current environment, production warning state, active test run, expiry, tagged-record counts, and available actions. Front Desk can see **TEST DATA** badges when operating on tagged records but cannot create, close, delete, or reset a test run.
+- ⬜ **ETR-02 — Start and close a test run.** Admin creates a named, time-limited run through an authenticated server route. Persist an opaque run ID, environment, creator UID, creation/expiry/closed timestamps, and status. Only one production test run may be active unless the implementation can prove cleanup isolation between concurrent runs.
+- ⬜ **ETR-03 — Temporary public-flow access.** Starting a run creates an expiring opaque guest-booking test link/token. Public booking APIs validate the token server-side against the active run; a query parameter or client-supplied `isTestData` flag alone never classifies data as test.
+- ⬜ **ETR-04 — Staff-created test records.** While a run is active, Admin may explicitly create a walk-in or other staff-side test record under that run. The selected run is verified server-side from the authenticated request. Ordinary staff workflows default to live and cannot accidentally inherit test mode.
+- ⬜ **ETR-05 — Persistent visual distinction.** Show an unmistakable **TEST DATA** badge on tagged bookings, store orders, drawers, receipts/previews, notifications, and relevant report rows. While a production run is active, display a persistent warning banner with run name and expiry; do not rely on color alone.
+
+#### Canonical classification and propagation
+
+- ⬜ **ETR-06 — Server-owned root metadata.** Test booking/order roots store `isTestData`, `testRunId`, classification timestamp, and classifying actor/run. Security rules and handlers prevent clients from adding, removing, or changing classification fields on existing records.
+- ⬜ **ETR-07 — Inherit classification automatically.** Payments, refunds, incidental charges, store orders/tenders, notifications, stay-scoped intercom data, and audit records inherit classification from their verified parent booking/order or active server test run. Never ask staff to tag dependent records individually.
+- ⬜ **ETR-08 — Live-by-default safety.** Missing, invalid, expired, closed, mismatched-environment, or unverifiable test metadata always resolves to live/unclassified and is ineligible for bulk test cleanup. Never infer test status from guest name, email, phone, reference prefix, notes, dates, or room number.
+- ⬜ **ETR-09 — Reference integrity.** Preserve booking/order reference counters during all cleanup so references already included in emails, screenshots, exports, or external conversations are never reused.
+
+#### Test-run review and scoped cleanup
+
+- ⬜ **ETR-10 — Review before deletion.** Closing a run freezes new inheritance and produces a server-generated manifest/count of tagged bookings, booking subcollections, store orders/tenders, notifications, intercom stays/messages, audit records, affected rooms, and affected stock items. Admin reviews the manifest before cleanup.
+- ⬜ **ETR-11 — Delete by verified run ID only.** Cleanup accepts one closed `testRunId`, revalidates every candidate's classification/relationship server-side, and refuses ambiguous or untagged records. Use recursive/Admin-SDK deletion for subcollections; no browser-side delete loop or client write permissions.
+- ⬜ **ETR-12 — Recover operational state.** After tagged data deletion, restore rooms affected only by the test run to the agreed operational baseline and close test intercom sessions. Inventory recovery must be explicit: either preserve current stock or restore affected items from a captured/approved pre-run baseline; never silently guess catalog quantities.
+- ⬜ **ETR-13 — Durable cleanup audit.** Store the run manifest, initiating/completing Admin UIDs, timestamps, counts, failures, backup reference when applicable, and integrity-check result in a protected environment-reset audit location that is outside the deleted operational dataset.
+- ⬜ **ETR-14 — Safe job execution.** Acquire a reset lock and temporarily block new test writes for the selected run. Cleanup is idempotent, resumable, and exposes progress/failures; serverless timeout or partial failure must not report success. Release the lock only after reconciliation checks complete or the job is explicitly marked failed with a recovery path.
+
+#### Permanent staging-only Reset operational data
+
+> **Owner requirement added July 16, 2026:** Staging needs a reusable clean-slate control for repeated end-to-end testing. This is distinct from production test-run cleanup and from the temporary one-time production pre-live reset.
+
+- ⬜ **ETR-S01 — Staging authorization is server-owned.** Add a permanent authenticated reset route that succeeds only when the Admin SDK project ID/environment is present in an explicit server-side staging allowlist. Hostname, client environment variables, query parameters, request bodies, or UI visibility never authorize reset. The production project must return Forbidden before generating a destructive job.
+- ⬜ **ETR-S02 — Admin-only Settings control.** Show **Reset operational data** under Settings → Environment Testing only when the server reports the current project as an authorized staging environment. Require Admin role and recent reauthentication; Front Desk cannot preview or execute a reset.
+- ⬜ **ETR-S03 — Preview and typed confirmation.** Before execution, show the verified staging environment/project identifiers and a server-generated manifest with counts by collection/subcollection. Require the Admin to type both `RESET STAGING` and the displayed staging project name. Confirmation expires when the manifest changes or after a short timeout.
+- ⬜ **ETR-S04 — Default operational reset scope.** Delete all staging bookings and their payment/incidental subcollections, store orders/tenders, booking/store notifications, stay-scoped intercom history, operational booking/order audit records, Daily Close records, and active/closed staging test runs. Use recursive Admin-SDK deletion and the same locked, resumable job guarantees as ETR-14.
+- ⬜ **ETR-S05 — Preserve configuration and identity.** Preserve staff Auth/profile records, hotel settings and branding, rooms and room types, rates and seasonal pricing, payment methods, store catalog, vouchers/corporate configuration, and booking/order reference counters. Reference sequences never roll back or reuse identifiers after a reset.
+- ⬜ **ETR-S06 — Restore staging baselines.** Reset rooms to the configured staging availability/housekeeping baseline, close stale stay sessions, and restore store inventory from an explicit captured/approved staging baseline. If no stock baseline exists, block inventory restoration and require the Admin to choose **preserve current stock** rather than infer quantities.
+- ⬜ **ETR-S07 — Completion and audit.** Run orphan/reconciliation checks after deletion, show deleted/restored/failed counts, keep incomplete jobs visibly resumable, and persist the initiating/completing Admin UIDs plus manifest, baseline, timestamps, and integrity result outside the reset scope.
+- ⬜ **ETR-S08 — Production denial coverage.** Add tests proving the same route, payload, Admin token, manipulated client state, staging hostname, and copied confirmation phrase cannot preview or execute a reset when the Admin SDK is connected to the production project.
+
+#### Production-to-staging refresh and sanitization
+
+> **Owner requirement added July 16, 2026; revised the same day:** Admin needs a way to refresh staging from production and may need exact source values to reproduce a defect. The UI therefore includes a default-on sanitization checkbox. Turning it off does not create an ordinary refresh: it automatically activates the restricted diagnostic controls and automatic destruction defined below.
+
+- ⬜ **ETR-R01 — One-way refresh only.** Add an Admin-only **Refresh staging from production** workflow authorized by server-owned project/environment allowlists. Data may flow production → staging only; no UI, route, or job may promote staging operational data into production.
+- ⬜ **ETR-R02 — Refresh modes and sanitization toggle.** Offer **Configuration only** and **Operational snapshot**. Operational snapshot displays **Sanitize personal and payment data**, checked by default. When checked, apply the irreversible transformations below. When unchecked, immediately change the workflow label/state to **Restricted Diagnostic Mode** and require every ETR-D gate before preview or import.
+- ⬜ **ETR-R03 — Reviewable operational preservation.** In sanitized mode, allow separate choices to preserve operational dates, financial values, and statuses for workflow/reconciliation testing without passing PII/payment evidence. In restricted mode, preserve exact values only for the explicitly selected diagnostic scope so staff can follow the actual reproduction steps; never interpret unchecked sanitization as permission to clone the entire production dataset by default.
+- ⬜ **ETR-R04 — Irreversible identity replacement.** Replace guest names, emails, phones, addresses, emergency contacts, government-ID values, payment references, and other direct identifiers with deterministic synthetic values scoped to the snapshot. The same production subject maps consistently within one snapshot without writing the source-to-synthetic mapping into staging.
+- ⬜ **ETR-R05 — Sanitized-mode content and files.** When sanitization is on, remove or synthesize guest/internal free-text content, intercom messages, ID images, signatures, payment proofs, and private production Storage URLs. Public brand/catalog assets may be copied through an approved asset path; sensitive-file test cases use known synthetic fixtures rather than production uploads.
+- ⬜ **ETR-R06 — Preserve relational and finance integrity.** Preserve booking/order relationships, room/type links, stay duration, lifecycle state, price/rate breakdowns, discounts, vouchers, points, payments, refunds, incidentals, store quantities/tenders, balances, and report reconciliation totals. Sanitized mode maps production staff UIDs to staging-safe actors and replaces booking/order references while retaining stable joins; restricted mode retains exact approved values needed by the reproduction manifest.
+- ⬜ **ETR-R07 — Staging isolation.** Preserve staging Auth/staff and environment-specific secrets/configuration. Force-disable guest email delivery, payment callbacks, production notifications, and other outbound side effects during and after import. Imported documents carry snapshot ID/source/import timestamp metadata and a visible badge matching the mode: **SANITIZED PRODUCTION SNAPSHOT** or **REAL PRODUCTION DATA — RESTRICTED**.
+- ⬜ **ETR-R08 — Mode-appropriate scan before import.** Build snapshots in an isolated job and never log source PII. Sanitized mode runs denylist/schema scans for production emails, phones, IDs, payment references, private notes/messages, and production Storage URLs, then fails closed if any remain. Restricted mode verifies that every included record/file belongs to the approved narrow manifest and rejects scope expansion or unapproved sensitive-file classes.
+- ⬜ **ETR-R09 — Controlled replacement.** Back up the current staging dataset, generate source/transformation manifests, run the staging operational reset, import only the verified snapshot, restore staging-specific configuration/baselines, and execute orphan plus finance-invariant checks. A partial import remains visibly failed/resumable and cannot be treated as a valid refreshed environment.
+- ⬜ **ETR-R10 — Refresh audit and retention.** Persist snapshot source time, mode, transformation version, counts, exclusions, scan/integrity results, initiating/completing Admin UIDs, and backup reference without storing original PII. Support deletion/replacement of prior imported snapshots through the staging reset workflow.
+
+#### Restricted Diagnostic Mode through the sanitization toggle
+
+> Turning off **Sanitize personal and payment data** is supported for exact reproduction, but it changes staging into a temporary restricted environment. The toggle cannot bypass or weaken the gates below.
+
+- ⬜ **ETR-D01 — Toggle-to-restricted transition.** Allow Admin to uncheck sanitization only after a warning explains that real production data will enter staging. Require recent reauthentication, written diagnostic purpose/issue reference, requested lifetime, owner/DPO approval record, typed staging project confirmation, and explicit acknowledgement before generating the preview.
+- ⬜ **ETR-D02 — Lock everyday staging.** Before import, switch the allowlisted staging project into Restricted Diagnostic Mode: block public guest access and Front Desk access, permit only explicitly allowlisted Admin accounts, review Firestore/Storage/network/logging/export controls to production-equivalent standards, and prevent concurrent ordinary staging/test-run activity.
+- ⬜ **ETR-D03 — Minimize scope despite approval.** Select only the collections/documents/date range required for the defect. Exclude Firebase Auth accounts by default and require separate explicit approval for government IDs, signatures, payment proofs, private messages, or other sensitive files even when the structured dataset is otherwise unsanitized.
+- ⬜ **ETR-D04 — Separate sensitive-file opt-in.** Keep **Include payment proofs, IDs, signatures, and private uploads** unchecked by default even when sanitization is off. Enabling it requires a second explicit approval and narrows copied Storage objects to the approved manifest; private production URLs must never remain usable after diagnostic cleanup.
+- ⬜ **ETR-D05 — Disable side effects.** Force-disable guest/staff transactional emails, payment callbacks, webhooks, production notifications, scheduled jobs, and public access. Display a persistent **REAL PRODUCTION DATA — RESTRICTED** banner across staging and prevent the snapshot from being mistaken for ordinary test data.
+- ⬜ **ETR-D06 — Short TTL and destruction.** Default to a maximum 24-hour lifetime unless a shorter approved window is selected. Automatically lock and destroy the diagnostic snapshot at expiry; provide **Destroy diagnostic snapshot now** and require verification that Firestore data, copied Storage objects, temporary exports, keys, and caches are gone.
+- ⬜ **ETR-D07 — Restore ordinary staging.** Capture the prior staging snapshot/configuration before restricted import. After verified destruction, restore the approved sanitized/empty staging state, normal staging access policy, and ordinary test controls; keep outbound suppression until the restoration integrity scan succeeds.
+- ⬜ **ETR-D08 — Access and destruction audit.** Record toggle change, approval, purpose, included scope, authorized users, access timestamps where available, exports, expiry, early-destroy action, completion/failures, restoration, and destruction verification in a protected production audit location without duplicating copied PII.
+- ⬜ **ETR-D09 — Fail-safe behavior.** If approval, staging access lock, side-effect suppression, scope manifest, TTL scheduling, prior-state capture, or destruction/restoration verification cannot be proven, refuse the unsanitized import. Expiry/destruction failure triggers immediate access lock and a visible security incident requiring manual completion.
+- ⬜ **ETR-D10 — Privacy/security coverage.** Test source-to-staging one-way enforcement, default-on toggle behavior, toggle permission denial, exact selected-scope reproduction, scope-expansion rejection, sensitive-file second opt-in, outbound suppression, Admin-only staging lock, finance invariants, TTL destruction, restoration, and post-destruction absence.
+
+#### One-time pre-live production reset
+
+- ⬜ **ETR-15 — Temporary production authorization.** Full operational reset is unavailable by default and requires an explicit server-side pre-live authorization enabled only for the scheduled cutover window. The client cannot enable it. Remove the authorization immediately after owner sign-off rather than leaving a hidden permanent capability.
+- ⬜ **ETR-16 — Strong confirmation gates.** Require Admin authentication, recent reauthentication, maintenance mode, displayed environment/project identifiers, typed environment name and confirmation phrase, server-generated deletion manifest, and a verified backup/export reference before a production full reset can begin.
+- ⬜ **ETR-17 — Explicit reset scope.** The manifest separately lists bookings and their payments/charges, store orders/tenders, booking/store notifications, stay-scoped intercom history, operational audit records, and optional Daily Close records. Preserve hotel settings/branding, rooms and room types, staff accounts, rates/seasonal pricing, payment methods, store catalog, vouchers/corporate configuration, and reference counters by default.
+- ⬜ **ETR-18 — Baseline restoration and integrity scan.** Reset rooms to the owner-approved availability/housekeeping baseline, restore inventory only from an approved captured baseline, verify no orphaned ledgers/orders/intercom stays remain, confirm dashboards/reports show the clean dataset, and record the final integrity result.
+- ⬜ **ETR-19 — Final tagged smoke test.** After the reset, execute the minimum production path—booking, proof verification/payment ledger, confirmation, check-in, store order, later payment if required, checkout, email, notification, and report visibility—inside a new tagged run. Delete that run through scoped cleanup, re-run integrity checks, then obtain owner go-live sign-off.
+- ⬜ **ETR-20 — Post-launch lockout.** After sign-off, full reset remains disabled in production. Broad/destructive testing stays in staging. Any necessary production smoke test uses an authorized tagged run and may delete only that run; real untagged operational data is never bulk-deleted from Settings.
+
+#### Verification and acceptance criteria
+
+- ⬜ **ETR-21 — Security and regression coverage.** Test forged/expired/closed/wrong-environment tokens, client classification tampering, Front Desk permission denial, dependent-record inheritance, missing-tag live fallback, concurrent writes during cleanup, partial/resumed cleanup, inventory/room restoration, counter preservation, manifest accuracy, and post-launch full-reset denial.
+- ⬜ Production test data can be enumerated and removed deterministically by `testRunId` without using names, emails, dates, or other heuristics.
+- ⬜ An Admin can repeatedly reset the complete operational dataset in an allowlisted staging project from Settings while preserving configuration, identity, catalog, and reference counters.
+- ⬜ The staging reset endpoint denies both preview and execution against production regardless of client behavior, hostname, or authenticated Admin role.
+- ⬜ An Admin can refresh staging with production configuration or an irreversibly sanitized operational snapshot while preserving relational and financial behavior and preventing all production outbound side effects.
+- ⬜ Admin can turn sanitization off to reproduce an issue with exact approved source values, but the toggle cannot proceed until staging enters Restricted Diagnostic Mode and all authorization/scope/TTL gates pass.
+- ⬜ Sensitive production files remain excluded from an unsanitized snapshot unless the separate file opt-in is explicitly approved for the diagnostic manifest.
+- ⬜ Any unsanitized staging snapshot is minimally scoped, approval-bound, Admin-only, access-audited, automatically time-limited, verifiably destroyed, and followed by restoration of ordinary staging.
+- ⬜ No untagged booking, order, ledger entry, notification, message, audit record, room state, inventory value, or Daily Close record can be deleted by scoped test cleanup.
+- ⬜ The one-time pre-live reset cannot run without maintenance mode, recent Admin reauthentication, an approved manifest, and a verified backup reference.
+- ⬜ A failed or timed-out cleanup remains resumable and visibly incomplete; it never silently unlocks the environment or reports a clean slate.
+- ⬜ Full production reset is demonstrably unavailable after owner go-live sign-off, while staging reset and run-scoped production cleanup remain appropriately controlled.
+- ⬜ API/admin typecheck, committed API bundle verification, security/rules tests, cleanup integration tests, cutover-runbook dry run, and manual Settings/mobile QA pass before this item is marked complete.
 
 ### Notification Center — post-ship review (2026-07-15, all closed)
 
@@ -1268,14 +1569,14 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 | 11.5 — Audit Fixes & Launch-Readiness | 50 | 50 | 0 (decisions documented, unimplemented) | 14 (Wave 1) + 15 (Wave 2) + 1 (Wave 3, consolidated) + 2 (Wave 4 incl. W4.4) + 2 launch-gates (S5.2 Staff Accounts tab, S7.1 Booking Receipt PDF) + 1 SEV-1 (S2.3 RA 10173 erasure) + 4 polish SEV-1s (S1.4 self-cancel guard, S6.1 Google Maps CSP, S5.1 NaN% guard, S5.3 live chart) + 1 SEV-1 + 1 SEV-3 (W2.9 mute toggle, S2.4 enroll wiring) + 2 SEV-1s (S1.5 server-authoritative isCorporate, S4.1 ratePerRoomType client path) + 1 SEV-1 (S4.2 convert-to-booking flow) + 1 SEV-3 (W4.4 8 email templates) + 1 SEV-2 (S6.2 settings-driven public content) + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) + 2 SEV-2s (#78 room block structured, #80 store stock on confirmed) + 2 (#75 includedInRoomRate dropped, #76 contact form wired) + 2 (#83 cron reminderSentAt, #100 corporate no-promo) + 6 (Wave 3 W3.1-W3.6) + 6 (Wave 3 W3.7-W3.12) + 2 (Wave 4 W4.2 Vite OG + W4.3 WHITE-LABEL.md). **All 50 audit items shipped.** |
 | 11.7 — Admin Mobile UX | 30 | 29 | 1 (P3 manual QA matrix — device testing) |
 | 11.8 — Public Content Editability | 4 (open questions) + ~100 (3 PRs) | 0 → **PR 1 (4 fields) shipped** → **PR 3 (7 fields) shipped** → **PR 2 (deferred post-launch)** | ~35 fields + 4 Qs to close with owner (Q1 deferred until owner demo — homepage eyebrow ships with `config.tagline` fallback; Q2/Q3/Q4 deferred to PR 2 + Phase 12) |
-| 12 — Post-Launch | 17 | 14 | 3 deferred |
+| 12 — Post-Launch | 22 | 14 | 8 (3 deferred + booking drawer UX refactor + controlled unpaid checkout + payment reference clarity + filtering UX + environment test/reset controls planned) |
 | Finance & Reports Audit (July 11) | 14 | 14 | 0 (FIN-01..FIN-14 fixed + 2 scoped-out decisions — see `AUDIT-FINANCE-REPORTS-2026-07-11.md`) |
 | Finance Lifecycle Audit (July 12) | 20 | 20 | 0 (all FL-01..FL-20 findings fixed — see `AUDIT-FINANCE-LIFECYCLE-2026-07-12.md`) |
 | Finance Lifecycle Recommendations (July 14) | 5 | 3 | 2 (FLR-01/FLR-02/FLR-04 fixed; FLR-03 deferred, FLR-05 open) |
 | Production Environment Split (July 14) | 6 | 0 | 6 (PC-01..PC-06 open, PC-02 in progress; 1 decision blocks PC-05 — see `PROD-CUTOVER-RUNBOOK.md`) |
 | Audit Fixes (June 10) | 21 | 21 | 0 |
 | Audit Fixes (June 11) | 16 | 16 | 0 |
-| **Total** | **395** | **363** | **~132** |
+| **Total** | **400** | **363** | **~137** |
 
 *Phase 11.5 is now 50/50 implemented. The audit is fully shipped on dev. 5 SEV-1 fixes from Launch-Readiness + 6 from Batch 1 + 5 from Batch 2 + 1 launch-gate (S5.2) from Batch 3 + 1 launch-gate (S7.1) from Batch 4 + 1 SEV-1 (S2.3) from Batch 5 + 4 polish SEV-1s from Batch 6 + 1 SEV-1 + 1 SEV-3 from Batch 7 + 2 SEV-1s from Batch 8 + 1 SEV-1 (S4.2) from Batch 9 + 1 SEV-3 (W4.4 8 email templates) from Batch 10 + 1 SEV-2 (S6.2 settings-driven public content) from Batch 11 + 1 launch-gate SEV-2 (Rewards tab full rewardsConfig write) from Batch 12 + 1 launch-gate SEV-2 (BookingConfirmPage Add to Calendar) from Batch 13 + 1 SEV-1 (#84 checkIn/checkOut always Timestamp) from Batch 14 + 2 SEV-2s (#78 + #80) from Batch 15 + 2 (#75 + #76) from Batch 16 + 2 (#83 + #100) from Batch 17 + 6 (Wave 3 batch 1) from Batch 18 + 6 (Wave 3 batch 2) from Batch 19 + 2 (Wave 4) from Batch 20 are shipped. 0 decisions remain unimplemented. The total (329) is unchanged from Batch 10 (the Batch 11–20 SEV-2/SEV-1s were already counted in the 50-item Phase 11.5 inventory).*
 

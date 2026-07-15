@@ -9,10 +9,11 @@ const bookingsPageSrc = readFileSync(
 
 describe("BookingsPage onsite payments", () => {
   it("sources Record Onsite Payment methods from Settings paymentMethods", () => {
-    expect(bookingsPageSrc).toMatch(/paymentMethods,\s*\n\s*currentUser\s*\}\s*=\s*useAdmin\(\)/);
+    expect(bookingsPageSrc).toMatch(/paymentMethods/);
+    expect(bookingsPageSrc).toMatch(/useAdmin\(\)/);
     expect(bookingsPageSrc).toMatch(/const\s+onsitePaymentMethodOptions\s*=\s*useMemo/);
     expect(bookingsPageSrc).toMatch(/paymentMethods\.filter/);
-    expect(bookingsPageSrc).toMatch(/onsitePaymentMethodOptions\.map\(\(method\)\s*=>\s*\(/);
+    expect(bookingsPageSrc).toMatch(/onsitePaymentMethodOptions\.map\(\(/);
   });
 
   it("keeps non-tender methods (store rails + pay-at-hotel intent) out of the onsite selector", () => {

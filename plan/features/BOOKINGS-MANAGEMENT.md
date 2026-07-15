@@ -296,6 +296,30 @@ A staff-initiated room move/upgrade mechanism already exists and is more capable
 - ✅ **Firestore rules** — `charges` subcollection added with the append-only pattern above
 - ✅ **Docs** — `TYPES.md`, `BACKEND.md §bookings`, and `REPORTS.md` updated in the same PR (per CLAUDE.md task-start order step 5)
 
+## Implementation — Booking Drawer Information Architecture *(in progress 2026-07-15)*
+
+### Goal
+
+Reduce the cognitive load of the booking drawer without removing operational, financial, compliance, communication, or audit functionality. Existing handlers and server-authoritative rules remain unchanged; the refactor reorganizes how staff discover and complete work.
+
+### Structural tranche implemented on feature branch
+
+- [x] Compact operational summary with guest, room, stay, status, source, total, paid, and balance
+- [x] Guest contact plus editable payment method/reference context remain above the section tabs so they do not shift or disappear between workflows
+- [x] Booking lifecycle indicator and context-sensitive payment, early-check-in, and readiness alerts
+- [x] Four preserved-state sections: Overview, Check-in, Folio, and Activity & More
+- [x] Check-in readiness card driven by the shared client/server readiness helper
+- [x] Sticky status-aware primary action with secondary/destructive controls moved to More
+- [x] Responsive section labels, 44px touch targets, existing Drawer safe-area footer, focus trap, and reduced-motion behavior
+- [x] Feature-parity regression coverage confirming every pre-refactor drawer capability remains reachable
+
+### Remaining tranche
+
+- [ ] Add progressive disclosures for completed registration, detailed pricing, payment/refund history, incidentals, breakfast selections, and email history/actions
+- [ ] Move bounded workflows into focused responsive modals/sheets: move/upgrade, discount/voucher, payment, refund, incidental add/void, early check-in resolution, and cancellation
+- [ ] Extract the remaining forms and ledgers from `BookingsPage.tsx` into focused named components while retaining the established mutation boundary
+- [ ] Add interaction-level keyboard/focus/state-preservation tests and authenticated visual QA at mobile, tablet, and desktop breakpoints
+
 ## References
 
 - Booking schema and status flow: `plan/docs/BACKEND.md §bookings`

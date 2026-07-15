@@ -1,4 +1,4 @@
-import { ArrowLeft, Calendar, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Calendar, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -37,6 +37,8 @@ interface BookingData {
   status: string;
   hasBreakfast: boolean;
   specialRequests: string;
+  paymentReferenceNumber?: string | null;
+  paymentRejectionReason?: string | null;
 }
 
 function toDateInput(value: unknown): string {
@@ -183,7 +185,9 @@ export function BookingLookupPage() {
         paymentMethod: data.paymentMethod || "",
         status: data.status,
         hasBreakfast: Boolean(data.hasBreakfast),
-        specialRequests: data.specialRequests || ""
+        specialRequests: data.specialRequests || "",
+        paymentReferenceNumber: data.paymentReferenceNumber || null,
+        paymentRejectionReason: data.paymentRejectionReason || null
       };
       setActiveBooking(normalized);
     } catch (err) {
@@ -668,6 +672,21 @@ export function BookingLookupPage() {
                     </div>
                   </div>
                 </div>
+
+                {activeBooking.paymentRejectionReason && (
+                  <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+                    <AlertTriangle className="mt-0.5 shrink-0 text-red-600" size={18} />
+                    <div>
+                      <p className="text-sm font-bold text-red-800">Payment proof needs attention</p>
+                      <p className="mt-1 text-xs leading-relaxed text-red-700">
+                        {activeBooking.paymentRejectionReason}
+                      </p>
+                      <p className="mt-2 text-xs font-semibold text-red-700">
+                        Please upload a corrected payment proof below.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
                   <Sparkles className="text-primary shrink-0 mt-0.5 animate-pulse" size={18} />

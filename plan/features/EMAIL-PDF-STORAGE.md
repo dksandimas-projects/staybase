@@ -18,14 +18,18 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 |---|---|---|---|
 | Booking submitted | `/api/email/booking-submitted` | Guest | Immediately after booking creation |
 | Payment confirmed | `/api/email/payment-confirmed` | Guest | When staff confirms payment |
+| Payment rejected | *(inline booking trigger)* | Guest | When staff rejects an uploaded payment proof |
 | Booking confirmed | `/api/email/booking-confirmed` | Guest | When status set to `confirmed` |
+| Booking rescheduled | *(inline booking trigger)* | Guest | When staff changes the assigned room or stay dates |
 | Check-in reminder | `/api/email/checkin-reminder` | Guest | 1 day before `checkIn` date |
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
 | New corporate inquiry | `/api/email/corporate-inquiry` | Staff (admin email) | When inquiry form submitted on guest site |
 | Corporate inquiry confirmation | *(inline trigger)* | Submitter (guest email) | Sent to submitter immediately after corporate inquiry submission |
+| Contact inquiry | *(inline trigger)* | Staff (admin email) | Sent when the public contact form is submitted |
 | Contact inquiry confirmation | *(inline trigger)* | Submitter (guest email) | Sent to submitter immediately after contact form submission |
 | Discount rejected | `/api/email/discount-rejected` | Guest | When staff rejects Senior/PWD discount ID |
 | Early check-in request | `/api/email/early-checkin-request` | Staff (admin email) | When Spark Rewards member requests early check-in for an upcoming booking |
+| Early check-in resolution | *(inline trigger)* | Guest | When staff approves or declines an early check-in request |
 | Voucher issued *(per `DECISIONS-FEATURES.md #104` — implemented in Phase 11.6 Batch 10)* | `/api/email/voucher-issued` | Guest | When admin creates a voucher with a non-empty `guestEmail` |
 | Store order placed | `/api/email/store-order-placed` | Guest | When guest places a store order via Intercom Shop |
 | Store order confirmed | `/api/email/store-order-confirmed` | Guest | When staff confirms the order (status: placed → confirmed) |

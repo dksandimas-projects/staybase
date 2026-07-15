@@ -7,11 +7,11 @@ service cloud.firestore {
     }
 
     function isStaff() {
-      return signedIn() && request.auth.token.role in ["front-desk", "admin"];
+      return signedIn() && 'role' in request.auth.token && request.auth.token.role in ["front-desk", "admin"];
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.token.role == "admin";
+      return signedIn() && 'role' in request.auth.token && request.auth.token.role == "admin";
     }
 
     match /rooms/{roomId} {
