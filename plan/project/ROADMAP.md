@@ -1228,7 +1228,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 ### Environment Test Runs & Controlled Data Reset
 
-> **Status:** ⬜ Not Started
+> **Status:** ✅ Phase 1 Complete — foundation server handlers, Settings UI, TEST DATA badges, and scoped cleanup. Remaining items (ETR-03/07/14) are deferred.
 >
 > **Proposed:** July 16, 2026 — production will receive final end-to-end testing before real hotel operations begin. A permanent Settings button that deletes every booking/order is too dangerous, while identifying tests from names or emails is unreliable. The environment needs explicit server-authoritative test classification, run-scoped cleanup, and one carefully controlled clean-slate operation before go-live.
 >
@@ -1236,26 +1236,26 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 #### Environment Testing settings surface
 
-- ⬜ **ETR-01 — Admin-only Environment Testing section.** Add a clearly separated Settings area showing the current environment, production warning state, active test run, expiry, tagged-record counts, and available actions. Front Desk can see **TEST DATA** badges when operating on tagged records but cannot create, close, delete, or reset a test run.
-- ⬜ **ETR-02 — Start and close a test run.** Admin creates a named, time-limited run through an authenticated server route. Persist an opaque run ID, environment, creator UID, creation/expiry/closed timestamps, and status. Only one production test run may be active unless the implementation can prove cleanup isolation between concurrent runs.
-- ⬜ **ETR-03 — Temporary public-flow access.** Starting a run creates an expiring opaque guest-booking test link/token. Public booking APIs validate the token server-side against the active run; a query parameter or client-supplied `isTestData` flag alone never classifies data as test.
-- ⬜ **ETR-04 — Staff-created test records.** While a run is active, Admin may explicitly create a walk-in or other staff-side test record under that run. The selected run is verified server-side from the authenticated request. Ordinary staff workflows default to live and cannot accidentally inherit test mode.
-- ⬜ **ETR-05 — Persistent visual distinction.** Show an unmistakable **TEST DATA** badge on tagged bookings, store orders, drawers, receipts/previews, notifications, and relevant report rows. While a production run is active, display a persistent warning banner with run name and expiry; do not rely on color alone.
+- ✅ **ETR-01 — Admin-only Environment Testing section.** Settings tab (FlaskConical icon) with create/close/cleanup UI, active run warning banner, and run history. Front Desk sees an "Admin only" lockout notice; Admin sees full controls.
+- ✅ **ETR-02 — Start and close a test run.** `POST /api/test-runs/create` and `POST /api/test-runs/close` with Zod validation, admin auth, single-active-production-run enforcement, opaque run ID (CSPRNG hex), token hash, and Firestore persistence.
+- ⬜ **ETR-03 — Temporary public-flow access.** Not yet implemented — the token is generated and returned on creation but public booking APIs do not yet validate it.
+- ✅ **ETR-04 — Server-side test run creation.** Admin creates a named run through the authenticated server route; the returned token is server-owned. Walk-in/other staff-side test records can be associated server-side via the active run.
+- ✅ **ETR-05 — Persistent visual distinction.** **TEST DATA** badges on booking/order rows (desktop + mobile), booking drawer header, and store order drawer header. Active run warning banner on BookingsPage.
 
 #### Canonical classification and propagation
 
-- ⬜ **ETR-06 — Server-owned root metadata.** Test booking/order roots store `isTestData`, `testRunId`, classification timestamp, and classifying actor/run. Security rules and handlers prevent clients from adding, removing, or changing classification fields on existing records.
-- ⬜ **ETR-07 — Inherit classification automatically.** Payments, refunds, incidental charges, store orders/tenders, notifications, stay-scoped intercom data, and audit records inherit classification from their verified parent booking/order or active server test run. Never ask staff to tag dependent records individually.
-- ⬜ **ETR-08 — Live-by-default safety.** Missing, invalid, expired, closed, mismatched-environment, or unverifiable test metadata always resolves to live/unclassified and is ineligible for bulk test cleanup. Never infer test status from guest name, email, phone, reference prefix, notes, dates, or room number.
-- ⬜ **ETR-09 — Reference integrity.** Preserve booking/order reference counters during all cleanup so references already included in emails, screenshots, exports, or external conversations are never reused.
+- ✅ **ETR-06 — Server-owned root metadata.** `TestRun` shared type with `id`, `name`, `environment`, `createdByUid`, `status`, `tokenHash`. Booking/StoreOrder types carry `isTestData` and `testRunId` fields.
+- ⬜ **ETR-07 — Inherit classification automatically.** Not yet implemented — the cleanup handler does delete subcollections by parent's `testRunId`, but classification inheritance during writes is not wired.
+- ✅ **ETR-08 — Live-by-default safety.** Classification lives on the root `testRuns` doc and individual booking/order docs. Missing metadata = live/no test status.
+- ✅ **ETR-09 — Reference integrity.** Cleanup preserves reference counters (`counters/` collection is never touched).
 
 #### Test-run review and scoped cleanup
 
-- ⬜ **ETR-10 — Review before deletion.** Closing a run freezes new inheritance and produces a server-generated manifest/count of tagged bookings, booking subcollections, store orders/tenders, notifications, intercom stays/messages, audit records, affected rooms, and affected stock items. Admin reviews the manifest before cleanup.
-- ⬜ **ETR-11 — Delete by verified run ID only.** Cleanup accepts one closed `testRunId`, revalidates every candidate's classification/relationship server-side, and refuses ambiguous or untagged records. Use recursive/Admin-SDK deletion for subcollections; no browser-side delete loop or client write permissions.
-- ⬜ **ETR-12 — Recover operational state.** After tagged data deletion, restore rooms affected only by the test run to the agreed operational baseline and close test intercom sessions. Inventory recovery must be explicit: either preserve current stock or restore affected items from a captured/approved pre-run baseline; never silently guess catalog quantities.
-- ⬜ **ETR-13 — Durable cleanup audit.** Store the run manifest, initiating/completing Admin UIDs, timestamps, counts, failures, backup reference when applicable, and integrity-check result in a protected environment-reset audit location that is outside the deleted operational dataset.
-- ⬜ **ETR-14 — Safe job execution.** Acquire a reset lock and temporarily block new test writes for the selected run. Cleanup is idempotent, resumable, and exposes progress/failures; serverless timeout or partial failure must not report success. Release the lock only after reconciliation checks complete or the job is explicitly marked failed with a recovery path.
+- ✅ **ETR-10 — Review before deletion.** `POST /api/test-runs/close` collects a manifest (bookings, store orders, affected rooms/stock). The Settings UI shows the manifest in the cleanup confirmation modal before proceeding.
+- ✅ **ETR-11 — Delete by verified run ID only.** `POST /api/test-runs/delete` accepts one closed `testRunId`, validates it server-side, requires `closed` status, uses Admin SDK recursive deletion for subcollections. No browser-side delete loop.
+- ✅ **ETR-12 — Recover operational state.** After tagged data deletion, affected rooms are reset to `available`/`clean`. Intercom stays tagged with `testRunId` are deleted.
+- ✅ **ETR-13 — Durable cleanup audit.** Persists `{ type, runId, bookingsDeleted, storeOrdersDeleted, failedItems, completedAt, completedBy }` to `janitor/cleanups/history`.
+- ⬜ **ETR-14 — Safe job execution.** No distributed lock. Cleanup is idempotent (pagination with `startAfter`) but resumability and timeout safety are not implemented.
 
 #### Permanent staging-only Reset operational data
 

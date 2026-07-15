@@ -41,7 +41,8 @@ import {
   Move,
   Info,
   ChevronRight,
-  Search
+  Search,
+  FlaskConical
 } from "lucide-react";
 
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
@@ -385,7 +386,8 @@ export function BookingsPage() {
     corporateCodes,
     paymentMethods,
     currentUser,
-    verifyAndRecordPayment
+    verifyAndRecordPayment,
+    testRuns
   } = useAdmin();
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
@@ -789,7 +791,18 @@ export function BookingsPage() {
 
   // Table Columns Setup
   const columns: Array<DataTableColumn<Booking>> = [
-    { key: "bookingRef", header: "Reference" },
+    {
+      key: "bookingRef",
+      header: "Reference",
+      render: (row) => (
+        <span className="inline-flex items-center gap-1.5">
+          {row.bookingRef}
+          {row.isTestData && (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+          )}
+        </span>
+      )
+    },
     { key: "guestName", header: "Guest" },
     {
       key: "roomNumber",
@@ -997,7 +1010,18 @@ export function BookingsPage() {
 
   // Store Columns
   const storeColumns: Array<DataTableColumn<any>> = [
-    { key: "orderRef", header: "Order Ref" },
+    {
+      key: "orderRef",
+      header: "Order Ref",
+      render: (row) => (
+        <span className="inline-flex items-center gap-1.5">
+          {row.orderRef}
+          {row.isTestData && (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+          )}
+        </span>
+      )
+    },
     { key: "roomNumber", header: "Room" },
     { key: "guestName", header: "Guest" },
     {
@@ -1053,8 +1077,13 @@ export function BookingsPage() {
   const renderBookingCard = (row: Booking) => (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
-          REF: {row.bookingRef}
+        <span className="inline-flex items-center gap-1.5">
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            REF: {row.bookingRef}
+          </span>
+          {row.isTestData && (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+          )}
         </span>
         <StatusBadge label={row.status.replace("-", " ")} status={row.status} />
       </div>
@@ -1103,8 +1132,13 @@ export function BookingsPage() {
   const renderOrderCard = (row: any) => (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
-          REF: {row.orderRef}
+        <span className="inline-flex items-center gap-1.5">
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            REF: {row.orderRef}
+          </span>
+          {row.isTestData && (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+          )}
         </span>
         <StatusBadge
           label={row.status.replace("-", " ")}
@@ -2557,6 +2591,14 @@ export function BookingsPage() {
           <h1 className="font-heading text-3xl text-gray-950 lowercase font-medium">bookings & store orders</h1>
           <p className="text-xs text-gray-500 mt-1">Review active room check-ins, record onsite charges, and process walk-ins and minibar deliveries.</p>
         </div>
+        {testRuns.filter(r => r.status === "active").length > 0 && (
+          <div className="col-span-full rounded-lg bg-amber-50 border border-amber-300 px-4 py-3 text-xs text-amber-900 flex items-center gap-2.5">
+            <FlaskConical size={14} className="shrink-0" />
+            <span>
+              <strong>Active test run.</strong> Test data is tagged with TEST badges.
+            </span>
+          </div>
+        )}
         {activeMainTab === "bookings" && (
           <button
             onClick={() => {
@@ -4275,9 +4317,14 @@ export function BookingsPage() {
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Delivery Destination</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2 text-xs">
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="font-bold text-gray-900">Room {selectedOrder.roomNumber}</span>
-                  <span className="text-gray-655">{selectedOrder.guestName}</span>
+                  <span className="inline-flex items-center gap-1.5 text-gray-655">
+                    {selectedOrder.guestName}
+                    {selectedOrder.isTestData && (
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+                    )}
+                  </span>
                 </div>
                 {selectedOrder.notes && (
                   <div className="border-t border-gray-100 pt-2 mt-2">

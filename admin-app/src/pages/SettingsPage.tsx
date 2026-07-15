@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminContext";
+import type { TestRun } from "@spark-inn/shared";
 import {
   compressImageFile,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
@@ -20,7 +21,7 @@ import {
   Mail, Users, Scale, MessageSquare, Volume2, GripVertical, UserCog, Lock,
   Upload, ChevronLeft, ChevronRight, X, Palette, ImagePlus, RotateCcw, Building2,
   Award, Star, CreditCard, AlertTriangle, ArrowUp, ArrowDown, Wallet, Banknote, Eye, RefreshCw,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, FlaskConical
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -33,7 +34,7 @@ import { useBreakpoint } from "../utils/useBreakpoint";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff";
+type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment";
 type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -101,7 +102,8 @@ const VALID_TAB_IDS: TabId[] = [
   "email",
   "intercom",
   "legal",
-  "staff"
+  "staff",
+  "environment"
 ];
 
 const DEFAULT_OG_IMAGE_URL = config.ogImage.startsWith("http")
@@ -1165,7 +1167,12 @@ export function SettingsPage() {
     reorderPaymentMethods,
     deletePaymentMethod,
     uploadPaymentMethodQr,
-    resetPaymentMethodQr
+    resetPaymentMethodQr,
+    testRuns,
+    testRunsLoading,
+    createTestRun,
+    closeTestRun,
+    deleteTestRun
   } = useAdmin();
   const toast = useToast();
   const { isMobile } = useBreakpoint();
@@ -1433,6 +1440,12 @@ export function SettingsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
+  // Environment Testing (ETR)
+  const [newRunName, setNewRunName] = useState("");
+  const [newRunEnv, setNewRunEnv] = useState<"staging" | "production">("staging");
+  const [newRunDuration, setNewRunDuration] = useState(60);
+  const [confirmDeleteRun, setConfirmDeleteRun] = useState<TestRun | null>(null);
+
   // Breakfast item CRUD states
   const [isBreakfastItemModalOpen, setIsBreakfastItemModalOpen] = useState(false);
   const [editingSilogItem, setEditingSilogItem] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
@@ -1627,6 +1640,42 @@ export function SettingsPage() {
     }
     setAddress(addrStr);
   }, [storeConfig, hotelConfig, websiteContent, rewardsConfig, seoSettings]);
+
+  // Environment Testing handlers (ETR)
+  const handleCreateRun = async () => {
+    if (!newRunName.trim()) return;
+    const result = await createTestRun({
+      name: newRunName.trim(),
+      environment: newRunEnv,
+      durationMinutes: newRunDuration
+    });
+    if (result.success) {
+      toast.success("Test run created", "Admin SDK service account is required for server route.");
+      setNewRunName("");
+    } else {
+      toast.error("Failed to create test run", result.error || "Unknown error");
+    }
+  };
+
+  const handleCloseRun = async (runId: string) => {
+    const result = await closeTestRun(runId);
+    if (result.success) {
+      toast.success("Test run closed", "Closing generated the manifest. Review it before cleanup.");
+    } else {
+      toast.error("Failed to close test run", result.error || "Unknown error");
+    }
+  };
+
+  const handleConfirmCleanup = async () => {
+    if (!confirmDeleteRun) return;
+    const result = await deleteTestRun(confirmDeleteRun.id);
+    if (result.success) {
+      toast.success("Cleanup completed", "Test data has been removed.");
+    } else {
+      toast.error("Failed to clean up", result.error || "Unknown error");
+    }
+    setConfirmDeleteRun(null);
+  };
 
   // Handle Form submissions
   const handleSaveHotel = async (e: React.FormEvent) => {
@@ -2284,6 +2333,7 @@ export function SettingsPage() {
     { id: "email" as const, label: "Email Config", icon: Mail },
     { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
     { id: "legal" as const, label: "Legal Content", icon: Scale },
+    { id: "environment" as const, label: "Environment Testing", icon: FlaskConical },
     { id: "staff" as const, label: "Staff Accounts", icon: UserCog }
   ];
 
@@ -5010,7 +5060,162 @@ export function SettingsPage() {
             </div>
           )}
 
-          {/* TAB 10: STAFF ACCOUNTS (admin-only) */}
+          {/* TAB 10: ENVIRONMENT TESTING (admin-only) */}
+          {activeTab === "environment" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Environment Testing</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">Create and manage time-limited test runs for production and staging environments. Test data is visually distinct and automatically cleaned up.</p>
+              </div>
+
+              {!isAdmin ? (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-5 text-xs text-amber-800 flex gap-2.5 items-start">
+                  <Lock size={16} className="shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Admin only</p>
+                    <p className="mt-1 leading-relaxed">Only admin accounts can manage test runs. Sign in with an admin account to use this feature.</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {testRunsLoading && (
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <RefreshCw size={14} className="animate-spin" />
+                      Loading test runs...
+                    </div>
+                  )}
+
+                  {/* Active run warning banner */}
+                  {testRuns.filter(r => r.status === "active").length > 0 && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-300 p-4 text-xs text-amber-900 flex gap-2.5 items-start">
+                      <FlaskConical size={16} className="shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Active Test Run</p>
+                        {testRuns.filter(r => r.status === "active").map(run => (
+                          <p key={run.id} className="mt-1 leading-relaxed">
+                            <strong>{run.name}</strong> ({run.environment}) — expires{" "}
+                            {new Date(run.expiresAt).toLocaleString()}
+                          </p>
+                        ))}
+                        <p className="mt-2 text-amber-700">Test data is clearly marked with TEST DATA badges.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Create test run */}
+                  <div className="rounded-lg border border-gray-200 p-5 space-y-4">
+                    <h4 className="font-bold text-gray-900">Create Test Run</h4>
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      <label className="flex flex-col gap-1.5">
+                        <span className="font-bold text-gray-700">Run name</span>
+                        <input
+                          type="text"
+                          value={newRunName}
+                          onChange={(e) => setNewRunName(e.target.value)}
+                          placeholder="e.g. Q3 smoke test"
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-primary focus:outline-none"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="font-bold text-gray-700">Environment</span>
+                        <select
+                          value={newRunEnv}
+                          onChange={(e) => setNewRunEnv(e.target.value as "staging" | "production")}
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-primary focus:outline-none"
+                        >
+                          <option value="staging">Staging</option>
+                          <option value="production">Production</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="font-bold text-gray-700">Duration</span>
+                        <select
+                          value={newRunDuration}
+                          onChange={(e) => setNewRunDuration(Number(e.target.value))}
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-primary focus:outline-none"
+                        >
+                          <option value={15}>15 minutes</option>
+                          <option value={60}>1 hour</option>
+                          <option value={360}>6 hours</option>
+                          <option value={1440}>24 hours</option>
+                          <option value={4320}>72 hours</option>
+                          <option value={10080}>7 days</option>
+                          <option value={43200}>30 days</option>
+                        </select>
+                      </label>
+                    </div>
+                    <button
+                      onClick={handleCreateRun}
+                      disabled={testRunsLoading || !newRunName.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50 transition"
+                    >
+                      <FlaskConical size={14} />
+                      Create Test Run
+                    </button>
+                  </div>
+
+                  {/* Run history */}
+                  {testRuns.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-bold text-gray-900">Run History</h4>
+                      <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                        {testRuns.map(run => (
+                          <div key={run.id} className="flex items-center justify-between px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <FlaskConical size={14} className={run.status === "active" ? "text-amber-500" : run.status === "closed" ? "text-blue-500" : "text-gray-400"} />
+                              <div>
+                                <p className="font-bold text-gray-900">{run.name}</p>
+                                <p className="text-[10px] text-gray-500">
+                                  {run.environment} · Created {new Date(run.createdAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                                run.status === "active"
+                                  ? "border-amber-100 bg-amber-50 text-amber-700"
+                                  : run.status === "closed"
+                                    ? "border-blue-100 bg-blue-50 text-blue-700"
+                                    : run.status === "cleanup-in-progress"
+                                      ? "border-purple-100 bg-purple-50 text-purple-700"
+                                      : "border-gray-100 bg-gray-50 text-gray-500"
+                              }`}>
+                                {run.status === "cleanup-in-progress" ? "Cleaning..." : run.status}
+                              </span>
+                              {run.status === "active" && (
+                                <button
+                                  onClick={() => handleCloseRun(run.id)}
+                                  disabled={testRunsLoading}
+                                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition"
+                                >
+                                  Close
+                                </button>
+                              )}
+                              {run.status === "closed" && (
+                                <button
+                                  onClick={() => setConfirmDeleteRun(run)}
+                                  disabled={testRunsLoading}
+                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[10px] font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 transition"
+                                >
+                                  Clean up
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!testRunsLoading && testRuns.length === 0 && (
+                    <p className="text-gray-500 italic">No test runs yet. Create one above.</p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB 11: STAFF ACCOUNTS (admin-only) */}
           {activeTab === "staff" && (
             <div className="space-y-6 text-xs">
               <div>
@@ -5603,6 +5808,49 @@ export function SettingsPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Cleanup confirmation modal */}
+      <Modal
+        title="Clean up test data?"
+        open={confirmDeleteRun !== null}
+        onClose={() => setConfirmDeleteRun(null)}
+      >
+        <div className="space-y-4 text-xs">
+          <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-red-800">
+            <p className="font-bold">This action is irreversible.</p>
+            <p className="mt-1">
+              All data tagged under this test run will be permanently deleted.
+              {confirmDeleteRun?.manifest && (
+                <span className="block mt-2">
+                  Manifest: {confirmDeleteRun.manifest.bookings} bookings, {confirmDeleteRun.manifest.storeOrders} store orders
+                </span>
+              )}
+            </p>
+          </div>
+          <p>
+            Rooms affected by the test run will be reset to available/clean.
+            Reference counters are preserved.
+          </p>
+          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteRun(null)}
+              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmCleanup}
+              disabled={testRunsLoading}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-red-600 px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50 active:scale-95"
+            >
+              <Trash2 size={14} />
+              Clean up data
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

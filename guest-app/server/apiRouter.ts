@@ -18,6 +18,7 @@ import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
+import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -1147,6 +1148,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
 
     return await handleNotificationsPrune(req, res);
+  }
+
+  // ── Test Runs (ETR) ──────────────────────────────────────
+  if (domain === "test-runs" && action === "create" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`test-runs-create:${ip}`, 5, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can manage test runs." });
+    }
+    (req as any).staff = authResult;
+    return await handleCreateTestRun(req, res);
+  }
+
+  if (domain === "test-runs" && action === "close" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can manage test runs." });
+    }
+    (req as any).staff = authResult;
+    return await handleCloseTestRun(req, res);
+  }
+
+  if (domain === "test-runs" && action === "delete" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can manage test runs." });
+    }
+    (req as any).staff = authResult;
+    return await handleDeleteTestRun(req, res);
+  }
+
+  if (domain === "test-runs" && action === "list" && req.method === "GET") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can list test runs." });
+    }
+    (req as any).staff = authResult;
+    return await handleListTestRuns(req, res);
   }
 
   // Fallback 404
