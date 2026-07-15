@@ -168,6 +168,8 @@ export interface Booking {
   checkedOutFolioTotal?: number;
   checkedOutCollectedTotal?: number;
   earlyCheckoutOriginalCheckOut?: string | null;
+  unpaidCheckoutReason?: string | null;
+  unpaidCheckoutApprovedBy?: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
   paymentReferenceNumber?: string | null;
@@ -1416,10 +1418,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             "Content-Type": "application/json",
             "Authorization": token ? `Bearer ${token}` : ""
           },
-          body: JSON.stringify({ bookingId })
+          body: JSON.stringify({
+            bookingId,
+            unpaidCheckoutReason: details?.unpaidCheckoutReason || null
+          })
         });
         const data = await res.json();
         if (!res.ok || !data.success) {
+          if (data.thresholdExceeded) {
+            throw new Error(data.message || data.error);
+          }
           throw new Error(data.error || "Failed to checkout booking via server API.");
         }
       } else if (status === "checked-in") {

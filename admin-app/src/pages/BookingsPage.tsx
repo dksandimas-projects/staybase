@@ -386,7 +386,21 @@ export function BookingsPage() {
   } = useAdmin();
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
-  const checkoutWithBalanceConfirm = useTwoClickConfirm<"confirm">();
+
+  // UCO-02/03: unpaid checkout reason modal state
+  const [showUnpaidCheckoutForm, setShowUnpaidCheckoutForm] = useState(false);
+  const [unpaidCheckoutReason, setUnpaidCheckoutReason] = useState("");
+  const [unpaidCheckoutError, setUnpaidCheckoutError] = useState<string | null>(null);
+  const [unpaidCheckoutSubmitting, setUnpaidCheckoutSubmitting] = useState(false);
+  const UNPAID_REASON_SHORTCUTS = [
+    { label: "Company billing", value: "approved company billing" },
+    { label: "Bank transfer pending", value: "bank transfer pending" },
+    { label: "Payment failure", value: "payment failure" },
+    { label: "Disputed charge", value: "disputed charge" },
+    { label: "Other", value: "other" }
+  ];
+  const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
+  const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const brandRgb = hexToRgb(config.colors.primary);
   const getApiBaseUrl = () => {
     if (typeof window === "undefined") return "";
@@ -2216,17 +2230,24 @@ export function BookingsPage() {
           type="button"
           onClick={() => {
             const folio = getBookingFolio(selectedBooking);
-            if (folio.balance > 0 && !checkoutWithBalanceConfirm.arm("confirm")) return;
-            handleStatusTransition("checked-out");
+            if (folio.balance > 0) {
+              setUnpaidCheckoutReason("");
+              setUnpaidCheckoutError(null);
+              setUnpaidCheckoutBlocked(false);
+              setUnpaidCheckoutBlockMessage("");
+              setShowUnpaidCheckoutForm(true);
+            } else {
+              handleStatusTransition("checked-out");
+            }
           }}
           className={`inline-flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 text-xs font-bold text-white shadow-sm transition active:scale-95 ${
-            selectedBookingFolio && selectedBookingFolio.balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
+            selectedBookingFolio && selectedBookingFolio.balance > 0
               ? "bg-orange-600 hover:bg-orange-700"
               : "bg-gray-900 hover:bg-black"
           }`}
         >
-          {selectedBookingFolio && selectedBookingFolio.balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
-            ? `Confirm — ${formatPrice(selectedBookingFolio.balance)} still due`
+          {selectedBookingFolio && selectedBookingFolio.balance > 0
+            ? `Check out — ${formatPrice(selectedBookingFolio.balance)} due`
             : "Review folio & check out"}
         </button>
       );
@@ -3606,6 +3627,49 @@ export function BookingsPage() {
               />
             ) : null}
 
+            {/* UCO-08/UCO-10: post-checkout receivable state */}
+            {selectedBooking.status === "checked-out" && (() => {
+              const folio = getBookingFolio(selectedBooking);
+              const hasLiveBalance = folio.balance > 0;
+              const hasUnpaidCheckoutReason = selectedBooking.unpaidCheckoutReason;
+              if (hasLiveBalance) {
+                return (
+                  <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-2">
+                    <p className="flex items-center gap-1.5 text-xs font-bold text-orange-800">
+                      <CreditCard size={14} />
+                      {hasUnpaidCheckoutReason ? "Balance due — unpaid departure" : "Balance due"}
+                    </p>
+                    <p className="text-[10px] text-orange-700">
+                      Outstanding: {formatPrice(folio.balance)} · Record a payment to settle.
+                    </p>
+                    {selectedBooking.unpaidCheckoutReason && (
+                      <p className="rounded bg-orange-100/50 px-2 py-1 text-[10px] text-orange-800">
+                        Reason: {selectedBooking.unpaidCheckoutReason}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-orange-600">
+                      Original folio: {formatPrice(selectedBooking.checkedOutFolioTotal || folio.grandTotal)} ·
+                      Collected at checkout: {formatPrice(selectedBooking.checkedOutCollectedTotal || folio.paymentsTotal)}
+                    </p>
+                  </div>
+                );
+              }
+              if (folio.balance <= 0 && folio.paymentsTotal > 0 && selectedBooking.checkedOutWithBalance && selectedBooking.checkedOutWithBalance > 0) {
+                return (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+                      <CreditCard size={14} />
+                      Settled after checkout
+                    </p>
+                    <p className="mt-1 text-[10px] text-emerald-700">
+                      Originally departed with {formatPrice(selectedBooking.checkedOutWithBalance)} due. Now fully settled.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             {/* Checkout folio */}
             {(selectedBooking.status === "checked-in" || selectedBooking.status === "checked-out") && (
               <div className="space-y-3">
@@ -4197,6 +4261,133 @@ export function BookingsPage() {
             </div>
           </div>
         </form>
+      </Modal>
+      <Modal
+        title="Unpaid checkout — reason required"
+        open={showUnpaidCheckoutForm}
+        onClose={() => setShowUnpaidCheckoutForm(false)}
+        className="max-w-lg"
+      >
+        {selectedBooking && (() => {
+          const folio = getBookingFolio(selectedBooking);
+          return (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                <p className="text-xs font-semibold text-amber-900">
+                  Outstanding balance: <span className="text-base">{formatPrice(folio.balance)}</span>
+                </p>
+                <p className="mt-1 text-[10px] text-amber-700">
+                  Folio total: {formatPrice(folio.grandTotal)} · Collected: {formatPrice(folio.paymentsTotal)}
+                </p>
+              </div>
+
+              {unpaidCheckoutBlocked ? (
+                <div className="space-y-3">
+                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                    <p className="text-xs font-bold text-red-800">Front Desk approval limit exceeded</p>
+                    <p className="mt-1 text-[10px] text-red-700">{unpaidCheckoutBlockMessage}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowUnpaidCheckoutForm(false)}
+                    className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Close
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label htmlFor="unpaid-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                      Reason for unpaid checkout <span className="text-red-500">*</span>
+                    </label>
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {UNPAID_REASON_SHORTCUTS.map((shortcut) => (
+                        <button
+                          key={shortcut.value}
+                          type="button"
+                          onClick={() => setUnpaidCheckoutReason(shortcut.value)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-colors ${
+                            unpaidCheckoutReason === shortcut.value
+                              ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                          }`}
+                        >
+                          {shortcut.label}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      id="unpaid-reason"
+                      value={unpaidCheckoutReason}
+                      onChange={(e) => setUnpaidCheckoutReason(e.target.value)}
+                      placeholder="Describe why the balance remains unpaid..."
+                      rows={3}
+                      maxLength={500}
+                      className="w-full resize-none rounded-lg border border-gray-250 px-3 py-2 text-xs text-gray-900 placeholder-gray-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    <p className="mt-1 text-right text-[10px] text-gray-400">{unpaidCheckoutReason.length}/500</p>
+                  </div>
+
+                  {unpaidCheckoutError && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{unpaidCheckoutError}</p>
+                  )}
+
+                  <div className="flex items-center justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowUnpaidCheckoutForm(false)}
+                      disabled={unpaidCheckoutSubmitting}
+                      className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selectedBooking) return;
+                        const reason = unpaidCheckoutReason.trim();
+                        if (!reason) {
+                          setUnpaidCheckoutError("A reason is required for unpaid checkout.");
+                          return;
+                        }
+                        setUnpaidCheckoutSubmitting(true);
+                        setUnpaidCheckoutError(null);
+                        try {
+                          await updateBookingStatus(selectedBooking.id, "checked-out", {
+                            unpaidCheckoutReason: reason
+                          } as any);
+                          setSelectedBooking(prev => prev ? { ...prev, status: "checked-out", unpaidCheckoutReason: reason } as any : null);
+                          setShowUnpaidCheckoutForm(false);
+                        } catch (err: any) {
+                          if (err.message?.includes("Front Desk cannot complete")) {
+                            setUnpaidCheckoutBlocked(true);
+                            setUnpaidCheckoutBlockMessage(err.message);
+                          } else {
+                            setUnpaidCheckoutError(err.message || "Failed to checkout.");
+                          }
+                        } finally {
+                          setUnpaidCheckoutSubmitting(false);
+                        }
+                      }}
+                      disabled={unpaidCheckoutSubmitting || !unpaidCheckoutReason.trim()}
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white hover:bg-orange-700 disabled:opacity-50"
+                    >
+                      {unpaidCheckoutSubmitting ? (
+                        <>
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          Checking out…
+                        </>
+                      ) : (
+                        `Check out with ${formatPrice(folio.balance)} due`
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
       <Modal
         title={imagePreview?.title ?? "Image preview"}
