@@ -1,6 +1,7 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
+import { writeNotification } from "../lib/notifications";
 import {
   calculateSeasonalAwareRoomBreakdown,
   calculateVoucherDiscount,
@@ -1139,6 +1140,20 @@ export async function handleCreateBooking(req: any, res: any) {
       console.error("Failed to send staff-new-booking email:", staffEmailErr);
     }
 
+    // Per Phase 12 — Notification Center (decision #120):
+    // persist a `notifications` doc for the bell panel. Best-effort;
+    // a failure here never fails the booking. The room number +
+    // booking ref are denormalized so the panel can render without
+    // a second Firestore round-trip.
+    void writeNotification({
+      type: "booking",
+      title: `New booking — ${finalBookingRef} (Room ${assignedRoomNumber})`,
+      entityType: "booking",
+      entityId: bookingId,
+      roomNumber: assignedRoomNumber,
+      bookingRef: finalBookingRef
+    });
+
     return res.status(200).json({
       success: true,
       data: {
@@ -1526,6 +1541,24 @@ export async function handleCreateWalkin(req: any, res: any) {
       } catch (emailErr) {
         console.error("Failed to send walk-in booking confirmation email:", emailErr);
       }
+    }
+
+    // Per Phase 12 — Notification Center (decision #120):
+    // persist a `notifications` doc for the bell panel so
+    // the front desk can see the walk-in booking in the
+    // persistent event log. The room number + booking ref
+    // are denormalized. The notification type is `booking`
+    // for both online + walk-in (status here is `confirmed`
+    // or `checked-in`, but the bell surfaces both).
+    if (newBooking) {
+      void writeNotification({
+        type: "booking",
+        title: `New walk-in booking — ${finalBookingRef} (Room ${newBooking.roomNumber})`,
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: newBooking.roomNumber,
+        bookingRef: finalBookingRef
+      });
     }
 
     return res.status(200).json({
@@ -2144,6 +2177,28 @@ export async function handleAddPayment(req: any, res: any) {
     console.error("Failed to send payment confirmation email:", emailErr);
   }
 
+  // Per Phase 12 — Notification Center (decision #120):
+  // persist a `notifications` doc for the bell panel so the
+  // front desk can see the payment + the
+  // `payment-confirmed` transition in the persistent log.
+  // Best-effort: never fails the call. The
+  // `idempotentReplay` short-circuit avoids writing
+  // duplicate notifications when the same payment is
+  // re-sent with the same id.
+  if (!idempotentReplay && bookingDataSnapshot) {
+    const notifTitle = transitionedToPaymentConfirmed
+      ? `Payment received — ${bookingDataSnapshot.bookingRef || bookingId} (full)`
+      : `Payment added — ${bookingDataSnapshot.bookingRef || bookingId} (${numericAmount})`;
+    void writeNotification({
+      type: "payment",
+      title: notifTitle,
+      entityType: "booking",
+      entityId: bookingId,
+      roomNumber: bookingDataSnapshot.roomNumber || null,
+      bookingRef: bookingDataSnapshot.bookingRef || null
+    });
+  }
+
   return res.status(200).json({
     success: true,
     data: {
@@ -2333,6 +2388,21 @@ export async function handleConfirmBooking(req: any, res: any) {
       console.error("Failed to send booking confirmation email:", emailErr);
     }
 
+    // Per Phase 12 — Notification Center (decision #120):
+    // persist a `notifications` doc for the bell panel so
+    // the front desk sees the booking move to `confirmed`
+    // in the persistent log. Distinct from the
+    // `payment` notification (payment receipt) so the bell
+    // surfaces both events.
+    void writeNotification({
+      type: "booking",
+      title: `Booking confirmed — ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
+      entityType: "booking",
+      entityId: bookingId,
+      roomNumber: bookingData.roomNumber || null,
+      bookingRef: bookingData.bookingRef || null
+    });
+
     return res.status(200).json({ success: true, data: { status: "confirmed" } });
   } catch (error: any) {
     if (error?.message === "BOOKING_NOT_FOUND") {
@@ -2408,6 +2478,26 @@ export async function handleCheckinBooking(req: any, res: any) {
         updatedAt: new Date()
       });
     });
+
+    // Per Phase 12 — Notification Center (decision #120):
+    // persist a `notifications` doc for the bell panel.
+    // The transaction above only updated the booking +
+    // room; re-read here for the denormalized fields
+    // (bookingRef, roomNumber).
+    try {
+      const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
+      const fresh = freshSnap.data() || {};
+      void writeNotification({
+        type: "arrival",
+        title: `Guest checked in — ${fresh.bookingRef || bookingId} (Room ${fresh.roomNumber || ""})`.trim(),
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: fresh.roomNumber || null,
+        bookingRef: fresh.bookingRef || null
+      });
+    } catch (notifErr) {
+      console.error("Failed to fetch booking for arrival notification:", notifErr);
+    }
 
     return res.status(200).json({ success: true, data: { status: "checked-in" } });
   } catch (error: any) {
@@ -2603,6 +2693,26 @@ export async function handleCheckoutBooking(req: any, res: any) {
         checkedOutWithBalance
       }
     });
+
+    // Per Phase 12 — Notification Center (decision #120):
+    // persist a `notifications` doc for the bell panel.
+    // The booking doc is the source of truth for the
+    // denormalized fields (bookingRef, roomNumber); re-read
+    // after the transaction to capture the final values.
+    try {
+      const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
+      const fresh = freshSnap.data() || {};
+      void writeNotification({
+        type: "departure",
+        title: `Guest checked out — ${fresh.bookingRef || bookingId} (Room ${fresh.roomNumber || ""})`.trim(),
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: fresh.roomNumber || null,
+        bookingRef: fresh.bookingRef || null
+      });
+    } catch (notifErr) {
+      console.error("Failed to fetch booking for departure notification:", notifErr);
+    }
   } catch (error: any) {
     console.error("Checkout booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });

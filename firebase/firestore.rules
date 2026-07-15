@@ -255,6 +255,24 @@ service cloud.firestore {
       allow create: if false;
       allow delete: if isAdmin();
     }
+
+    // Per Phase 12 — Notification Center (decision #120):
+    // persisted operational alerts for staff. One doc per
+    // event, written server-side via the Admin SDK from the
+    // existing API routes (booking create / add-payment /
+    // confirm / check-in / check-out / store order placed).
+    // Guests must never read or write this collection.
+    // Staff can flip the `readBy` field (the per-staff read
+    // trail); create is Admin-SDK-only. The retention cron
+    // hard-deletes docs older than 30 days — runs as Admin
+    // SDK, so no client delete is allowed.
+    match /notifications/{notificationId} {
+      allow read: if isStaff();
+      allow create: if false;
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readBy"]);
+      allow delete: if false;
+    }
     // ── collectionGroup rules ──────────────────────────────────────────────
     // Firestore requires explicit collectionGroup rules for cross-document
     // queries (collectionGroup(db, "charges") / "payments"). The nested

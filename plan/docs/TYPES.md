@@ -604,6 +604,42 @@ IntercomThread {
 
 ---
 
+## Notification (Phase 12 — Notification Center, decision #120)
+
+Persisted operational alerts for staff. One document per event,
+written server-side via the Admin SDK from the existing API routes
+(booking create / add-payment / confirm / check-in / check-out /
+store order placed). Live-derived from the `intercoms` listener
+(B1) for chat alerts — chat messages are **not** persisted here.
+
+```
+NotificationType = "booking" | "payment" | "message"
+                 | "arrival" | "departure" | "store-order"
+
+NotificationEntityType = "booking" | "storeOrder" | "intercom"
+
+Notification {
+  id: string
+  type: NotificationType
+  title: string                   // capped at 160 chars
+  entityType: NotificationEntityType
+  entityId: string                // bookingId | storeOrderId | roomId
+  roomNumber: string | null       // denormalized; capped at 12 chars
+  bookingRef: string | null       // e.g. "SI-20260715-00001"; capped at 40 chars
+  readBy: Record<string, Date | null>
+                                  // per-staff read trail; absence of my UID = unread for me
+  createdBy: "system"             // always "system" (Admin SDK)
+  createdAt: Date                 // server timestamp; the panel orders by this desc
+}
+```
+
+**Hard Rule:** never store guest email, payment data, or any other
+PII in a `notifications` doc. The doc carries room number + booking
+ref + order ref + entity id only. See `plan/features/NOTIFICATION-CENTER.md`
+and decision #120.
+
+---
+
 ## Store
 
 ```

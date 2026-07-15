@@ -444,7 +444,18 @@ export function BookingsPage() {
     if (orderRef) {
       setOrderSearchText(orderRef);
     }
-  }, [searchParams]);
+    // Per Phase 12 — Notification Center (decision #120):
+    // bell deep-links with `?orderId=...` to open the
+    // matching store order drawer on the Store tab.
+    const orderId = searchParams.get("orderId");
+    if (orderId) {
+      const match = storeOrders.find((order) => order.id === orderId);
+      if (match) {
+        setSelectedOrder(match);
+        setIsOrderDrawerOpen(true);
+      }
+    }
+  }, [searchParams, storeOrders]);
 
   useEffect(() => {
     const bookingId = searchParams.get("bookingId");
