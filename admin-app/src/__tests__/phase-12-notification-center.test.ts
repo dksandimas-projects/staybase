@@ -259,6 +259,25 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
         /request\.resource\.data\.readBy\[request\.auth\.uid\]\s+is\s+timestamp/
       );
     });
+
+    it("NC-02b: existing readBy keys must survive (no removal vector)", () => {
+      // Per NC-02b (post-ship review 2026-07-15): the NC-02
+      // tightening only bounded the *request* key set
+      // (subset of existing ∪ writer). A staff member
+      // could still submit `readBy = {me: ts}` and wipe
+      // every other staff member's read entry. The fix
+      // adds the inverse: every existing key must also
+      // appear in the request, so the key set can only
+      // *grow by the writer's own UID* (or stay the same).
+      const block = firestoreRules.match(
+        /match\s+\/notifications\/\{notificationId\}\s*\{[\s\S]*?\}/
+      );
+      expect(block).toBeTruthy();
+      // Match the two halves independently — the rule
+      // spans multiple lines.
+      expect(block![0]).toMatch(/resource\.data\.readBy\.keys\(\)\.hasOnly\(/);
+      expect(block![0]).toMatch(/request\.resource\.data\.readBy\.keys\(\)/);
+    });
   });
 
   describe("server-side write sites", () => {
