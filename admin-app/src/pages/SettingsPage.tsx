@@ -37,6 +37,57 @@ type TabId = "hotel" | "payment" | "roomtypes" | "branding" | "website" | "seo" 
 type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
+interface EmailTriggerCatalogItem {
+  action: string;
+  description: string;
+  label: string;
+}
+
+const EMAIL_TRIGGER_GROUPS: Array<{ label: string; triggers: EmailTriggerCatalogItem[] }> = [
+  {
+    label: "Bookings & payments",
+    triggers: [
+      { label: "Booking Submitted", description: "Guest receives acknowledgment when a booking request is submitted", action: "booking-submitted" },
+      { label: "Payment Confirmed", description: "Guest notified when their payment is verified and fully paid", action: "payment-confirmed" },
+      { label: "Payment Rejected", description: "Guest receives the rejection reason and a link to upload a corrected proof", action: "payment-rejected" },
+      { label: "Booking Confirmed", description: "Guest notified when booking is confirmed by front desk", action: "booking-confirmed" },
+      { label: "Check-in Reminder", description: "Scheduled daily cron reminds guests checking in tomorrow", action: "checkin-reminder" },
+      { label: "Booking Rescheduled", description: "Guest notified when their booking dates or room are updated", action: "booking-rescheduled" },
+      { label: "Booking Cancelled", description: "Guest receives cancellation confirmation", action: "booking-cancelled" },
+      { label: "Discount Rejected", description: "Guest notified when their Senior/PWD ID cannot be verified", action: "discount-rejected" }
+    ]
+  },
+  {
+    label: "Requests & promotions",
+    triggers: [
+      { label: "Corporate Inquiry — Staff", description: "Staff notified when a new corporate inquiry is submitted", action: "corporate-inquiry" },
+      { label: "Corporate Inquiry — Guest", description: "Submitter receives confirmation that their corporate inquiry was received", action: "corporate-inquiry-confirmation" },
+      { label: "Contact Inquiry — Staff", description: "Staff receives the details from a new public contact-form submission", action: "contact-inquiry" },
+      { label: "Contact Inquiry — Guest", description: "Submitter receives confirmation that their contact message was received", action: "contact-confirmation" },
+      { label: "Early Check-in Request", description: "Staff notified when a member requests early check-in", action: "early-checkin-request" },
+      { label: "Early Check-in Resolution", description: "Guest notified when an early check-in request is approved or declined", action: "early-checkin-resolve" },
+      { label: "Voucher Issued", description: "Guest receives a newly issued promotional voucher and redemption details", action: "voucher-issued" }
+    ]
+  },
+  {
+    label: "In-room store",
+    triggers: [
+      { label: "Store Order Placed", description: "Guest receives an order receipt immediately after checkout", action: "store-order-placed" },
+      { label: "Store Order Confirmed", description: "Guest notified when staff confirms and starts preparing the order", action: "store-order-confirmed" },
+      { label: "Store Order Out for Delivery", description: "Guest notified when the order is heading to their room", action: "store-order-out-for-delivery" },
+      { label: "Store Order Delivered", description: "Guest receives delivery confirmation and a feedback link", action: "store-order-delivered" },
+      { label: "Store Order Cancelled", description: "Guest receives cancellation and payment guidance", action: "store-order-cancelled" }
+    ]
+  },
+  {
+    label: "Staff alerts",
+    triggers: [
+      { label: "New Online Booking", description: "Staff notified when a guest creates a new online booking", action: "staff-new-booking" },
+      { label: "New Payment Proof", description: "Staff notified when a guest uploads a payment proof", action: "staff-new-payment" }
+    ]
+  }
+];
+
 const VALID_TAB_IDS: TabId[] = [
   "hotel",
   "payment",
@@ -4760,43 +4811,44 @@ export function SettingsPage() {
               </div>
 
               <div className="pt-4 border-t border-gray-150">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-3">Active Email Triggers</h4>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {[
-                    { label: "Booking Submitted", description: "Guest receives acknowledgment when a booking request is submitted", status: "active", action: "booking-submitted" },
-                    { label: "Payment Confirmed", description: "Guest notified when their payment is verified and fully paid", status: "active", action: "payment-confirmed" },
-                    { label: "Booking Confirmed", description: "Guest notified when booking is confirmed by front desk", status: "active", action: "booking-confirmed" },
-                    { label: "Check-in Reminder", description: "Scheduled daily cron — guests with tomorrow's check-in get a reminder", status: "active", action: "checkin-reminder" },
-                    { label: "Booking Cancelled", description: "Guest receives cancellation confirmation", status: "active", action: "booking-cancelled" },
-                    { label: "Discount Rejected", description: "Guest notified when their Senior/PWD ID cannot be verified", status: "active", action: "discount-rejected" },
-                    { label: "Corporate Inquiry", description: "Staff notification when a new corporate inquiry is submitted", status: "active", action: "corporate-inquiry" },
-                    { label: "Early Check-in Request", description: "Staff notification when a member requests early check-in via Intercom", status: "active", action: "early-checkin-request" },
-                    { label: "Early Check-in Resolve", description: "Guest notified when their early check-in request is approved or declined", status: "active", action: "early-checkin-resolve" },
-                    { label: "Booking Rescheduled", description: "Guest notified when their booking dates or room are updated", status: "active", action: "booking-rescheduled" }
-                  ].map(trigger => (
-                    <div key={trigger.label} className="rounded-lg border border-gray-150 bg-white p-3 space-y-1 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${trigger.status === "active" ? "bg-green-500" : "bg-gray-300"}`} />
-                            <span className="text-xs font-bold text-gray-800">{trigger.label}</span>
-                            {trigger.status === "planned" && (
-                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gray-500">Planned</span>
-                            )}
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Active Email Templates</h4>
+                  <span className="rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-bold text-green-700">
+                    {EMAIL_TRIGGER_GROUPS.reduce((total, group) => total + group.triggers.length, 0)} active
+                  </span>
+                </div>
+                <div className="space-y-6">
+                  {EMAIL_TRIGGER_GROUPS.map((group) => (
+                    <section key={group.label} aria-labelledby={`email-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}>
+                      <h5
+                        id={`email-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                        className="mb-2 text-xs font-bold text-gray-700"
+                      >
+                        {group.label}
+                      </h5>
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        {group.triggers.map((trigger) => (
+                          <div key={trigger.action} className="flex min-h-[92px] items-start justify-between gap-3 rounded-lg border border-gray-150 bg-white p-3 shadow-sm">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" />
+                                <span className="text-xs font-bold text-gray-800">{trigger.label}</span>
+                              </div>
+                              <p className="mt-1 text-[10px] leading-relaxed text-gray-500">{trigger.description}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void handleOpenPreview(trigger.action, trigger.label)}
+                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 transition hover:bg-primary-light hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                              title="Preview template"
+                              aria-label={`Preview ${trigger.label} email template`}
+                            >
+                              <Eye size={16} />
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleOpenPreview(trigger.action, trigger.label)}
-                            className="text-gray-400 hover:text-primary transition p-1"
-                            title="Preview template"
-                            aria-label={`Preview ${trigger.label} email template`}
-                          >
-                            <Eye size={14} />
-                          </button>
-                        </div>
-                        <p className="text-[10px] text-gray-500 leading-relaxed mt-1">{trigger.description}</p>
+                        ))}
                       </div>
-                    </div>
+                    </section>
                   ))}
                 </div>
               </div>
