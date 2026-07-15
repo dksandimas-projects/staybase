@@ -1037,6 +1037,53 @@ describe("/api/bookings/create", () => {
       });
     });
 
+    test("voucher with a non-Timestamp expiresAt (string) does not crash booking creation", async () => {
+      // Regression (BF-500): legacy/imported voucher docs can store expiresAt
+      // as an ISO string, so `vData.expiresAt.toDate()` threw
+      // "toDate is not a function" and 500'd /api/bookings/create.
+      mockVouchers.SAVESTR = {
+        code: "SAVESTR",
+        discountType: "fixed",
+        discountValue: 500,
+        isActive: true,
+        expiresAt: `${isoDate(90)}T00:00:00Z`,
+        usageCap: 10,
+        usageCount: 4,
+        applicableRoomTypes: []
+      };
+
+      const body = {
+        bookingId: "bookingVoucherStr",
+        roomType: "standard-double",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Voucher",
+          lastName: "Guest",
+          email: "voucherstr@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "",
+        discountIdPhotoUrl: null,
+        voucherCode: "savestr",
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const created = setCalls.find((c) => c.path === "bookings/bookingVoucherStr")?.data;
+      expect(created).toBeDefined();
+      expect(created.voucherCode).toBe("SAVESTR");
+      expect(created.voucherDiscount).toBe(500);
+    });
+
     test("percent voucher applies after Senior/PWD discount during booking creation", async () => {
       mockVouchers.SAVE10 = {
         code: "SAVE10",

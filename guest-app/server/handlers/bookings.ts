@@ -677,7 +677,7 @@ export async function handleCreateBooking(req: any, res: any) {
           const corpData = corpCodeDoc.data()!;
           const corpValidation = validateCorporateCode({
             isActive: corpData.isActive !== false,
-            expiresAt: corpData.expiresAt ? corpData.expiresAt.toDate() : null,
+            expiresAt: toDateOrNull(corpData.expiresAt),
             usageCap: corpData.usageCap ?? null,
             usageCount: corpData.usageCount || 0
           });
@@ -822,6 +822,13 @@ export async function handleCreateBooking(req: any, res: any) {
         if (voucherDoc.exists) {
           const vData = voucherDoc.data()!;
           const now = new Date();
+          // Per BF-500: `expiresAt` is not guaranteed to be a Firestore
+          // Timestamp — legacy/imported voucher docs can store it as an ISO
+          // string or a plain `{_seconds}` shape, so calling `.toDate()`
+          // directly threw "vData.expiresAt.toDate is not a function" and
+          // 500'd booking creation. Normalize through the same helper the
+          // other voucher-validation sites already use.
+          const voucherExpiresAt = toDateOrNull(vData.expiresAt);
           // Per BF-18 (booking-flow audit 2026-06-26): the
           // assigned room's `type` should match the room type
           // the guest selected (the body's `roomType`). If they
@@ -831,7 +838,7 @@ export async function handleCreateBooking(req: any, res: any) {
           const assignedTypeMatchesChosen = !roomType || roomData.type === roomType;
           const isValid =
             vData.isActive !== false &&
-            (!vData.expiresAt || vData.expiresAt.toDate() >= now) &&
+            (!voucherExpiresAt || voucherExpiresAt >= now) &&
             (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) &&
             // Per BF-19 (booking-flow audit 2026-06-26): the
             // empty-or-undefined case is covered by the optional
