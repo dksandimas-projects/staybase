@@ -104,11 +104,29 @@ vi.mock("../../server/lib/firebase-admin", () => {
     })
   };
 
+  const mockHotelConfig = {
+    paymentMethods: [
+      { method: "cash", requireReferenceNumber: false },
+      { method: "gcash", requireReferenceNumber: true },
+      { method: "maya", requireReferenceNumber: true },
+      { method: "bank", requireReferenceNumber: true }
+    ]
+  };
+
   return {
     adminDb: {
-      collection: vi.fn().mockImplementation((collName: string) => ({
-        doc: (docId: string) => bookingDocRef(`${collName}/${docId}`)
-      })),
+      collection: vi.fn().mockImplementation((collName: string) => {
+        if (collName === "settings") {
+          return {
+            doc: () => ({
+              get: async () => ({ exists: true, data: () => mockHotelConfig })
+            })
+          };
+        }
+        return {
+          doc: (docId: string) => bookingDocRef(`${collName}/${docId}`)
+        };
+      }),
       runTransaction: vi.fn().mockImplementation(async (callback: any) => {
         return await callback(mockTransaction);
       })
@@ -117,7 +135,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
   };
 });
 
-import { handleAddPayment } from "../../server/handlers/bookings";
+import { handleAddPayment, handleVerifyAndRecordPayment } from "../../server/handlers/bookings";
 
 const mockResponse = () => {
   const res: any = {};
@@ -325,5 +343,101 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
     expect(mockBookings["booking_1"].loyaltyAwardStatus).toBe("pending-payment");
     expect(mockMembers["member_1"].rewardsPoints).toBe(100);
     expect(mockPointsHistory).toHaveLength(0);
+  });
+
+  test("PRC-07: cash without transaction reference is accepted", async () => {
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 1000, method: "cash" }), res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const recordedPayment = mockPayments.find((p) => p.amount === 1000 && p.method === "cash");
+    expect(recordedPayment).toBeDefined();
+    expect((recordedPayment as any)?.transactionReference).toBeUndefined();
+  });
+
+  test("PRC-07: digital method with missing reference is rejected", async () => {
+    const savedPaymentsLength = mockPayments.length;
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 2000, method: "gcash" }), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: false,
+      error: expect.stringMatching(/Transaction reference is required/i)
+    }));
+    expect(mockPayments.length).toBe(savedPaymentsLength);
+  });
+
+  test("PRC-07: digital method with valid reference is accepted", async () => {
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 1500, method: "gcash", transactionReference: "GCASH-REF-123" }), res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const recordedPayment = mockPayments.find((p) => p.amount === 1500 && p.method === "gcash");
+    expect(recordedPayment).toBeDefined();
+    expect((recordedPayment as any)?.transactionReference).toBe("GCASH-REF-123");
+  });
+
+  test("PRC-09: legacy note without transactionReference renders as-is", async () => {
+    const res = mockResponse();
+    await handleAddPayment(staffReq({ amount: 800, method: "cash", note: "Legacy payment note from old system" }), res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const recordedPayment = mockPayments.find((p) => p.amount === 800 && p.method === "cash");
+    expect(recordedPayment).toBeDefined();
+    expect((recordedPayment as any)?.note).toBe("Legacy payment note from old system");
+    expect((recordedPayment as any)?.transactionReference).toBeUndefined();
+  });
+});
+
+describe("PRC-19: Verify & Record Payment handler", () => {
+  beforeEach(() => {
+    Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
+    mockPayments.length = 0;
+    mockPointsHistory.length = 0;
+    mockUpdates.length = 0;
+    sendBookingTrigger.mockClear();
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260716-001",
+      totalPrice: 5000,
+      status: "payment-uploaded",
+      paymentMethod: "gcash",
+      paymentReferenceNumber: "ORIG-REF-001",
+      paymentProofUrl: "https://example.com/proof.jpg",
+      memberId: "member_1",
+      guestEmail: "guest@example.com",
+      guestName: "Test Guest"
+    };
+    mockMembers["member_1"] = { rewardsPoints: 100 };
+  });
+
+  test("creates payment entry and transitions status to payment-confirmed when fully paid", async () => {
+    const req = { method: "POST", staff: { uid: "staff_1", email: "admin@sparkinn.com", role: "admin" }, body: { bookingId: "booking_1", amount: 5000, method: "gcash", transactionReference: "GCASH-VRF-001" } };
+    const res = mockResponse();
+    await handleVerifyAndRecordPayment(req, res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const createdPayment = mockPayments.find((p) => (p as any).transactionReference === "GCASH-VRF-001");
+    expect(createdPayment).toBeDefined();
+    expect(mockBookings["booking_1"].status).toBe("payment-confirmed");
+  });
+
+  test("partial verification creates payment entry but does not transition status", async () => {
+    const req = { method: "POST", staff: { uid: "staff_1", role: "admin" }, body: { bookingId: "booking_1", amount: 2000, method: "gcash", transactionReference: "GCASH-PARTIAL-001" } };
+    const res = mockResponse();
+    await handleVerifyAndRecordPayment(req, res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const createdPayment = mockPayments.find((p) => (p as any).transactionReference === "GCASH-PARTIAL-001");
+    expect(createdPayment).toBeDefined();
+    expect(createdPayment?.amount).toBe(2000);
+    expect(mockBookings["booking_1"].status).toBe("payment-uploaded");
+  });
+
+  test("rejects missing required fields", async () => {
+    const res = mockResponse();
+    await handleVerifyAndRecordPayment({ method: "POST", body: {} }, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test("rejects invalid amount (zero)", async () => {
+    const req = { method: "POST", staff: { uid: "staff_1", role: "admin" }, body: { bookingId: "booking_1", amount: 0, method: "gcash", transactionReference: "GCASH-ZERO" } };
+    const res = mockResponse();
+    await handleVerifyAndRecordPayment(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
   });
 });

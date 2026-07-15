@@ -92,7 +92,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
     expect(pageSrc).toMatch(/footer=\{selectedBooking \? \(/);
     expect(pageSrc).toMatch(/primaryAction=\{renderBookingPrimaryAction\(\)\}/);
     expect(pageSrc).toMatch(/Confirm pay-at-hotel booking/);
-    expect(pageSrc).toMatch(/Mark payment confirmed/);
+    expect(pageSrc).toMatch(/Verify & Record Payment/);
     expect(pageSrc).toMatch(/Verify guest ID & check in/);
     expect(pageSrc).toMatch(/Review folio & check out|Check out — /);
     expect(pageSrc).toMatch(/View \/ print receipt/);

@@ -382,7 +382,8 @@ export function BookingsPage() {
     vouchers,
     corporateCodes,
     paymentMethods,
-    currentUser
+    currentUser,
+    verifyAndRecordPayment
   } = useAdmin();
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
@@ -496,15 +497,25 @@ export function BookingsPage() {
   const [isOrderDrawerOpen, setIsOrderDrawerOpen] = useState(false);
 
   // Payment Form States
+  const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false);
+  const paymentSubmissionIdRef = useRef<string | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
   const [paymentTransactionReference, setPaymentTransactionReference] = useState("");
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
-  const paymentSubmissionIdRef = useRef<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
   const [refundMethod, setRefundMethod] = useState("cash");
   const [refundReason, setRefundReason] = useState("");
+
+  const [showVerifyPaymentModal, setShowVerifyPaymentModal] = useState(false);
+  const [verifyAmount, setVerifyAmount] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState("gcash");
+  const [verifyReference, setVerifyReference] = useState("");
+  const [verifyNote, setVerifyNote] = useState("");
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
@@ -2191,10 +2202,10 @@ export function BookingsPage() {
       return (
         <button
           type="button"
-          onClick={() => handleStatusTransition("payment-confirmed")}
+          onClick={() => { setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
         >
-          Mark payment confirmed
+          Verify & Record Payment
         </button>
       );
     }
@@ -3214,67 +3225,15 @@ export function BookingsPage() {
                   );
                 })()}
 
-                {/* Inline form to record payments */}
-                <form onSubmit={handleAddPaymentSubmit} className="rounded-lg border border-gray-150 p-4 space-y-3 bg-white">
-                  <p className="text-xs font-bold text-gray-750">Record Onsite Payment</p>
-                  
-                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1.3fr_1.3fr_auto]">
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Amount (PHP)
-                      <input
-                        type="number"
-                        required
-                        value={paymentAmount}
-                        onChange={(e) => setPaymentAmount(e.target.value)}
-                        placeholder="e.g. 500"
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      />
-                    </label>
-                    
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Payment Method
-                      <select
-                        value={paymentMethod}
-                        onChange={(e) => setPaymentMethod(e.target.value)}
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      >
-                        {onsitePaymentMethodOptions.map((method) => (
-                          <option key={method.method} value={method.method}>
-                            {method.label || method.method}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Transaction Reference
-                      <input
-                        type="text"
-                        value={paymentTransactionReference}
-                        onChange={(e) => setPaymentTransactionReference(e.target.value)}
-                        placeholder="e.g. GCash ref or bank trace #"
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Internal Note
-                      <input
-                        type="text"
-                        value={paymentNote}
-                        onChange={(e) => setPaymentNote(e.target.value)}
-                        placeholder="e.g. Downpayment deposit"
-                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
-                      />
-                    </label>
-                  
-                    <button
-                      type="submit"
-                      disabled={isRecordingPayment}
-                      className="min-h-[44px] self-end rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark disabled:opacity-60"
-                    >
-                      {isRecordingPayment ? "Recording..." : "Record payment"}
-                    </button>
-                  </div>
-                </form>
+                {/* PRC-11: Focused Record Payment modal (BDUX-05 style) */}
+                <button
+                  type="button"
+                  onClick={() => { setShowRecordPaymentModal(true); setPaymentAmount(String(Math.max(0, getBookingFolio(selectedBooking).balance))); setPaymentMethod("cash"); setPaymentTransactionReference(""); setPaymentNote(""); setPaymentError(null); }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                >
+                  <CreditCard size={13} />
+                  Record Onsite Payment
+                </button>
 
                 {currentUser?.role === "admin" && selectedBookingPayments.some((payment) => payment.amount > 0) && (
                   <form onSubmit={handleRefundSubmit} className="rounded-lg border border-red-100 bg-red-50/40 p-4 space-y-3">
@@ -4389,6 +4348,120 @@ export function BookingsPage() {
           );
         })()}
       </Modal>
+      {/* PRC-11: Focused Record Payment modal */}
+      <Modal
+        title="Record Onsite Payment"
+        open={showRecordPaymentModal}
+        onClose={() => setShowRecordPaymentModal(false)}
+        className="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg bg-gray-50 px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Folio balance</p>
+              <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking ? getBookingFolio(selectedBooking).balance : 0)}</p>
+            </div>
+          </div>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Amount (PHP)
+            <input type="number" required min="0.01" step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Payment Method
+            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900">
+              {onsitePaymentMethodOptions.map((m) => (<option key={m.method} value={m.method}>{m.label || m.method}</option>))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Transaction Reference
+            <input type="text" value={paymentTransactionReference} onChange={(e) => setPaymentTransactionReference(e.target.value)} placeholder="e.g. GCash ref or bank trace #" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+            Internal Note <span className="font-normal text-gray-400">(optional)</span>
+            <input type="text" value={paymentNote} onChange={(e) => setPaymentNote(e.target.value)} placeholder="e.g. Downpayment deposit" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+          </label>
+          {paymentError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{paymentError}</p>}
+          <div className="flex items-center justify-end gap-3">
+            <button type="button" onClick={() => setShowRecordPaymentModal(false)} disabled={isRecordingPayment} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={() => void (async () => { setPaymentError(null); await handleAddPaymentSubmit(new Event("submit") as unknown as React.FormEvent); setShowRecordPaymentModal(false); })()} disabled={isRecordingPayment || !paymentAmount || parseFloat(paymentAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
+              {isRecordingPayment ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Record Payment"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* PRC-13: Verify & Record Payment modal (replaces old status-only mark-payment-confirmed) */}
+      <Modal
+        title={selectedBooking ? `Verify payment — ${selectedBooking.bookingRef}` : "Verify payment"}
+        open={showVerifyPaymentModal}
+        onClose={() => setShowVerifyPaymentModal(false)}
+        className="max-w-lg"
+      >
+        {selectedBooking && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-600">
+              Review the uploaded proof and confirm the collection. This atomically creates a payment ledger entry
+              and transitions the booking status.
+            </p>
+            {selectedBooking.paymentProofUrl && (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <button type="button" onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })} className="block w-full overflow-hidden rounded-lg border border-gray-200">
+                  <img src={selectedBooking.paymentProofUrl} alt="Payment proof" className="max-h-48 w-full object-contain" />
+                </button>
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}</p>
+              </div>
+            </div>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Verified amount
+              <input type="number" required min="0.01" step="0.01" value={verifyAmount} onChange={(e) => setVerifyAmount(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Payment method
+              <select value={verifyMethod} onChange={(e) => setVerifyMethod(e.target.value)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900">
+                <option value="gcash">GCash</option>
+                <option value="maya">Maya</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="paypal">PayPal</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Transaction reference
+              <input type="text" value={verifyReference} onChange={(e) => setVerifyReference(e.target.value)} placeholder="GCash ref or bank trace #" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Internal note <span className="font-normal text-gray-400">(optional)</span>
+              <input type="text" value={verifyNote} onChange={(e) => setVerifyNote(e.target.value)} placeholder="e.g. Full payment via GCash" className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900" />
+            </label>
+            {verifyError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{verifyError}</p>}
+            <div className="flex items-center justify-end gap-3">
+              <button type="button" onClick={() => setShowVerifyPaymentModal(false)} disabled={verifyPending} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+              <button type="button" onClick={() => void (async () => {
+                setVerifyError(null);
+                const amount = parseFloat(verifyAmount);
+                if (!Number.isFinite(amount) || amount <= 0) { setVerifyError("Enter a valid positive amount."); return; }
+                setVerifyPending(true);
+                const result = await verifyAndRecordPayment(selectedBooking.id, amount, verifyMethod, verifyReference.trim() || undefined, verifyNote.trim() || undefined);
+                setVerifyPending(false);
+                if (!result.success) { setVerifyError(result.error || "Failed to verify payment."); return; }
+                setShowVerifyPaymentModal(false);
+              })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
+                {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}

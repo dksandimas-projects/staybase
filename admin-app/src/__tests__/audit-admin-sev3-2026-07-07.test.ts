@@ -51,7 +51,7 @@ describe("Admin audit SEV-3 fixes — 2026-07-07", () => {
     expect(ratesPage).toMatch(/corpExpiresAt/);
     expect(ratesPage).toMatch(/corpUsageCap/);
     expect(bookingsPage).toMatch(/value="payment-confirmed"/);
-    expect(bookingsPage).toMatch(/handleStatusTransition\("payment-confirmed"\)/);
+    expect(bookingsPage).toMatch(/Verify & Record Payment/);
     expect(adminContext).toMatch(/\/api\/bookings\/mark-payment-confirmed/);
     expect(adminContext).not.toMatch(/\/api\/email\/payment-confirmed/);
   });
