@@ -425,7 +425,7 @@ export function DashboardPage() {
                       <CreditCard size={18} className="text-gray-400" />
                     )}
                   </button>
-                    <div className="min-w-0">
+                  <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-bold text-gray-900">{booking.bookingRef}</p>
                       <StatusBadge label="payment uploaded" status="payment-uploaded" />
@@ -438,15 +438,16 @@ export function DashboardPage() {
                       </p>
                     )}
                   </div>
-                  <div className="flex flex-col gap-2 sm:w-36">
+                  <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                     {booking.paymentProofUrl && (
                       <button
                         type="button"
                         onClick={() => setImagePreview({ title: `Payment proof for ${booking.bookingRef}`, url: booking.paymentProofUrl ?? "" })}
-                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                        className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        title="View payment proof"
                       >
-                        <Eye size={12} />
-                        View Proof
+                        <Eye size={14} />
+                        Proof
                       </button>
                     )}
                     <button
@@ -455,17 +456,20 @@ export function DashboardPage() {
                         cancelRejectForm();
                         openRejectForm(booking);
                       }}
-                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-[10px] font-bold text-red-700 hover:bg-red-50"
+                      className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200"
+                      title="Reject payment proof"
                     >
-                      <XCircle size={12} />
+                      <XCircle size={14} />
                       Reject
                     </button>
                     <button
                       type="button"
                       onClick={() => void confirmPayment(booking.id)}
-                      className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                      className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 sm:col-auto"
+                      title="Confirm payment"
                     >
-                      Confirm Payment
+                      <Check size={14} />
+                      Confirm
                     </button>
                   </div>
                 </div>
