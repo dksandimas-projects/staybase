@@ -10,6 +10,6 @@ describe("Dashboard pending-payment actions", () => {
     expect(dashboardSrc).toMatch(/col-span-2 inline-flex min-h-\[44px\].*sm:col-auto/);
     expect(dashboardSrc).toMatch(/title="View payment proof"/);
     expect(dashboardSrc).toMatch(/title="Reject payment proof"/);
-    expect(dashboardSrc).toMatch(/title="Confirm payment"/);
+    expect(dashboardSrc).toMatch(/title="Verify and record payment"/);
   });
 });

@@ -2053,7 +2053,7 @@ export async function handleCancelBooking(req: any, res: any) {
 }
 
 export async function handleAddPayment(req: any, res: any) {
-  const { bookingId, paymentId, amount, method, note } = req.body || {};
+  const { bookingId, paymentId, amount, method, note, transactionReference } = req.body || {};
   if (!bookingId || !paymentId || amount === undefined || !method) {
     return res.status(400).json({ success: false, error: "Booking ID, payment ID, amount, and payment method are required." });
   }
@@ -2079,6 +2079,12 @@ export async function handleAddPayment(req: any, res: any) {
   // land in the payments subcollection as-is.
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
 
+  // Per PRC-07: method-aware transaction reference validation.
+  // Resolve the requirement from server-side config, never from the client.
+  const safeTransactionReference = typeof transactionReference === "string"
+    ? transactionReference.trim().slice(0, 200) || null
+    : null;
+
   // Per BF-14 (booking-flow audit 2026-06-26): the previous
   // implementation wrote the new payment, then re-read the
   // entire `bookings/{id}/payments` subcollection to compute
@@ -2091,16 +2097,18 @@ export async function handleAddPayment(req: any, res: any) {
   // the staff-new-payment dedup inside a Firestore transaction,
   // then defers the email sends to a single follow-up read.
   const staffUid = req.staff?.uid || "staff";
-  const paymentRecord = {
+  const paymentRecord: Record<string, any> = {
     type: "payment",
     amount: numericAmount,
     method,
     note: safeNote,
+    transactionReference: safeTransactionReference,
     reason: null,
     approvedBy: null,
     recordedBy: staffUid,
     recordedAt: new Date()
   };
+  if (!safeTransactionReference) delete paymentRecord.transactionReference;
 
   // Result of the transaction — used to decide which emails to
   // fire after the transaction commits.
@@ -2126,6 +2134,19 @@ export async function handleAddPayment(req: any, res: any) {
       bookingDataSnapshot = bookingData;
       transitionedToPaymentConfirmed = false;
 
+      // Per PRC-07: method-aware transaction reference requirement.
+      // Resolve from server-side config, never trust the client.
+      if (method !== "pay-at-hotel" && method !== "add-to-bill") {
+        const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+        const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
+        const paymentMethodsArr: any[] = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p: any) => p && p.method === method);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && !safeTransactionReference) {
+          throw new Error("Transaction reference is required for this payment method.");
+        }
+      }
+
       const paymentsRef = bookingRef.collection("payments");
       // Read existing payments before queuing writes. Firestore
       // transactions reject reads after writes, and the final
@@ -2140,7 +2161,8 @@ export async function handleAddPayment(req: any, res: any) {
         const existingData = existingPayment.data();
         const sameRequest = Number(existingData.amount) === numericAmount
           && String(existingData.method) === String(method)
-          && String(existingData.note || "") === safeNote;
+          && String(existingData.note || "") === safeNote
+          && String(existingData.transactionReference || "") === (safeTransactionReference || "");
         if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
         idempotentReplay = true;
         totalPaid = existingPaid;
@@ -2410,6 +2432,190 @@ export async function handleMarkPaymentConfirmed(req: any, res: any) {
     }
     console.error("Mark payment confirmed handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "Unable to confirm payment." });
+  }
+}
+
+export async function handleVerifyAndRecordPayment(req: any, res: any) {
+  const { bookingId, amount, method, transactionReference, note } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!method) {
+    return res.status(400).json({ success: false, error: "Payment method is required." });
+  }
+
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ success: false, error: "Verified amount must be a positive number." });
+  }
+  if (numericAmount > 1_000_000) {
+    return res.status(400).json({ success: false, error: "Verified amount exceeds the 1,000,000 per-transaction limit." });
+  }
+
+  const safeTransactionReference = typeof transactionReference === "string"
+    ? transactionReference.trim().slice(0, 200) || null
+    : null;
+  const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
+
+  const staffUid = req.staff?.uid || "staff";
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    let bookingData: any = null;
+    let totalCollected = 0;
+    let totalPrice = 0;
+    let fullyPaid = false;
+    let idempotentReplay = false;
+    let paymentId = "";
+
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
+      const data = bookingDoc.data()!;
+      bookingData = data;
+
+      // Only allow verify-and-record from payment-uploaded status
+      if (data.status === "payment-confirmed" || data.status === "confirmed") {
+        throw new Error("ALREADY_CONFIRMED");
+      }
+      if (data.status !== "payment-uploaded" && data.status !== "pending") {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+
+      // PRC-07: method-aware reference requirement from server config
+      if (method !== "pay-at-hotel" && method !== "add-to-bill") {
+        const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+        const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
+        const paymentMethodsArr: any[] = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p: any) => p && p.method === method);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && !safeTransactionReference) {
+          throw new Error("Transaction reference is required for this payment method.");
+        }
+      }
+
+      const paymentsRef = bookingRef.collection("payments");
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const existingPaid = paymentsSnapshot.docs.reduce((sum: number, docSnap: any) => {
+        return sum + Number(docSnap.data().amount || 0);
+      }, 0);
+
+      // Check for idempotent replay: same amount + method + transactionReference
+      const matchedPayment = paymentsSnapshot.docs.find((docSnap: any) => {
+        const d = docSnap.data();
+        return Number(d.amount) === numericAmount
+          && String(d.method) === String(method)
+          && (d.transactionReference || "") === (safeTransactionReference || "");
+      });
+      if (matchedPayment) {
+        idempotentReplay = true;
+        paymentId = matchedPayment.id;
+        totalPrice = Number(data.totalPrice || 0);
+        totalCollected = existingPaid;
+        fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+        return;
+      }
+
+      // Pre-allocate a payment ID and create the ledger entry
+      paymentId = paymentsRef.doc().id;
+      totalPrice = Number(data.totalPrice || 0);
+      totalCollected = existingPaid + numericAmount;
+      fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+
+      const paymentRecord: Record<string, any> = {
+        type: "payment",
+        amount: numericAmount,
+        method,
+        note: safeNote || "Verified payment proof",
+        transactionReference: safeTransactionReference,
+        reason: null,
+        approvedBy: null,
+        recordedBy: staffUid,
+        recordedAt: new Date()
+      };
+      if (!safeTransactionReference) delete paymentRecord.transactionReference;
+
+      transaction.create(paymentsRef.doc(paymentId), paymentRecord);
+
+      // Transition to payment-confirmed only when fully paid
+      const bookingUpdates: Record<string, any> = {
+        updatedAt: new Date()
+      };
+      if (fullyPaid) {
+        bookingUpdates.status = "payment-confirmed";
+        bookingUpdates.handledBy = staffUid;
+        bookingUpdates.paymentConfirmedAt = new Date();
+      }
+      transaction.update(bookingRef, bookingUpdates);
+      bookingData = { ...data, ...bookingUpdates };
+    });
+
+    if (idempotentReplay) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          idempotentReplay: true,
+          paymentId,
+          totalCollected,
+          status: bookingData?.status || null,
+          fullyPaid
+        }
+      });
+    }
+
+    // Post-transaction side effects (best-effort)
+    try {
+      if (fullyPaid) {
+        await sendBookingTrigger("payment-confirmed", { ...bookingData, status: "payment-confirmed" });
+      }
+      await writeNotification({
+        type: "payment",
+        title: fullyPaid
+          ? `Payment verified — ${bookingData?.bookingRef || bookingId} (full)`
+          : `Partial payment recorded — ${bookingData?.bookingRef || bookingId} (${numericAmount})`,
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: bookingData?.roomNumber || null,
+        bookingRef: bookingData?.bookingRef || null
+      });
+    } catch (sideEffectErr) {
+      console.error("Verify-and-record side effect error:", sideEffectErr);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        paymentId,
+        amount: numericAmount,
+        method,
+        transactionReference: safeTransactionReference,
+        recordedBy: staffUid,
+        totalCollected,
+        status: fullyPaid ? "payment-confirmed" : "payment-uploaded",
+        fullyPaid
+      }
+    });
+  } catch (error: any) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message === "ALREADY_CONFIRMED") {
+      return res.status(200).json({
+        success: true,
+        data: { alreadyConfirmed: true, status: bookingData?.status || "payment-confirmed" }
+      });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment cannot be verified because the booking status is ${error.message.split(":")[1]}.`
+      });
+    }
+    if (error?.message?.includes("Transaction reference is required")) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    console.error("Verify and record payment handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Unable to verify and record payment." });
   }
 }
 

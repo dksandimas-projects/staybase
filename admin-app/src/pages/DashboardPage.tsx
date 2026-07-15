@@ -10,6 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import config from "@config";
 import { formatPrice } from "../utils/format";
 
+
 export function getDaysOverdue(checkOut: string, todayKey: string) {
   const checkOutTime = Date.UTC(
     Number(checkOut.slice(0, 4)),
@@ -52,7 +53,7 @@ export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, cu
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, rejectPayment } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
@@ -312,10 +313,60 @@ export function DashboardPage() {
     navigate(`/bookings?bookingId=${encodeURIComponent(bookingId)}`);
   };
 
-  const confirmPayment = async (bookingId: string) => {
-    // Legacy SEV-2 breadcrumb: updateBookingStatus(bookingId, "confirmed")
-    // SEV-3 restores the intermediate payment-confirmed state.
-    await updateBookingStatus(bookingId, "payment-confirmed");
+  // Per PRC-13: verify-and-record replaces the old status-only
+  // confirmPayment. Opens a focused modal that shows the proof,
+  // defaults amount/method/reference, and atomically creates a
+  // ledger entry + transitions status in one transaction.
+  const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
+  const [verifyAmount, setVerifyAmount] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState("gcash");
+  const [verifyReference, setVerifyReference] = useState("");
+  const [verifyNote, setVerifyNote] = useState("");
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
+  const openVerifyForm = (booking: Booking) => {
+    setVerifyTarget(booking);
+    setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));
+    setVerifyMethod(booking.paymentMethod || "gcash");
+    setVerifyReference(booking.paymentReferenceNumber || "");
+    setVerifyNote("");
+    setVerifyError(null);
+    setVerifyPending(false);
+  };
+
+  const cancelVerifyForm = () => {
+    setVerifyTarget(null);
+    setVerifyAmount("");
+    setVerifyMethod("gcash");
+    setVerifyReference("");
+    setVerifyNote("");
+    setVerifyError(null);
+    setVerifyPending(false);
+  };
+
+  const submitVerification = async () => {
+    if (!verifyTarget) return;
+    const amount = parseFloat(verifyAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setVerifyError("Enter a valid positive amount.");
+      return;
+    }
+    setVerifyPending(true);
+    setVerifyError(null);
+    const result = await verifyAndRecordPayment(
+      verifyTarget.id,
+      amount,
+      verifyMethod,
+      verifyReference.trim() || undefined,
+      verifyNote.trim() || undefined
+    );
+    setVerifyPending(false);
+    if (!result.success) {
+      setVerifyError(result.error || "Failed to verify payment.");
+      return;
+    }
+    cancelVerifyForm();
   };
 
   return (
@@ -464,12 +515,15 @@ export function DashboardPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void confirmPayment(booking.id)}
+                      onClick={() => {
+                        cancelRejectForm();
+                        openVerifyForm(booking);
+                      }}
                       className="col-span-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition-colors hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 sm:col-auto"
-                      title="Confirm payment"
+                      title="Verify and record payment"
                     >
                       <Check size={14} />
-                      Confirm
+                      Verify & Record
                     </button>
                   </div>
                 </div>
@@ -1018,6 +1072,126 @@ export function DashboardPage() {
                   </>
                 ) : (
                   "Reject Payment"
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+      <Modal
+        title={verifyTarget ? `Verify payment — ${verifyTarget.bookingRef}` : "Verify payment"}
+        open={!!verifyTarget}
+        onClose={cancelVerifyForm}
+        className="max-w-lg"
+      >
+        {verifyTarget && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-600">
+              Review the uploaded proof and confirm the collection. This atomically creates a payment ledger entry
+              and transitions the booking status.
+            </p>
+
+            {verifyTarget.paymentProofUrl && (
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <button
+                  type="button"
+                  onClick={() => setImagePreview({ title: `Payment proof for ${verifyTarget.bookingRef}`, url: verifyTarget.paymentProofUrl ?? "" })}
+                  className="block w-full overflow-hidden rounded-lg border border-gray-200"
+                >
+                  <img src={verifyTarget.paymentProofUrl} alt="Payment proof" className="max-h-48 w-full object-contain" />
+                </button>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Booking total</p>
+                <p className="text-sm font-bold text-gray-900">{formatPrice(verifyTarget.totalPrice)}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Outstanding</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {formatPrice(verifyTarget.totalPrice - (verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))}
+                </p>
+              </div>
+            </div>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Verified amount
+              <input
+                type="number"
+                required
+                min="0.01"
+                step="0.01"
+                value={verifyAmount}
+                onChange={(e) => setVerifyAmount(e.target.value)}
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Payment method
+              <select
+                value={verifyMethod}
+                onChange={(e) => setVerifyMethod(e.target.value)}
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              >
+                <option value="gcash">GCash</option>
+                <option value="maya">Maya</option>
+                <option value="bank">Bank Transfer</option>
+                <option value="paypal">PayPal</option>
+                <option value="cash">Cash</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Transaction reference
+              <input
+                type="text"
+                value={verifyReference}
+                onChange={(e) => setVerifyReference(e.target.value)}
+                placeholder="GCash ref or bank trace #"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
+              Internal note <span className="font-normal text-gray-400">(optional)</span>
+              <input
+                type="text"
+                value={verifyNote}
+                onChange={(e) => setVerifyNote(e.target.value)}
+                placeholder="e.g. Full payment via GCash"
+                className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
+              />
+            </label>
+
+            {verifyError && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{verifyError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={cancelVerifyForm}
+                disabled={verifyPending}
+                className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitVerification()}
+                disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50"
+              >
+                {verifyPending ? (
+                  <>
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Recording…
+                  </>
+                ) : (
+                  "Verify & Record Payment"
                 )}
               </button>
             </div>
