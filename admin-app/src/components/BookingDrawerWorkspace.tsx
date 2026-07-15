@@ -115,16 +115,25 @@ export function BookingDrawerWorkspaceHeader({
                 {booking.paymentMethod || "Not specified"}
               </p>
             </div>
-            <label className="flex flex-col gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-              Payment reference number
-              <input
-                type="text"
-                value={booking.paymentReferenceNumber || ""}
-                onChange={(event) => onPaymentReferenceChange(event.target.value)}
-                placeholder="GCash ref or bank trace #"
-                className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium normal-case tracking-normal text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-primary"
-              />
-            </label>
+            {booking.paymentReferenceNumber || booking.paymentMethod !== "pay-at-hotel" ? (
+              <label className="flex flex-col gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                Original booking payment reference
+                <input
+                  type="text"
+                  value={booking.paymentReferenceNumber || ""}
+                  onChange={(event) => onPaymentReferenceChange(event.target.value)}
+                  placeholder="GCash ref or bank trace #"
+                  className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium normal-case tracking-normal text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-primary"
+                />
+              </label>
+            ) : (
+              <div>
+                <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                  Original booking payment reference
+                </p>
+                <p className="mt-2 text-xs text-gray-400 italic">Not submitted (pay at hotel)</p>
+              </div>
+            )}
           </div>
         </div>
 

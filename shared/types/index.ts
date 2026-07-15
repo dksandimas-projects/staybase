@@ -289,6 +289,10 @@ export interface PaymentEntry {
   amount: number;
   method: string;
   note: string;
+  /** Distinct from Booking.paymentReferenceNumber — this is the
+   *  tender-specific identifier for this individual ledger entry
+   *  (e.g. GCash ref, bank trace). Not set for cash or legacy notes. */
+  transactionReference?: string | null;
   reason: string | null;
   approvedBy: string | null;
   recordedBy: string;

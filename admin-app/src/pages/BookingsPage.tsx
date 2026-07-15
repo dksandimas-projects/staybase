@@ -485,6 +485,7 @@ export function BookingsPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentTransactionReference, setPaymentTransactionReference] = useState("");
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
   const paymentSubmissionIdRef = useRef<string | null>(null);
   const [refundAmount, setRefundAmount] = useState("");
@@ -1939,11 +1940,12 @@ export function BookingsPage() {
       setIsRecordingPayment(true);
       let paymentCompleted = false;
       try {
-        const result = await addOnsitePayment(selectedBooking.id, paymentId, amount, paymentMethod, paymentNote);
+        const result = await addOnsitePayment(selectedBooking.id, paymentId, amount, paymentMethod, paymentNote, paymentTransactionReference || undefined);
         if (result.success) {
           paymentCompleted = true;
           setPaymentAmount("");
           setPaymentNote("");
+          setPaymentTransactionReference("");
           toast.success("Payment recorded", `${formatPrice(amount)} via ${getOnsitePaymentMethodLabel(paymentMethod)}`);
         } else {
           toast.error("Failed to record payment", result.error);
@@ -2424,51 +2426,29 @@ export function BookingsPage() {
 
             <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
             {selectedBooking.paymentProofUrl && (
-              <div className="space-y-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                  <CreditCard size={14} className="text-primary" />
-                  Payment Proof
-                </h3>
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <div className="grid gap-4 sm:grid-cols-[112px_1fr]">
-                    <button
-                      type="button"
-                      onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
-                      className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
-                    >
-                      <img
-                        src={selectedBooking.paymentProofUrl}
-                        alt={`Payment proof for ${selectedBooking.bookingRef}`}
-                        className="h-28 w-full object-cover"
-                      />
-                    </button>
-                    <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
-                      <p>
-                        Review the uploaded payment screenshot before confirming this booking.
-                      </p>
-                      <p className="font-semibold text-gray-900">
-                        Method: {selectedBooking.paymentMethod || "Not specified"}
-                      </p>
-                      <a
-                        href={selectedBooking.paymentProofUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
-                      >
-                        <Eye size={13} />
-                        Open Full Size
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
-                        className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
-                      >
-                        <Eye size={13} />
-                        Preview
-                      </button>
-                    </div>
-                  </div>
-                </div>
+              <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+                <p className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500">
+                  <CreditCard size={13} className="text-primary" />
+                  Payment: {selectedBooking.paymentMethod || "Not specified"}
+                  {selectedBooking.status === "payment-uploaded" && (
+                    <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">Pending</span>
+                  )}
+                  {selectedBooking.status === "payment-confirmed" && (
+                    <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-800">Confirmed</span>
+                  )}
+                </p>
+                {selectedBooking.paymentReferenceNumber && (
+                  <p className="mt-1 text-[10px] text-gray-400">
+                    Ref: {selectedBooking.paymentReferenceNumber}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveBookingSection("folio")}
+                  className="mt-1 text-[10px] font-semibold text-primary hover:text-primary-dark"
+                >
+                  View full proof in Folio →
+                </button>
               </div>
             )}
             </BookingDrawerSectionPanel>
@@ -2838,6 +2818,60 @@ export function BookingsPage() {
                   </>
                 )}
               </div>
+
+              {selectedBooking.paymentProofUrl && (
+                <div className="space-y-3">
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
+                    <CreditCard size={14} className="text-primary" />
+                    Payment Proof
+                  </h3>
+                  <div className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="grid gap-4 sm:grid-cols-[112px_1fr]">
+                      <button
+                        type="button"
+                        onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
+                        className="block overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                      >
+                        <img
+                          src={selectedBooking.paymentProofUrl}
+                          alt={`Payment proof for ${selectedBooking.bookingRef}`}
+                          className="h-28 w-full object-cover"
+                        />
+                      </button>
+                      <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
+                        <p>
+                          Review the uploaded payment screenshot before confirming this booking.
+                        </p>
+                        <p className="font-semibold text-gray-900">
+                          Method: {selectedBooking.paymentMethod || "Not specified"}
+                        </p>
+                        {selectedBooking.paymentReferenceNumber && (
+                          <p className="font-semibold text-gray-900">
+                            Ref: {selectedBooking.paymentReferenceNumber}
+                          </p>
+                        )}
+                        <a
+                          href={selectedBooking.paymentProofUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 transition hover:bg-gray-50"
+                        >
+                          <Eye size={13} />
+                          Open Full Size
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
+                          className="inline-flex min-h-[36px] w-fit items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white transition hover:bg-primary-dark"
+                        >
+                          <Eye size={13} />
+                          Preview
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             </BookingDrawerSectionPanel>
 
@@ -3135,7 +3169,11 @@ export function BookingsPage() {
                       <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
                         <div>
                           <p className="font-semibold text-gray-800">{pay.type === "refund" ? `Refund — ${pay.reason || pay.note}` : pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">{pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}{pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}</p>
+                          <p className="text-[9px] text-gray-400">
+                            {pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}
+                            {pay.transactionReference ? ` · Ref: ${pay.transactionReference}` : ""}
+                            {pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}
+                          </p>
                         </div>
                         <span className={`font-bold ${pay.type === "refund" ? "text-red-600" : "text-green-700"}`}>{pay.amount >= 0 ? "+" : ""}{formatPrice(pay.amount)}</span>
                       </div>
@@ -3159,7 +3197,7 @@ export function BookingsPage() {
                 <form onSubmit={handleAddPaymentSubmit} className="rounded-lg border border-gray-150 p-4 space-y-3 bg-white">
                   <p className="text-xs font-bold text-gray-750">Record Onsite Payment</p>
                   
-                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1.6fr_auto]">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr_1.3fr_1.3fr_auto]">
                     <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
                       Amount (PHP)
                       <input
@@ -3187,7 +3225,17 @@ export function BookingsPage() {
                       </select>
                     </label>
                     <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
-                      Payment Reference / Note
+                      Transaction Reference
+                      <input
+                        type="text"
+                        value={paymentTransactionReference}
+                        onChange={(e) => setPaymentTransactionReference(e.target.value)}
+                        placeholder="e.g. GCash ref or bank trace #"
+                        className="min-h-[44px] w-full rounded border border-gray-200 px-2 text-xs"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-2 text-[10px] font-semibold text-gray-500">
+                      Internal Note
                       <input
                         type="text"
                         value={paymentNote}

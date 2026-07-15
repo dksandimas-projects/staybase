@@ -39,7 +39,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
 
   it("keeps guest and payment context above the section tabs", () => {
     const guestIndex = workspaceSrc.indexOf("Guest information");
-    const paymentIndex = workspaceSrc.indexOf("Payment reference number");
+    const paymentIndex = workspaceSrc.indexOf("Original booking payment reference");
     const navIndex = workspaceSrc.indexOf("Booking drawer sections");
     expect(guestIndex).toBeGreaterThan(0);
     expect(paymentIndex).toBeGreaterThan(guestIndex);
@@ -56,7 +56,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
       "Payment Proof",
       "Guest information",
       "Payment method",
-      "Payment reference number",
+      "Original booking payment reference",
       "Check-in Registration",
       "Guest ID Attachment",
       "Stay & Accommodation",

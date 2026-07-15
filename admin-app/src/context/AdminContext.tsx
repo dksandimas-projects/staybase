@@ -91,6 +91,7 @@ export interface OnsitePayment {
   amount: number;
   method: string;
   note: string;
+  transactionReference?: string | null;
   reason: string | null;
   approvedBy: string | null;
   recordedBy: string;
@@ -392,7 +393,7 @@ export interface AdminContextType {
   updateBookingStatus: (bookingId: string, status: Booking["status"], details?: Partial<Booking>) => void | Promise<void>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
-  addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string) => Promise<{ success: boolean; error?: string }>;
+  addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
   addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
@@ -400,6 +401,7 @@ export interface AdminContextType {
   // booking back to `pending` (room stays held), emails
   // the guest with the reason, and writes a `payment`
   // notification for the bell.
+  verifyAndRecordPayment: (bookingId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
   rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
@@ -1443,7 +1445,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addOnsitePayment = async (bookingId: string, paymentId: string, amount: number, method: string, note: string): Promise<{ success: boolean; error?: string }> => {
+  const addOnsitePayment = async (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/add-payment`, {
@@ -1457,7 +1459,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           paymentId,
           amount,
           method,
-          note
+          note,
+          transactionReference
         })
       });
       const data = await res.json();
@@ -1544,6 +1547,34 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // `bookings` snapshot updates via the existing
   // `onSnapshot` listener so the dashboard card flips to
   // `pending` on the next frame.
+  const verifyAndRecordPayment = async (
+    bookingId: string,
+    amount: number,
+    method: string,
+    transactionReference?: string,
+    note?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/verify-and-record-payment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, amount, method, transactionReference, note })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to verify and record payment." };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error verifying and recording payment:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
   const rejectPayment = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string }> => {
     const safeReason = String(reason || "").trim().slice(0, 500);
     if (!safeReason) {
@@ -4373,6 +4404,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         addOnsitePayment,
         addWalkinBooking,
         resendBookingEmail,
+        verifyAndRecordPayment,
         rejectPayment,
         roomBlocks,
         createRoomBlock,
