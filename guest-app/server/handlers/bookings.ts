@@ -2821,8 +2821,17 @@ export async function handleCheckinBooking(req: any, res: any) {
   }
 }
 
+const UNPAID_REASON_MAX_LENGTH = 500;
+const UNPAID_REASON_SHORTCUTS = [
+  "approved company billing",
+  "bank transfer pending",
+  "payment failure",
+  "disputed charge",
+  "other"
+];
+
 export async function handleCheckoutBooking(req: any, res: any) {
-  const { bookingId } = req.body;
+  const { bookingId, unpaidCheckoutReason } = req.body;
   if (!bookingId) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
@@ -2847,12 +2856,23 @@ export async function handleCheckoutBooking(req: any, res: any) {
     // fields flow into the `bookings/audit/records` collection
     // and are PII-sensitive.
     const checkedOutBy = req.staff?.uid || "staff";
+    const staffRole = req.staff?.role || "front-desk";
+
+    // Pre-read hotelConfig for unpaid checkout threshold (UCO-03)
+    const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
+    const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
+    const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5000;
+
+    const safeUnpaidReason = typeof unpaidCheckoutReason === "string"
+      ? unpaidCheckoutReason.trim().slice(0, UNPAID_REASON_MAX_LENGTH)
+      : null;
 
     let pointsAwarded = 0;
     let eligiblePoints = 0;
     let checkedOutWithBalance = 0;
     let memberId: string | null = bookingData.memberId || null;
     let rewardsConfig: any = null;
+    let unpaidCheckoutApprovedBy: string | null = null;
 
     // Try to find member either by memberId (if booking is already linked) or by guestEmail
     let memberDoc: any = null;
@@ -2901,6 +2921,18 @@ export async function handleCheckoutBooking(req: any, res: any) {
         ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
         : 0;
 
+      // UCO-02: require reason for unpaid checkout
+      if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
+        throw new Error("UNPAID_REASON_REQUIRED");
+      }
+
+      // UCO-03/UCO-13: threshold enforcement — admin may override, Front Desk is capped
+      const needsAdminApproval = checkedOutWithBalance > 0 && checkedOutWithBalance > unpaidCheckoutThreshold;
+      if (needsAdminApproval && staffRole !== "admin") {
+        throw new Error(`THRESHOLD_EXCEEDED:${unpaidCheckoutThreshold}:${checkedOutWithBalance}`);
+      }
+      unpaidCheckoutApprovedBy = (checkedOutWithBalance > 0 && staffRole === "admin") ? checkedOutBy : null;
+
       const memberRef = memberId && eligiblePoints > 0
         ? adminDb.collection("members").doc(memberId)
         : null;
@@ -2925,6 +2957,18 @@ export async function handleCheckoutBooking(req: any, res: any) {
         checkedOutCollectedTotal: collectedTotal,
         updatedAt: new Date()
       };
+
+      // UCO-06: stamp unpaid departure exception data
+      if (checkedOutWithBalance > 0) {
+        bookingUpdate.unpaidCheckoutReason = safeUnpaidReason;
+        bookingUpdate.unpaidCheckoutApprovalThreshold = unpaidCheckoutThreshold;
+        bookingUpdate.unpaidCheckoutApprovedBy = unpaidCheckoutApprovedBy;
+        bookingUpdate.unpaidCheckoutApprovedAt = new Date();
+        bookingUpdate.unpaidCheckoutSnapshotFolioTotal = checkoutFolioTotal;
+        bookingUpdate.unpaidCheckoutSnapshotCollectedTotal = collectedTotal;
+        bookingUpdate.unpaidCheckoutSnapshotBalance = checkedOutWithBalance;
+      }
+
       if (memberId && freshBookingData.memberId !== memberId) {
         bookingUpdate.memberId = memberId;
       }
@@ -2993,18 +3037,6 @@ export async function handleCheckoutBooking(req: any, res: any) {
 
     // Per Phase 12 — Notification Center (decision #120):
     // persist a `notifications` doc for the bell panel.
-    // The booking doc is the source of truth for the
-    // denormalized fields (bookingRef, roomNumber); re-read
-    // after the transaction to capture the final values.
-    //
-    // Per NC-01 (post-ship review 2026-07-15): this MUST run
-    // **before** `res.json()` and be **awaited** so Vercel
-    // does not freeze the serverless instance after the
-    // response flushes and silently drop the doc. Safe —
-    // the helper never throws. The try/catch only protects
-    // against a failed re-read (the booking is already
-    // updated, so the request can still succeed without the
-    // notification rather than 500).
     try {
       const freshSnap = await adminDb.collection("bookings").doc(bookingId).get();
       const fresh = freshSnap.data() || {};
@@ -3026,10 +3058,31 @@ export async function handleCheckoutBooking(req: any, res: any) {
         status: "checked-out",
         pointsAwarded,
         memberId,
-        checkedOutWithBalance
+        checkedOutWithBalance,
+        unpaidCheckoutReason: safeUnpaidReason,
+        unpaidCheckoutApprovedBy
       }
     });
   } catch (error: any) {
+    if (error?.message === "UNPAID_REASON_REQUIRED") {
+      return res.status(400).json({
+        success: false,
+        error: "An unpaid checkout reason is required when the folio has a positive balance."
+      });
+    }
+    if (error?.message?.startsWith("THRESHOLD_EXCEEDED:")) {
+      const parts = error.message.split(":");
+      const threshold = parts[1] || "5000";
+      const balance = parts[2] || "0";
+      return res.status(403).json({
+        success: false,
+        error: "Front Desk cannot complete this checkout.",
+        thresholdExceeded: true,
+        threshold: Number(threshold),
+        balance: Number(balance),
+        message: `The outstanding balance (₱${Number(balance).toFixed(2)}) exceeds the Front Desk approval limit (₱${Number(threshold).toFixed(2)}). An administrator must authorize this checkout.`
+      });
+    }
     console.error("Checkout booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
