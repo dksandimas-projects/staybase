@@ -1039,7 +1039,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 #### Target information architecture
 
-- ✅ **BDUX-01 — Sticky booking header and lifecycle context.** Implemented compact booking context, lifecycle, total/paid/balance summary, and actionable payment, early-check-in, and readiness alerts.
+- ✅ **BDUX-01 — Sticky booking header and lifecycle context.** Implemented compact booking context, lifecycle, total/paid/balance summary, actionable payment/early-check-in/readiness alerts, and persistent guest contact plus editable payment reference above the section tabs.
 - ✅ **BDUX-02 — Four task-based sections.** Implemented **Overview**, **Check-in**, **Folio**, and **Activity & More** with desktop/mobile labels. Panels remain mounted while hidden so switching sections does not discard local form input.
   - **Overview:** guest information, room and dates, guest count, breakfast inclusion, payment method/reference, compact payment-proof review, early check-in alert, and high-level financial summary.
   - **Check-in:** readiness checklist, guest registration, signature, guest ID, government discount verification, and breakfast selections.

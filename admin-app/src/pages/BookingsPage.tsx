@@ -20,8 +20,6 @@ import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { formatPrice } from "../utils/format";
 import {
   Calendar,
-  User,
-  Phone,
   Mail,
   Plus,
   Eye,
@@ -2421,14 +2419,10 @@ export function BookingsPage() {
               totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
+              onPaymentReferenceChange={(value) => persistSelectedBooking({ paymentReferenceNumber: value || null })}
             />
 
-            <BookingDrawerSectionPanel
-              section="overview"
-              activeSection={activeBookingSection}
-              className="lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0"
-              primary
-            >
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
             {selectedBooking.paymentProofUrl && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -2477,58 +2471,6 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
-
-            {/* Guest details card */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Guest Information</h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2.5">
-                <p className="flex items-center gap-2 text-gray-800">
-                  <User size={16} className="text-primary shrink-0" />
-                  <span>{selectedBooking.guestName}</span>
-                </p>
-                <p className="flex items-center gap-2 text-gray-600 text-xs">
-                  <Mail size={16} className="text-gray-400 shrink-0" />
-                  <span>{selectedBooking.guestEmail}</span>
-                </p>
-                <p className="flex items-center gap-2 text-gray-600 text-xs">
-                  <Phone size={16} className="text-gray-400 shrink-0" />
-                  <span>{selectedBooking.guestPhone}</span>
-                </p>
-              </div>
-            </div>
-
-            {/* Payment method & Reference number workstation */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                <CreditCard size={14} className="text-primary" />
-                Payment Method & Reference
-              </h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <p className="text-[10px] uppercase font-bold text-gray-400">Payment Method</p>
-                    <p className="text-xs font-bold text-gray-900 mt-1 uppercase">
-                      {selectedBooking.paymentMethod || "Not specified"}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Payment Reference Number
-                      <input
-                        type="text"
-                        value={selectedBooking.paymentReferenceNumber || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          persistSelectedBooking({ paymentReferenceNumber: val || null });
-                        }}
-                        placeholder="e.g. GCash Ref # or Bank Trace #"
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800 font-medium"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
             </BookingDrawerSectionPanel>
 
             {/* Check-in registration workstation */}
@@ -2718,7 +2660,7 @@ export function BookingsPage() {
             </BookingDrawerSectionPanel>
 
             {/* Room stay details */}
-            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection} primary>
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Stay & Accommodation</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">

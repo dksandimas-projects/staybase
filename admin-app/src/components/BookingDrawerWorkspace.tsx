@@ -5,7 +5,10 @@ import {
   ClipboardCheck,
   CreditCard,
   LayoutDashboard,
+  Mail,
   MoreHorizontal,
+  Phone,
+  User,
   XCircle
 } from "lucide-react";
 import type { Booking } from "../context/AdminContext";
@@ -22,6 +25,7 @@ interface BookingDrawerWorkspaceHeaderProps {
   totalPaid: number;
   balance: number;
   missingCheckInItems: string[];
+  onPaymentReferenceChange: (value: string) => void;
 }
 
 const sections: Array<{
@@ -42,7 +46,8 @@ export function BookingDrawerWorkspaceHeader({
   onSectionChange,
   totalPaid,
   balance,
-  missingCheckInItems
+  missingCheckInItems,
+  onPaymentReferenceChange
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
@@ -79,6 +84,47 @@ export function BookingDrawerWorkspaceHeader({
               value={formatPrice(Math.abs(balance))}
               tone={balance > 0 ? "danger" : "success"}
             />
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 border-t border-gray-100 pt-4 lg:grid-cols-2">
+          <div className="rounded-lg bg-gray-50 px-3 py-3">
+            <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+              <User size={13} className="text-primary" aria-hidden="true" />
+              Guest information
+            </p>
+            <div className="mt-2 flex flex-col gap-1.5 text-xs text-gray-650 sm:flex-row sm:flex-wrap sm:gap-x-5">
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <Mail size={13} className="shrink-0 text-gray-400" aria-hidden="true" />
+                <span className="truncate">{booking.guestEmail}</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Phone size={13} className="shrink-0 text-gray-400" aria-hidden="true" />
+                {booking.guestPhone}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-lg bg-gray-50 px-3 py-3 sm:grid-cols-[minmax(110px,0.7fr)_minmax(180px,1.3fr)] sm:items-end">
+            <div>
+              <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                <CreditCard size={13} className="text-primary" aria-hidden="true" />
+                Payment method
+              </p>
+              <p className="mt-2 truncate text-xs font-bold uppercase text-gray-900">
+                {booking.paymentMethod || "Not specified"}
+              </p>
+            </div>
+            <label className="flex flex-col gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+              Payment reference number
+              <input
+                type="text"
+                value={booking.paymentReferenceNumber || ""}
+                onChange={(event) => onPaymentReferenceChange(event.target.value)}
+                placeholder="GCash ref or bank trace #"
+                className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium normal-case tracking-normal text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-primary"
+              />
+            </label>
           </div>
         </div>
 
@@ -189,7 +235,7 @@ export function BookingDrawerSectionPanel({
       role={primary ? "tabpanel" : undefined}
       aria-labelledby={primary ? `booking-drawer-tab-${section}` : undefined}
       hidden={activeSection !== section}
-      className={cn("space-y-6", className)}
+      className={cn("space-y-6", activeSection !== section && "!hidden", className)}
     >
       {children}
     </section>

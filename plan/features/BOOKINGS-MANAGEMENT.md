@@ -305,6 +305,7 @@ Reduce the cognitive load of the booking drawer without removing operational, fi
 ### Structural tranche implemented on feature branch
 
 - [x] Compact operational summary with guest, room, stay, status, source, total, paid, and balance
+- [x] Guest contact plus editable payment method/reference context remain above the section tabs so they do not shift or disappear between workflows
 - [x] Booking lifecycle indicator and context-sensitive payment, early-check-in, and readiness alerts
 - [x] Four preserved-state sections: Overview, Check-in, Folio, and Activity & More
 - [x] Check-in readiness card driven by the shared client/server readiness helper
