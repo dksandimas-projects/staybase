@@ -126,4 +126,39 @@ describe("[...route].ts — CORS explicit allowlist (SEV-1 #2)", () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.end).toHaveBeenCalled();
   });
+
+  it("allows the staging admin origin so staff actions work on Vercel Preview", async () => {
+    // Regression: staging (stg-admin.sparkinnbohol.com) is not the production
+    // config.adminDomain, so it was absent from the allowlist and every staff
+    // booking action (confirm/checkout/payment) failed the browser preflight.
+    const req = {
+      method: "OPTIONS",
+      url: "/api/%5B...route%5D?route=bookings/checkout",
+      query: { route: "bookings/checkout" },
+      headers: {
+        host: "stg.sparkinnbohol.com",
+        origin: "https://stg-admin.sparkinnbohol.com",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,content-type"
+      },
+      socket: { remoteAddress: "127.0.0.1" }
+    } as any;
+    const res: any = {
+      status: vi.fn().mockReturnThis(),
+      setHeader: vi.fn().mockReturnThis(),
+      end: vi.fn().mockReturnThis()
+    };
+
+    await handler(req, res);
+
+    expect(res.setHeader).toHaveBeenCalledWith("Access-Control-Allow-Origin", "https://stg-admin.sparkinnbohol.com");
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it("derives staging origins from the guest host and gates them on non-production", () => {
+    expect(src).toMatch(/VERCEL_ENV\s*===\s*["']production["']/);
+    expect(src).toMatch(/stg\.\$\{configuredGuestHost\}/);
+    expect(src).toMatch(/stg-admin\.\$\{configuredGuestHost\}/);
+    expect(src).toMatch(/EXTRA_ALLOWED_ORIGINS/);
+  });
 });

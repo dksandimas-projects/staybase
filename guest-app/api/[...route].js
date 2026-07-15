@@ -194200,10 +194200,18 @@ var PRODUCTION_GUEST_HOSTS = /* @__PURE__ */ new Set([
   configuredGuestHost,
   `www.${configuredGuestHost}`.replace(/^www\.www\./, "www.")
 ]);
+var isProductionDeploy = process.env.VERCEL_ENV === "production";
+var stagingOrigins = isProductionDeploy ? [] : [
+  `https://stg.${configuredGuestHost}`,
+  `https://stg-admin.${configuredGuestHost}`
+];
+var extraAllowedOrigins = (process.env.EXTRA_ALLOWED_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean);
 var ALLOWED_ORIGINS = /* @__PURE__ */ new Set([
   `https://${configuredGuestHost}`,
   `https://www.${configuredGuestHost}`.replace(/^https:\/\/www\.www\./, "https://www."),
   `https://${configuredAdminHost}`,
+  ...stagingOrigins,
+  ...extraAllowedOrigins,
   "http://localhost:5173",
   // guest-app dev (Vite)
   "http://localhost:5174",

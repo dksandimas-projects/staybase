@@ -53,10 +53,37 @@ const PRODUCTION_GUEST_HOSTS = new Set([
   configuredGuestHost,
   `www.${configuredGuestHost}`.replace(/^www\.www\./, "www.")
 ]);
+
+// Non-production surfaces (Vercel Preview = staging on the `dev` branch) serve
+// the admin/guest apps from staging subdomains that are NOT the production
+// `config.domain`/`config.adminDomain`. Because the admin app calls the guest
+// API cross-origin, those staging origins must be in the CORS allow-list or
+// every staff action (confirm, checkout, payment, …) is blocked by the browser
+// preflight. Derive them from the base guest domain using the documented
+// `stg.` / `stg-admin.` convention (see plan/project/PROD-CUTOVER-RUNBOOK.md),
+// only when this deployment is not production.
+const isProductionDeploy = process.env.VERCEL_ENV === "production";
+const stagingOrigins = isProductionDeploy
+  ? []
+  : [
+      `https://stg.${configuredGuestHost}`,
+      `https://stg-admin.${configuredGuestHost}`
+    ];
+
+// White-label / per-client escape hatch: comma-separated absolute origins
+// (e.g. "https://staging.acme.com,https://admin-staging.acme.com") set in the
+// deployment's env for any host that doesn't follow the derivation above.
+const extraAllowedOrigins = (process.env.EXTRA_ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const ALLOWED_ORIGINS = new Set<string>([
   `https://${configuredGuestHost}`,
   `https://www.${configuredGuestHost}`.replace(/^https:\/\/www\.www\./, "https://www."),
   `https://${configuredAdminHost}`,
+  ...stagingOrigins,
+  ...extraAllowedOrigins,
   "http://localhost:5173", // guest-app dev (Vite)
   "http://localhost:5174", // admin-app dev (Vite)
   "http://localhost:3000", // generic CRA / Next.js dev
