@@ -8,6 +8,13 @@ import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
+import {
+  BookingCheckInReadiness,
+  BookingDrawerActionFooter,
+  BookingDrawerSectionPanel,
+  BookingDrawerWorkspaceHeader,
+  type BookingDrawerSection
+} from "../components/BookingDrawerWorkspace";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { formatPrice } from "../utils/format";
@@ -431,6 +438,11 @@ export function BookingsPage() {
   // Booking Drawer States
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [activeBookingSection, setActiveBookingSection] = useState<BookingDrawerSection>("overview");
+
+  useEffect(() => {
+    setActiveBookingSection("overview");
+  }, [selectedBooking?.id]);
 
   // Store Order Search and Filter States
   const [orderSearchText, setOrderSearchText] = useState("");
@@ -2144,6 +2156,94 @@ export function BookingsPage() {
     }
   };
 
+  const selectedBookingFolio = selectedBooking ? getBookingFolio(selectedBooking) : null;
+
+  const renderBookingPrimaryAction = () => {
+    if (!selectedBooking) return null;
+
+    if (selectedBooking.status === "pending") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("confirmed")}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+        >
+          Confirm pay-at-hotel booking
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "payment-uploaded") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("payment-confirmed")}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-green-600 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+        >
+          Mark payment confirmed
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "payment-confirmed") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("confirmed")}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          Confirm booking
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "confirmed") {
+      return (
+        <button
+          type="button"
+          onClick={() => handleStatusTransition("checked-in")}
+          disabled={!selectedBookingCheckInReadiness?.ready}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
+        >
+          {selectedBookingCheckInReadiness?.ready ? "Verify guest ID & check in" : "Complete check-in requirements"}
+        </button>
+      );
+    }
+
+    if (selectedBooking.status === "checked-in") {
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            const folio = getBookingFolio(selectedBooking);
+            if (folio.balance > 0 && !checkoutWithBalanceConfirm.arm("confirm")) return;
+            handleStatusTransition("checked-out");
+          }}
+          className={`inline-flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 text-xs font-bold text-white shadow-sm transition active:scale-95 ${
+            selectedBookingFolio && selectedBookingFolio.balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
+              ? "bg-orange-600 hover:bg-orange-700"
+              : "bg-gray-900 hover:bg-black"
+          }`}
+        >
+          {selectedBookingFolio && selectedBookingFolio.balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
+            ? `Confirm — ${formatPrice(selectedBookingFolio.balance)} still due`
+            : "Review folio & check out"}
+        </button>
+      );
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={printBookingReceiptPDF}
+        className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+      >
+        <FileText size={15} aria-hidden="true" />
+        View / print receipt
+      </button>
+    );
+  };
+
   return (
     <>
       <div className="space-y-8 font-body">
@@ -2300,27 +2400,35 @@ export function BookingsPage() {
 
       {/* Booking Detail Drawer (D-01) */}
       <Drawer
-        title={selectedBooking ? `Reference: ${selectedBooking.bookingRef}` : ""}
+        title={selectedBooking ? `Booking ${selectedBooking.bookingRef}` : ""}
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         className="max-w-[1120px]"
+        footer={selectedBooking ? (
+          <BookingDrawerActionFooter
+            primaryAction={renderBookingPrimaryAction()}
+            onMoreActions={() => setActiveBookingSection("more")}
+            moreActionsActive={activeBookingSection === "more"}
+          />
+        ) : undefined}
       >
         {selectedBooking && (
           <div className="space-y-6 text-sm">
-            {/* Status overview */}
-            <div className="grid gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2">
-              <div>
-                <p className="text-[10px] uppercase font-bold text-gray-400">Current Status</p>
-                <div className="mt-1">
-                  <StatusBadge label={selectedBooking.status.replace("-", " ")} status={selectedBooking.status} />
-                </div>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase font-bold text-gray-400 sm:text-right">Channel</p>
-                <p className="text-xs font-bold text-gray-900 mt-1 uppercase sm:text-right">{selectedBooking.source}</p>
-              </div>
-            </div>
+            <BookingDrawerWorkspaceHeader
+              booking={selectedBooking}
+              activeSection={activeBookingSection}
+              onSectionChange={setActiveBookingSection}
+              totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
+              balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
+              missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
+            />
 
+            <BookingDrawerSectionPanel
+              section="overview"
+              activeSection={activeBookingSection}
+              className="lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0"
+              primary
+            >
             {selectedBooking.paymentProofUrl && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -2328,7 +2436,7 @@ export function BookingsPage() {
                   Payment Proof
                 </h3>
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <div className="grid gap-4 sm:grid-cols-[160px_1fr]">
+                  <div className="grid gap-4 sm:grid-cols-[112px_1fr]">
                     <button
                       type="button"
                       onClick={() => setImagePreview({ title: `Payment proof for ${selectedBooking.bookingRef}`, url: selectedBooking.paymentProofUrl ?? "" })}
@@ -2337,7 +2445,7 @@ export function BookingsPage() {
                       <img
                         src={selectedBooking.paymentProofUrl}
                         alt={`Payment proof for ${selectedBooking.bookingRef}`}
-                        className="h-44 w-full object-cover"
+                        className="h-28 w-full object-cover"
                       />
                     </button>
                     <div className="flex flex-col justify-center gap-2 text-xs text-gray-600">
@@ -2421,8 +2529,16 @@ export function BookingsPage() {
                 </div>
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Check-in registration workstation */}
+            <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection} primary>
+            {selectedBookingCheckInReadiness && (
+              <BookingCheckInReadiness
+                ready={selectedBookingCheckInReadiness.ready}
+                missingItems={selectedBookingCheckInReadiness.missingItems}
+              />
+            )}
             {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
@@ -2599,8 +2715,10 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
             {/* Room stay details */}
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Stay & Accommodation</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
@@ -2626,7 +2744,10 @@ export function BookingsPage() {
                   <div className="border-t border-gray-100 pt-3">
                     <button
                       type="button"
-                      onClick={() => setShowMoveForm(!showMoveForm)}
+                      onClick={() => {
+                        setShowMoveForm(!showMoveForm);
+                        setActiveBookingSection("more");
+                      }}
                       className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 transition hover:bg-gray-50 active:scale-95"
                     >
                       <Move size={14} className="text-primary" />
@@ -2636,8 +2757,10 @@ export function BookingsPage() {
                 )}
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Move booking form */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection}>
             {selectedBooking && showMoveForm && (
               <div className="space-y-3">
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -2745,8 +2868,10 @@ export function BookingsPage() {
                 </form>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
             {/* Financial totals */}
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} primary>
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Financial Breakdown</h3>
               <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
@@ -2772,8 +2897,10 @@ export function BookingsPage() {
                 )}
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Breakfast selections */}
+            <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
             {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -2825,7 +2952,9 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
             {!selectedBooking.discountType && !selectedBooking.voucherCode && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
               <form onSubmit={handleApplyStaffDiscount} className="rounded-card border border-primary/20 bg-primary-light/20 p-4 space-y-3">
                 <div>
@@ -2849,8 +2978,10 @@ export function BookingsPage() {
                 </button>
               </form>
             )}
+            </BookingDrawerSectionPanel>
 
             {/* Government discount verification */}
+            <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
             {selectedBooking.discountType && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -2983,7 +3114,9 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
             {selectedBooking.memberId && ["confirmed", "checked-in", "checked-out"].includes(selectedBooking.status) && (
               <div className="rounded-card border border-primary/20 bg-primary-light/30 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3157,8 +3290,10 @@ export function BookingsPage() {
                 )}
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
             {/* Early Check-In Request Panel */}
+            <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
             {selectedBooking.earlyCheckIn && ["confirmed", "checked-in"].includes(selectedBooking.status) && (() => {
               const eci = selectedBooking.earlyCheckIn!;
               const isResolved = eci.status === "approved" || eci.status === "declined";
@@ -3330,8 +3465,10 @@ export function BookingsPage() {
                 </div>
               );
             })()}
+            </BookingDrawerSectionPanel>
 
             {/* Email Actions Panel */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} primary>
             <div className="space-y-3">
               <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
                 <Mail size={14} className="text-primary" />
@@ -3394,7 +3531,9 @@ export function BookingsPage() {
                 </div>
               </div>
             </div>
+            </BookingDrawerSectionPanel>
 
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
             {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -3571,89 +3710,18 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
 
-            {/* Allowed transitions buttons */}
-            <div className="grid gap-2 border-t border-gray-150 pt-4 sm:grid-cols-2">
-              {selectedBooking.status === "pending" && (
+            {/* Secondary and destructive booking actions */}
+            <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} className="border-t border-gray-150 pt-4">
+              {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showMoveForm && (
                 <button
-                  onClick={() => handleStatusTransition("confirmed")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
+                  type="button"
+                  onClick={() => setShowMoveForm(true)}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
                 >
-                  Confirm Pay-at-Hotel Booking
-                </button>
-              )}
-
-              {selectedBooking.status === "payment-uploaded" && (
-                <button
-                  onClick={() => handleStatusTransition("payment-confirmed")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
-                >
-                  Mark Payment Confirmed
-                </button>
-              )}
-
-              {selectedBooking.status === "payment-confirmed" && (
-                <button
-                  onClick={() => handleStatusTransition("confirmed")}
-                  className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
-                >
-                  Confirm Booking
-                </button>
-              )}
-
-              {(selectedBooking.status === "confirmed" || selectedBooking.status === "payment-confirmed") && selectedBookingCheckInReadiness && (
-                <div className="sm:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold text-gray-900">Ready for check-in</p>
-                      <p className="mt-0.5 text-[11px] text-gray-600">
-                        Guest ID, registration details, and signature must be saved first.
-                      </p>
-                    </div>
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
-                      selectedBookingCheckInReadiness.ready
-                        ? "bg-status-green-bg text-status-green-text"
-                        : "bg-amber-50 text-amber-700"
-                    }`}>
-                      {selectedBookingCheckInReadiness.ready ? "Ready" : "Missing items"}
-                    </span>
-                  </div>
-                  {!selectedBookingCheckInReadiness.ready ? (
-                    <ul className="mt-3 grid gap-1 text-[11px] font-medium text-amber-800 sm:grid-cols-2">
-                      {selectedBookingCheckInReadiness.missingItems.map((item) => (
-                        <li key={item} className="flex items-center gap-1.5">
-                          <XCircle size={12} className="shrink-0" />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <button
-                    onClick={() => handleStatusTransition("checked-in")}
-                    disabled={!selectedBookingCheckInReadiness.ready}
-                    className="mt-3 min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95 disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none disabled:active:scale-100"
-                  >
-                    Verify Guest ID & Check In
-                  </button>
-                </div>
-              )}
-
-              {selectedBooking.status === "checked-in" && (
-                <button
-                  onClick={() => {
-                    const folio = getBookingFolio(selectedBooking);
-                    if (folio.balance > 0 && !checkoutWithBalanceConfirm.arm("confirm")) return;
-                    handleStatusTransition("checked-out");
-                  }}
-                  className={`min-h-[44px] w-full inline-flex items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm transition active:scale-95 ${
-                    getBookingFolio(selectedBooking).balance > 0 && checkoutWithBalanceConfirm.isPending("confirm")
-                      ? "bg-orange-600 hover:bg-orange-700"
-                      : "bg-gray-900 hover:bg-black"
-                  }`}
-                >
-                  {checkoutWithBalanceConfirm.isPending("confirm")
-                    ? `Confirm — ${formatPrice(getBookingFolio(selectedBooking).balance)} still due`
-                    : "Check Out Room Folio"}
+                  <Move size={15} className="text-primary" aria-hidden="true" />
+                  Move / upgrade room
                 </button>
               )}
 
@@ -3679,7 +3747,7 @@ export function BookingsPage() {
                   </button>
                 )
               )}
-            </div>
+            </BookingDrawerSectionPanel>
           </div>
         )}
       </Drawer>

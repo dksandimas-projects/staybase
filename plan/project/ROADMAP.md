@@ -1027,7 +1027,7 @@ Most of the ~100 new fields are simple `string` mirrors of the existing list-edi
 
 ### Booking Drawer Information Architecture & UX Refactor
 
-> **Status:** ⬜ Not Started
+> **Status:** 🔄 In Progress — structural tranche implemented on `feature/booking-drawer-ux`; focused workflow modals and final visual QA remain.
 >
 > **Proposed:** July 15, 2026 — owner requested a less overwhelming and better-organized booking drawer without removing any existing feature.
 >
@@ -1039,18 +1039,18 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 #### Target information architecture
 
-- ⬜ **BDUX-01 — Sticky booking header and lifecycle context.** Keep booking reference, guest name, room, stay dates, status, source/channel, and close control visible while staff scroll. Show the booking lifecycle (`Pending → Confirmed → Checked in → Checked out`) and surface only actionable alerts, such as payment proof awaiting review, early check-in awaiting resolution, missing guest ID, or incomplete registration.
-- ⬜ **BDUX-02 — Four task-based sections.** Replace the single long default view with **Overview**, **Check-in**, **Folio**, and **Activity & More**. Desktop uses a section tab/segmented navigation below the sticky header; mobile uses a compact sticky tab bar labelled **Summary**, **Check-in**, **Folio**, and **More**. Switching sections must not discard unsaved local form input.
+- ✅ **BDUX-01 — Sticky booking header and lifecycle context.** Implemented compact booking context, lifecycle, total/paid/balance summary, and actionable payment, early-check-in, and readiness alerts.
+- ✅ **BDUX-02 — Four task-based sections.** Implemented **Overview**, **Check-in**, **Folio**, and **Activity & More** with desktop/mobile labels. Panels remain mounted while hidden so switching sections does not discard local form input.
   - **Overview:** guest information, room and dates, guest count, breakfast inclusion, payment method/reference, compact payment-proof review, early check-in alert, and high-level financial summary.
   - **Check-in:** readiness checklist, guest registration, signature, guest ID, government discount verification, and breakfast selections.
   - **Folio:** total/paid/balance summary, locked-rate breakdown, discounts/voucher, Rewards redemption, onsite payments, refunds, incidentals, store charges, checkout folio, and receipt actions.
   - **Activity & More:** transactional email actions/history, move/upgrade/reschedule, secondary administrative controls, audit-oriented detail, and cancellation.
-- ⬜ **BDUX-03 — Check-in readiness workspace.** Present registration, signature, guest ID, required government-discount verification, and applicable breakfast selections as a scannable complete/missing checklist. Selecting a checklist item opens or expands its existing editor. The shared client/server check-in gate remains authoritative and the drawer must continue displaying the server-compatible missing-items list.
-- ⬜ **BDUX-04 — Progressive disclosure rules.** Keep essential summaries and unresolved alerts visible by default. Use accordions for completed registration details, detailed rate computation, payment history, incidental history, breakfast selections, and email actions/history. Do not implement the drawer as one large stack of accordions; top-level tabs establish the primary hierarchy.
+- ✅ **BDUX-03 — Check-in readiness workspace.** Implemented a scannable readiness card driven by the shared client/server missing-items helper; Check-in alerts navigate to the existing editors. Fine-grained checklist-to-editor focus remains with BDUX-04.
+- 🔄 **BDUX-04 — Progressive disclosure rules.** The four top-level sections now establish the primary hierarchy and essential alerts stay visible. Remaining: focused disclosures for completed registration, detailed rates, payment/refund history, incidentals, breakfast selections, and email history/actions.
 - ⬜ **BDUX-05 — Focused task modals.** Move bounded workflows into responsive modals/full-screen mobile sheets: move/upgrade/reschedule, apply discount or voucher, record payment, record refund, add incidental charge, void a charge, resolve early check-in, and cancel booking. Existing validations, confirmations, permissions, audit stamps, optimistic updates, and toast feedback must be preserved. Destructive actions still require one clear confirmation step.
-- ⬜ **BDUX-06 — Status-aware sticky action footer.** Show one obvious primary action based on the current booking state: **Confirm booking**, **Mark payment confirmed**, **Check in guest**, **Review folio & check out**, or **View / print receipt**. Put valid secondary actions in a **More actions** menu. Cancellation remains visibly destructive but must not compete with the normal next operational step.
-- ⬜ **BDUX-07 — Responsive composition.** Desktop Overview uses a two-column layout where space allows: guest/stay information on the left and payment/readiness/alerts on the right. Mobile remains a full-screen drawer sheet with a compact sticky header, single-column content, sticky section navigation, one expanded editor at a time, a sticky primary footer, 44×44px touch targets, safe-area padding, focus trap, logical keyboard order, and reduced-motion support per `ADMIN-MOBILE.md`.
-- ⬜ **BDUX-08 — Component extraction and regression coverage.** Break the current booking drawer JSX out of `BookingsPage.tsx` into focused named components with explicit props while keeping data mutations in the established context/page boundary where appropriate. Add tests for section feature parity, status-to-primary-action mapping, check-in readiness, responsive navigation, modal/accordion accessibility, focus restoration, unsaved-state preservation, and every existing action remaining reachable.
+- ✅ **BDUX-06 — Status-aware sticky action footer.** Implemented one primary action for the current status plus **More actions** navigation. Cancellation is isolated in More and no longer competes with the normal workflow.
+- ✅ **BDUX-07 — Responsive composition.** Implemented two-column desktop Overview content, compact mobile section labels, 44px navigation/actions, and the existing Drawer's safe-area footer, focus trap, and reduced-motion behavior.
+- 🔄 **BDUX-08 — Component extraction and regression coverage.** Extracted the workspace header, tabs/panels, readiness card, and action footer into `BookingDrawerWorkspace.tsx`; added feature-parity and status-action tests. Remaining: extract the large editors/ledgers and add interaction-level modal/disclosure tests plus authenticated visual QA.
 
 #### Interaction and visual rules
 
@@ -1063,8 +1063,8 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 #### Delivery and acceptance criteria
 
-- ⬜ Inventory every current booking-drawer control before extraction and maintain a feature-parity checklist during implementation.
-- ⬜ Implement the structural shell first: sticky header, lifecycle, section navigation, and sticky footer; then migrate one existing feature group at a time.
+- ✅ Inventory every current booking-drawer control before extraction and maintain a feature-parity checklist during implementation.
+- ✅ Implement the structural shell first: sticky header, lifecycle, section navigation, and sticky footer; then migrate one existing feature group at a time.
 - ⬜ Verify representative bookings in every status and conditional combination: payment proof, breakfast, Senior/PWD, voucher, Rewards, early check-in, onsite payments/refunds, incidentals, store charges, corporate source, checked-out, and cancelled.
 - ⬜ At 1440px, staff can understand guest, stay, payment state, outstanding balance, and next action without scrolling the default Overview.
 - ⬜ At 375px, there is no horizontal page scroll; all features remain reachable; the primary action stays usable above the safe area; modal/sheet focus and close behavior remain accessible.
