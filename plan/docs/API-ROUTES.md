@@ -5,7 +5,9 @@
 
 ## Overview
 
-All server-side logic lives in a single Vercel catch-all API route at `guest-app/api/[...route].ts`. The `api/` folder is co-located inside `guest-app/` — Vercel picks it up automatically when the root directory is set to `guest-app/`.
+All server-side logic is authored behind the catch-all router at `guest-app/server/apiRouter.ts` and bundled into the single committed Vercel function `guest-app/api/[...route].js`. The `api/` folder is co-located inside `guest-app/` — Vercel picks it up automatically when the root directory is set to `guest-app/`.
+
+Any staged change under `guest-app/server/` or `shared/` must include a rebuilt `guest-app/api/[...route].js`. The pre-commit bundle-freshness check independently rebuilds to a temporary file and rejects stale or unstaged output.
 
 No Firebase Cloud Functions. No separate Vercel project for the API. No separate backend service.
 
@@ -73,6 +75,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
 | `/api/bookings/lookup` | POST | None (owner by ref+email or ref+lookup token) | Look up a single booking by `bookingRef` plus either `guestEmail` or magic-link `lookupToken` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}`. Response payload intentionally includes `guestName`, `guestEmail`, `guestPhone`, `roomType`/`roomNumber`, and guest-safe `rateBreakdown` so the self-service page can display the booking back to the guest. These fields are the data-subject's own PII or non-sensitive pricing details (per RA 10173 right to be informed + the right to access), and the endpoint enforces ref+email or ref+token ownership before returning them. |
 | `/api/bookings/add-payment` | POST | Staff | Atomically append an onsite payment using the required client-preallocated `paymentId`; exact retries replay without a duplicate, while reuse with different details is rejected. Moves `pending`/`payment-uploaded` to `payment-confirmed` when the running total reaches `totalPrice`; the committed status transition gates the one-time payment-confirmed email. For a checked-out member folio with a locked pending loyalty award, the final payment also awards those points exactly once. |
+| `/api/bookings/verify-and-record-payment` | POST | Staff | Verify an uploaded payment proof and atomically append its payment ledger entry using a required client-preallocated `paymentId`. Exact retries with the same ID replay safely; reusing an ID for different details is rejected, while legitimate equal-amount reference-free installments remain distinct when they use different IDs. |
 | `/api/bookings/add-refund` | POST | Admin | Append an immutable negative refund entry after transactionally verifying it does not exceed net collected funds; requires method, reason, and approver UID |
 | `/api/bookings/mark-payment-confirmed` | POST | Staff | Transactionally flip `payment-uploaded` → `payment-confirmed`, stamp the handling staff member, and send the payment-confirmed email only for the committed transition. Exact retries are idempotent. |
 | `/api/bookings/confirm` | POST | Staff | Flip `pending`/`payment-uploaded`/`payment-confirmed` → `confirmed`; fires the booking-confirmed email once |
