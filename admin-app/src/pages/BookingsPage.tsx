@@ -15,6 +15,9 @@ import {
   BookingDrawerWorkspaceHeader,
   type BookingDrawerSection
 } from "../components/BookingDrawerWorkspace";
+import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
+import { BookingEmailActions } from "../components/BookingEmailActions";
+import { IncidentalChargeList } from "../components/IncidentalChargeList";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { formatPrice } from "../utils/format";
@@ -3021,165 +3024,14 @@ export function BookingsPage() {
                 missingItems={selectedBookingCheckInReadiness.missingItems}
               />
             )}
-            {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
-              const reg = selectedBooking.guestRegistration;
-              const isComplete = reg?.signatureStatus === "signed" && reg?.nationality && reg?.dateOfBirth && reg?.gender && reg?.idNumber && reg?.address && reg?.emergencyContact;
-              return (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                    <ClipboardCheck size={14} className="text-primary" />
-                    Check-in Registration
-                  </h3>
-                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                    reg?.signatureStatus === "signed"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-orange-50 text-orange-700"
-                  }`}>
-                    {reg?.signatureStatus === "signed" ? "Signed" : "Pending"}
-                  </span>
-                </div>
-
-                {isComplete && !showEditRegistration ? (
-                  <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-                      <div><span className="text-gray-400">Nationality:</span> <span className="font-medium text-gray-800">{reg?.nationality}</span></div>
-                      <div><span className="text-gray-400">DOB:</span> <span className="font-medium text-gray-800">{reg?.dateOfBirth}</span></div>
-                      <div><span className="text-gray-400">Gender:</span> <span className="font-medium text-gray-800 capitalize">{reg?.gender}</span></div>
-                      <div><span className="text-gray-400">ID Type:</span> <span className="font-medium text-gray-800 capitalize">{reg?.idType?.replace(/-/g, " ")}</span></div>
-                      <div><span className="text-gray-400">ID Number:</span> <span className="font-medium text-gray-800">{reg?.idNumber}</span></div>
-                      <div><span className="text-gray-400">Emergency:</span> <span className="font-medium text-gray-800">{reg?.emergencyContact}</span></div>
-                      <div className="col-span-2"><span className="text-gray-400">Address:</span> <span className="font-medium text-gray-800">{reg?.address}</span></div>
-                      {reg?.vehiclePlate && <div className="col-span-2"><span className="text-gray-400">Vehicle:</span> <span className="font-medium text-gray-800">{reg?.vehiclePlate}</span></div>}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowEditRegistration(true)}
-                      className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-                    >
-                      <Save size={13} />
-                      Edit registration
-                    </button>
-                  </div>
-                ) : (
-                  <form onSubmit={(e) => { handleRegistrationSubmit(e); setShowEditRegistration(false); }} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                        Nationality
-                        <input
-                          name="nationality"
-                          defaultValue={reg?.nationality ?? "Filipino"}
-                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                        Date of Birth
-                        <input
-                          name="dateOfBirth"
-                          type="date"
-                          defaultValue={reg?.dateOfBirth ?? ""}
-                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                        Gender
-                        <select
-                          name="gender"
-                          defaultValue={reg?.gender ?? ""}
-                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                        >
-                          <option value="">Select</option>
-                          <option value="female">Female</option>
-                          <option value="male">Male</option>
-                          <option value="prefer-not-to-say">Prefer not to say</option>
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                        Valid ID Type
-                        <select
-                          name="idType"
-                          defaultValue={reg?.idType ?? "passport"}
-                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                        >
-                          <option value="passport">Passport</option>
-                          <option value="drivers-license">Driver's License</option>
-                          <option value="national-id">National ID</option>
-                          <option value="umid">UMID</option>
-                          <option value="other">Other Government ID</option>
-                        </select>
-                      </label>
-                    </div>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      ID Number
-                      <input
-                        name="idNumber"
-                        defaultValue={reg?.idNumber ?? ""}
-                        placeholder="Government ID reference"
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Home Address
-                      <textarea
-                        name="address"
-                        rows={2}
-                        defaultValue={reg?.address ?? ""}
-                        placeholder="Guest residential address"
-                        className="rounded border border-gray-200 p-2 text-xs text-gray-800"
-                      />
-                    </label>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                        Emergency Contact
-                        <input
-                          name="emergencyContact"
-                          defaultValue={reg?.emergencyContact ?? ""}
-                          placeholder="Name / Phone"
-                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                        Vehicle Plate
-                        <input
-                          name="vehiclePlate"
-                          defaultValue={reg?.vehiclePlate ?? ""}
-                          placeholder="Optional"
-                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                        />
-                      </label>
-                    </div>
-                    <label className="flex min-h-[38px] items-center gap-2 rounded border border-gray-200 px-2 text-[10px] font-bold text-gray-700">
-                      <input
-                        type="checkbox"
-                        name="signatureStatus"
-                        value="signed"
-                        defaultChecked={reg?.signatureStatus === "signed"}
-                        className="h-4 w-4 accent-primary"
-                      />
-                      Guest signed physical registration form
-                    </label>
-                    <div className="flex flex-col gap-2 border-t border-gray-100 pt-3 sm:flex-row sm:justify-end">
-                      <button
-                        type="button"
-                        onClick={printRegistrationPDF}
-                        className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-                      >
-                        <FileText size={13} />
-                        Preview Registration PDF
-                      </button>
-                      <button
-                        type="submit"
-                        className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
-                      >
-                        <Save size={13} />
-                        Save Registration
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-              );
-            })()}
+            <BookingRegistrationForm
+              registration={selectedBooking.guestRegistration}
+              status={selectedBooking.status}
+              showEdit={showEditRegistration}
+              onSetShowEdit={setShowEditRegistration}
+              onSubmit={handleRegistrationSubmit}
+              onPrintPdf={printRegistrationPDF}
+            />
 
             {/* Guest ID upload */}
             {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
@@ -4102,158 +3954,22 @@ export function BookingsPage() {
 
             {/* Email Actions Panel */}
             <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} primary>
-            <div className="space-y-3">
-              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                <Mail size={14} className="text-primary" />
-                Resend Transactional Email
-              </h3>
-              <details className="group rounded-lg border border-gray-200 bg-white open:shadow-sm">
-                <summary className="flex cursor-pointer items-center justify-between gap-3 p-4 text-xs font-semibold text-gray-600 hover:text-gray-800 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
-                  <span className="flex items-center gap-2">
-                    <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
-                    Resend email to {selectedBooking.guestEmail}
-                  </span>
-                </summary>
-                <div className="border-t border-gray-200 p-5 space-y-4">
-                  <p className="text-[10px] leading-relaxed text-gray-500">
-                    Select an email template below to resend to the guest (<strong>{selectedBooking.guestEmail}</strong>).
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {(() => {
-                      const getRecommendedEmailAction = (status: Booking["status"]) => {
-                        if (status === "pending" || status === "payment-uploaded") return "booking-submitted";
-                        if (status === "payment-confirmed") return "payment-confirmed";
-                        if (status === "confirmed") return "booking-confirmed";
-                        if (status === "checked-in") return "checkin-reminder";
-                        if (status === "checked-out") return "payment-confirmed";
-                        if (status === "cancelled") return "booking-cancelled";
-                        return null;
-                      };
-
-                      const recommendedAction = getRecommendedEmailAction(selectedBooking.status);
-
-                      return [
-                        { action: "booking-submitted", label: "Booking Submitted" },
-                        { action: "booking-confirmed", label: "Booking Confirmed" },
-                        { action: "payment-confirmed", label: "Payment Confirmed" },
-                        { action: "checkin-reminder", label: "Check-in Reminder" },
-                        { action: "booking-cancelled", label: "Booking Cancelled" },
-                        { action: "discount-rejected", label: "Discount Rejected" },
-                      ].map(({ action, label }) => {
-                        const isRecommended = recommendedAction === action || (action === "discount-rejected" && selectedBooking.discountRejected);
-                        const isPending = resendingEmailAction === action;
-
-                        return (
-                          <button
-                            key={action}
-                            type="button"
-                            disabled={resendingEmailAction !== null}
-                            onClick={() => handleResendEmail(action)}
-                            className={`min-h-[40px] px-3 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 active:scale-95 ${
-                              isRecommended
-                                ? "bg-primary hover:bg-primary-dark text-white border-transparent shadow-sm"
-                                : "bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 disabled:opacity-50"
-                            }`}
-                          >
-                            {isPending ? (
-                              <Loader2 size={12} className="animate-spin" />
-                            ) : null}
-                            {label}
-                            {isRecommended && !isPending && (
-                              <span className="ml-1 rounded bg-white/20 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-white">
-                                Rec
-                              </span>
-                            )}
-                          </button>
-                        );
-                      });
-                    })()}
-                  </div>
-                </div>
-              </details>
-            </div>
+            <BookingEmailActions
+              booking={selectedBooking}
+              resendingAction={resendingEmailAction}
+              onResend={handleResendEmail}
+            />
             </BookingDrawerSectionPanel>
 
             <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
-            {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (
-              <div className="rounded-card border border-gray-200 bg-white p-4 space-y-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="flex items-center gap-1.5 text-xs font-bold text-gray-900">
-                      <FileText size={14} className="text-primary" />
-                      Incidental charges
-                    </h3>
-                    <p className="mt-1 text-[11px] text-gray-500">Fees and reversals added by staff.</p>
-                  </div>
-                  {selectedBooking.status !== "checked-out" && (
-                    <button
-                      type="button"
-                      onClick={() => { setChargeCategory("other"); setChargeLabel(""); setChargeAmount(""); setChargeNote(""); setShowChargeModal(true); }}
-                      className="inline-flex min-h-[44px] w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 sm:w-auto"
-                    >
-                      <Plus size={14} />
-                      Add charge
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-3">
-                  {selectedBookingCharges.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">No incidental charges recorded.</p>
-                  ) : (() => {
-                    const chargeList = (
-                      <div className="divide-y divide-gray-100 rounded-lg border border-gray-150">
-                        {selectedBookingCharges.map((charge) => (
-                          <div key={charge.id} className="flex items-center justify-between gap-3 p-3 text-xs">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-gray-800">{charge.label}</p>
-                              <p className="mt-0.5 text-[10px] text-gray-500 capitalize">
-                                {charge.category.replace(/-/g, " ")} · {charge.addedAt ? charge.addedAt.slice(0, 10) : "Pending timestamp"}
-                                {charge.voidOf ? " · reversal" : ""}
-                              </p>
-                              {charge.note ? <p className="mt-1 text-[10px] text-gray-500">{charge.note}</p> : null}
-                            </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <span className={`font-bold ${charge.amount < 0 ? "text-red-600" : "text-gray-900"}`}>{formatPrice(charge.amount)}</span>
-                              {!charge.voidOf && charge.amount > 0 && !selectedBookingCharges.some((entry) => entry.voidOf === charge.id) && selectedBooking.status !== "checked-out" ? (
-                                <button type="button" onClick={() => setChargeToVoid(charge)} className="min-h-[44px] rounded-lg px-3 text-[10px] font-bold text-red-600 hover:bg-red-50">Void</button>
-                              ) : null}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                    if (selectedBookingCharges.length >= 4) {
-                      return (
-                        <details className="group" defaultChecked>
-                          <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-800 [&::-webkit-details-marker]:hidden">
-                            <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
-                            {selectedBookingCharges.length} entries
-                          </summary>
-                          <div className="mt-2">{chargeList}</div>
-                        </details>
-                      );
-                    }
-                    return chargeList;
-                  })()}
-
-                </div>
-              </div>
-            )}
-
-            {chargeToVoid ? (
-              <ConfirmForm
-                title="Void incidental charge?"
-                message={<>A negative reversal for <strong>{chargeToVoid.label}</strong> ({formatPrice(chargeToVoid.amount)}) will be appended. The original entry will remain in the audit trail.</>}
-                reasonLabel="Void reason"
-                reasonPlaceholder="Required audit note"
-                confirmLabel="Add reversal"
-                cancelLabel="Keep charge"
-                variant="danger"
-                reasonRequired
-                onConfirm={(reason) => void handleVoidCharge(reason)}
-                onCancel={() => setChargeToVoid(null)}
-              />
-            ) : null}
+            <IncidentalChargeList
+              charges={selectedBookingCharges}
+              booking={selectedBooking}
+              chargeToVoid={chargeToVoid}
+              onAddCharge={() => { setChargeCategory("other"); setChargeLabel(""); setChargeAmount(""); setChargeNote(""); setShowChargeModal(true); }}
+              onSetChargeToVoid={setChargeToVoid}
+              onVoidCharge={handleVoidCharge}
+            />
 
             {/* UCO-08/UCO-10: post-checkout receivable state */}
             {selectedBooking.status === "checked-out" && (() => {

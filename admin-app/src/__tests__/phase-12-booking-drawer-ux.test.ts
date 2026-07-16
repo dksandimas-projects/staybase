@@ -6,7 +6,10 @@ const repoRoot = resolve(__dirname, "../../..");
 const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
 const pageSrc = read("admin-app/src/pages/BookingsPage.tsx");
 const workspaceSrc = read("admin-app/src/components/BookingDrawerWorkspace.tsx");
-const drawerSrc = `${pageSrc}\n${workspaceSrc}`;
+const regFormSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
+const emailActionsSrc = read("admin-app/src/components/BookingEmailActions.tsx");
+const incidentalSrc = read("admin-app/src/components/IncidentalChargeList.tsx");
+const drawerSrc = `${pageSrc}\n${workspaceSrc}\n${regFormSrc}\n${emailActionsSrc}\n${incidentalSrc}`;
 
 describe("Phase 12 — booking drawer information architecture", () => {
   it("provides the four task-based sections with accessible tabs", () => {

@@ -26,6 +26,8 @@ describe("Roadmap fixes batch tests", () => {
   it("QA-Email-Resend: Resend Transactional Email per booking", () => {
     const adminContextSrc = readFileSync(resolve(__dirname, "../context/AdminContext.tsx"), "utf8");
     const bookingsPageSrc = readFileSync(resolve(__dirname, "../pages/BookingsPage.tsx"), "utf8");
+    const emailActionsSrc = readFileSync(resolve(__dirname, "../components/BookingEmailActions.tsx"), "utf8");
+    const allSrc = `${bookingsPageSrc}\n${emailActionsSrc}`;
 
     // Verify AdminContext exposes resendBookingEmail and calls the backend correctly
     expect(adminContextSrc).toMatch(/resendBookingEmail/);
@@ -35,8 +37,8 @@ describe("Roadmap fixes batch tests", () => {
 
     // Verify BookingsPage incorporates resendBookingEmail and displays the interface
     expect(bookingsPageSrc).toMatch(/resendBookingEmail/);
-    expect(bookingsPageSrc).toMatch(/Resend Transactional Email/);
+    expect(allSrc).toMatch(/Resend Transactional Email/);
     expect(bookingsPageSrc).toMatch(/handleResendEmail/);
-    expect(bookingsPageSrc).toMatch(/getRecommendedEmailAction/);
+    expect(emailActionsSrc).toMatch(/getRecommendedEmailAction/);
   });
 });
