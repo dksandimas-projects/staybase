@@ -14192,22 +14192,22 @@ var require_crypto2 = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.NodeCrypto = void 0;
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var NodeCrypto = class {
       async sha256DigestBase64(str) {
-        return crypto17.createHash("sha256").update(str).digest("base64");
+        return crypto18.createHash("sha256").update(str).digest("base64");
       }
       randomBytesBase64(count) {
-        return crypto17.randomBytes(count).toString("base64");
+        return crypto18.randomBytes(count).toString("base64");
       }
       async verify(pubkey, data, signature) {
-        const verifier = crypto17.createVerify("RSA-SHA256");
+        const verifier = crypto18.createVerify("RSA-SHA256");
         verifier.update(data);
         verifier.end();
         return verifier.verify(pubkey, signature, "base64");
       }
       async sign(privateKey, data) {
-        const signer = crypto17.createSign("RSA-SHA256");
+        const signer = crypto18.createSign("RSA-SHA256");
         signer.update(data);
         signer.end();
         return signer.sign(privateKey, "base64");
@@ -14225,7 +14225,7 @@ var require_crypto2 = __commonJS({
        *   string in hexadecimal encoding.
        */
       async sha256DigestHex(str) {
-        return crypto17.createHash("sha256").update(str).digest("hex");
+        return crypto18.createHash("sha256").update(str).digest("hex");
       }
       /**
        * Computes the HMAC hash of a message using the provided crypto key and the
@@ -14237,7 +14237,7 @@ var require_crypto2 = __commonJS({
        */
       async signWithHmacSha256(key, msg) {
         const cryptoKey = typeof key === "string" ? key : toBuffer(key);
-        return toArrayBuffer(crypto17.createHmac("sha256", cryptoKey).update(msg).digest());
+        return toArrayBuffer(crypto18.createHmac("sha256", cryptoKey).update(msg).digest());
       }
     };
     exports2.NodeCrypto = NodeCrypto;
@@ -15150,10 +15150,10 @@ var require_oauth2client = __commonJS({
        * https://github.com/googleapis/google-auth-library-nodejs/blob/main/samples/oauth2-codeVerifier.js
        */
       async generateCodeVerifierAsync() {
-        const crypto17 = (0, crypto_1.createCrypto)();
-        const randomString = crypto17.randomBytesBase64(96);
+        const crypto18 = (0, crypto_1.createCrypto)();
+        const randomString = crypto18.randomBytesBase64(96);
         const codeVerifier = randomString.replace(/\+/g, "~").replace(/=/g, "_").replace(/\//g, "-");
-        const unencodedCodeChallenge = await crypto17.sha256DigestBase64(codeVerifier);
+        const unencodedCodeChallenge = await crypto18.sha256DigestBase64(codeVerifier);
         const codeChallenge = unencodedCodeChallenge.split("=")[0].replace(/\+/g, "-").replace(/\//g, "_");
         return { codeVerifier, codeChallenge };
       }
@@ -15594,7 +15594,7 @@ var require_oauth2client = __commonJS({
        * @return Returns a promise resolving to LoginTicket on verification.
        */
       async verifySignedJwtWithCertsAsync(jwt, certs, requiredAudience, issuers, maxExpiry) {
-        const crypto17 = (0, crypto_1.createCrypto)();
+        const crypto18 = (0, crypto_1.createCrypto)();
         if (!maxExpiry) {
           maxExpiry = _OAuth2Client.DEFAULT_MAX_TOKEN_LIFETIME_SECS_;
         }
@@ -15607,7 +15607,7 @@ var require_oauth2client = __commonJS({
         let envelope;
         let payload;
         try {
-          envelope = JSON.parse(crypto17.decodeBase64StringUtf8(segments[0]));
+          envelope = JSON.parse(crypto18.decodeBase64StringUtf8(segments[0]));
         } catch (err) {
           if (err instanceof Error) {
             err.message = `Can't parse token envelope: ${segments[0]}': ${err.message}`;
@@ -15618,7 +15618,7 @@ var require_oauth2client = __commonJS({
           throw new Error("Can't parse token envelope: " + segments[0]);
         }
         try {
-          payload = JSON.parse(crypto17.decodeBase64StringUtf8(segments[1]));
+          payload = JSON.parse(crypto18.decodeBase64StringUtf8(segments[1]));
         } catch (err) {
           if (err instanceof Error) {
             err.message = `Can't parse token payload '${segments[0]}`;
@@ -15635,7 +15635,7 @@ var require_oauth2client = __commonJS({
         if (envelope.alg === "ES256") {
           signature = formatEcdsa.joseToDer(signature, "ES256").toString("base64");
         }
-        const verified = await crypto17.verify(cert2, signed, signature);
+        const verified = await crypto18.verify(cert2, signed, signature);
         if (!verified) {
           throw new Error("Invalid token signature: " + jwt);
         }
@@ -16010,14 +16010,14 @@ var require_buffer_equal_constant_time = __commonJS({
 var require_jwa = __commonJS({
   "../node_modules/jwa/index.js"(exports2, module2) {
     var Buffer6 = require_safe_buffer().Buffer;
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var formatEcdsa = require_ecdsa_sig_formatter();
     var util2 = require("util");
     var MSG_INVALID_ALGORITHM = '"%s" is not a valid algorithm.\n  Supported algorithms are:\n  "HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512" and "none".';
     var MSG_INVALID_SECRET = "secret must be a string or buffer";
     var MSG_INVALID_VERIFIER_KEY = "key must be a string or a buffer";
     var MSG_INVALID_SIGNER_KEY = "key must be a string, a buffer or an object";
-    var supportsKeyObjects = typeof crypto17.createPublicKey === "function";
+    var supportsKeyObjects = typeof crypto18.createPublicKey === "function";
     if (supportsKeyObjects) {
       MSG_INVALID_VERIFIER_KEY += " or a KeyObject";
       MSG_INVALID_SECRET += "or a KeyObject";
@@ -16107,17 +16107,17 @@ var require_jwa = __commonJS({
       return function sign(thing, secret) {
         checkIsSecretKey(secret);
         thing = normalizeInput(thing);
-        var hmac = crypto17.createHmac("sha" + bits, secret);
+        var hmac = crypto18.createHmac("sha" + bits, secret);
         var sig = (hmac.update(thing), hmac.digest("base64"));
         return fromBase64(sig);
       };
     }
     var bufferEqual;
-    var timingSafeEqual = "timingSafeEqual" in crypto17 ? function timingSafeEqual2(a, b3) {
+    var timingSafeEqual = "timingSafeEqual" in crypto18 ? function timingSafeEqual2(a, b3) {
       if (a.byteLength !== b3.byteLength) {
         return false;
       }
-      return crypto17.timingSafeEqual(a, b3);
+      return crypto18.timingSafeEqual(a, b3);
     } : function timingSafeEqual2(a, b3) {
       if (!bufferEqual) {
         bufferEqual = require_buffer_equal_constant_time();
@@ -16134,7 +16134,7 @@ var require_jwa = __commonJS({
       return function sign(thing, privateKey) {
         checkIsPrivateKey(privateKey);
         thing = normalizeInput(thing);
-        var signer = crypto17.createSign("RSA-SHA" + bits);
+        var signer = crypto18.createSign("RSA-SHA" + bits);
         var sig = (signer.update(thing), signer.sign(privateKey, "base64"));
         return fromBase64(sig);
       };
@@ -16144,7 +16144,7 @@ var require_jwa = __commonJS({
         checkIsPublicKey(publicKey);
         thing = normalizeInput(thing);
         signature = toBase64(signature);
-        var verifier = crypto17.createVerify("RSA-SHA" + bits);
+        var verifier = crypto18.createVerify("RSA-SHA" + bits);
         verifier.update(thing);
         return verifier.verify(publicKey, signature, "base64");
       };
@@ -16153,11 +16153,11 @@ var require_jwa = __commonJS({
       return function sign(thing, privateKey) {
         checkIsPrivateKey(privateKey);
         thing = normalizeInput(thing);
-        var signer = crypto17.createSign("RSA-SHA" + bits);
+        var signer = crypto18.createSign("RSA-SHA" + bits);
         var sig = (signer.update(thing), signer.sign({
           key: privateKey,
-          padding: crypto17.constants.RSA_PKCS1_PSS_PADDING,
-          saltLength: crypto17.constants.RSA_PSS_SALTLEN_DIGEST
+          padding: crypto18.constants.RSA_PKCS1_PSS_PADDING,
+          saltLength: crypto18.constants.RSA_PSS_SALTLEN_DIGEST
         }, "base64"));
         return fromBase64(sig);
       };
@@ -16167,12 +16167,12 @@ var require_jwa = __commonJS({
         checkIsPublicKey(publicKey);
         thing = normalizeInput(thing);
         signature = toBase64(signature);
-        var verifier = crypto17.createVerify("RSA-SHA" + bits);
+        var verifier = crypto18.createVerify("RSA-SHA" + bits);
         verifier.update(thing);
         return verifier.verify({
           key: publicKey,
-          padding: crypto17.constants.RSA_PKCS1_PSS_PADDING,
-          saltLength: crypto17.constants.RSA_PSS_SALTLEN_DIGEST
+          padding: crypto18.constants.RSA_PKCS1_PSS_PADDING,
+          saltLength: crypto18.constants.RSA_PSS_SALTLEN_DIGEST
         }, signature, "base64");
       };
     }
@@ -18748,14 +18748,14 @@ var require_awsrequestsigner = __commonJS({
       }
     };
     exports2.AwsRequestSigner = AwsRequestSigner;
-    async function sign(crypto17, key, msg) {
-      return await crypto17.signWithHmacSha256(key, msg);
+    async function sign(crypto18, key, msg) {
+      return await crypto18.signWithHmacSha256(key, msg);
     }
-    async function getSigningKey(crypto17, key, dateStamp, region, serviceName) {
-      const kDate = await sign(crypto17, `AWS4${key}`, dateStamp);
-      const kRegion = await sign(crypto17, kDate, region);
-      const kService = await sign(crypto17, kRegion, serviceName);
-      const kSigning = await sign(crypto17, kService, "aws4_request");
+    async function getSigningKey(crypto18, key, dateStamp, region, serviceName) {
+      const kDate = await sign(crypto18, `AWS4${key}`, dateStamp);
+      const kRegion = await sign(crypto18, kDate, region);
+      const kService = await sign(crypto18, kRegion, serviceName);
+      const kSigning = await sign(crypto18, kService, "aws4_request");
       return kSigning;
     }
     async function generateAuthenticationHeaderMap(options) {
@@ -19721,7 +19721,7 @@ var require_gdchclient = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.GdchClient = exports2.GDCH_SERVICE_ACCOUNT_TYPE = void 0;
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var fs3 = require("fs");
     var https3 = require("https");
     var oauth2client_1 = require_oauth2client();
@@ -19912,7 +19912,7 @@ var require_gdchclient = __commonJS({
         const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
         const encodedPayload = this.base64UrlEncode(JSON.stringify(payload));
         const signingInput = `${encodedHeader}.${encodedPayload}`;
-        const signature = crypto17.sign("sha256", Buffer.from(signingInput), {
+        const signature = crypto18.sign("sha256", Buffer.from(signingInput), {
           key: this.privateKey,
           dsaEncoding: "ieee-p1363"
         });
@@ -20773,24 +20773,24 @@ var require_googleauth = __commonJS({
           const signed = await client.sign(data);
           return signed.signedBlob;
         }
-        const crypto17 = (0, crypto_1.createCrypto)();
+        const crypto18 = (0, crypto_1.createCrypto)();
         if (client instanceof jwtclient_1.JWT && client.key) {
-          const sign = await crypto17.sign(client.key, data);
+          const sign = await crypto18.sign(client.key, data);
           return sign;
         }
         const creds = await this.getCredentials();
         if (!creds.client_email) {
           throw new Error("Cannot sign data without `client_email`.");
         }
-        return this.signBlob(crypto17, creds.client_email, data, endpoint);
+        return this.signBlob(crypto18, creds.client_email, data, endpoint);
       }
-      async signBlob(crypto17, emailOrUniqueId, data, endpoint) {
+      async signBlob(crypto18, emailOrUniqueId, data, endpoint) {
         const url = new URL(endpoint + `${emailOrUniqueId}:signBlob`);
         const res = await this.request({
           method: "POST",
           url: url.href,
           data: {
-            payload: crypto17.encodeBase64StringUtf8(data)
+            payload: crypto18.encodeBase64StringUtf8(data)
           },
           retry: true,
           retryConfig: {
@@ -23701,7 +23701,7 @@ var require_firestore_client_config = __commonJS({
 var require_object_hash = __commonJS({
   "../node_modules/object-hash/index.js"(exports2, module2) {
     "use strict";
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     exports2 = module2.exports = objectHash;
     function objectHash(object, options) {
       options = applyDefaults(object, options);
@@ -23719,7 +23719,7 @@ var require_object_hash = __commonJS({
     exports2.keysMD5 = function(object) {
       return objectHash(object, { algorithm: "md5", encoding: "hex", excludeValues: true });
     };
-    var hashes = crypto17.getHashes ? crypto17.getHashes().slice() : ["sha1", "md5"];
+    var hashes = crypto18.getHashes ? crypto18.getHashes().slice() : ["sha1", "md5"];
     hashes.push("passthrough");
     var encodings = ["buffer", "hex", "binary", "base64"];
     function applyDefaults(object, sourceOptions) {
@@ -23765,7 +23765,7 @@ var require_object_hash = __commonJS({
     function hash(object, options) {
       var hashingStream;
       if (options.algorithm !== "passthrough") {
-        hashingStream = crypto17.createHash(options.algorithm);
+        hashingStream = crypto18.createHash(options.algorithm);
       } else {
         hashingStream = new PassThrough5();
       }
@@ -36486,22 +36486,22 @@ var require_crypto5 = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.NodeCrypto = void 0;
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var NodeCrypto = class {
       async sha256DigestBase64(str) {
-        return crypto17.createHash("sha256").update(str).digest("base64");
+        return crypto18.createHash("sha256").update(str).digest("base64");
       }
       randomBytesBase64(count) {
-        return crypto17.randomBytes(count).toString("base64");
+        return crypto18.randomBytes(count).toString("base64");
       }
       async verify(pubkey, data, signature) {
-        const verifier = crypto17.createVerify("RSA-SHA256");
+        const verifier = crypto18.createVerify("RSA-SHA256");
         verifier.update(data);
         verifier.end();
         return verifier.verify(pubkey, signature, "base64");
       }
       async sign(privateKey, data) {
-        const signer = crypto17.createSign("RSA-SHA256");
+        const signer = crypto18.createSign("RSA-SHA256");
         signer.update(data);
         signer.end();
         return signer.sign(privateKey, "base64");
@@ -36519,7 +36519,7 @@ var require_crypto5 = __commonJS({
        *   string in hexadecimal encoding.
        */
       async sha256DigestHex(str) {
-        return crypto17.createHash("sha256").update(str).digest("hex");
+        return crypto18.createHash("sha256").update(str).digest("hex");
       }
       /**
        * Computes the HMAC hash of a message using the provided crypto key and the
@@ -36531,7 +36531,7 @@ var require_crypto5 = __commonJS({
        */
       async signWithHmacSha256(key, msg) {
         const cryptoKey = typeof key === "string" ? key : toBuffer(key);
-        return toArrayBuffer(crypto17.createHmac("sha256", cryptoKey).update(msg).digest());
+        return toArrayBuffer(crypto18.createHmac("sha256", cryptoKey).update(msg).digest());
       }
     };
     exports2.NodeCrypto = NodeCrypto;
@@ -37087,10 +37087,10 @@ var require_oauth2client2 = __commonJS({
        * https://github.com/googleapis/google-auth-library-nodejs/blob/main/samples/oauth2-codeVerifier.js
        */
       async generateCodeVerifierAsync() {
-        const crypto17 = (0, crypto_1.createCrypto)();
-        const randomString = crypto17.randomBytesBase64(96);
+        const crypto18 = (0, crypto_1.createCrypto)();
+        const randomString = crypto18.randomBytesBase64(96);
         const codeVerifier = randomString.replace(/\+/g, "~").replace(/=/g, "_").replace(/\//g, "-");
-        const unencodedCodeChallenge = await crypto17.sha256DigestBase64(codeVerifier);
+        const unencodedCodeChallenge = await crypto18.sha256DigestBase64(codeVerifier);
         const codeChallenge = unencodedCodeChallenge.split("=")[0].replace(/\+/g, "-").replace(/\//g, "_");
         return { codeVerifier, codeChallenge };
       }
@@ -37534,7 +37534,7 @@ var require_oauth2client2 = __commonJS({
        * @return Returns a promise resolving to LoginTicket on verification.
        */
       async verifySignedJwtWithCertsAsync(jwt, certs, requiredAudience, issuers, maxExpiry) {
-        const crypto17 = (0, crypto_1.createCrypto)();
+        const crypto18 = (0, crypto_1.createCrypto)();
         if (!maxExpiry) {
           maxExpiry = _OAuth2Client.DEFAULT_MAX_TOKEN_LIFETIME_SECS_;
         }
@@ -37547,7 +37547,7 @@ var require_oauth2client2 = __commonJS({
         let envelope;
         let payload;
         try {
-          envelope = JSON.parse(crypto17.decodeBase64StringUtf8(segments[0]));
+          envelope = JSON.parse(crypto18.decodeBase64StringUtf8(segments[0]));
         } catch (err) {
           if (err instanceof Error) {
             err.message = `Can't parse token envelope: ${segments[0]}': ${err.message}`;
@@ -37558,7 +37558,7 @@ var require_oauth2client2 = __commonJS({
           throw new Error("Can't parse token envelope: " + segments[0]);
         }
         try {
-          payload = JSON.parse(crypto17.decodeBase64StringUtf8(segments[1]));
+          payload = JSON.parse(crypto18.decodeBase64StringUtf8(segments[1]));
         } catch (err) {
           if (err instanceof Error) {
             err.message = `Can't parse token payload '${segments[0]}`;
@@ -37575,7 +37575,7 @@ var require_oauth2client2 = __commonJS({
         if (envelope.alg === "ES256") {
           signature = formatEcdsa.joseToDer(signature, "ES256").toString("base64");
         }
-        const verified = await crypto17.verify(cert2, signed, signature);
+        const verified = await crypto18.verify(cert2, signed, signature);
         if (!verified) {
           throw new Error("Invalid token signature: " + jwt);
         }
@@ -39720,14 +39720,14 @@ var require_awsrequestsigner2 = __commonJS({
       }
     };
     exports2.AwsRequestSigner = AwsRequestSigner;
-    async function sign(crypto17, key, msg) {
-      return await crypto17.signWithHmacSha256(key, msg);
+    async function sign(crypto18, key, msg) {
+      return await crypto18.signWithHmacSha256(key, msg);
     }
-    async function getSigningKey(crypto17, key, dateStamp, region, serviceName) {
-      const kDate = await sign(crypto17, `AWS4${key}`, dateStamp);
-      const kRegion = await sign(crypto17, kDate, region);
-      const kService = await sign(crypto17, kRegion, serviceName);
-      const kSigning = await sign(crypto17, kService, "aws4_request");
+    async function getSigningKey(crypto18, key, dateStamp, region, serviceName) {
+      const kDate = await sign(crypto18, `AWS4${key}`, dateStamp);
+      const kRegion = await sign(crypto18, kDate, region);
+      const kService = await sign(crypto18, kRegion, serviceName);
+      const kSigning = await sign(crypto18, kService, "aws4_request");
       return kSigning;
     }
     async function generateAuthenticationHeaderMap(options) {
@@ -41312,24 +41312,24 @@ var require_googleauth2 = __commonJS({
           const signed = await client.sign(data);
           return signed.signedBlob;
         }
-        const crypto17 = (0, crypto_1.createCrypto)();
+        const crypto18 = (0, crypto_1.createCrypto)();
         if (client instanceof jwtclient_1.JWT && client.key) {
-          const sign = await crypto17.sign(client.key, data);
+          const sign = await crypto18.sign(client.key, data);
           return sign;
         }
         const creds = await this.getCredentials();
         if (!creds.client_email) {
           throw new Error("Cannot sign data without `client_email`.");
         }
-        return this.signBlob(crypto17, creds.client_email, data, endpoint);
+        return this.signBlob(crypto18, creds.client_email, data, endpoint);
       }
-      async signBlob(crypto17, emailOrUniqueId, data, endpoint) {
+      async signBlob(crypto18, emailOrUniqueId, data, endpoint) {
         const url = new URL(endpoint + `${emailOrUniqueId}:signBlob`);
         const res = await this.request({
           method: "POST",
           url: url.href,
           data: {
-            payload: crypto17.encodeBase64StringUtf8(data)
+            payload: crypto18.encodeBase64StringUtf8(data)
           },
           retry: true,
           retryConfig: {
@@ -108263,8 +108263,8 @@ var require_crypto_signer = __commonJS({
        * @inheritDoc
        */
       sign(buffer) {
-        const crypto17 = require("node:crypto");
-        const sign = crypto17.createSign("RSA-SHA256");
+        const crypto18 = require("node:crypto");
+        const sign = crypto18.createSign("RSA-SHA256");
         sign.update(buffer);
         return Promise.resolve(sign.sign(this.credential.privateKey));
       }
@@ -112049,9 +112049,9 @@ var require_webcrypto = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.isCryptoKey = void 0;
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var util2 = require("util");
-    var webcrypto = crypto17.webcrypto;
+    var webcrypto = crypto18.webcrypto;
     exports2.default = webcrypto;
     exports2.isCryptoKey = util2.types.isCryptoKey ? (key) => util2.types.isCryptoKey(key) : (key) => false;
   }
@@ -114702,22 +114702,22 @@ var require_sign2 = __commonJS({
   "../node_modules/jose/dist/node/cjs/runtime/sign.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var util_1 = require("util");
     var dsa_digest_js_1 = require_dsa_digest();
     var hmac_digest_js_1 = require_hmac_digest();
     var node_key_js_1 = require_node_key();
     var get_sign_verify_key_js_1 = require_get_sign_verify_key();
     var oneShotSign;
-    if (crypto17.sign.length > 3) {
-      oneShotSign = (0, util_1.promisify)(crypto17.sign);
+    if (crypto18.sign.length > 3) {
+      oneShotSign = (0, util_1.promisify)(crypto18.sign);
     } else {
-      oneShotSign = crypto17.sign;
+      oneShotSign = crypto18.sign;
     }
     var sign = async (alg, key, data) => {
       const keyObject = (0, get_sign_verify_key_js_1.default)(alg, key, "sign");
       if (alg.startsWith("HS")) {
-        const hmac = crypto17.createHmac((0, hmac_digest_js_1.default)(alg), keyObject);
+        const hmac = crypto18.createHmac((0, hmac_digest_js_1.default)(alg), keyObject);
         hmac.update(data);
         return hmac.digest();
       }
@@ -114732,7 +114732,7 @@ var require_verify2 = __commonJS({
   "../node_modules/jose/dist/node/cjs/runtime/verify.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var util_1 = require("util");
     var dsa_digest_js_1 = require_dsa_digest();
     var node_key_js_1 = require_node_key();
@@ -114740,10 +114740,10 @@ var require_verify2 = __commonJS({
     var get_sign_verify_key_js_1 = require_get_sign_verify_key();
     var flags_js_1 = require_flags();
     var oneShotVerify;
-    if (crypto17.verify.length > 4 && flags_js_1.oneShotCallback) {
-      oneShotVerify = (0, util_1.promisify)(crypto17.verify);
+    if (crypto18.verify.length > 4 && flags_js_1.oneShotCallback) {
+      oneShotVerify = (0, util_1.promisify)(crypto18.verify);
     } else {
-      oneShotVerify = crypto17.verify;
+      oneShotVerify = crypto18.verify;
     }
     var verify = async (alg, key, signature, data) => {
       const keyObject = (0, get_sign_verify_key_js_1.default)(alg, key, "verify");
@@ -114751,7 +114751,7 @@ var require_verify2 = __commonJS({
         const expected = await (0, sign_js_1.default)(alg, keyObject, data);
         const actual = signature;
         try {
-          return crypto17.timingSafeEqual(actual, expected);
+          return crypto18.timingSafeEqual(actual, expected);
         } catch {
           return false;
         }
@@ -121602,22 +121602,22 @@ var require_crypto8 = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.NodeCrypto = void 0;
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var NodeCrypto = class {
       async sha256DigestBase64(str) {
-        return crypto17.createHash("sha256").update(str).digest("base64");
+        return crypto18.createHash("sha256").update(str).digest("base64");
       }
       randomBytesBase64(count) {
-        return crypto17.randomBytes(count).toString("base64");
+        return crypto18.randomBytes(count).toString("base64");
       }
       async verify(pubkey, data, signature) {
-        const verifier = crypto17.createVerify("RSA-SHA256");
+        const verifier = crypto18.createVerify("RSA-SHA256");
         verifier.update(data);
         verifier.end();
         return verifier.verify(pubkey, signature, "base64");
       }
       async sign(privateKey, data) {
-        const signer = crypto17.createSign("RSA-SHA256");
+        const signer = crypto18.createSign("RSA-SHA256");
         signer.update(data);
         signer.end();
         return signer.sign(privateKey, "base64");
@@ -121635,7 +121635,7 @@ var require_crypto8 = __commonJS({
        *   string in hexadecimal encoding.
        */
       async sha256DigestHex(str) {
-        return crypto17.createHash("sha256").update(str).digest("hex");
+        return crypto18.createHash("sha256").update(str).digest("hex");
       }
       /**
        * Computes the HMAC hash of a message using the provided crypto key and the
@@ -121647,7 +121647,7 @@ var require_crypto8 = __commonJS({
        */
       async signWithHmacSha256(key, msg) {
         const cryptoKey = typeof key === "string" ? key : toBuffer(key);
-        return toArrayBuffer(crypto17.createHmac("sha256", cryptoKey).update(msg).digest());
+        return toArrayBuffer(crypto18.createHmac("sha256", cryptoKey).update(msg).digest());
       }
     };
     exports2.NodeCrypto = NodeCrypto;
@@ -122203,10 +122203,10 @@ var require_oauth2client3 = __commonJS({
        * https://github.com/googleapis/google-auth-library-nodejs/blob/main/samples/oauth2-codeVerifier.js
        */
       async generateCodeVerifierAsync() {
-        const crypto17 = (0, crypto_1.createCrypto)();
-        const randomString = crypto17.randomBytesBase64(96);
+        const crypto18 = (0, crypto_1.createCrypto)();
+        const randomString = crypto18.randomBytesBase64(96);
         const codeVerifier = randomString.replace(/\+/g, "~").replace(/=/g, "_").replace(/\//g, "-");
-        const unencodedCodeChallenge = await crypto17.sha256DigestBase64(codeVerifier);
+        const unencodedCodeChallenge = await crypto18.sha256DigestBase64(codeVerifier);
         const codeChallenge = unencodedCodeChallenge.split("=")[0].replace(/\+/g, "-").replace(/\//g, "_");
         return { codeVerifier, codeChallenge };
       }
@@ -122650,7 +122650,7 @@ var require_oauth2client3 = __commonJS({
        * @return Returns a promise resolving to LoginTicket on verification.
        */
       async verifySignedJwtWithCertsAsync(jwt, certs, requiredAudience, issuers, maxExpiry) {
-        const crypto17 = (0, crypto_1.createCrypto)();
+        const crypto18 = (0, crypto_1.createCrypto)();
         if (!maxExpiry) {
           maxExpiry = _OAuth2Client.DEFAULT_MAX_TOKEN_LIFETIME_SECS_;
         }
@@ -122663,7 +122663,7 @@ var require_oauth2client3 = __commonJS({
         let envelope;
         let payload;
         try {
-          envelope = JSON.parse(crypto17.decodeBase64StringUtf8(segments[0]));
+          envelope = JSON.parse(crypto18.decodeBase64StringUtf8(segments[0]));
         } catch (err) {
           if (err instanceof Error) {
             err.message = `Can't parse token envelope: ${segments[0]}': ${err.message}`;
@@ -122674,7 +122674,7 @@ var require_oauth2client3 = __commonJS({
           throw new Error("Can't parse token envelope: " + segments[0]);
         }
         try {
-          payload = JSON.parse(crypto17.decodeBase64StringUtf8(segments[1]));
+          payload = JSON.parse(crypto18.decodeBase64StringUtf8(segments[1]));
         } catch (err) {
           if (err instanceof Error) {
             err.message = `Can't parse token payload '${segments[0]}`;
@@ -122691,7 +122691,7 @@ var require_oauth2client3 = __commonJS({
         if (envelope.alg === "ES256") {
           signature = formatEcdsa.joseToDer(signature, "ES256").toString("base64");
         }
-        const verified = await crypto17.verify(cert2, signed, signature);
+        const verified = await crypto18.verify(cert2, signed, signature);
         if (!verified) {
           throw new Error("Invalid token signature: " + jwt);
         }
@@ -124572,14 +124572,14 @@ var require_awsrequestsigner3 = __commonJS({
       }
     };
     exports2.AwsRequestSigner = AwsRequestSigner;
-    async function sign(crypto17, key, msg) {
-      return await crypto17.signWithHmacSha256(key, msg);
+    async function sign(crypto18, key, msg) {
+      return await crypto18.signWithHmacSha256(key, msg);
     }
-    async function getSigningKey(crypto17, key, dateStamp, region, serviceName) {
-      const kDate = await sign(crypto17, `AWS4${key}`, dateStamp);
-      const kRegion = await sign(crypto17, kDate, region);
-      const kService = await sign(crypto17, kRegion, serviceName);
-      const kSigning = await sign(crypto17, kService, "aws4_request");
+    async function getSigningKey(crypto18, key, dateStamp, region, serviceName) {
+      const kDate = await sign(crypto18, `AWS4${key}`, dateStamp);
+      const kRegion = await sign(crypto18, kDate, region);
+      const kService = await sign(crypto18, kRegion, serviceName);
+      const kSigning = await sign(crypto18, kService, "aws4_request");
       return kSigning;
     }
     async function generateAuthenticationHeaderMap(options) {
@@ -126164,24 +126164,24 @@ var require_googleauth3 = __commonJS({
           const signed = await client.sign(data);
           return signed.signedBlob;
         }
-        const crypto17 = (0, crypto_1.createCrypto)();
+        const crypto18 = (0, crypto_1.createCrypto)();
         if (client instanceof jwtclient_1.JWT && client.key) {
-          const sign = await crypto17.sign(client.key, data);
+          const sign = await crypto18.sign(client.key, data);
           return sign;
         }
         const creds = await this.getCredentials();
         if (!creds.client_email) {
           throw new Error("Cannot sign data without `client_email`.");
         }
-        return this.signBlob(crypto17, creds.client_email, data, endpoint);
+        return this.signBlob(crypto18, creds.client_email, data, endpoint);
       }
-      async signBlob(crypto17, emailOrUniqueId, data, endpoint) {
+      async signBlob(crypto18, emailOrUniqueId, data, endpoint) {
         const url = new URL(endpoint + `${emailOrUniqueId}:signBlob`);
         const res = await this.request({
           method: "POST",
           url: url.href,
           data: {
-            payload: crypto17.encodeBase64StringUtf8(data)
+            payload: crypto18.encodeBase64StringUtf8(data)
           },
           retry: true,
           retryConfig: {
@@ -133005,7 +133005,7 @@ var require_signer = __commonJS({
     })();
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.SigningError = exports2.URLSigner = exports2.PATH_STYLED_HOST = exports2.SignerExceptionMessages = void 0;
-    var crypto17 = __importStar(require("crypto"));
+    var crypto18 = __importStar(require("crypto"));
     var url = __importStar(require("url"));
     var storage_js_1 = require_storage();
     var util_js_1 = require_util13();
@@ -133142,7 +133142,7 @@ var require_signer = __commonJS({
           };
           const canonicalQueryParams = this.getCanonicalQueryParams(queryParams);
           const canonicalRequest = this.getCanonicalRequest(config2.method, this.getResourcePath(!!config2.cname, config2.bucket, config2.file), canonicalQueryParams, extensionHeadersString, signedHeaders, contentSha256);
-          const hash = crypto17.createHash("sha256").update(canonicalRequest).digest("hex");
+          const hash = crypto18.createHash("sha256").update(canonicalRequest).digest("hex");
           const blobToSign = [
             "GOOG4-RSA-SHA256",
             dateISO,
@@ -133295,7 +133295,7 @@ var require_file = __commonJS({
     exports2.File = exports2.FileExceptionMessages = exports2.RequestError = exports2.STORAGE_POST_POLICY_BASE_URL = exports2.ActionToHTTPMethod = void 0;
     var index_js_1 = require_nodejs_common();
     var promisify_1 = require_src27();
-    var crypto17 = __importStar(require("crypto"));
+    var crypto18 = __importStar(require("crypto"));
     var fs3 = __importStar(require("fs"));
     var mime_1 = __importDefault(require_mime());
     var resumableUpload = __importStar(require_resumable_upload());
@@ -134894,7 +134894,7 @@ var require_file = __commonJS({
       setEncryptionKey(encryptionKey) {
         this.encryptionKey = encryptionKey;
         this.encryptionKeyBase64 = Buffer.from(encryptionKey).toString("base64");
-        this.encryptionKeyHash = crypto17.createHash("sha256").update(this.encryptionKeyBase64, "base64").digest("base64");
+        this.encryptionKeyHash = crypto18.createHash("sha256").update(this.encryptionKeyBase64, "base64").digest("base64");
         this.encryptionKeyInterceptor = {
           request: (reqOpts) => {
             reqOpts.headers = reqOpts.headers || {};
@@ -161885,7 +161885,7 @@ var require_react_dom_server_node_production = __commonJS({
   "../node_modules/react-dom/cjs/react-dom-server.node.production.js"(exports2) {
     "use strict";
     var util2 = require("util");
-    var crypto17 = require("crypto");
+    var crypto18 = require("crypto");
     var async_hooks = require("async_hooks");
     var React = require_react();
     var ReactDOM = require_react_dom();
@@ -164637,7 +164637,7 @@ var require_react_dom_server_node_production = __commonJS({
     function createPostbackActionStateKey(permalink, componentKeyPath, hookIndex) {
       if (void 0 !== permalink) return "p" + permalink;
       permalink = JSON.stringify([componentKeyPath, null, hookIndex]);
-      componentKeyPath = crypto17.createHash("md5");
+      componentKeyPath = crypto18.createHash("md5");
       componentKeyPath.update(permalink);
       return "k" + componentKeyPath.digest("hex");
     }
@@ -177854,7 +177854,7 @@ var require_react_dom_server_node_development = __commonJS({
       function createPostbackActionStateKey(permalink, componentKeyPath, hookIndex) {
         if (void 0 !== permalink) return "p" + permalink;
         permalink = JSON.stringify([componentKeyPath, null, hookIndex]);
-        componentKeyPath = crypto17.createHash("md5");
+        componentKeyPath = crypto18.createHash("md5");
         componentKeyPath.update(permalink);
         return "k" + componentKeyPath.digest("hex");
       }
@@ -181213,7 +181213,7 @@ var require_react_dom_server_node_development = __commonJS({
           }
         };
       }
-      var util2 = require("util"), crypto17 = require("crypto"), async_hooks = require("async_hooks"), React = require_react(), ReactDOM = require_react_dom(), stream = require("stream"), REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy"), REACT_SCOPE_TYPE = Symbol.for("react.scope"), REACT_ACTIVITY_TYPE = Symbol.for("react.activity"), REACT_LEGACY_HIDDEN_TYPE = Symbol.for("react.legacy_hidden"), REACT_MEMO_CACHE_SENTINEL = Symbol.for("react.memo_cache_sentinel"), REACT_VIEW_TRANSITION_TYPE = Symbol.for("react.view_transition"), MAYBE_ITERATOR_SYMBOL = Symbol.iterator, isArrayImpl = Array.isArray, jsxPropsParents = /* @__PURE__ */ new WeakMap(), jsxChildrenParents = /* @__PURE__ */ new WeakMap(), CLIENT_REFERENCE_TAG = Symbol.for("react.client.reference"), scheduleMicrotask = queueMicrotask, currentView = null, writtenBytes = 0, destinationHasCapacity$1 = true, textEncoder = new util2.TextEncoder(), assign = Object.assign, hasOwnProperty = Object.prototype.hasOwnProperty, VALID_ATTRIBUTE_NAME_REGEX = RegExp(
+      var util2 = require("util"), crypto18 = require("crypto"), async_hooks = require("async_hooks"), React = require_react(), ReactDOM = require_react_dom(), stream = require("stream"), REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element"), REACT_PORTAL_TYPE = Symbol.for("react.portal"), REACT_FRAGMENT_TYPE = Symbol.for("react.fragment"), REACT_STRICT_MODE_TYPE = Symbol.for("react.strict_mode"), REACT_PROFILER_TYPE = Symbol.for("react.profiler"), REACT_CONSUMER_TYPE = Symbol.for("react.consumer"), REACT_CONTEXT_TYPE = Symbol.for("react.context"), REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref"), REACT_SUSPENSE_TYPE = Symbol.for("react.suspense"), REACT_SUSPENSE_LIST_TYPE = Symbol.for("react.suspense_list"), REACT_MEMO_TYPE = Symbol.for("react.memo"), REACT_LAZY_TYPE = Symbol.for("react.lazy"), REACT_SCOPE_TYPE = Symbol.for("react.scope"), REACT_ACTIVITY_TYPE = Symbol.for("react.activity"), REACT_LEGACY_HIDDEN_TYPE = Symbol.for("react.legacy_hidden"), REACT_MEMO_CACHE_SENTINEL = Symbol.for("react.memo_cache_sentinel"), REACT_VIEW_TRANSITION_TYPE = Symbol.for("react.view_transition"), MAYBE_ITERATOR_SYMBOL = Symbol.iterator, isArrayImpl = Array.isArray, jsxPropsParents = /* @__PURE__ */ new WeakMap(), jsxChildrenParents = /* @__PURE__ */ new WeakMap(), CLIENT_REFERENCE_TAG = Symbol.for("react.client.reference"), scheduleMicrotask = queueMicrotask, currentView = null, writtenBytes = 0, destinationHasCapacity$1 = true, textEncoder = new util2.TextEncoder(), assign = Object.assign, hasOwnProperty = Object.prototype.hasOwnProperty, VALID_ATTRIBUTE_NAME_REGEX = RegExp(
         "^[:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD][:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD\\-.0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040]*$"
       ), illegalAttributeNameCache = {}, validatedAttributeNameCache = {}, unitlessNumbers = new Set(
         "animationIterationCount aspectRatio borderImageOutset borderImageSlice borderImageWidth boxFlex boxFlexGroup boxOrdinalGroup columnCount columns flex flexGrow flexPositive flexShrink flexNegative flexOrder gridArea gridRow gridRowEnd gridRowSpan gridRowStart gridColumn gridColumnEnd gridColumnSpan gridColumnStart fontWeight lineClamp lineHeight opacity order orphans scale tabSize widows zIndex zoom fillOpacity floodOpacity stopOpacity strokeDasharray strokeDashoffset strokeMiterlimit strokeOpacity strokeWidth MozAnimationIterationCount MozBoxFlex MozBoxFlexGroup MozLineClamp msAnimationIterationCount msFlex msZoom msFlexGrow msFlexNegative msFlexOrder msFlexPositive msFlexShrink msGridColumn msGridColumnSpan msGridRow msGridRowSpan WebkitAnimationIterationCount WebkitBoxFlex WebKitBoxFlexGroup WebkitBoxOrdinalGroup WebkitColumnCount WebkitColumns WebkitFlex WebkitFlexGrow WebkitFlexPositive WebkitFlexShrink WebkitLineClamp".split(
@@ -190865,23 +190865,23 @@ async function handleRejectDiscount(req, res) {
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
-    const bookingData = bookingDoc.data();
-    if (!bookingData.discountType) {
+    const bookingData2 = bookingDoc.data();
+    if (!bookingData2.discountType) {
       return res.status(400).json({ success: false, error: "Booking does not have an active government discount request." });
     }
-    const originalTotalPrice = bookingData.originalTotalPrice;
+    const originalTotalPrice = bookingData2.originalTotalPrice;
     if (originalTotalPrice === null || originalTotalPrice === void 0) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
-    const voucherDiscount = Number(bookingData.voucherDiscount || 0);
+    const voucherDiscount = Number(bookingData2.voucherDiscount || 0);
     const afterVoucher = Math.max(originalTotalPrice - voucherDiscount, 0);
-    const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
+    const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
     const memberDiscount = Math.round(afterVoucher * (memberDiscountPct / 100));
-    const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
+    const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
     const restoredTotalPrice = Math.max(afterVoucher - memberDiscount - pointsRedeemedValue, 0);
     const rateBreakdown = rebuildRateBreakdown({
-      ...bookingData,
+      ...bookingData2,
       discountType: "",
       discountPct: 0,
       pointsRedeemedValue,
@@ -190903,7 +190903,7 @@ async function handleRejectDiscount(req, res) {
     await bookingRef.update(updates);
     try {
       await sendBookingTrigger("discount-rejected", {
-        ...bookingData,
+        ...bookingData2,
         discountRejectionReason: reason || "",
         totalPrice: restoredTotalPrice
       });
@@ -190927,7 +190927,7 @@ async function handleRejectPayment(req, res) {
     return res.status(400).json({ success: false, error: "A rejection reason is required so the guest can fix the issue." });
   }
   const paymentRejectedBy = req.staff?.uid || "staff";
-  let bookingData = null;
+  let bookingData2 = null;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const bookingDoc = await bookingRef.get();
@@ -190941,7 +190941,7 @@ async function handleRejectPayment(req, res) {
         error: `Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`
       });
     }
-    bookingData = data;
+    bookingData2 = data;
     const updatedAt = /* @__PURE__ */ new Date();
     await bookingRef.update({
       status: "pending",
@@ -190972,7 +190972,7 @@ async function handleCancelBooking(req, res) {
   let validReason = typeof reason === "string" ? reason.slice(0, 500) : "";
   try {
     let bookingDocumentRef;
-    let bookingData;
+    let bookingData2;
     if (req.staff) {
       if (bookingId) {
         bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
@@ -190990,7 +190990,7 @@ async function handleCancelBooking(req, res) {
       if (!doc.exists) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      bookingData = doc.data();
+      bookingData2 = doc.data();
     } else {
       const parsed = guestCancelSchema.safeParse(req.body || {});
       if (!parsed.success) {
@@ -191010,12 +191010,12 @@ async function handleCancelBooking(req, res) {
         });
       }
       bookingDocumentRef = snapshot.docs[0].ref;
-      bookingData = snapshot.docs[0].data();
+      bookingData2 = snapshot.docs[0].data();
     }
-    if (bookingData.status === "checked-in" || bookingData.status === "checked-out" || bookingData.status === "cancelled") {
+    if (bookingData2.status === "checked-in" || bookingData2.status === "checked-out" || bookingData2.status === "cancelled") {
       return res.status(400).json({
         success: false,
-        error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
+        error: `Booking cannot be cancelled because its status is already ${bookingData2.status}. Please contact the front desk.`
       });
     }
     await adminDb.runTransaction(async (transaction) => {
@@ -191079,7 +191079,7 @@ async function handleCancelBooking(req, res) {
     });
     try {
       await sendBookingTrigger("booking-cancelled", {
-        ...bookingData,
+        ...bookingData2,
         cancellationReason: validReason
       });
     } catch (emailErr) {
@@ -191092,7 +191092,7 @@ async function handleCancelBooking(req, res) {
   }
 }
 async function handleAddPayment(req, res) {
-  const { bookingId, paymentId, amount, method, note } = req.body || {};
+  const { bookingId, paymentId, amount, method, note, transactionReference } = req.body || {};
   if (!bookingId || !paymentId || amount === void 0 || !method) {
     return res.status(400).json({ success: false, error: "Booking ID, payment ID, amount, and payment method are required." });
   }
@@ -191107,17 +191107,20 @@ async function handleAddPayment(req, res) {
     return res.status(400).json({ success: false, error: "Payment amount exceeds the 1,000,000 per-transaction limit." });
   }
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
+  const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
   const staffUid = req.staff?.uid || "staff";
   const paymentRecord = {
     type: "payment",
     amount: numericAmount,
     method,
     note: safeNote,
+    transactionReference: safeTransactionReference,
     reason: null,
     approvedBy: null,
     recordedBy: staffUid,
     recordedAt: /* @__PURE__ */ new Date()
   };
+  if (!safeTransactionReference) delete paymentRecord.transactionReference;
   let totalPaid = 0;
   let totalPrice = 0;
   let isConfirmableStatus = false;
@@ -191135,9 +191138,19 @@ async function handleAddPayment(req, res) {
       if (!bookingDoc.exists) {
         throw new Error("Booking not found");
       }
-      const bookingData = bookingDoc.data();
-      bookingDataSnapshot = bookingData;
+      const bookingData2 = bookingDoc.data();
+      bookingDataSnapshot = bookingData2;
       transitionedToPaymentConfirmed = false;
+      if (method !== "pay-at-hotel" && method !== "add-to-bill") {
+        const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+        const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
+        const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p) => p && p.method === method);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && !safeTransactionReference) {
+          throw new Error("Transaction reference is required for this payment method.");
+        }
+      }
       const paymentsRef = bookingRef.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
@@ -191147,24 +191160,24 @@ async function handleAddPayment(req, res) {
       const existingPayment = paymentsSnapshot.docs.find((docSnap) => docSnap.id === paymentId);
       if (existingPayment) {
         const existingData = existingPayment.data();
-        const sameRequest = Number(existingData.amount) === numericAmount && String(existingData.method) === String(method) && String(existingData.note || "") === safeNote;
+        const sameRequest = Number(existingData.amount) === numericAmount && String(existingData.method) === String(method) && String(existingData.note || "") === safeNote && String(existingData.transactionReference || "") === (safeTransactionReference || "");
         if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
         idempotentReplay = true;
         totalPaid = existingPaid;
-        totalPrice = Number(bookingData.totalPrice || 0);
+        totalPrice = Number(bookingData2.totalPrice || 0);
         fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
         staffPaymentMarkerMissing = false;
         return;
       }
       totalPaid = existingPaid + numericAmount;
-      totalPrice = Number(bookingData.totalPrice || 0);
+      totalPrice = Number(bookingData2.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
-      isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
-      hadPaymentProof = !!bookingData.paymentProofUrl;
-      staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
-      const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
-      const settlesCheckedOutFolio = bookingData.status === "checked-out" && bookingData.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData.checkedOutFolioTotal || 0);
-      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId ? adminDb.collection("members").doc(String(bookingData.memberId)) : null;
+      isConfirmableStatus = bookingData2.status === "pending" || bookingData2.status === "payment-uploaded";
+      hadPaymentProof = !!bookingData2.paymentProofUrl;
+      staffPaymentMarkerMissing = !bookingData2.emailNotificationsSent?.staffNewPayment;
+      const pendingLoyaltyPoints = Math.max(Number(bookingData2.pendingLoyaltyPoints || 0), 0);
+      const settlesCheckedOutFolio = bookingData2.status === "checked-out" && bookingData2.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData2.checkedOutFolioTotal || 0);
+      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData2.memberId ? adminDb.collection("members").doc(String(bookingData2.memberId)) : null;
       const loyaltyMemberDoc = loyaltyMemberRef ? await transaction.get(loyaltyMemberRef) : null;
       const bookingUpdates = {};
       if (hadPaymentProof && staffPaymentMarkerMissing) {
@@ -191179,7 +191192,7 @@ async function handleAddPayment(req, res) {
         });
         transitionedToPaymentConfirmed = true;
         bookingDataSnapshot = {
-          ...bookingData,
+          ...bookingData2,
           ...bookingUpdates
         };
       }
@@ -191202,8 +191215,8 @@ async function handleAddPayment(req, res) {
           type: "earn",
           points: loyaltyPointsAwarded,
           bookingId,
-          bookingRef: bookingData.bookingRef,
-          description: `Settled Stay Earnings (${bookingData.bookingRef})`,
+          bookingRef: bookingData2.bookingRef,
+          description: `Settled Stay Earnings (${bookingData2.bookingRef})`,
           by: staffUid,
           createdAt: awardedAt
         });
@@ -191220,6 +191233,9 @@ async function handleAddPayment(req, res) {
     }
     if (error.message === "Payment ID has already been used for a different payment.") {
       return res.status(409).json({ success: false, error: error.message });
+    }
+    if (error.message === "Transaction reference is required for this payment method.") {
+      return res.status(400).json({ success: false, error: error.message });
     }
     console.error("Add payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
@@ -191317,13 +191333,13 @@ async function handleMarkPaymentConfirmed(req, res) {
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const handledBy = req.staff?.uid || "staff";
-    let bookingData = null;
+    let bookingData2 = null;
     let alreadyConfirmed = false;
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
-      bookingData = data;
+      bookingData2 = data;
       if (data.status === "payment-confirmed") {
         alreadyConfirmed = true;
         return;
@@ -191342,7 +191358,7 @@ async function handleMarkPaymentConfirmed(req, res) {
       return res.status(200).json({ success: true, data: { status: "payment-confirmed", alreadyConfirmed: true } });
     }
     try {
-      await sendBookingTrigger("payment-confirmed", { ...bookingData, status: "payment-confirmed" });
+      await sendBookingTrigger("payment-confirmed", { ...bookingData2, status: "payment-confirmed" });
     } catch (emailErr) {
       console.error("Failed to send payment-confirmed email:", emailErr);
     }
@@ -191361,6 +191377,161 @@ async function handleMarkPaymentConfirmed(req, res) {
     return res.status(500).json({ success: false, error: error.message || "Unable to confirm payment." });
   }
 }
+async function handleVerifyAndRecordPayment(req, res) {
+  const { bookingId, amount, method, transactionReference, note } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!method) {
+    return res.status(400).json({ success: false, error: "Payment method is required." });
+  }
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return res.status(400).json({ success: false, error: "Verified amount must be a positive number." });
+  }
+  if (numericAmount > 1e6) {
+    return res.status(400).json({ success: false, error: "Verified amount exceeds the 1,000,000 per-transaction limit." });
+  }
+  const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
+  const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
+  const staffUid = req.staff?.uid || "staff";
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    let bookingData2 = null;
+    let totalCollected = 0;
+    let totalPrice = 0;
+    let fullyPaid = false;
+    let idempotentReplay = false;
+    let paymentId = "";
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
+      const data = bookingDoc.data();
+      bookingData2 = data;
+      if (data.status === "payment-confirmed" || data.status === "confirmed") {
+        throw new Error("ALREADY_CONFIRMED");
+      }
+      if (data.status !== "payment-uploaded" && data.status !== "pending") {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+      if (method !== "pay-at-hotel" && method !== "add-to-bill") {
+        const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+        const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
+        const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
+        const pmConfig = paymentMethodsArr.find((p) => p && p.method === method);
+        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
+        if (isRefRequired && !safeTransactionReference) {
+          throw new Error("Transaction reference is required for this payment method.");
+        }
+      }
+      const paymentsRef = bookingRef.collection("payments");
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
+        return sum + Number(docSnap.data().amount || 0);
+      }, 0);
+      const matchedPayment = paymentsSnapshot.docs.find((docSnap) => {
+        const d = docSnap.data();
+        return Number(d.amount) === numericAmount && String(d.method) === String(method) && (d.transactionReference || "") === (safeTransactionReference || "");
+      });
+      if (matchedPayment) {
+        idempotentReplay = true;
+        paymentId = matchedPayment.id;
+        totalPrice = Number(data.totalPrice || 0);
+        totalCollected = existingPaid;
+        fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+        return;
+      }
+      paymentId = paymentsRef.doc().id;
+      totalPrice = Number(data.totalPrice || 0);
+      totalCollected = existingPaid + numericAmount;
+      fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+      const paymentRecord = {
+        type: "payment",
+        amount: numericAmount,
+        method,
+        note: safeNote || "Verified payment proof",
+        transactionReference: safeTransactionReference,
+        reason: null,
+        approvedBy: null,
+        recordedBy: staffUid,
+        recordedAt: /* @__PURE__ */ new Date()
+      };
+      if (!safeTransactionReference) delete paymentRecord.transactionReference;
+      transaction.create(paymentsRef.doc(paymentId), paymentRecord);
+      const bookingUpdates = {
+        updatedAt: /* @__PURE__ */ new Date()
+      };
+      if (fullyPaid) {
+        bookingUpdates.status = "payment-confirmed";
+        bookingUpdates.handledBy = staffUid;
+        bookingUpdates.paymentConfirmedAt = /* @__PURE__ */ new Date();
+      }
+      transaction.update(bookingRef, bookingUpdates);
+      bookingData2 = { ...data, ...bookingUpdates };
+    });
+    if (idempotentReplay) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          idempotentReplay: true,
+          paymentId,
+          totalCollected,
+          status: bookingData2?.status || null,
+          fullyPaid
+        }
+      });
+    }
+    try {
+      if (fullyPaid) {
+        await sendBookingTrigger("payment-confirmed", { ...bookingData2, status: "payment-confirmed" });
+      }
+      await writeNotification({
+        type: "payment",
+        title: fullyPaid ? `Payment verified \u2014 ${bookingData2?.bookingRef || bookingId} (full)` : `Partial payment recorded \u2014 ${bookingData2?.bookingRef || bookingId} (${numericAmount})`,
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: bookingData2?.roomNumber || null,
+        bookingRef: bookingData2?.bookingRef || null
+      });
+    } catch (sideEffectErr) {
+      console.error("Verify-and-record side effect error:", sideEffectErr);
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        paymentId,
+        amount: numericAmount,
+        method,
+        transactionReference: safeTransactionReference,
+        recordedBy: staffUid,
+        totalCollected,
+        status: fullyPaid ? "payment-confirmed" : "payment-uploaded",
+        fullyPaid
+      }
+    });
+  } catch (error) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message === "ALREADY_CONFIRMED") {
+      return res.status(200).json({
+        success: true,
+        data: { alreadyConfirmed: true, status: bookingData?.status || "payment-confirmed" }
+      });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment cannot be verified because the booking status is ${error.message.split(":")[1]}.`
+      });
+    }
+    if (error?.message?.includes("Transaction reference is required")) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+    console.error("Verify and record payment handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "Unable to verify and record payment." });
+  }
+}
 async function handleConfirmBooking(req, res) {
   const { bookingId } = req.body || {};
   if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
@@ -191369,7 +191540,7 @@ async function handleConfirmBooking(req, res) {
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const confirmedBy = req.staff?.uid || "staff";
-    let bookingData = null;
+    let bookingData2 = null;
     let alreadyConfirmed = false;
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
@@ -191377,7 +191548,7 @@ async function handleConfirmBooking(req, res) {
         throw new Error("BOOKING_NOT_FOUND");
       }
       const data = bookingDoc.data();
-      bookingData = data;
+      bookingData2 = data;
       if (data.status === "confirmed") {
         alreadyConfirmed = true;
         return;
@@ -191397,17 +191568,17 @@ async function handleConfirmBooking(req, res) {
       return res.status(200).json({ success: true, data: { status: "confirmed", alreadyConfirmed: true } });
     }
     try {
-      await sendBookingTrigger("booking-confirmed", { ...bookingData, status: "confirmed" });
+      await sendBookingTrigger("booking-confirmed", { ...bookingData2, status: "confirmed" });
     } catch (emailErr) {
       console.error("Failed to send booking confirmation email:", emailErr);
     }
     await writeNotification({
       type: "booking",
-      title: `Booking confirmed \u2014 ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
+      title: `Booking confirmed \u2014 ${bookingData2.bookingRef || bookingId} (Room ${bookingData2.roomNumber || ""})`.trim(),
       entityType: "booking",
       entityId: bookingId,
-      roomNumber: bookingData.roomNumber || null,
-      bookingRef: bookingData.bookingRef || null
+      roomNumber: bookingData2.roomNumber || null,
+      bookingRef: bookingData2.bookingRef || null
     });
     return res.status(200).json({ success: true, data: { status: "confirmed" } });
   } catch (error) {
@@ -191437,19 +191608,19 @@ async function handleCheckinBooking(req, res) {
       if (!bookingDoc.exists) {
         throw new Error("Booking not found.");
       }
-      const bookingData = bookingDoc.data() || {};
+      const bookingData2 = bookingDoc.data() || {};
       const readiness = getCheckInReadiness({
-        status: bookingData.status,
-        guestIdPhotoUrl: bookingData.guestIdPhotoUrl,
-        guestRegistration: bookingData.guestRegistration
+        status: bookingData2.status,
+        guestIdPhotoUrl: bookingData2.guestIdPhotoUrl,
+        guestRegistration: bookingData2.guestRegistration
       });
       if (!readiness.ready) {
         throw new Error(`Booking is not ready for check-in. Missing: ${readiness.missingItems.join(", ")}.`);
       }
-      if (!bookingData.roomId) {
+      if (!bookingData2.roomId) {
         throw new Error("Booking has no assigned room.");
       }
-      const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
+      const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) {
         throw new Error("Assigned room not found.");
@@ -191458,7 +191629,7 @@ async function handleCheckinBooking(req, res) {
       if (roomData.status === "blocked") {
         throw new Error("Assigned room is blocked and cannot be checked in.");
       }
-      const activeCheckinQuery = adminDb.collection("bookings").where("roomId", "==", String(bookingData.roomId)).where("status", "==", "checked-in").limit(1);
+      const activeCheckinQuery = adminDb.collection("bookings").where("roomId", "==", String(bookingData2.roomId)).where("status", "==", "checked-in").limit(1);
       const activeCheckinSnap = await transaction.get(activeCheckinQuery);
       const occupiedByOtherBooking = activeCheckinSnap.docs.some((doc) => doc.id !== bookingId);
       if (occupiedByOtherBooking) {
@@ -191498,8 +191669,9 @@ async function handleCheckinBooking(req, res) {
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
+var UNPAID_REASON_MAX_LENGTH = 500;
 async function handleCheckoutBooking(req, res) {
-  const { bookingId } = req.body;
+  const { bookingId, unpaidCheckoutReason } = req.body;
   if (!bookingId) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
@@ -191509,25 +191681,31 @@ async function handleCheckoutBooking(req, res) {
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
-    const bookingData = bookingDoc.data();
-    if (bookingData.status !== "checked-in") {
+    const bookingData2 = bookingDoc.data();
+    if (bookingData2.status !== "checked-in") {
       return res.status(400).json({
         success: false,
-        error: `Booking can only be checked out from 'checked-in' status (current: ${bookingData.status}).`
+        error: `Booking can only be checked out from 'checked-in' status (current: ${bookingData2.status}).`
       });
     }
     const checkedOutBy = req.staff?.uid || "staff";
+    const staffRole = req.staff?.role || "front-desk";
+    const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
+    const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
+    const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
+    const safeUnpaidReason = typeof unpaidCheckoutReason === "string" ? unpaidCheckoutReason.trim().slice(0, UNPAID_REASON_MAX_LENGTH) : null;
     let pointsAwarded = 0;
     let eligiblePoints = 0;
     let checkedOutWithBalance = 0;
-    let memberId = bookingData.memberId || null;
+    let memberId = bookingData2.memberId || null;
     let rewardsConfig = null;
+    let unpaidCheckoutApprovedBy = null;
     let memberDoc = null;
     if (memberId) {
       memberDoc = await adminDb.collection("members").doc(memberId).get();
     }
-    if (!memberDoc?.exists && bookingData.guestEmail) {
-      const guestEmail = String(bookingData.guestEmail).toLowerCase();
+    if (!memberDoc?.exists && bookingData2.guestEmail) {
+      const guestEmail = String(bookingData2.guestEmail).toLowerCase();
       const membersSnap = await adminDb.collection("members").where("email", "==", guestEmail).limit(1).get();
       if (!membersSnap.empty) {
         memberDoc = membersSnap.docs[0];
@@ -191559,6 +191737,14 @@ async function handleCheckoutBooking(req, res) {
       const checkoutFolioTotal = Number(freshBookingData.totalPrice || 0) + incidentalTotal + addToBillTotal;
       checkedOutWithBalance = Math.max(checkoutFolioTotal - collectedTotal, 0);
       eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
+        throw new Error("UNPAID_REASON_REQUIRED");
+      }
+      const needsAdminApproval = checkedOutWithBalance > 0 && checkedOutWithBalance > unpaidCheckoutThreshold;
+      if (needsAdminApproval && staffRole !== "admin") {
+        throw new Error(`THRESHOLD_EXCEEDED:${unpaidCheckoutThreshold}:${checkedOutWithBalance}`);
+      }
+      unpaidCheckoutApprovedBy = checkedOutWithBalance > 0 && staffRole === "admin" ? checkedOutBy : null;
       const memberRef = memberId && eligiblePoints > 0 ? adminDb.collection("members").doc(memberId) : null;
       const memberDocInTransaction = memberRef ? await transaction.get(memberRef) : null;
       const { todayStr } = getManilaDateInfo();
@@ -191575,6 +191761,15 @@ async function handleCheckoutBooking(req, res) {
         checkedOutCollectedTotal: collectedTotal,
         updatedAt: /* @__PURE__ */ new Date()
       };
+      if (checkedOutWithBalance > 0) {
+        bookingUpdate.unpaidCheckoutReason = safeUnpaidReason;
+        bookingUpdate.unpaidCheckoutApprovalThreshold = unpaidCheckoutThreshold;
+        bookingUpdate.unpaidCheckoutApprovedBy = unpaidCheckoutApprovedBy;
+        bookingUpdate.unpaidCheckoutApprovedAt = /* @__PURE__ */ new Date();
+        bookingUpdate.unpaidCheckoutSnapshotFolioTotal = checkoutFolioTotal;
+        bookingUpdate.unpaidCheckoutSnapshotCollectedTotal = collectedTotal;
+        bookingUpdate.unpaidCheckoutSnapshotBalance = checkedOutWithBalance;
+      }
       if (memberId && freshBookingData.memberId !== memberId) {
         bookingUpdate.memberId = memberId;
       }
@@ -191595,15 +191790,15 @@ async function handleCheckoutBooking(req, res) {
         pointsAwardedAt: awardNow ? /* @__PURE__ */ new Date() : null
       });
       transaction.update(bookingRef, bookingUpdate);
-      if (bookingData.roomId) {
-        const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
+      if (bookingData2.roomId) {
+        const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
         transaction.update(roomRef, {
           status: "available",
           housekeepingStatus: "dirty",
           updatedAt: /* @__PURE__ */ new Date()
         });
       }
-      const roomNumber = String(bookingData.roomNumber || "");
+      const roomNumber = String(bookingData2.roomNumber || "");
       if (roomNumber) {
         const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
         transaction.set(
@@ -191623,8 +191818,8 @@ async function handleCheckoutBooking(req, res) {
           type: "earn",
           points: pointsAwarded,
           bookingId,
-          bookingRef: bookingData.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+          bookingRef: bookingData2.bookingRef,
+          description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
           by: checkedOutBy,
           createdAt: /* @__PURE__ */ new Date()
         });
@@ -191650,10 +191845,31 @@ async function handleCheckoutBooking(req, res) {
         status: "checked-out",
         pointsAwarded,
         memberId,
-        checkedOutWithBalance
+        checkedOutWithBalance,
+        unpaidCheckoutReason: safeUnpaidReason,
+        unpaidCheckoutApprovedBy
       }
     });
   } catch (error) {
+    if (error?.message === "UNPAID_REASON_REQUIRED") {
+      return res.status(400).json({
+        success: false,
+        error: "An unpaid checkout reason is required when the folio has a positive balance."
+      });
+    }
+    if (error?.message?.startsWith("THRESHOLD_EXCEEDED:")) {
+      const parts = error.message.split(":");
+      const threshold = parts[1] || "5000";
+      const balance = parts[2] || "0";
+      return res.status(403).json({
+        success: false,
+        error: "Front Desk cannot complete this checkout.",
+        thresholdExceeded: true,
+        threshold: Number(threshold),
+        balance: Number(balance),
+        message: `The outstanding balance (\u20B1${Number(balance).toFixed(2)}) exceeds the Front Desk approval limit (\u20B1${Number(threshold).toFixed(2)}). An administrator must authorize this checkout.`
+      });
+    }
     console.error("Checkout booking handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
@@ -191682,22 +191898,22 @@ async function handleLookupBooking(req, res) {
       if (!matched) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      const bookingData2 = { id: matched.id, ...matched.data() };
-      return await enrichAndRespond(res, bookingData2);
+      const bookingData3 = { id: matched.id, ...matched.data() };
+      return await enrichAndRespond(res, bookingData3);
     }
     const bookingDoc = snapshot.docs[0];
-    const bookingData = { id: bookingDoc.id, ...bookingDoc.data() };
-    return await enrichAndRespond(res, bookingData);
+    const bookingData2 = { id: bookingDoc.id, ...bookingDoc.data() };
+    return await enrichAndRespond(res, bookingData2);
   } catch (error) {
     console.error("Booking lookup failed:", error?.message || error);
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
   }
 }
-async function enrichAndRespond(res, bookingData) {
+async function enrichAndRespond(res, bookingData2) {
   let roomData = null;
-  if (bookingData.roomId) {
+  if (bookingData2.roomId) {
     try {
-      const roomDoc = await adminDb.collection("rooms").doc(String(bookingData.roomId)).get();
+      const roomDoc = await adminDb.collection("rooms").doc(String(bookingData2.roomId)).get();
       if (roomDoc.exists) {
         roomData = roomDoc.data();
       }
@@ -191708,26 +191924,26 @@ async function enrichAndRespond(res, bookingData) {
   return res.status(200).json({
     success: true,
     data: {
-      id: bookingData.id,
-      bookingRef: bookingData.bookingRef,
-      guestName: bookingData.guestName,
-      guestEmail: bookingData.guestEmail,
-      guestPhone: bookingData.guestPhone,
-      roomId: bookingData.roomId,
-      roomNumber: bookingData.roomNumber,
-      roomName: roomData?.name || bookingData.roomType || "",
-      roomType: bookingData.roomType,
-      checkIn: bookingData.checkIn,
-      checkOut: bookingData.checkOut,
-      numNights: bookingData.numNights,
-      numGuests: bookingData.numGuests,
-      ratePerNight: bookingData.ratePerNight,
-      totalPrice: bookingData.totalPrice,
-      rateBreakdown: bookingData.rateBreakdown || null,
-      paymentMethod: bookingData.paymentMethod,
-      status: bookingData.status,
-      hasBreakfast: bookingData.hasBreakfast,
-      specialRequests: bookingData.specialRequests || ""
+      id: bookingData2.id,
+      bookingRef: bookingData2.bookingRef,
+      guestName: bookingData2.guestName,
+      guestEmail: bookingData2.guestEmail,
+      guestPhone: bookingData2.guestPhone,
+      roomId: bookingData2.roomId,
+      roomNumber: bookingData2.roomNumber,
+      roomName: roomData?.name || bookingData2.roomType || "",
+      roomType: bookingData2.roomType,
+      checkIn: bookingData2.checkIn,
+      checkOut: bookingData2.checkOut,
+      numNights: bookingData2.numNights,
+      numGuests: bookingData2.numGuests,
+      ratePerNight: bookingData2.ratePerNight,
+      totalPrice: bookingData2.totalPrice,
+      rateBreakdown: bookingData2.rateBreakdown || null,
+      paymentMethod: bookingData2.paymentMethod,
+      status: bookingData2.status,
+      hasBreakfast: bookingData2.hasBreakfast,
+      specialRequests: bookingData2.specialRequests || ""
     }
   });
 }
@@ -191755,7 +191971,7 @@ async function handleResolveEarlyCheckin(req, res) {
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
-    let bookingData = null;
+    let bookingData2 = null;
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) {
@@ -191773,14 +191989,14 @@ async function handleResolveEarlyCheckin(req, res) {
         staffNote: staffNote || "",
         confirmedTime: status === "approved" ? confirmedTime || data.earlyCheckIn.requestedTime : null
       };
-      bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
+      bookingData2 = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
       transaction.update(bookingRef, {
         earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: /* @__PURE__ */ new Date()
       });
     });
     try {
-      await sendEarlyCheckinResolveTrigger(bookingData, status, staffNote);
+      await sendEarlyCheckinResolveTrigger(bookingData2, status, staffNote);
     } catch (emailErr) {
       console.error("Failed to send early check-in resolve email:", emailErr);
     }
@@ -194551,6 +194767,340 @@ async function handleNotificationsPrune(req, res) {
   }
 }
 
+// server/handlers/test-runs.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+function getStaff3(req) {
+  return req.staff || {};
+}
+function generateRunId() {
+  return import_node_crypto.default.randomBytes(16).toString("hex");
+}
+function hashToken(token2) {
+  return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
+}
+var createTestRunSchema = external_exports.object({
+  name: external_exports.string().trim().min(1).max(120),
+  environment: external_exports.enum(["staging", "production"]),
+  durationMinutes: external_exports.number().int().min(5).max(43200)
+}).strict();
+var closeTestRunSchema = external_exports.object({
+  runId: external_exports.string().trim().min(1).max(64)
+}).strict();
+var deleteTestRunSchema = external_exports.object({
+  runId: external_exports.string().trim().min(1).max(64)
+}).strict();
+async function collectManifest(runId) {
+  const affectedRooms = /* @__PURE__ */ new Set();
+  const affectedStockItems = /* @__PURE__ */ new Set();
+  const bookingsSnap = await adminDb.collection("bookings").where("testRunId", "==", runId).get();
+  const bookingIds = bookingsSnap.docs.map((d) => {
+    affectedRooms.add(d.data().roomNumber || "");
+    return d.id;
+  });
+  const storeSnap = await adminDb.collection("storeOrders").where("testRunId", "==", runId).get();
+  storeSnap.docs.forEach((d) => {
+    const itemIds = (d.data().items || []).map((i2) => i2.itemId);
+    itemIds.forEach((id) => {
+      if (id) affectedStockItems.add(id);
+    });
+  });
+  return {
+    bookings: bookingIds.length,
+    storeOrders: storeSnap.docs.length,
+    affectedRooms: [...affectedRooms].filter(Boolean),
+    affectedStockItems: [...affectedStockItems].filter(Boolean)
+  };
+}
+async function handleCreateTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff3(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can create test runs." });
+  }
+  const parsed = createTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run name, environment, and duration."
+    });
+  }
+  const { name: name2, environment, durationMinutes } = parsed.data;
+  try {
+    if (environment === "production") {
+      const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
+      if (!activeRuns.empty) {
+        return res.status(409).json({
+          success: false,
+          error: "There is already an active production test run. Close it before creating a new one."
+        });
+      }
+    }
+    const now = /* @__PURE__ */ new Date();
+    const runId = generateRunId();
+    const tokenBytes = import_node_crypto.default.randomBytes(24);
+    const token2 = tokenBytes.toString("base64url");
+    const run = {
+      id: runId,
+      name: name2,
+      environment,
+      createdBy: staff.email || "",
+      createdByUid: staff.uid || "",
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + durationMinutes * 6e4),
+      closedAt: null,
+      closedBy: null,
+      status: "active",
+      tokenHash: hashToken(token2)
+    };
+    await adminDb.collection("testRuns").doc(runId).set(run);
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: runId,
+        name: name2,
+        environment,
+        token: token2,
+        expiresAt: run.expiresAt.toISOString(),
+        durationMinutes
+      }
+    });
+  } catch (error) {
+    console.error("Test run creation failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to create test run. Please try again."
+    });
+  }
+}
+async function handleCloseTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff3(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can close test runs." });
+  }
+  const parsed = closeTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run ID."
+    });
+  }
+  const { runId } = parsed.data;
+  try {
+    const runRef = adminDb.collection("testRuns").doc(runId);
+    const runDoc = await runRef.get();
+    if (!runDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Test run not found."
+      });
+    }
+    const runData = runDoc.data();
+    if (runData.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        error: "This test run is not active and cannot be closed."
+      });
+    }
+    const manifest = await collectManifest(runId);
+    const now = /* @__PURE__ */ new Date();
+    await runRef.set({
+      closedAt: now,
+      closedBy: staff.email || "",
+      status: "closed",
+      manifest
+    }, { merge: true });
+    return res.status(200).json({
+      success: true,
+      data: { runId, closedAt: now.toISOString(), manifest }
+    });
+  } catch (error) {
+    console.error("Test run close failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to close test run. Please try again."
+    });
+  }
+}
+async function handleDeleteTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff3(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can delete test data." });
+  }
+  const parsed = deleteTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run ID."
+    });
+  }
+  const { runId } = parsed.data;
+  try {
+    const runRef = adminDb.collection("testRuns").doc(runId);
+    const runDoc = await runRef.get();
+    if (!runDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Test run not found."
+      });
+    }
+    const runData = runDoc.data();
+    if (runData.status !== "closed") {
+      return res.status(400).json({
+        success: false,
+        error: "Only closed test runs can be cleaned up. Close the run first."
+      });
+    }
+    await runRef.set({ status: "cleanup-in-progress" }, { merge: true });
+    let bookingCount = 0;
+    let storeOrderCount = 0;
+    let failedItems = [];
+    const batchSize = 20;
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("bookings").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const subcollections = ["payments", "incidentalCharges", "notifications", "audit"];
+          for (const sub of subcollections) {
+            const subSnap = await adminDb.collection("bookings").doc(doc.id).collection(sub).get();
+            const deletes = subSnap.docs.map((sd) => sd.ref.delete());
+            await Promise.all(deletes);
+          }
+          await doc.ref.delete();
+          bookingCount++;
+        } catch (err) {
+          failedItems.push(`booking/${doc.id}`);
+        }
+      }
+    }
+    lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("storeOrders").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
+          await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          await doc.ref.delete();
+          storeOrderCount++;
+        } catch (err) {
+          failedItems.push(`storeOrder/${doc.id}`);
+        }
+      }
+    }
+    let notifQ = adminDb.collection("notifications").where("testRunId", "==", runId);
+    const notifSnap = await notifQ.get();
+    for (const doc of notifSnap.docs) {
+      try {
+        await doc.ref.delete();
+      } catch {
+        failedItems.push(`notification/${doc.id}`);
+      }
+    }
+    let intercomQ = adminDb.collection("intercoms").where("testRunId", "==", runId);
+    const intercomSnap = await intercomQ.get();
+    for (const doc of intercomSnap.docs) {
+      try {
+        const msgSnap = await adminDb.collection("intercoms").doc(doc.id).collection("messages").get();
+        await Promise.all(msgSnap.docs.map((md) => md.ref.delete()));
+        await doc.ref.delete();
+      } catch {
+        failedItems.push(`intercom/${doc.id}`);
+      }
+    }
+    const now = /* @__PURE__ */ new Date();
+    const auditResult = {
+      type: "test-run-cleanup",
+      runId,
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount,
+      failedItems,
+      completedAt: now,
+      completedBy: staff.email || ""
+    };
+    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
+    const affectedRooms = runData.manifest?.affectedRooms || [];
+    for (const roomNumber of affectedRooms) {
+      if (!roomNumber) continue;
+      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+      for (const doc of roomsSnap.docs) {
+        await doc.ref.set({
+          status: "available",
+          housekeepingStatus: "clean"
+        }, { merge: true });
+      }
+    }
+    await runRef.set({
+      status: "cleaned",
+      cleanupCompletedAt: now,
+      cleanupResult: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount, failedItems: failedItems.length }
+    }, { merge: true });
+    return res.status(200).json({
+      success: true,
+      data: {
+        runId,
+        bookingsDeleted: bookingCount,
+        storeOrdersDeleted: storeOrderCount,
+        failedItems: failedItems.length,
+        roomsRestored: affectedRooms.length
+      }
+    });
+  } catch (error) {
+    console.error("Test run cleanup failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to clean up test data. Please try again."
+    });
+  }
+}
+async function handleListTestRuns(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff3(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can list test runs." });
+  }
+  try {
+    const snap = await adminDb.collection("testRuns").orderBy("createdAt", "desc").limit(50).get();
+    const runs = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        name: data.name,
+        environment: data.environment,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+        expiresAt: data.expiresAt?.toDate?.()?.toISOString() || data.expiresAt,
+        closedAt: data.closedAt?.toDate?.()?.toISOString() || null,
+        closedBy: data.closedBy || null,
+        status: data.status,
+        manifest: data.manifest || null,
+        cleanupResult: data.cleanupResult || null
+      };
+    });
+    return res.status(200).json({ success: true, data: runs });
+  } catch (error) {
+    console.error("List test runs failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to list test runs." });
+  }
+}
+
 // server/apiRouter.ts
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
@@ -194865,6 +195415,14 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleAddRefund(req, res);
+  }
+  if (domain === "bookings" && action === "verify-and-record-payment" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleVerifyAndRecordPayment(req, res);
   }
   if (domain === "bookings" && action === "mark-payment-confirmed" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
@@ -195345,6 +195903,53 @@ async function handler(req, res) {
   }
   if (domain === "notifications" && action === "prune" && (req.method === "POST" || req.method === "GET")) {
     return await handleNotificationsPrune(req, res);
+  }
+  if (domain === "test-runs" && action === "create" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`test-runs-create:${ip}`, 5, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can manage test runs." });
+    }
+    req.staff = authResult;
+    return await handleCreateTestRun(req, res);
+  }
+  if (domain === "test-runs" && action === "close" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can manage test runs." });
+    }
+    req.staff = authResult;
+    return await handleCloseTestRun(req, res);
+  }
+  if (domain === "test-runs" && action === "delete" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can manage test runs." });
+    }
+    req.staff = authResult;
+    return await handleDeleteTestRun(req, res);
+  }
+  if (domain === "test-runs" && action === "list" && req.method === "GET") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can list test runs." });
+    }
+    req.staff = authResult;
+    return await handleListTestRuns(req, res);
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }
