@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 16, 2026 (Roadmap — ETR-14 implemented: distributed lock (Firestore transaction), stale-lock recovery, and progress checkpointing for safe test-run cleanup execution. Other improvements are documented below.)
+> Last updated: July 16, 2026 (Roadmap — ETR-S08: 9 production-denial tests for staging reset endpoints. Other improvements are documented below.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1275,7 +1275,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ **ETR-S05 — Preserve configuration and identity.** Only deletes operational data. Staff Auth/guests, settings docs, rooms/room types, rates, payment methods, store catalog, vouchers/corporate codes, and `counters/` reference sequences are never touched.
 - ✅ **ETR-S06 — Restore staging baselines.** Affected rooms reset to `available`/`clean`. Inventory restoration is explicit (preserve current stock rather than infer).
 - ✅ **ETR-S07 — Completion and audit.** Persists `{ type: "staging-reset", bookingsDeleted, storeOrdersDeleted, notificationsDeleted, intercomStaysDeleted, testRunsDeleted, failedItems, manifestBefore, startedAt, completedAt, completedBy, projectId }` to `janitor/cleanups/history`.
-- ⬜ **ETR-S08 — Production denial coverage.** Tests verifying the route returns 403 in a production context are not yet written.
+- ✅ **ETR-S08 — Production denial coverage.** 9 tests in `tests/api/test-runs-staging-deny.test.ts` verify both preview and execute return 403 when `FIREBASE_PROJECT_ID` is absent or not in the staging allowlist; confirm happy path (allowlisted + correct confirmation) returns 200; and assert that non-admin staff, wrong confirmation phrase, and project-name mismatch are all rejected.
 
 #### Production-to-staging refresh and sanitization
 
