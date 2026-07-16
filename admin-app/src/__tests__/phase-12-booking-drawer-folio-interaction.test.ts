@@ -9,15 +9,15 @@ const workspaceSrc = read("admin-app/src/components/BookingDrawerWorkspace.tsx")
 const drawerSrc = `${pageSrc}\n${workspaceSrc}`;
 
 describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
-  it("renders the folio section with all four ledger panels", () => {
+  it("renders the folio workspace with summary, payment, and charge panels", () => {
     expect(workspaceSrc).toContain(`id: "folio"`);
     expect(pageSrc.match(/section="folio"/g)?.length).toBeGreaterThanOrEqual(3);
     expect(pageSrc).toContain("Total");
     expect(pageSrc).toContain("Paid");
     expect(pageSrc).toContain("Balance");
     expect(pageSrc).toContain("Charge breakdown");
-    expect(pageSrc).toContain("On-site Payments Ledger");
-    expect(pageSrc).toContain("Incidental Charge Ledger");
+    expect(pageSrc).toContain("Payment history");
+    expect(pageSrc).toContain("Incidental charges");
   });
 
   it("shows a three-column Total/Paid/Balance summary grid", () => {
@@ -29,7 +29,7 @@ describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
 
   it("highlights positive balance with red styling", () => {
     expect(pageSrc).toMatch(/balance > 0/);
-    expect(pageSrc).toMatch(/balance < 0/);
+    expect(pageSrc).toMatch(/balance[^\n]*< 0/);
   });
 
   it("shows a compact verified-proof row after verification", () => {
@@ -58,8 +58,23 @@ describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
   });
 
   it("shows Collect button with folio balance when positive", () => {
-    expect(pageSrc).toMatch(/Collect/);
-    expect(pageSrc).toMatch(/folio\.balance/);
+    expect(pageSrc.match(/Collect \{formatPrice\(selectedBookingFolio\.balance\)\}/g)).toHaveLength(1);
+    expect(pageSrc).toMatch(/activeBookingSection === "folio"/);
+    expect(pageSrc).toMatch(/openRecordPaymentForBalance\(selectedBookingFolio\.balance\)/);
+  });
+
+  it("uses a two-column desktop folio with a sticky summary", () => {
+    expect(pageSrc).toMatch(/lg:grid-cols-12 lg:items-start/);
+    expect(pageSrc).toMatch(/lg:col-span-4 lg:col-start-9 lg:row-start-2/);
+    expect(pageSrc).toMatch(/lg:col-span-8 lg:col-start-1/);
+    expect(pageSrc).toMatch(/lg:sticky lg:top-20/);
+  });
+
+  it("shows the category charge breakdown without another disclosure", () => {
+    expect(pageSrc).toContain("Room and booked add-ons");
+    expect(pageSrc).toContain("Store charges billed to room");
+    expect(pageSrc).toContain("Incidental charges");
+    expect(pageSrc).toMatch(/selectedBookingFolio\?\.grandTotal/);
   });
 
   it("hides Record Payment for pending and payment-uploaded", () => {
@@ -84,7 +99,7 @@ describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
   });
 
   it("shows current discount and voucher info when present", () => {
-    expect(pageSrc).toContain("Discount / Voucher");
+    expect(pageSrc).toContain("Discount or voucher");
     expect(pageSrc).toMatch(/discountType/);
     expect(pageSrc).toMatch(/voucherCode/);
   });
@@ -105,8 +120,8 @@ describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
     expect(pageSrc).toMatch(/setChargeToVoid/);
   });
 
-  it("shows Checkout Folio Review for checked-in and checked-out", () => {
-    expect(pageSrc).toMatch(/Checkout Folio Review/);
+  it("shows receipt and checkout documents for checked-in and checked-out", () => {
+    expect(pageSrc).toMatch(/Receipt and checkout documents/);
     expect(pageSrc).toMatch(/folio\.grandTotal|folioTotal/);
   });
 

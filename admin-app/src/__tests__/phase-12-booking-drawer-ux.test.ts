@@ -63,14 +63,14 @@ describe("Phase 12 — booking drawer information architecture", () => {
       "Move / Upgrade Room Workstation",
       "Charge breakdown",
       "Breakfast Selections",
-      "Discount / Voucher",
+      "Discount or voucher",
       "Government Discount Verification",
       "Spark Rewards Redemption",
-      "On-site Payments Ledger",
+      "Payment history",
       "Early Check-In Request",
       "Resend Transactional Email",
-      "Incidental Charge Ledger",
-      "Checkout Folio Review",
+      "Incidental charges",
+      "Receipt and checkout documents",
       "Cancel Booking"
     ]) {
       expect(drawerSrc, `expected booking drawer feature: ${feature}`).toContain(feature);

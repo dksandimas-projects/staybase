@@ -2411,6 +2411,15 @@ export function BookingsPage() {
 
   const selectedBookingFolio = selectedBooking ? getBookingFolio(selectedBooking) : null;
 
+  const openRecordPaymentForBalance = (balance: number) => {
+    setShowRecordPaymentModal(true);
+    setPaymentAmount(String(Math.max(0, balance)));
+    setPaymentMethod("cash");
+    setPaymentTransactionReference("");
+    setPaymentNote("");
+    setPaymentError(null);
+  };
+
   const renderBookingPrimaryAction = () => {
     if (!selectedBooking) return null;
 
@@ -2446,6 +2455,24 @@ export function BookingsPage() {
           className="inline-flex min-h-[44px] w-full items-center justify-center rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
         >
           Confirm booking
+        </button>
+      );
+    }
+
+    if (
+      activeBookingSection === "folio" &&
+      ["confirmed", "checked-in", "checked-out"].includes(selectedBooking.status) &&
+      selectedBookingFolio &&
+      selectedBookingFolio.balance > 0
+    ) {
+      return (
+        <button
+          type="button"
+          onClick={() => openRecordPaymentForBalance(selectedBookingFolio.balance)}
+          className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          <CreditCard size={15} aria-hidden="true" />
+          Collect {formatPrice(selectedBookingFolio.balance)}
         </button>
       );
     }
@@ -2938,7 +2965,11 @@ export function BookingsPage() {
         ) : undefined}
       >
         {selectedBooking && (
-          <div className="space-y-6 text-sm">
+          <div className={activeBookingSection === "folio"
+            ? "grid grid-cols-1 gap-6 text-sm lg:grid-cols-12 lg:items-start"
+            : "space-y-6 text-sm"
+          }>
+            <div className={activeBookingSection === "folio" ? "lg:col-span-12" : undefined}>
             <BookingDrawerWorkspaceHeader
               booking={selectedBooking}
               activeSection={activeBookingSection}
@@ -2948,6 +2979,7 @@ export function BookingsPage() {
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
               onPaymentReferenceChange={(value) => persistSelectedBooking({ paymentReferenceNumber: value || null })}
             />
+            </div>
 
             <BookingDrawerSectionPanel section="overview" activeSection={activeBookingSection}>
             {selectedBooking.paymentProofUrl ? (
@@ -3319,52 +3351,87 @@ export function BookingsPage() {
             </BookingDrawerSectionPanel>
 
             {/* Financial totals */}
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} primary>
-            <div className="space-y-3">
+            <BookingDrawerSectionPanel
+              section="folio"
+              activeSection={activeBookingSection}
+              primary
+              className="lg:col-span-4 lg:col-start-9 lg:row-start-2 lg:self-start lg:sticky lg:top-20"
+            >
+            <div className="space-y-4 rounded-card border border-gray-200 bg-white p-4 shadow-sm">
+              <div>
+                <h2 className="text-sm font-bold text-gray-950">Folio summary</h2>
+                <p className="mt-1 text-[11px] text-gray-500">Current charges and collections for this stay.</p>
+              </div>
               {/* BDUX-05a: Read-first Total / Paid / Balance summary */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-center">
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Total</p>
-                  <p className="mt-0.5 text-base font-heading font-bold text-gray-950">{formatPrice(selectedBooking.totalPrice)}</p>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-gray-500">Total</p>
+                  <p className="mt-0.5 text-base font-heading font-bold text-gray-950">{formatPrice(selectedBookingFolio?.grandTotal ?? selectedBooking.totalPrice)}</p>
                 </div>
                 <div className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-center">
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Paid</p>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-gray-500">Paid</p>
                   <p className="mt-0.5 text-base font-heading font-bold text-emerald-700">{formatPrice(selectedBookingFolio?.paymentsTotal ?? 0)}</p>
                 </div>
-                <div className="rounded-lg px-3.5 py-2.5 text-center" style={{ backgroundColor: (selectedBookingFolio?.balance ?? 0) > 0 ? "#fef2f2" : "#f0fdf4" }}>
-                  <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: (selectedBookingFolio?.balance ?? 0) > 0 ? "#991b1b" : "#166534" }}>Balance</p>
-                  <p className="mt-0.5 text-base font-heading font-bold" style={{ color: (selectedBookingFolio?.balance ?? 0) > 0 ? "#dc2626" : "#16a34a" }}>{formatPrice(Math.max(0, selectedBookingFolio?.balance ?? 0))}</p>
+                <div className={`rounded-lg px-3.5 py-2.5 text-center ${
+                  (selectedBookingFolio?.balance ?? 0) > 0
+                    ? "bg-red-50"
+                    : (selectedBookingFolio?.balance ?? 0) < 0
+                      ? "bg-amber-50"
+                      : "bg-emerald-50"
+                }`}>
+                  <p className={`text-[9px] font-bold uppercase tracking-widest ${
+                    (selectedBookingFolio?.balance ?? 0) > 0
+                      ? "text-red-800"
+                      : (selectedBookingFolio?.balance ?? 0) < 0
+                        ? "text-amber-800"
+                        : "text-emerald-800"
+                  }`}>
+                    {(selectedBookingFolio?.balance ?? 0) > 0 ? "Balance" : (selectedBookingFolio?.balance ?? 0) < 0 ? "Overpaid" : "Settled"}
+                  </p>
+                  <p className={`mt-0.5 text-base font-heading font-bold ${
+                    (selectedBookingFolio?.balance ?? 0) > 0
+                      ? "text-red-600"
+                      : (selectedBookingFolio?.balance ?? 0) < 0
+                        ? "text-amber-700"
+                        : "text-emerald-700"
+                  }`}>
+                    {formatPrice(Math.abs(selectedBookingFolio?.balance ?? 0))}
+                  </p>
                 </div>
               </div>
 
-              <details className="group">
-                <summary className="flex cursor-pointer items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400 hover:text-gray-600">
-                  <span>Charge breakdown</span>
-                  <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
-                </summary>
-                <div className="mt-2 rounded-lg border border-gray-200 bg-white p-4 space-y-1.5 text-xs">
-                  {selectedBooking.rateBreakdown ? (
-                    <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
-                  ) : (
-                    <>
-                      <div className="flex justify-between">
-                        <span>Room Charge ({selectedBooking.numNights} nights)</span>
-                        <span>{formatPrice(selectedBooking.ratePerNight * selectedBooking.numNights)}</span>
-                      </div>
-                      {selectedBooking.hasBreakfast && (
-                        <div className="flex justify-between text-gray-500">
-                          <span>Breakfast Service charge</span>
-                          <span>{formatPrice((selectedBooking.breakfastRate || 0) * selectedBooking.numGuests * selectedBooking.numNights)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between border-t border-gray-150 pt-1.5 text-sm font-bold text-gray-950">
-                        <span>Total Bill Amount:</span>
-                        <span className="text-primary-dark">{formatPrice(selectedBooking.totalPrice)}</span>
-                      </div>
-                    </>
-                  )}
+              <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3.5 text-xs">
+                <h3 className="font-bold text-gray-900">Charge breakdown</h3>
+                <div className="mt-3 space-y-2 text-gray-600">
+                  <div className="flex items-center justify-between gap-4">
+                    <span>Room and booked add-ons</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(selectedBooking.totalPrice)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span>Store charges billed to room</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(selectedBookingFolio?.storeTotal ?? 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span>Incidental charges</span>
+                    <span className="font-semibold text-gray-900">{formatPrice(selectedBookingFolio?.chargesTotal ?? 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 border-t border-gray-200 pt-2 font-bold text-gray-950">
+                    <span>Folio total</span>
+                    <span>{formatPrice(selectedBookingFolio?.grandTotal ?? selectedBooking.totalPrice)}</span>
+                  </div>
                 </div>
-              </details>
+                {selectedBooking.rateBreakdown && (
+                  <details className="group mt-3 border-t border-gray-200 pt-3">
+                    <summary className="flex cursor-pointer items-center gap-1.5 text-[10px] font-semibold text-gray-500 hover:text-gray-700">
+                      <span>View nightly rate details</span>
+                      <ChevronRight size={12} className="transition-transform group-open:rotate-90" />
+                    </summary>
+                    <div className="mt-3 rounded-lg bg-white p-3">
+                      <AdminPriceBreakdown breakdown={selectedBooking.rateBreakdown} total={selectedBooking.totalPrice} />
+                    </div>
+                  </details>
+                )}
+              </div>
 
               {selectedBooking.paymentProofUrl && (
                 <div className="space-y-3">
@@ -3494,35 +3561,40 @@ export function BookingsPage() {
             )}
             </BookingDrawerSectionPanel>
 
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:col-span-8 lg:col-start-1">
             {(() => {
               const hasVoucherOrDiscount = selectedBooking.discountType || selectedBooking.voucherCode;
               return (
-                <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-                  <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                    <ShieldCheck size={14} className="text-primary" />
-                    Discount / Voucher
-                  </h3>
-                  {hasVoucherOrDiscount ? (
-                    <div className="space-y-1 text-xs">
-                      {selectedBooking.discountType && (
-                        <p className="font-semibold text-gray-800">
-                          {selectedBooking.discountType === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
-                          {selectedBooking.discountVerified ? <span className="ml-1 text-emerald-600">✓ Verified</span> : <span className="ml-1 text-amber-600">Pending</span>}
-                        </p>
-                      )}
-                      {selectedBooking.voucherCode && (
-                        <p className="font-semibold text-gray-800">Voucher: {selectedBooking.voucherCode}</p>
+                <div className="flex flex-col gap-3 rounded-card border border-gray-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="flex items-center gap-1.5 text-xs font-bold text-gray-900">
+                      <ShieldCheck size={14} className="text-primary" />
+                      Discount or voucher
+                    </h3>
+                    <div className="mt-1 space-y-1 text-[11px] text-gray-500">
+                      {hasVoucherOrDiscount ? (
+                        <>
+                          {selectedBooking.discountType && (
+                            <p>
+                              {selectedBooking.discountType === "senior" ? "Senior Citizen (20%)" : "PWD (20%)"}
+                              {selectedBooking.discountVerified ? <span className="ml-1 font-semibold text-emerald-700">Verified</span> : <span className="ml-1 font-semibold text-amber-700">Pending review</span>}
+                            </p>
+                          )}
+                          {selectedBooking.voucherCode && <p>Voucher {selectedBooking.voucherCode}</p>}
+                        </>
+                      ) : (
+                        <p>No booking-level discount has been applied.</p>
                       )}
                     </div>
-                  ) : RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
+                  </div>
+                  {!hasVoucherOrDiscount && RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && (
                     <button
                       type="button"
                       onClick={() => { setStaffDiscountType(""); setStaffVoucherCode(""); setShowDiscountForm(true); }}
-                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm hover:bg-primary-dark"
+                      className="inline-flex min-h-[44px] w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-white px-4 text-xs font-bold text-primary-dark hover:bg-primary-light sm:w-auto"
                     >
                       <Plus size={14} />
-                      Apply discount / voucher
+                      Apply discount
                     </button>
                   )}
                 </div>
@@ -3666,7 +3738,7 @@ export function BookingsPage() {
             )}
             </BookingDrawerSectionPanel>
 
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:col-span-8 lg:col-start-1">
             {selectedBooking.memberId && ["confirmed", "checked-in", "checked-out"].includes(selectedBooking.status) && (
               <div className="rounded-card border border-primary/20 bg-primary-light/30 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3733,8 +3805,11 @@ export function BookingsPage() {
             )}
 
             {/* Onsite payments ledger */}
-            <div className="space-y-3.5">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">On-site Payments Ledger</h3>
+            <div className="space-y-3.5 rounded-card border border-gray-200 bg-white p-4">
+              <div>
+                <h3 className="text-xs font-bold text-gray-900">Payment history</h3>
+                <p className="mt-1 text-[11px] text-gray-500">Immutable onsite collections and refunds.</p>
+              </div>
               
               <div className="space-y-2">
                 {selectedBookingPayments.length > 0 ? (
@@ -3754,31 +3829,21 @@ export function BookingsPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 italic">No onsite payments recorded yet.</p>
+                  <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">No onsite payments recorded.</p>
                 )}
 
-                {(() => {
-                  const folio = getBookingFolio(selectedBooking);
-                  return (
-                    <div className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-xs font-semibold">
-                      <span className="text-gray-600">Outstanding folio balance</span>
-                      <span className={folio.balance > 0 ? "text-red-600" : "text-emerald-700"}>{formatPrice(Math.max(0, folio.balance))}</span>
-                    </div>
-                  );
-                })()}
-
-                {/* BDUX-05d: Record Payment — visible when collection is valid; emphasized when balance is due */}
+                {/* The sticky drawer footer owns the sole primary Collect action while a balance is due. */}
                 {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (() => {
                   const folioBalance = getBookingFolio(selectedBooking).balance;
-                  const isDue = folioBalance > 0;
+                  if (folioBalance > 0) return null;
                   return (
                     <button
                       type="button"
-                      onClick={() => { setShowRecordPaymentModal(true); setPaymentAmount(String(Math.max(0, folioBalance))); setPaymentMethod("cash"); setPaymentTransactionReference(""); setPaymentNote(""); setPaymentError(null); }}
-                      className={`inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg px-4 text-xs font-bold text-white shadow-sm ${isDue ? "bg-orange-600 hover:bg-orange-700" : "bg-primary hover:bg-primary-dark"}`}
+                      onClick={() => openRecordPaymentForBalance(folioBalance)}
+                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 sm:w-auto"
                     >
                       <CreditCard size={13} />
-                      {isDue ? `Collect ${formatPrice(folioBalance)}` : "Record Onsite Payment"}
+                      Record payment
                     </button>
                   );
                 })()}
@@ -3787,7 +3852,7 @@ export function BookingsPage() {
                   <button
                     type="button"
                     onClick={() => { setRefundAmount(""); setRefundMethod("cash"); setRefundReason(""); setShowRefundModal(true); }}
-                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-4 text-xs font-bold text-red-700 shadow-sm hover:bg-red-100"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 text-xs font-bold text-red-700 hover:bg-red-50 sm:w-auto"
                   >
                     <CreditCard size={13} />
                     Record Refund
@@ -4038,16 +4103,31 @@ export function BookingsPage() {
             </div>
             </BookingDrawerSectionPanel>
 
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection}>
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:col-span-8 lg:col-start-1">
             {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (
-              <div className="space-y-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                  <FileText size={14} className="text-primary" />
-                  Incidental Charge Ledger
-                </h3>
-                <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+              <div className="rounded-card border border-gray-200 bg-white p-4 space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="flex items-center gap-1.5 text-xs font-bold text-gray-900">
+                      <FileText size={14} className="text-primary" />
+                      Incidental charges
+                    </h3>
+                    <p className="mt-1 text-[11px] text-gray-500">Fees and reversals added by staff.</p>
+                  </div>
+                  {selectedBooking.status !== "checked-out" && (
+                    <button
+                      type="button"
+                      onClick={() => { setChargeCategory("other"); setChargeLabel(""); setChargeAmount(""); setChargeNote(""); setShowChargeModal(true); }}
+                      className="inline-flex min-h-[44px] w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 sm:w-auto"
+                    >
+                      <Plus size={14} />
+                      Add charge
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-3">
                   {selectedBookingCharges.length === 0 ? (
-                    <p className="text-xs italic text-gray-400">No incidental charges recorded.</p>
+                    <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">No incidental charges recorded.</p>
                   ) : (
                     <div className="divide-y divide-gray-100 rounded-lg border border-gray-150">
                       {selectedBookingCharges.map((charge) => (
@@ -4071,16 +4151,6 @@ export function BookingsPage() {
                     </div>
                   )}
 
-                  {selectedBooking.status !== "checked-out" && (
-                    <button
-                      type="button"
-                      onClick={() => { setChargeCategory("other"); setChargeLabel(""); setChargeAmount(""); setChargeNote(""); setShowChargeModal(true); }}
-                      className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 shadow-sm hover:bg-gray-50"
-                    >
-                      <Plus size={14} />
-                      Add charge
-                    </button>
-                  )}
                 </div>
               </div>
             )}
@@ -4143,107 +4213,44 @@ export function BookingsPage() {
               return null;
             })()}
 
-            {/* Checkout folio */}
+            {/* Receipt actions — financial totals live in the sticky Folio summary. */}
             {(selectedBooking.status === "checked-in" || selectedBooking.status === "checked-out") && (
-              <div className="space-y-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                  <CreditCard size={14} className="text-primary" />
-                  Checkout Folio Review
-                </h3>
-                <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-2 text-xs">
-                  {(() => {
-                    const folio = getBookingFolio(selectedBooking);
-                    return (
-                      <>
-                        <div className="flex justify-between">
-                          <span>Room and booked add-ons</span>
-                          <span>{formatPrice(selectedBooking.totalPrice)}</span>
-                        </div>
-                        {folio.storeCharges.length > 0 ? (
-                          <div className="space-y-1 border-t border-gray-100 pt-2">
-                            <p className="font-bold text-gray-700">Spark Essentials billed to room</p>
-                            {folio.storeCharges.map((order) => (
-                              <div key={order.id} className="flex justify-between text-gray-500">
-                                <span>{order.orderRef}</span>
-                                <span>{formatPrice(order.totalAmount)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="flex justify-between text-gray-400">
-                            <span>No delivered store charges billed yet</span>
-                            <span>{formatPrice(0)}</span>
-                          </div>
-                        )}
-                        {folio.charges.length > 0 && (
-                          <div className="space-y-1 border-t border-gray-100 pt-2">
-                            <p className="font-bold text-gray-700">Incidental charges</p>
-                            {folio.charges.map((charge) => (
-                              <div key={charge.id} className="flex justify-between text-gray-500">
-                                <span>{charge.label}</span>
-                                <span>{formatPrice(charge.amount)}</span>
-                              </div>
-                            ))}
-                            <div className="flex justify-between font-semibold text-gray-700">
-                              <span>Incidental subtotal</span>
-                              <span>{formatPrice(folio.chargesTotal)}</span>
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex justify-between border-t border-gray-150 pt-2 font-bold text-gray-950">
-                          <span>Folio total</span>
-                          <span>{formatPrice(folio.grandTotal)}</span>
-                        </div>
-                        <div className="flex justify-between text-gray-500">
-                          <span>Payments collected</span>
-                          <span>-{formatPrice(folio.paymentsTotal)}</span>
-                        </div>
-                        <div className={`flex justify-between rounded-lg px-3 py-2 text-sm font-bold ${
-                          folio.balance > 0 ? "bg-red-50 text-red-700" : folio.balance < 0 ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"
-                        }`}>
-                          <span>{folio.balance > 0 ? "Balance due at checkout" : folio.balance < 0 ? "Overpaid amount" : "Fully settled"}</span>
-                          <span>{formatPrice(Math.abs(folio.balance))}</span>
-                        </div>
-                        {folio.balance > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => { setShowRecordPaymentModal(true); setPaymentAmount(String(folio.balance)); setPaymentMethod("cash"); setPaymentTransactionReference(""); setPaymentNote(""); setPaymentError(null); }}
-                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg bg-orange-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-orange-700"
-                          >
-                            <CreditCard size={13} />
-                            Collect {formatPrice(folio.balance)}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={printBookingReceiptPDF}
-                          className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-255 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-                        >
-                          <FileText size={13} />
-                          Print Booking Receipt (PDF)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const params = new URLSearchParams({
-                              bookingRef: selectedBooking.bookingRef,
-                              roomId: selectedBooking.roomId,
-                              checkIn: selectedBooking.checkIn,
-                              checkOut: selectedBooking.checkOut,
-                              guests: String(selectedBooking.numGuests),
-                              paymentMethod: selectedBooking.paymentMethod,
-                              total: String(selectedBooking.totalPrice)
-                            });
-                            window.open(`${getApiBaseUrl().replace(/\/$/, "")}/book/confirm?${params.toString()}`, "_blank");
-                          }}
-                          className="mt-2 inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-255 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-                        >
-                          <FileText size={13} />
-                          Preview Folio / Receipt Page
-                        </button>
-                      </>
-                    );
-                  })()}
+              <div className="rounded-card border border-gray-200 bg-white p-4">
+                <div>
+                  <h3 className="flex items-center gap-1.5 text-xs font-bold text-gray-900">
+                    <FileText size={14} className="text-primary" />
+                    Receipt and checkout documents
+                  </h3>
+                  <p className="mt-1 text-[11px] text-gray-500">The current folio summary is used for both receipt views.</p>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={printBookingReceiptPDF}
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    <FileText size={13} />
+                    Print receipt PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const params = new URLSearchParams({
+                        bookingRef: selectedBooking.bookingRef,
+                        roomId: selectedBooking.roomId,
+                        checkIn: selectedBooking.checkIn,
+                        checkOut: selectedBooking.checkOut,
+                        guests: String(selectedBooking.numGuests),
+                        paymentMethod: selectedBooking.paymentMethod,
+                        total: String(selectedBooking.totalPrice)
+                      });
+                      window.open(`${getApiBaseUrl().replace(/\/$/, "")}/book/confirm?${params.toString()}`, "_blank");
+                    }}
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-lg border border-gray-250 bg-white px-3 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    <Eye size={13} />
+                    Preview receipt page
+                  </button>
                 </div>
               </div>
             )}

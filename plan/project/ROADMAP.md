@@ -1075,6 +1075,10 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ **BDUX-05h — Payment proof belongs in Folio.** Full proof-review card with image preview, method, ref, upload timestamp, and **Verify & Record Payment** action lives in Folio. Overview shows only compact payment status (method + Pending/Verified/Rejected badge). Sticky footer links to Folio for review. No duplication across sections.
 - ✅ **BDUX-05i — Status-aware proof shortcuts.** Compact **Payment proof awaiting verification** alert in sticky drawer header; clicking switches to Folio. Overview shows quiet payment status only.
 - ✅ **BDUX-05j — Collapse verified evidence.** After successful verification (`payment-confirmed`, `confirmed`, or rejected), proof card collapses to compact immutable evidence row showing method, reference, and **View proof** button. Expanded card with verify action visible only while `payment-uploaded`.
+- ✅ **BDUX-05k — Two-column Folio workspace.** Desktop uses a wide ledger/history column plus a sticky financial-summary column; mobile preserves the workflow as a single column without horizontal overflow.
+- ✅ **BDUX-05l — One settlement action.** **Collect** is the only primary action while an eligible Folio has a balance and is rendered through the sticky drawer footer. Duplicate inline Collect and outstanding-balance rows were removed.
+- ✅ **BDUX-05m — Visible category breakdown.** Folio summary exposes booking/add-on, billed-to-room store, incidental, grand-total, paid, and balance figures without requiring a disclosure. Detailed nightly rates remain progressively disclosed.
+- ✅ **BDUX-05n — Dense secondary workflows.** Discount, refund, incidental-charge, and receipt controls use compact secondary buttons; payment and charge history use concise rows and compact empty states.
 
 #### Delivery and acceptance criteria
 
@@ -1084,6 +1088,9 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ⬜ At 1440px, staff can understand guest, stay, payment state, outstanding balance, and next action without scrolling the default Overview.
 - ⬜ At 375px, there is no horizontal page scroll; all features remain reachable; the primary action stays usable above the safe area; modal/sheet focus and close behavior remain accessible.
 - ⬜ The default Folio view contains no expanded voucher, payment, refund, or incidental entry form; each remains reachable through one clearly labeled action.
+- ✅ At desktop widths, the Folio summary remains visible beside payment and charge history; at mobile widths the same regions stack in reading order.
+- ✅ An outstanding eligible Folio exposes one primary Collect action, and the amount is derived from the charge-inclusive live balance.
+- ✅ Category-level charge composition is visible by default without repeating the full checkout review lower in the drawer.
 - ⬜ Opening and completing any Folio action leaves the user on the Folio tab with the updated Total, Paid, Balance, and ledger state visible.
 - ⬜ Pending payment proof can be reached from the sticky header in one action, while verified proof remains accessible without dominating the default Folio layout.
 - ⬜ No action requires more navigation steps than the current drawer for its common operational path, and the next valid status action remains reachable in one tap/click from any section.
