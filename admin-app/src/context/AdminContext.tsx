@@ -39,6 +39,7 @@ import { arrayUnion, collection, deleteField, doc, getDocs, limit, onSnapshot, u
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
 type StaffRole = "front-desk" | "admin";
 
@@ -4409,15 +4410,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
     return unsubscribe;
   }, [currentUser]);
-
-  const getApiBaseUrl = () => {
-    if (typeof window === "undefined") return "";
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:3000";
-    }
-    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
-  };
 
   const createStaff = async (input: {
     fullName: string;

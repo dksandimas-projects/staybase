@@ -31,6 +31,7 @@ import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
@@ -1995,15 +1996,6 @@ export function SettingsPage() {
     }));
   };
 
-  const getApiBaseUrl = () => {
-    if (typeof window === "undefined") return "";
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:3000";
-    }
-    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
-  };
-
   const handleOpenPreview = async (action: string, label: string) => {
     setPreviewingTemplate(action);
     setPreviewingLabel(label);
@@ -2196,6 +2188,12 @@ export function SettingsPage() {
   };
 
   const isAdmin = currentUser?.role === "admin";
+  const stagingResetAvailable = typeof window !== "undefined"
+    && isStagingAdminEnvironment(
+      window.location.hostname,
+      config.domain,
+      import.meta.env.VITE_GUEST_APP_URL
+    );
 
   // Toggle item status in local states
   const toggleSilogItem = (id: string) => {
@@ -5290,17 +5288,32 @@ export function SettingsPage() {
                         Preserves hotel settings, rooms, rates, staff accounts, catalog, and vouchers.
                         <strong className="block mt-1">This is a staging-only action.</strong>
                       </p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={handleStagingResetPreview}
-                          disabled={stagingResetLoading}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-xs font-bold text-red-800 hover:bg-red-100 disabled:opacity-50 transition"
-                        >
-                          <RefreshCw size={14} className={stagingResetLoading ? "animate-spin" : ""} />
-                          Preview & reset
-                        </button>
-                        {stagingResetLoading && <span className="text-xs text-gray-500">Generating manifest...</span>}
-                      </div>
+                      {stagingResetAvailable ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleStagingResetPreview}
+                            disabled={stagingResetLoading}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-xs font-bold text-red-800 hover:bg-red-100 disabled:opacity-50 transition"
+                          >
+                            <RefreshCw size={14} className={stagingResetLoading ? "animate-spin" : ""} />
+                            Preview & reset
+                          </button>
+                          {stagingResetLoading && <span className="text-xs text-gray-500">Generating manifest...</span>}
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                          This control is disabled on production. Open the{" "}
+                          <a
+                            href={`https://stg-admin.${config.domain}`}
+                            className="font-bold underline underline-offset-2"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            staging Admin app
+                          </a>{" "}
+                          to reset staging operational data.
+                        </div>
+                      )}
                     </div>
                   </div>
                 </>

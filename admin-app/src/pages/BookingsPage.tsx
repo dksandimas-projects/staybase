@@ -21,6 +21,7 @@ import { IncidentalChargeList } from "../components/IncidentalChargeList";
 import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { formatPrice } from "../utils/format";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {
   Calendar,
   Mail,
@@ -410,13 +411,6 @@ export function BookingsPage() {
   const [unpaidCheckoutBlocked, setUnpaidCheckoutBlocked] = useState(false);
   const [unpaidCheckoutBlockMessage, setUnpaidCheckoutBlockMessage] = useState("");
   const brandRgb = hexToRgb(config.colors.primary);
-  const getApiBaseUrl = () => {
-    if (typeof window === "undefined") return "";
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") return "http://localhost:3000";
-    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
-  };
-
   const [showDiscountRejectForm, setShowDiscountRejectForm] = useState(false);
   const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [discountError, setDiscountError] = useState<string | null>(null);
