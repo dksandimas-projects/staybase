@@ -348,6 +348,39 @@ Admin-only editor for crawler-facing metadata. SEO-only fields can be saved as a
 
 Saving Hotel Settings compares the schema-relevant operational fields with the last published snapshot. When they differ, it sets `settings/seo.sourceChangesPending`, adds a marker to the SEO & Search tab, shows a save notification directing the admin to publish, and keeps a warning in the SEO panel across sessions. A successful deploy-hook request clears the pending marker; a failed request leaves it active.
 
+### 15. Environment Testing and Staging Reset
+
+The Environment Testing tab is Admin-only. Test-run creation and run-scoped cleanup are the normal tools for repeatable testing. **Reset Operational Data** is a broader staging-only clean-slate operation and must never be exposed as an executable production action.
+
+**Current safety status (reviewed July 16, 2026)**
+
+- [x] Staging and production API targets are separated by the Admin host/environment.
+- [x] Production does not expose the staging-reset route; production Settings links to staging instead of rendering the execute action.
+- [x] The server requires an authenticated Admin, an exact server-side project allowlist match, the `RESET STAGING` phrase, and the exact Firebase project ID.
+- [x] Preview displays collection counts and the preservation list before confirmation.
+- [ ] **Do not execute the broad staging reset until the hardening checklist below is complete and verified in the deployed staging environment.**
+
+**Required hardening before first use**
+
+- [ ] Add an atomic reset-job lock. Concurrent requests must resolve to one job; stale locks need bounded recovery, and retries must resume safely rather than begin another deletion pass.
+- [ ] Bind execution to a short-lived preview manifest identifier/hash. Reject expired previews, project mismatches, and material scope drift; require a new preview instead of deleting against an unreviewed dataset.
+- [ ] Fail closed on partial deletion. Any failed item or phase must return an incomplete/failed result—not `200 success`—keep the Settings workflow visibly unresolved, and provide an idempotent retry path.
+- [ ] Persist phase checkpoints and progress counts outside collections being deleted. The job must survive function timeout/restart and never lose its recovery cursor when `testRuns` is cleared.
+- [ ] Reconcile the full operational scope. Explicitly classify calls/ICE candidates, room blocks, Daily Close records, corporate inquiries, operational notifications/audits, and every known child collection as deleted or preserved; show those decisions in preview.
+- [ ] Restore room state using verified room IDs and room numbers, then confirm every affected room is `available` and `clean`. Missing/renamed rooms must be reported as integrity failures.
+- [ ] Run a post-reset integrity scan: target collections empty, no orphaned ledgers/messages/tenders/signaling children, no stale active-room state, counters unchanged, and protected settings/identity/catalog/configuration still present.
+- [ ] Record a terminal audit state (`complete`, `incomplete`, or `failed`) with manifest ID, checkpoints, counts, failed items, integrity results, initiating/completing Admin, project ID, and timestamps.
+- [ ] Add emulator/integration coverage for concurrent execution, timeout/resume, individual delete failures, room restoration, scope preservation, counter preservation, preview expiry/drift, and post-reset orphan detection.
+- [ ] Configure `STAGING_ALLOWLIST_PROJECT_IDS` only in the guest/API Vercel Preview environment, verify an authenticated preview against the exact staging project, and re-confirm that production preview/execute remain unavailable.
+
+**First-use acceptance**
+
+- [ ] A controlled fixture reset completes from preview through integrity scan with matching before/deleted/remaining counts.
+- [ ] Injected failures produce an incomplete state, never a success toast, and the same job resumes to a verified clean result.
+- [ ] Two simultaneous execute requests cannot create overlapping jobs.
+- [ ] Configuration, staff identity, catalog, vouchers/corporate codes, and reference counters match their pre-reset values.
+- [ ] The deployed production Admin/API cannot preview or execute the broad reset regardless of authenticated role or client request.
+
 ---
 
 ## Data & Logic Checklist
