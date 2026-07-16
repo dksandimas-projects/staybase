@@ -586,6 +586,7 @@ export function BookingsPage() {
   const [refundReason, setRefundReason] = useState("");
 
   const [showVerifyPaymentModal, setShowVerifyPaymentModal] = useState(false);
+  const verifySubmissionIdRef = useRef<string | null>(null);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [verifyAmount, setVerifyAmount] = useState("");
   const [verifyMethod, setVerifyMethod] = useState("gcash");
@@ -3358,7 +3359,7 @@ export function BookingsPage() {
                           {selectedBooking.status === "payment-uploaded" && (
                             <button
                               type="button"
-                              onClick={() => { setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+                              onClick={() => { verifySubmissionIdRef.current = doc(collection(db, "bookings", selectedBooking.id, "payments")).id; setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
                               className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 text-[10px] font-bold text-white transition hover:bg-green-700"
                             >
                               <ShieldCheck size={13} />
@@ -4739,7 +4740,7 @@ export function BookingsPage() {
       <Modal
         title={selectedBooking ? `Verify payment — ${selectedBooking.bookingRef}` : "Verify payment"}
         open={showVerifyPaymentModal}
-        onClose={() => setShowVerifyPaymentModal(false)}
+        onClose={() => { verifySubmissionIdRef.current = null; setShowVerifyPaymentModal(false); }}
         className="max-w-lg"
       >
         {selectedBooking && (
@@ -4789,15 +4790,19 @@ export function BookingsPage() {
             </label>
             {verifyError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{verifyError}</p>}
             <div className="flex items-center justify-end gap-3">
-              <button type="button" onClick={() => setShowVerifyPaymentModal(false)} disabled={verifyPending} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+              <button type="button" onClick={() => { verifySubmissionIdRef.current = null; setShowVerifyPaymentModal(false); }} disabled={verifyPending} className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
               <button type="button" onClick={() => void (async () => {
                 setVerifyError(null);
                 const amount = parseFloat(verifyAmount);
                 if (!Number.isFinite(amount) || amount <= 0) { setVerifyError("Enter a valid positive amount."); return; }
                 setVerifyPending(true);
-                const result = await verifyAndRecordPayment(selectedBooking.id, amount, verifyMethod, verifyReference.trim() || undefined, verifyNote.trim() || undefined);
+                const paymentId = verifySubmissionIdRef.current
+                  || doc(collection(db, "bookings", selectedBooking.id, "payments")).id;
+                verifySubmissionIdRef.current = paymentId;
+                const result = await verifyAndRecordPayment(selectedBooking.id, paymentId, amount, verifyMethod, verifyReference.trim() || undefined, verifyNote.trim() || undefined);
                 setVerifyPending(false);
                 if (!result.success) { setVerifyError(result.error || "Failed to verify payment."); return; }
+                verifySubmissionIdRef.current = null;
                 setShowVerifyPaymentModal(false);
               })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
                 {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}

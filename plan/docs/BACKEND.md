@@ -180,7 +180,7 @@ and adds a guest-visible retained-total line to the rebuilt rate breakdown.
 
 ### `bookings/{bookingId}/payments/{paymentId}`
 
-Subcollection — audit trail of all onsite payments and refunds. Append-only, never edited or deleted. Onsite payment clients preallocate `paymentId`; the server creates that exact document so matching retries are idempotent. All writes use authenticated server routes; Firestore client creation is denied.
+Subcollection — audit trail of all onsite payments, uploaded-payment verifications, and refunds. Append-only, never edited or deleted. Payment clients preallocate `paymentId`; the server creates that exact document so matching retries are idempotent. Equal-amount reference-free installments remain distinct when they intentionally use different IDs, and reusing an existing ID with different details is rejected. All writes use authenticated server routes; Firestore client creation is denied.
 
 | Field | Type | Notes |
 |---|---|---|

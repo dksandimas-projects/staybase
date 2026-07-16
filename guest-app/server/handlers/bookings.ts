@@ -2502,9 +2502,12 @@ export async function handleMarkPaymentConfirmed(req: any, res: any) {
 }
 
 export async function handleVerifyAndRecordPayment(req: any, res: any) {
-  const { bookingId, amount, method, transactionReference, note } = req.body || {};
+  const { bookingId, paymentId, amount, method, transactionReference, note } = req.body || {};
   if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!paymentId || !PREALLOCATED_PAYMENT_ID_REGEX.test(String(paymentId))) {
+    return res.status(400).json({ success: false, error: "A valid payment ID is required." });
   }
   if (!method) {
     return res.status(400).json({ success: false, error: "Payment method is required." });
@@ -2522,6 +2525,7 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     ? transactionReference.trim().slice(0, 200) || null
     : null;
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
+  const paymentNote = safeNote || "Verified payment proof";
 
   const staffUid = req.staff?.uid || "staff";
 
@@ -2532,7 +2536,6 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     let totalPrice = 0;
     let fullyPaid = false;
     let idempotentReplay = false;
-    let paymentId = "";
 
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
@@ -2540,7 +2543,34 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       const data = bookingDoc.data()!;
       bookingData = data;
 
-      // Only allow verify-and-record from payment-uploaded status
+      const paymentsRef = bookingRef.collection("payments");
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const existingPaid = paymentsSnapshot.docs.reduce((sum: number, docSnap: any) => {
+        return sum + Number(docSnap.data().amount || 0);
+      }, 0);
+
+      // The client-preallocated document ID is the idempotency key. Matching
+      // cash installments remain distinct when they intentionally use
+      // different IDs, even if their amount and method are identical.
+      const existingPayment = paymentsSnapshot.docs.find((docSnap: any) => docSnap.id === paymentId);
+      if (existingPayment) {
+        const existingData = existingPayment.data();
+        const sameRequest = Number(existingData.amount) === numericAmount
+          && String(existingData.method) === String(method)
+          && String(existingData.note || "") === paymentNote
+          && String(existingData.transactionReference || "") === (safeTransactionReference || "");
+        if (!sameRequest) throw new Error("PAYMENT_ID_CONFLICT");
+        idempotentReplay = true;
+        totalPrice = Number(data.totalPrice || 0);
+        totalCollected = existingPaid;
+        fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+        return;
+      }
+
+      // Only allow new verify-and-record entries from payment-uploaded/pending.
+      // Existing payment IDs are checked first so a committed full-payment
+      // retry can replay safely and conflicting reuse cannot hide behind the
+      // booking's now-confirmed status.
       if (data.status === "payment-confirmed" || data.status === "confirmed") {
         throw new Error("ALREADY_CONFIRMED");
       }
@@ -2560,30 +2590,6 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         }
       }
 
-      const paymentsRef = bookingRef.collection("payments");
-      const paymentsSnapshot = await transaction.get(paymentsRef);
-      const existingPaid = paymentsSnapshot.docs.reduce((sum: number, docSnap: any) => {
-        return sum + Number(docSnap.data().amount || 0);
-      }, 0);
-
-      // Check for idempotent replay: same amount + method + transactionReference
-      const matchedPayment = paymentsSnapshot.docs.find((docSnap: any) => {
-        const d = docSnap.data();
-        return Number(d.amount) === numericAmount
-          && String(d.method) === String(method)
-          && (d.transactionReference || "") === (safeTransactionReference || "");
-      });
-      if (matchedPayment) {
-        idempotentReplay = true;
-        paymentId = matchedPayment.id;
-        totalPrice = Number(data.totalPrice || 0);
-        totalCollected = existingPaid;
-        fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
-        return;
-      }
-
-      // Pre-allocate a payment ID and create the ledger entry
-      paymentId = paymentsRef.doc().id;
       totalPrice = Number(data.totalPrice || 0);
       totalCollected = existingPaid + numericAmount;
       fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
@@ -2592,7 +2598,7 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         type: "payment",
         amount: numericAmount,
         method,
-        note: safeNote || "Verified payment proof",
+        note: paymentNote,
         transactionReference: safeTransactionReference,
         reason: null,
         approvedBy: null,
@@ -2679,6 +2685,12 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
     }
     if (error?.message?.includes("Transaction reference is required")) {
       return res.status(400).json({ success: false, error: error.message });
+    }
+    if (error?.message === "PAYMENT_ID_CONFLICT") {
+      return res.status(409).json({
+        success: false,
+        error: "Payment ID has already been used for different payment details."
+      });
     }
     console.error("Verify and record payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "Unable to verify and record payment." });

@@ -1286,6 +1286,8 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ **ETR-S15 — Deployment and first-use gate.** Configure `STAGING_ALLOWLIST_PROJECT_IDS` only on the isolated guest/API Vercel Preview environment; perform an authenticated preview, controlled fixture reset, injected-failure/resume drill, and manual Settings QA. Reconfirm production preview/execute denial before marking the staging reset usable.
 
 > **Current execution gate:** Do not run the destructive staging reset until the updated hardening branch is deployed and the complete ETR-S15 controlled fixture reset and injected-failure/resume drill have passed. Code-level verification alone does not authorize staging use.
+>
+> **⚠️ Gate re-opened 2026-07-16 (AUD-01):** the committed API bundle was not rebuilt for the final two staging-reset fixes, so the deployed endpoints do not contain them. ETR-S15 remains complete at the source level only; do not run the staging reset until AUD-01 ships and the deployed bundle is confirmed current.
 
 #### Production-to-staging refresh and sanitization
 
@@ -1356,6 +1358,27 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ NC-03 — **Retention prune deletes serially.** `pruneNotifications` hard-deleted in a 500-iteration `await` loop; correct and bounded, but a `BulkWriter`/batched delete scales better if volume ever grows. Also one run prunes ≤`batchSize` docs, so a large backlog drains over several daily runs (irrelevant at 14-room scale). **Shipped on `fix/notification-center-postship`:** prune now goes through `adminDb.bulkWriter()` with per-doc `.catch` so a single terminal delete failure no longer aborts the whole run. Partial-success path: the returned `deleted` count + `deletedIds` reflect only the docs that actually landed. Source-pattern + behavioral tests cover both happy + partial paths.
 
 > **Verified correct (no action):** titles carry only booking ref + room number (no guest PII, Hard Rule holds); payment writes guard on `!idempotentReplay`; client hook is auth-gated, `limit(50)`-bounded, and unsubscribes in cleanup; mark-read uses dot-path `readBy.${uid}` (satisfies the rule); bell has no `soundsEnabled` reference (logs even when muted, per Decision #97); both deep-link targets read their params (`?orderId=` added `storeOrders` to effect deps to handle the load race; `?room=` opens the thread); cron is CRON_SECRET-gated with capped `maxAgeMs`/`batchSize`. The listener + prune queries are single-field (`createdAt`) — no composite index needed (the code comment overstating a composite index is cosmetic).
+
+### Post-merge Audit — 2026-07-15/16 commit batch (audited 2026-07-16, all closed)
+
+> Audit of the ~40 commits merged 2026-07-15 → 2026-07-16 (Notification Center hardening, PRC payment reference semantics, UCO unpaid checkout, booking drawer UX, FSO filters, ETR test runs + staging reset). Architecture and safety engineering verified sound overall — see "Verified correct" below — but two deploy-affecting defects and a broken guest API test suite were found. All six findings were fixed on `fix/audit-aud-01-06`; verification after remediation: shared 125/125, guest API 421/421, admin 847/847, both production builds green, and typecheck clean.
+
+**SEV-2 (fix first):**
+
+- ✅ **AUD-01 — Committed API bundle freshness guard.** Fixed on `fix/audit-aud-01-06`: rebuilt `guest-app/api/[...route].js` with the orphan sweep and Firestore-safe empty `integrityErrors`, then added a mandatory pre-commit check that independently bundles staged `guest-app/server/**` / `shared/**` changes to a temporary file and fails when the committed bundle is stale or unstaged.
+- ✅ **AUD-02 — Production test-run cleanup now deletes booking `charges`.** Fixed on `fix/audit-aud-01-06`: scoped cleanup now deletes the two real booking ledger subcollections (`payments`, `charges`) before deleting the parent booking. A behavioral regression test asserts both child ledgers are actually traversed and deleted.
+
+**SEV-3:**
+
+- ✅ **AUD-03 — 12 stale guest API fixtures aligned with the intended payment-reference and unpaid-checkout rules.** Fixed on `fix/audit-aud-01-06`: ordinary payment tests now use a reference-free cash method, the booking-create mock declares cash as reference-optional, and unpaid checkout fixtures provide and assert the required reason/audit response. Handlers were unchanged for this item.
+- ✅ **AUD-04 — Date-dependent member-discount tests made durable.** Fixed on `fix/audit-aud-01-06`: the five tests now derive the next Manila Monday-to-Wednesday stay, keeping the check-in future and the two-night weekday pricing assertion stable over time.
+
+**SEV-4 (polish):**
+
+- ✅ **AUD-05 — Verify-and-record uses an explicit payment idempotency key.** Fixed on `fix/audit-aud-01-06`: both admin verification surfaces retain a client-preallocated payment ID across uncertain retries; the server creates that exact ledger document, safely replays matching IDs, rejects conflicting reuse, and records legitimate equal reference-free installments under distinct IDs. Behavioral coverage locks all three cases.
+- ✅ **AUD-06 — Test-run cleanup uses a refreshed 30-minute lease.** Fixed on `fix/audit-aud-01-06`: stale recovery now matches the staging reset's 30-minute window, and bookings, store orders, notifications, intercom, and room-restoration progress refresh `cleanupStartedAt` plus the resumability cursor.
+
+> **Verified correct (no action):** `firestore.rules` NC-02/02b/02c final `readBy` rule is sound (keys grow only by the writer's own UID, no removals, timestamp-typed; notification docs initialize `readBy` so the rule never evaluates a missing field) and the `isStaff`/`isAdmin` missing-role-claim guard is correct. Staging-reset safety stack verified end-to-end: env allowlist, admin checks at both router and handler, typed double confirmation, preview TTL + manifest-drift hash, transactional lock with stale recovery, resumable phases, fail-closed integrity scan, protected-collection hash verification. CORS staging-origin derivation is correctly gated to non-production deploys with the production allowlist unchanged. UCO checkout recalculates the folio server-side, enforces the role threshold server-side, and stamps the exception audit trail. ETR-03 test-token validation hashes server-side and checks run status + expiry. Walk-in test-run inheritance validates the run server-side. (Cosmetic only: the staging reset's collection-group sweep during the bookings phase also removes top-level notification docs early, so the reported `notificationsDeleted` count can read 0 on a non-resumed run.)
 
 ### Phase 12 Features Audit — fixes to close (audited 2026-07-08)
 

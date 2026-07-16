@@ -46,7 +46,12 @@ vi.mock("../../server/lib/firebase-admin", () => ({
   adminStorage: {}
 }));
 
-import { handleStagingResetPreview, handleStagingResetExecute, hashManifest } from "../../server/handlers/test-runs";
+import {
+  deleteTestRunBookingSubcollections,
+  handleStagingResetPreview,
+  handleStagingResetExecute,
+  hashManifest
+} from "../../server/handlers/test-runs";
 
 const mockResponse = () => {
   const res: any = {};
@@ -533,5 +538,44 @@ describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
     for (const key of expectedKeys) {
       expect(manifest).toHaveProperty(key);
     }
+  });
+});
+
+describe("AUD-02 — scoped test-run booking cleanup", () => {
+  it("deletes the real payment and incidental-charge ledger subcollections", async () => {
+    const deletedPaths: string[] = [];
+    const requestedSubcollections: string[] = [];
+    const bookingRef = {
+      collection: vi.fn((name: string) => {
+        requestedSubcollections.push(name);
+        return {
+          get: vi.fn().mockResolvedValue({
+            docs: [{
+              ref: {
+                delete: vi.fn(async () => {
+                  deletedPaths.push(name);
+                })
+              }
+            }]
+          })
+        };
+      })
+    };
+
+    await deleteTestRunBookingSubcollections(bookingRef);
+
+    expect(requestedSubcollections).toEqual(["payments", "charges"]);
+    expect(deletedPaths).toEqual(["payments", "charges"]);
+  });
+
+  it("uses a refreshed 30-minute cleanup lease", async () => {
+    const source = await import("node:fs/promises").then((fs) => fs.readFile(
+      new URL("../../server/handlers/test-runs.ts", import.meta.url),
+      "utf8"
+    ));
+
+    expect(source).toContain("const CLEANUP_TIMEOUT_MS = 30 * 60 * 1000");
+    expect(source).toContain("await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount)");
+    expect(source).toContain("cleanupStartedAt: new Date()");
   });
 });

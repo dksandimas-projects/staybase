@@ -151,7 +151,7 @@ const staffReq = (overrides: Record<string, any> = {}) => ({
     bookingId: "booking_1",
     paymentId: "paymentRequest001",
     amount: 1500,
-    method: "gcash",
+    method: "cash",
     note: "First installment",
     ...overrides
   }
@@ -387,6 +387,8 @@ describe("/api/bookings/add-payment payment-confirmed trigger", () => {
 });
 
 describe("PRC-19: Verify & Record Payment handler", () => {
+  const verificationPaymentId = "verifyPaymentId0001";
+
   beforeEach(() => {
     Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
     mockPayments.length = 0;
@@ -408,17 +410,24 @@ describe("PRC-19: Verify & Record Payment handler", () => {
   });
 
   test("creates payment entry and transitions status to payment-confirmed when fully paid", async () => {
-    const req = { method: "POST", staff: { uid: "staff_1", email: "admin@sparkinn.com", role: "admin" }, body: { bookingId: "booking_1", amount: 5000, method: "gcash", transactionReference: "GCASH-VRF-001" } };
+    const req = { method: "POST", staff: { uid: "staff_1", email: "admin@sparkinn.com", role: "admin" }, body: { bookingId: "booking_1", paymentId: verificationPaymentId, amount: 5000, method: "gcash", transactionReference: "GCASH-VRF-001" } };
     const res = mockResponse();
     await handleVerifyAndRecordPayment(req, res);
     expect(res.status).toHaveBeenCalledWith(200);
     const createdPayment = mockPayments.find((p) => (p as any).transactionReference === "GCASH-VRF-001");
     expect(createdPayment).toBeDefined();
     expect(mockBookings["booking_1"].status).toBe("payment-confirmed");
+
+    const replayResponse = mockResponse();
+    await handleVerifyAndRecordPayment(req, replayResponse);
+    expect(mockPayments).toHaveLength(1);
+    expect(replayResponse.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idempotentReplay: true, paymentId: verificationPaymentId })
+    }));
   });
 
   test("partial verification creates payment entry but does not transition status", async () => {
-    const req = { method: "POST", staff: { uid: "staff_1", role: "admin" }, body: { bookingId: "booking_1", amount: 2000, method: "gcash", transactionReference: "GCASH-PARTIAL-001" } };
+    const req = { method: "POST", staff: { uid: "staff_1", role: "admin" }, body: { bookingId: "booking_1", paymentId: verificationPaymentId, amount: 2000, method: "gcash", transactionReference: "GCASH-PARTIAL-001" } };
     const res = mockResponse();
     await handleVerifyAndRecordPayment(req, res);
     expect(res.status).toHaveBeenCalledWith(200);
@@ -435,9 +444,81 @@ describe("PRC-19: Verify & Record Payment handler", () => {
   });
 
   test("rejects invalid amount (zero)", async () => {
-    const req = { method: "POST", staff: { uid: "staff_1", role: "admin" }, body: { bookingId: "booking_1", amount: 0, method: "gcash", transactionReference: "GCASH-ZERO" } };
+    const req = { method: "POST", staff: { uid: "staff_1", role: "admin" }, body: { bookingId: "booking_1", paymentId: verificationPaymentId, amount: 0, method: "gcash", transactionReference: "GCASH-ZERO" } };
     const res = mockResponse();
     await handleVerifyAndRecordPayment(req, res);
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test("replays the same client payment ID without creating a duplicate", async () => {
+    const request = {
+      method: "POST",
+      staff: { uid: "staff_1", role: "admin" },
+      body: {
+        bookingId: "booking_1",
+        paymentId: verificationPaymentId,
+        amount: 5000,
+        method: "cash",
+        note: "First cash installment"
+      }
+    };
+
+    await handleVerifyAndRecordPayment(request, mockResponse());
+    const replayResponse = mockResponse();
+    await handleVerifyAndRecordPayment(request, replayResponse);
+
+    expect(mockPayments).toHaveLength(1);
+    expect(replayResponse.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ idempotentReplay: true, paymentId: verificationPaymentId })
+    }));
+  });
+
+  test("records equal reference-free installments when their payment IDs differ", async () => {
+    const baseBody = {
+      bookingId: "booking_1",
+      amount: 1000,
+      method: "cash",
+      note: "Equal cash installment"
+    };
+
+    await handleVerifyAndRecordPayment({
+      method: "POST",
+      staff: { uid: "staff_1", role: "admin" },
+      body: { ...baseBody, paymentId: "verifyPaymentId0002" }
+    }, mockResponse());
+    await handleVerifyAndRecordPayment({
+      method: "POST",
+      staff: { uid: "staff_1", role: "admin" },
+      body: { ...baseBody, paymentId: "verifyPaymentId0003" }
+    }, mockResponse());
+
+    expect(mockPayments).toHaveLength(2);
+    expect(mockPayments.map((payment) => payment.id)).toEqual([
+      "verifyPaymentId0002",
+      "verifyPaymentId0003"
+    ]);
+  });
+
+  test("rejects reuse of a payment ID for different details", async () => {
+    const firstRequest = {
+      method: "POST",
+      staff: { uid: "staff_1", role: "admin" },
+      body: {
+        bookingId: "booking_1",
+        paymentId: verificationPaymentId,
+        amount: 1000,
+        method: "cash"
+      }
+    };
+    await handleVerifyAndRecordPayment(firstRequest, mockResponse());
+
+    const conflictResponse = mockResponse();
+    await handleVerifyAndRecordPayment({
+      ...firstRequest,
+      body: { ...firstRequest.body, amount: 1200 }
+    }, conflictResponse);
+
+    expect(mockPayments).toHaveLength(1);
+    expect(conflictResponse.status).toHaveBeenCalledWith(409);
   });
 });

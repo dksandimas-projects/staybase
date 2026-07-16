@@ -410,7 +410,7 @@ export interface AdminContextType {
   // booking back to `pending` (room stays held), emails
   // the guest with the reason, and writes a `payment`
   // notification for the bell.
-  verifyAndRecordPayment: (bookingId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
+  verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
   rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
@@ -1573,6 +1573,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // `pending` on the next frame.
   const verifyAndRecordPayment = async (
     bookingId: string,
+    paymentId: string,
     amount: number,
     method: string,
     transactionReference?: string,
@@ -1586,7 +1587,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           "Content-Type": "application/json",
           "Authorization": token ? `Bearer ${token}` : ""
         },
-        body: JSON.stringify({ bookingId, amount, method, transactionReference, note })
+        body: JSON.stringify({ bookingId, paymentId, amount, method, transactionReference, note })
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
