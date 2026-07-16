@@ -2020,8 +2020,6 @@ function BookingReviewAside({
   isMember = false,
   rateBreakdown = null
 }: BookingReviewAsideProps) {
-  if (!typeLabel) return null;
-
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
     return calculateSeasonalAwareRoomTotal({
@@ -2033,6 +2031,8 @@ function BookingReviewAside({
       seasonalRateOverrides
     });
   }, [typeRates, typeValue, checkIn, checkOut, seasonalRateOverrides]);
+
+  if (!typeLabel) return null;
 
   const activeBreakfastRate = breakfastRate ?? 350;
   const breakfastTotal = hasBreakfast ? activeBreakfastRate * guests * nights : 0;

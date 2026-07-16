@@ -177,14 +177,14 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
     });
   });
 
-  describe("Booking drawer — Print Booking Receipt button", () => {
-    it("renders a Print Booking Receipt (PDF) button bound to printBookingReceiptPDF", () => {
+  describe("Booking drawer — Print receipt PDF button", () => {
+    it("renders a Print receipt PDF button bound to printBookingReceiptPDF", () => {
       // The button must exist in the drawer, onClick bound to the builder
       expect(bookingsPageSrc).toMatch(
         /onClick=\{printBookingReceiptPDF\}/
       );
       expect(bookingsPageSrc).toMatch(
-        /Print Booking Receipt \(PDF\)/
+        /Print receipt PDF/
       );
     });
   });

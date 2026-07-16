@@ -76,6 +76,11 @@ TURNSTILE_SECRET_KEY=
 # Vercel Cron (server-side only — never prefix with VITE_)
 CRON_SECRET=
 
+# Comma-separated Firebase project IDs allowed to use the destructive staging
+# operational reset. Set only in isolated staging deployments; leave unset in
+# production.
+STAGING_ALLOWLIST_PROJECT_IDS=
+
 # CORS allow-list escape hatch (server-side only; optional). Comma-separated
 # absolute origins for any admin/guest surface that isn't the production
 # config.domain/adminDomain or the auto-derived stg./stg-admin. staging hosts.
@@ -104,6 +109,11 @@ VITE_SENTRY_DSN=
 VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
 ```
 
+On the canonical `stg-admin.<domain>` host, the admin app routes API calls to
+`stg.<domain>` before consulting the production fallback above. Vercel preview
+hosts that do not use the canonical staging domain must set `VITE_GUEST_APP_URL`
+to their matching guest preview URL.
+
 ---
 
 ## Notes
@@ -114,6 +124,9 @@ VITE_GUEST_APP_URL=https://www.sparkinnbohol.com
 - `FIREBASE_PROJECT_ID` appears twice (once as `VITE_FIREBASE_PROJECT_ID` for client, once as `FIREBASE_PROJECT_ID` for Admin SDK) — both are needed
 - `CRON_SECRET` protects scheduled Vercel Cron email jobs and must match the bearer token expected by `/api/email/checkin-reminder`
 - `VERCEL_DEPLOY_HOOK_URL` is called only by the authenticated admin SEO publish endpoint. Never prefix it with `VITE_` or expose it to browser code.
+- `STAGING_ALLOWLIST_PROJECT_IDS` is a server-only destructive-action gate. The
+  reset endpoints return 403 unless `FIREBASE_PROJECT_ID` exactly matches one of
+  its comma-separated values. Never include the production project ID.
 
 ---
 

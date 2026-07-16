@@ -372,3 +372,36 @@ export interface Notification {
   createdBy: "system";
   createdAt: Date;
 }
+
+export type TestRunStatus = "active" | "closed" | "cleanup-in-progress" | "cleaned";
+
+export interface TestRunManifest {
+  bookings: number;
+  storeOrders: number;
+  affectedRooms: string[];
+  affectedStockItems: string[];
+}
+
+export interface TestRunCleanupResult {
+  bookingsDeleted: number;
+  storeOrdersDeleted: number;
+  failedItems: number;
+}
+
+export interface TestRun {
+  id: string;
+  name: string;
+  environment: "staging" | "production";
+  createdBy: string;
+  createdByUid: string;
+  createdAt: Date;
+  expiresAt: Date;
+  closedAt: Date | null;
+  closedBy: string | null;
+  status: TestRunStatus;
+  tokenHash: string;
+  manifest?: TestRunManifest | null;
+  cleanupResult?: TestRunCleanupResult | null;
+}
+
+

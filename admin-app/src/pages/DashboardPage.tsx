@@ -72,6 +72,16 @@ export function DashboardPage() {
   const [rejectionError, setRejectionError] = useState<string | null>(null);
   const [rejectionPending, setRejectionPending] = useState(false);
 
+  // Per PRC-13: keep every hook above the dashboard loading return so
+  // the first loaded render uses the same hook order as the skeleton.
+  const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
+  const [verifyAmount, setVerifyAmount] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState("gcash");
+  const [verifyReference, setVerifyReference] = useState("");
+  const [verifyNote, setVerifyNote] = useState("");
+  const [verifyPending, setVerifyPending] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
   const REJECTION_REASON_PRESETS: Array<{ label: string; value: string }> = [
     {
       label: "Reference doesn't match",
@@ -317,14 +327,6 @@ export function DashboardPage() {
   // confirmPayment. Opens a focused modal that shows the proof,
   // defaults amount/method/reference, and atomically creates a
   // ledger entry + transitions status in one transaction.
-  const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
-  const [verifyAmount, setVerifyAmount] = useState("");
-  const [verifyMethod, setVerifyMethod] = useState("gcash");
-  const [verifyReference, setVerifyReference] = useState("");
-  const [verifyNote, setVerifyNote] = useState("");
-  const [verifyPending, setVerifyPending] = useState(false);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
-
   const openVerifyForm = (booking: Booking) => {
     setVerifyTarget(booking);
     setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));

@@ -29,7 +29,9 @@ import {
   type ProtectedPaymentMethod,
   type RoomBlock,
   type RoomTypeEntry,
-  type SeasonalRateOverride
+  type SeasonalRateOverride,
+  type TestRun,
+  type TestRunStatus
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -37,6 +39,7 @@ import { arrayUnion, collection, deleteField, doc, getDocs, limit, onSnapshot, u
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
 
 type StaffRole = "front-desk" | "admin";
 
@@ -197,6 +200,8 @@ export interface Booking {
     vehiclePlate: string;
     signatureStatus: "pending" | "signed";
   };
+  isTestData?: boolean;
+  testRunId?: string | null;
   breakfastSelections?: Record<string, string>;
   breakfastServed?: Record<string, boolean>;
   earlyCheckIn?: {
@@ -363,6 +368,8 @@ export interface StoreOrder {
   deliveredAt: string | null;
   isBilled: boolean;
   billedAt: string | null;
+  isTestData?: boolean;
+  testRunId?: string | null;
   cancellationReason: string;
   handledBy: string;
   notes: string;
@@ -564,6 +571,14 @@ export interface AdminContextType {
   unreadNotificationCount: number;
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
+
+  // Environment Test Runs (ETR)
+  testRuns: TestRun[];
+  testRunsLoading: boolean;
+  createTestRun: (input: { name: string; environment: "staging" | "production"; durationMinutes: number }) => Promise<{ success: boolean; error?: string; token?: string }>;
+  closeTestRun: (runId: string) => Promise<{ success: boolean; error?: string; manifest?: any }>;
+  deleteTestRun: (runId: string) => Promise<{ success: boolean; error?: string }>;
+  refreshTestRuns: () => Promise<void>;
 }
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
@@ -1511,7 +1526,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           status: booking.status,
           totalPriceOverride: booking.totalPriceOverride,
           discountType: booking.discountType,
-          voucherCode: booking.voucherCode
+          voucherCode: booking.voucherCode,
+          testRunId: (booking as any).testRunId || null
         })
       });
       const data = await res.json();
@@ -4228,6 +4244,122 @@ export function AdminProvider({ children }: { children: ReactNode }) {
   // handlers write here transactionally; Firestore listeners refresh the UI.
   const [staff, setStaff] = useState<StaffMember[]>([]);
 
+  // Test Runs (ETR)
+  const [testRuns, setTestRuns] = useState<TestRun[]>([]);
+  const [testRunsLoading, setTestRunsLoading] = useState(false);
+
+  const refreshTestRuns = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      setTestRunsLoading(true);
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/list`, {
+        method: "GET",
+        headers: {
+          "Authorization": token ? `Bearer ${token}` : ""
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestRuns(data.data || []);
+      }
+    } catch (err: any) {
+      console.error("Error fetching test runs:", err);
+    } finally {
+      setTestRunsLoading(false);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser) {
+      refreshTestRuns();
+      const interval = setInterval(refreshTestRuns, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser, refreshTestRuns]);
+
+  const createTestRun = async (input: {
+    name: string;
+    environment: "staging" | "production";
+    durationMinutes: number;
+  }): Promise<{ success: boolean; error?: string; token?: string }> => {
+    try {
+      setTestRunsLoading(true);
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify(input)
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to create test run." };
+      }
+      await refreshTestRuns();
+      return { success: true, token: data.data?.token };
+    } catch (err: any) {
+      console.error("Error creating test run:", err);
+      return { success: false, error: err?.message || "Failed to create test run." };
+    } finally {
+      setTestRunsLoading(false);
+    }
+  };
+
+  const closeTestRun = async (runId: string): Promise<{ success: boolean; error?: string; manifest?: any }> => {
+    try {
+      setTestRunsLoading(true);
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/close`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ runId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to close test run." };
+      }
+      await refreshTestRuns();
+      return { success: true, manifest: data.data?.manifest };
+    } catch (err: any) {
+      console.error("Error closing test run:", err);
+      return { success: false, error: err?.message || "Failed to close test run." };
+    } finally {
+      setTestRunsLoading(false);
+    }
+  };
+
+  const deleteTestRun = async (runId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setTestRunsLoading(true);
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/delete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ runId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to delete test run data." };
+      }
+      await refreshTestRuns();
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error deleting test run data:", err);
+      return { success: false, error: err?.message || "Failed to delete test run data." };
+    } finally {
+      setTestRunsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!currentUser) return;
     const staffRef = query(
@@ -4278,15 +4410,6 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
     return unsubscribe;
   }, [currentUser]);
-
-  const getApiBaseUrl = () => {
-    if (typeof window === "undefined") return "";
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:3000";
-    }
-    return import.meta.env.VITE_GUEST_APP_URL || `https://www.${config.domain}`;
-  };
 
   const createStaff = async (input: {
     fullName: string;
@@ -4487,7 +4610,13 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         notificationsLoading,
         unreadNotificationCount,
         markNotificationRead,
-        markAllNotificationsRead
+        markAllNotificationsRead,
+        testRuns,
+        testRunsLoading,
+        createTestRun,
+        closeTestRun,
+        deleteTestRun,
+        refreshTestRuns
       }}
     >
       {children}

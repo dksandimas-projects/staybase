@@ -65,7 +65,12 @@ export function BookingDrawerWorkspaceHeader({
                 {booking.source}
               </span>
             </div>
-            <p className="mt-3 truncate text-base font-bold text-gray-950">{booking.guestName}</p>
+            <p className="mt-3 truncate text-base font-bold text-gray-950">
+              {booking.guestName}
+              {(booking as any).isTestData && (
+                <span className="ml-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700">TEST</span>
+              )}
+            </p>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
               <span className="inline-flex items-center gap-1.5">
                 <BedDouble size={14} className="text-primary" aria-hidden="true" />

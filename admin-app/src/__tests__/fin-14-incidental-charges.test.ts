@@ -26,7 +26,7 @@ describe("FIN-14 incidental charge ledger", () => {
     expect(bookings).toMatch(/chargesTotal = charges\.reduce\(\(sum, charge\) => sum \+ charge\.amount, 0\)/);
     expect(bookings).toMatch(/grandTotal = booking\.totalPrice \+ storeTotal \+ chargesTotal/);
     expect(bookings).toMatch(/receiptFolio\.grandTotal - paymentsTotal/);
-    expect(bookings).toMatch(/Print Booking Receipt \(PDF\)/);
+    expect(bookings).toMatch(/Print receipt PDF/);
   });
 
   it("adds incidentals to sales reporting and both XLSX exports", () => {

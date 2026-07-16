@@ -34,6 +34,15 @@ describe("Phase 11.7 — Bookings quick-view filtering (FSO-03/04/06)", () => {
     expect(bookingsSrc).toMatch(/matchesSearch && matchesStatus && matchesQV/);
   });
 
+  it("initializes folio helpers before advanced filters evaluate", () => {
+    const folioHelperIndex = bookingsSrc.indexOf("const getBookingFolio =");
+    const filteredRowsIndex = bookingsSrc.indexOf("const filteredRows = useMemo");
+
+    expect(folioHelperIndex).toBeGreaterThan(-1);
+    expect(filteredRowsIndex).toBeGreaterThan(-1);
+    expect(folioHelperIndex).toBeLessThan(filteredRowsIndex);
+  });
+
   it("renders active chips for each active criterion (FSO-02)", () => {
     expect(bookingsSrc).toMatch(/activeChips\.push/);
     expect(bookingsSrc).toMatch(/chip\.onRemove/);

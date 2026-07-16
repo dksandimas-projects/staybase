@@ -6,7 +6,10 @@ const repoRoot = resolve(__dirname, "../../..");
 const read = (path: string) => readFileSync(resolve(repoRoot, path), "utf8");
 const pageSrc = read("admin-app/src/pages/BookingsPage.tsx");
 const workspaceSrc = read("admin-app/src/components/BookingDrawerWorkspace.tsx");
-const drawerSrc = `${pageSrc}\n${workspaceSrc}`;
+const regFormSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
+const emailActionsSrc = read("admin-app/src/components/BookingEmailActions.tsx");
+const incidentalSrc = read("admin-app/src/components/IncidentalChargeList.tsx");
+const drawerSrc = `${pageSrc}\n${workspaceSrc}\n${regFormSrc}\n${emailActionsSrc}\n${incidentalSrc}`;
 
 describe("Phase 12 — booking drawer information architecture", () => {
   it("provides the four task-based sections with accessible tabs", () => {
@@ -63,14 +66,14 @@ describe("Phase 12 — booking drawer information architecture", () => {
       "Move / Upgrade Room Workstation",
       "Charge breakdown",
       "Breakfast Selections",
-      "Discount / Voucher",
+      "Discount or voucher",
       "Government Discount Verification",
       "Spark Rewards Redemption",
-      "On-site Payments Ledger",
+      "Payment history",
       "Early Check-In Request",
       "Resend Transactional Email",
-      "Incidental Charge Ledger",
-      "Checkout Folio Review",
+      "Incidental charges",
+      "Receipt and checkout documents",
       "Cancel Booking"
     ]) {
       expect(drawerSrc, `expected booking drawer feature: ${feature}`).toContain(feature);
