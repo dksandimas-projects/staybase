@@ -201,6 +201,8 @@ export async function handleCloseTestRun(req: any, res: any) {
   }
 }
 
+const CLEANUP_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — if cleanupStartedAt is older, allow retry
+
 export async function handleDeleteTestRun(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -220,34 +222,77 @@ export async function handleDeleteTestRun(req: any, res: any) {
   }
 
   const { runId } = parsed.data;
+  const runRef = adminDb.collection("testRuns").doc(runId);
+  const now = new Date();
+
+  // ETR-14: atomic distributed lock via Firestore transaction
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const runDoc = await transaction.get(runRef);
+      if (!runDoc.exists) {
+        throw new Error("NOT_FOUND");
+      }
+      const runData = runDoc.data()!;
+      const status = runData.status;
+
+      if (status === "cleaned") {
+        throw new Error("ALREADY_CLEANED");
+      }
+
+      if (status === "closed") {
+        // First attempt: acquire lock
+        transaction.set(runRef, {
+          status: "cleanup-in-progress",
+          cleanupStartedAt: now,
+          cleanupCursor: null
+        }, { merge: true });
+        return;
+      }
+
+      if (status === "cleanup-in-progress") {
+        // Stale lock recovery: if started long enough ago, reclaim
+        const startedAt = runData.cleanupStartedAt?.toDate?.() || runData.cleanupStartedAt;
+        if (startedAt && (now.getTime() - new Date(startedAt).getTime()) < CLEANUP_TIMEOUT_MS) {
+          throw new Error("CLEANUP_IN_PROGRESS");
+        }
+        // Stale lock — reclaim it
+        transaction.set(runRef, {
+          status: "cleanup-in-progress",
+          cleanupStartedAt: now
+        }, { merge: true });
+        return;
+      }
+
+      throw new Error("INVALID_STATUS");
+    });
+  } catch (txError: any) {
+    const msg = txError.message || "";
+    if (msg === "NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Test run not found." });
+    }
+    if (msg === "ALREADY_CLEANED") {
+      return res.status(400).json({ success: false, error: "This test run has already been cleaned up." });
+    }
+    if (msg === "CLEANUP_IN_PROGRESS") {
+      return res.status(409).json({
+        success: false,
+        error: "Cleanup is already in progress. Please wait for it to complete or try again after a few minutes."
+      });
+    }
+    if (msg === "INVALID_STATUS") {
+      return res.status(400).json({ success: false, error: "Only closed test runs can be cleaned up. Close the run first." });
+    }
+    throw txError;
+  }
 
   try {
-    const runRef = adminDb.collection("testRuns").doc(runId);
-    const runDoc = await runRef.get();
-
-    if (!runDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Test run not found."
-      });
-    }
-
-    const runData = runDoc.data()!;
-    if (runData.status !== "closed") {
-      return res.status(400).json({
-        success: false,
-        error: "Only closed test runs can be cleaned up. Close the run first."
-      });
-    }
-
-    await runRef.set({ status: "cleanup-in-progress" }, { merge: true });
-
     let bookingCount = 0;
     let storeOrderCount = 0;
     let failedItems: string[] = [];
 
     const batchSize = 20;
 
+    // ETR-14: resumable — queries are idempotent (already-deleted docs are gone)
     // Delete tagged bookings and subcollections
     let lastDoc: any = null;
     while (true) {
@@ -267,6 +312,11 @@ export async function handleDeleteTestRun(req: any, res: any) {
           }
           await doc.ref.delete();
           bookingCount++;
+
+          // Periodically checkpoint progress for resumability
+          if (bookingCount % 20 === 0) {
+            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {});
+          }
         } catch (err) {
           failedItems.push(`booking/${doc.id}`);
         }
@@ -288,6 +338,10 @@ export async function handleDeleteTestRun(req: any, res: any) {
           await Promise.all(subSnap.docs.map(sd => sd.ref.delete()));
           await doc.ref.delete();
           storeOrderCount++;
+
+          if (storeOrderCount % 20 === 0) {
+            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {});
+          }
         } catch (err) {
           failedItems.push(`storeOrder/${doc.id}`);
         }
@@ -313,7 +367,6 @@ export async function handleDeleteTestRun(req: any, res: any) {
     }
 
     // Audit trail: store the cleanup result
-    const now = new Date();
     const auditResult = {
       type: "test-run-cleanup",
       runId,
@@ -326,6 +379,8 @@ export async function handleDeleteTestRun(req: any, res: any) {
     await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
 
     // Restore affected rooms to operational baseline
+    const runDoc = await runRef.get();
+    const runData = runDoc.data()!;
     const affectedRooms: string[] = (runData.manifest?.affectedRooms || []);
     for (const roomNumber of affectedRooms) {
       if (!roomNumber) continue;
@@ -341,6 +396,7 @@ export async function handleDeleteTestRun(req: any, res: any) {
     await runRef.set({
       status: "cleaned",
       cleanupCompletedAt: now,
+      cleanupCursor: null,
       cleanupResult: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount, failedItems: failedItems.length }
     }, { merge: true });
 

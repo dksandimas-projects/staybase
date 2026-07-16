@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 16, 2026 (Roadmap — ETR-07 implemented: walk-in bookings inherit `isTestData` + `testRunId` classification, with admin UI selector for active test runs. Other improvements are documented below.)
+> Last updated: July 16, 2026 (Roadmap — ETR-14 implemented: distributed lock (Firestore transaction), stale-lock recovery, and progress checkpointing for safe test-run cleanup execution. Other improvements are documented below.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1262,7 +1262,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ **ETR-11 — Delete by verified run ID only.** `POST /api/test-runs/delete` accepts one closed `testRunId`, validates it server-side, requires `closed` status, uses Admin SDK recursive deletion for subcollections. No browser-side delete loop.
 - ✅ **ETR-12 — Recover operational state.** After tagged data deletion, affected rooms are reset to `available`/`clean`. Intercom stays tagged with `testRunId` are deleted.
 - ✅ **ETR-13 — Durable cleanup audit.** Persists `{ type, runId, bookingsDeleted, storeOrdersDeleted, failedItems, completedAt, completedBy }` to `janitor/cleanups/history`.
-- ⬜ **ETR-14 — Safe job execution.** No distributed lock. Cleanup is idempotent (pagination with `startAfter`) but resumability and timeout safety are not implemented.
+- ✅ **ETR-14 — Safe job execution.** Firestore transaction for atomic lock acquisition (eliminates concurrent-cleanup race). Stale-lock recovery after 5-minute timeout allows retry of interrupted cleanups. Periodic progress checkpointing (`cleanupCursor`) enables resumability. Status `cleanup-in-progress` is accepted for retry when the lock is stale; `cleaned` runs are rejected.
 
 #### Permanent staging-only Reset operational data
 
