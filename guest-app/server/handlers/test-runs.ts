@@ -201,7 +201,26 @@ export async function handleCloseTestRun(req: any, res: any) {
   }
 }
 
-const CLEANUP_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — if cleanupStartedAt is older, allow retry
+const CLEANUP_TIMEOUT_MS = 30 * 60 * 1000; // 30-minute lease, refreshed after each cleanup page
+
+const TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"] as const;
+
+export async function deleteTestRunBookingSubcollections(bookingRef: any) {
+  for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
+    const snapshot = await bookingRef.collection(subcollection).get();
+    await Promise.all(snapshot.docs.map((child: any) => child.ref.delete()));
+  }
+}
+
+async function heartbeatTestRunCleanup(runRef: any, bookingCount: number, storeOrderCount: number) {
+  await runRef.set({
+    cleanupStartedAt: new Date(),
+    cleanupCursor: {
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount
+    }
+  }, { merge: true });
+}
 
 export async function handleDeleteTestRun(req: any, res: any) {
   if (req.method !== "POST") {
@@ -276,7 +295,7 @@ export async function handleDeleteTestRun(req: any, res: any) {
     if (msg === "CLEANUP_IN_PROGRESS") {
       return res.status(409).json({
         success: false,
-        error: "Cleanup is already in progress. Please wait for it to complete or try again after a few minutes."
+        error: "Cleanup is already in progress. Please wait for it to complete or try again after 30 minutes."
       });
     }
     if (msg === "INVALID_STATUS") {
@@ -304,23 +323,16 @@ export async function handleDeleteTestRun(req: any, res: any) {
 
       for (const doc of snap.docs) {
         try {
-          const subcollections = ["payments", "incidentalCharges", "notifications", "audit"];
-          for (const sub of subcollections) {
-            const subSnap = await adminDb.collection("bookings").doc(doc.id).collection(sub).get();
-            const deletes = subSnap.docs.map(sd => sd.ref.delete());
-            await Promise.all(deletes);
-          }
+          const bookingRef = adminDb.collection("bookings").doc(doc.id);
+          await deleteTestRunBookingSubcollections(bookingRef);
           await doc.ref.delete();
           bookingCount++;
 
-          // Periodically checkpoint progress for resumability
-          if (bookingCount % 20 === 0) {
-            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {});
-          }
         } catch (err) {
           failedItems.push(`booking/${doc.id}`);
         }
       }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     }
 
     // Delete tagged store orders
@@ -339,13 +351,11 @@ export async function handleDeleteTestRun(req: any, res: any) {
           await doc.ref.delete();
           storeOrderCount++;
 
-          if (storeOrderCount % 20 === 0) {
-            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {});
-          }
         } catch (err) {
           failedItems.push(`storeOrder/${doc.id}`);
         }
       }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     }
 
     // Delete notifications for test entities
@@ -354,6 +364,7 @@ export async function handleDeleteTestRun(req: any, res: any) {
     for (const doc of notifSnap.docs) {
       try { await doc.ref.delete(); } catch { failedItems.push(`notification/${doc.id}`); }
     }
+    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
 
     // Delete intercom stays and messages tagged to the run
     let intercomQ: any = adminDb.collection("intercoms").where("testRunId", "==", runId);
@@ -365,6 +376,7 @@ export async function handleDeleteTestRun(req: any, res: any) {
         await doc.ref.delete();
       } catch { failedItems.push(`intercom/${doc.id}`); }
     }
+    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
 
     // Audit trail: store the cleanup result
     const auditResult = {
@@ -391,6 +403,7 @@ export async function handleDeleteTestRun(req: any, res: any) {
           housekeepingStatus: "clean"
         }, { merge: true });
       }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     }
 
     await runRef.set({

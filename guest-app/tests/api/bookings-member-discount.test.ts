@@ -1,6 +1,20 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { assertBookingFinanceInvariant } from "@spark-inn/shared";
+import { assertBookingFinanceInvariant, getManilaDateInfo } from "@spark-inn/shared";
 import handler from "../../server/apiRouter";
+
+function nextManilaMonday(): Date {
+  const { todayStr } = getManilaDateInfo();
+  const date = new Date(`${todayStr}T00:00:00Z`);
+  const daysUntilMonday = (8 - date.getUTCDay()) % 7 || 7;
+  date.setUTCDate(date.getUTCDate() + daysUntilMonday);
+  return date;
+}
+
+const memberMonday = nextManilaMonday();
+const memberWednesday = new Date(memberMonday);
+memberWednesday.setUTCDate(memberWednesday.getUTCDate() + 2);
+const memberCheckIn = memberMonday.toISOString().slice(0, 10);
+const memberCheckOut = memberWednesday.toISOString().slice(0, 10);
 
 // Per W2.2 / decision #90: the server is authoritative on the
 // member discount. The handler must (a) verify the Firebase ID
@@ -222,8 +236,8 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const body = {
       bookingId: "bookingBf01A",
       roomType: "standard-double",
-      checkIn: "2026-07-15",
-      checkOut: "2026-07-17",
+      checkIn: memberCheckIn,
+      checkOut: memberCheckOut,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -256,8 +270,8 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const body = {
       bookingId: "bookingBf01B",
       roomType: "standard-double",
-      checkIn: "2026-07-15",
-      checkOut: "2026-07-17",
+      checkIn: memberCheckIn,
+      checkOut: memberCheckOut,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -286,8 +300,8 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const body = {
       bookingId: "bookingBf01C",
       roomType: "standard-double",
-      checkIn: "2026-07-15",
-      checkOut: "2026-07-17",
+      checkIn: memberCheckIn,
+      checkOut: memberCheckOut,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -324,8 +338,8 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const body = {
       bookingId: "bookingBf01D",
       roomType: "standard-double",
-      checkIn: "2026-07-15",
-      checkOut: "2026-07-17",
+      checkIn: memberCheckIn,
+      checkOut: memberCheckOut,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {
@@ -358,8 +372,8 @@ describe("BF-01 — handleCreateBooking reads the Authorization Bearer token and
     const body = {
       bookingId: "bookingBf01E",
       roomType: "standard-double",
-      checkIn: "2026-07-15",
-      checkOut: "2026-07-17",
+      checkIn: memberCheckIn,
+      checkOut: memberCheckOut,
       guests: 2,
       hasBreakfast: false,
       guestDetails: {

@@ -243,7 +243,7 @@ describe("/api/bookings/checkout", () => {
     mockRooms["room_101"] = { status: "occupied", housekeepingStatus: "clean" };
 
     const res = mockResponse();
-    await handleCheckoutBooking(staffReq(), res);
+    await handleCheckoutBooking(staffReq({ unpaidCheckoutReason: "approved company billing" }), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mockBookings["booking_1"].status).toBe("checked-out");
@@ -253,7 +253,14 @@ describe("/api/bookings/checkout", () => {
     expect(mockPointsHistory.length).toBe(0);
     expect(res.json).toHaveBeenCalledWith({
       success: true,
-      data: { status: "checked-out", pointsAwarded: 0, memberId: null, checkedOutWithBalance: 5000 }
+      data: {
+        status: "checked-out",
+        pointsAwarded: 0,
+        memberId: null,
+        checkedOutWithBalance: 5000,
+        unpaidCheckoutReason: "approved company billing",
+        unpaidCheckoutApprovedBy: null
+      }
     });
   });
 
@@ -341,7 +348,7 @@ describe("/api/bookings/checkout", () => {
     mockPayments.push({ amount: 2000 });
 
     const res = mockResponse();
-    await handleCheckoutBooking(staffReq(), res);
+    await handleCheckoutBooking(staffReq({ unpaidCheckoutReason: "bank transfer pending" }), res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mockBookings["booking_1"].pointsAwarded).toBe(0);
@@ -406,7 +413,7 @@ describe("/api/bookings/checkout", () => {
     mockRooms["room_101"] = { status: "occupied" };
 
     const res = mockResponse();
-    await handleCheckoutBooking(staffReq(), res);
+    await handleCheckoutBooking(staffReq({ unpaidCheckoutReason: "bank transfer pending" }), res);
 
     expect(mockBookings["booking_1"]).toEqual(expect.objectContaining({
       checkedOutFolioTotal: 5800,

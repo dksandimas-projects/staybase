@@ -1,5 +1,6 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { collection, doc } from "firebase/firestore";
 import { getManilaDateInfo } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
@@ -9,6 +10,7 @@ import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, Sh
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
+import { db } from "../firebase/config";
 
 
 export function getDaysOverdue(checkOut: string, todayKey: string) {
@@ -75,6 +77,7 @@ export function DashboardPage() {
   // Per PRC-13: keep every hook above the dashboard loading return so
   // the first loaded render uses the same hook order as the skeleton.
   const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
+  const verifySubmissionIdRef = useRef<string | null>(null);
   const [verifyAmount, setVerifyAmount] = useState("");
   const [verifyMethod, setVerifyMethod] = useState("gcash");
   const [verifyReference, setVerifyReference] = useState("");
@@ -328,6 +331,7 @@ export function DashboardPage() {
   // defaults amount/method/reference, and atomically creates a
   // ledger entry + transitions status in one transaction.
   const openVerifyForm = (booking: Booking) => {
+    verifySubmissionIdRef.current = doc(collection(db, "bookings", booking.id, "payments")).id;
     setVerifyTarget(booking);
     setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));
     setVerifyMethod(booking.paymentMethod || "gcash");
@@ -338,6 +342,7 @@ export function DashboardPage() {
   };
 
   const cancelVerifyForm = () => {
+    verifySubmissionIdRef.current = null;
     setVerifyTarget(null);
     setVerifyAmount("");
     setVerifyMethod("gcash");
@@ -349,6 +354,9 @@ export function DashboardPage() {
 
   const submitVerification = async () => {
     if (!verifyTarget) return;
+    const paymentId = verifySubmissionIdRef.current
+      || doc(collection(db, "bookings", verifyTarget.id, "payments")).id;
+    verifySubmissionIdRef.current = paymentId;
     const amount = parseFloat(verifyAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       setVerifyError("Enter a valid positive amount.");
@@ -358,6 +366,7 @@ export function DashboardPage() {
     setVerifyError(null);
     const result = await verifyAndRecordPayment(
       verifyTarget.id,
+      paymentId,
       amount,
       verifyMethod,
       verifyReference.trim() || undefined,

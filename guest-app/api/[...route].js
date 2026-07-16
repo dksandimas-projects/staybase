@@ -189771,7 +189771,23 @@ async function handleCloseTestRun(req, res) {
     });
   }
 }
-var CLEANUP_TIMEOUT_MS = 5 * 60 * 1e3;
+var CLEANUP_TIMEOUT_MS = 30 * 60 * 1e3;
+var TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"];
+async function deleteTestRunBookingSubcollections(bookingRef) {
+  for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
+    const snapshot = await bookingRef.collection(subcollection).get();
+    await Promise.all(snapshot.docs.map((child) => child.ref.delete()));
+  }
+}
+async function heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount) {
+  await runRef.set({
+    cleanupStartedAt: /* @__PURE__ */ new Date(),
+    cleanupCursor: {
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount
+    }
+  }, { merge: true });
+}
 async function handleDeleteTestRun(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -189833,7 +189849,7 @@ async function handleDeleteTestRun(req, res) {
     if (msg === "CLEANUP_IN_PROGRESS") {
       return res.status(409).json({
         success: false,
-        error: "Cleanup is already in progress. Please wait for it to complete or try again after a few minutes."
+        error: "Cleanup is already in progress. Please wait for it to complete or try again after 30 minutes."
       });
     }
     if (msg === "INVALID_STATUS") {
@@ -189855,22 +189871,15 @@ async function handleDeleteTestRun(req, res) {
       lastDoc = snap.docs[snap.docs.length - 1];
       for (const doc of snap.docs) {
         try {
-          const subcollections = ["payments", "incidentalCharges", "notifications", "audit"];
-          for (const sub of subcollections) {
-            const subSnap = await adminDb.collection("bookings").doc(doc.id).collection(sub).get();
-            const deletes = subSnap.docs.map((sd) => sd.ref.delete());
-            await Promise.all(deletes);
-          }
+          const bookingRef = adminDb.collection("bookings").doc(doc.id);
+          await deleteTestRunBookingSubcollections(bookingRef);
           await doc.ref.delete();
           bookingCount++;
-          if (bookingCount % 20 === 0) {
-            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {
-            });
-          }
         } catch (err) {
           failedItems.push(`booking/${doc.id}`);
         }
       }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     }
     lastDoc = null;
     while (true) {
@@ -189885,14 +189894,11 @@ async function handleDeleteTestRun(req, res) {
           await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
           await doc.ref.delete();
           storeOrderCount++;
-          if (storeOrderCount % 20 === 0) {
-            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {
-            });
-          }
         } catch (err) {
           failedItems.push(`storeOrder/${doc.id}`);
         }
       }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     }
     let notifQ = adminDb.collection("notifications").where("testRunId", "==", runId);
     const notifSnap = await notifQ.get();
@@ -189903,6 +189909,7 @@ async function handleDeleteTestRun(req, res) {
         failedItems.push(`notification/${doc.id}`);
       }
     }
+    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     let intercomQ = adminDb.collection("intercoms").where("testRunId", "==", runId);
     const intercomSnap = await intercomQ.get();
     for (const doc of intercomSnap.docs) {
@@ -189914,6 +189921,7 @@ async function handleDeleteTestRun(req, res) {
         failedItems.push(`intercom/${doc.id}`);
       }
     }
+    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     const auditResult = {
       type: "test-run-cleanup",
       runId,
@@ -189936,6 +189944,7 @@ async function handleDeleteTestRun(req, res) {
           housekeepingStatus: "clean"
         }, { merge: true });
       }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
     }
     await runRef.set({
       status: "cleaned",
@@ -190238,6 +190247,27 @@ async function handleStagingResetExecute(req, res) {
       }
     }
   }
+  async function deleteCollectionGroupPage(groupName) {
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collectionGroup(groupName).limit(RESET_BATCH_SIZE);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      const failuresBeforePage = failedItems.length;
+      for (const doc of snap.docs) {
+        try {
+          await doc.ref.delete();
+        } catch {
+          failedItems.push(`${groupName}/${doc.id}`);
+        }
+      }
+      if (failedItems.length > failuresBeforePage) {
+        throw new Error(`Deletion failed in collection group ${groupName}; retry this reset job to resume.`);
+      }
+    }
+  }
   try {
     manifestBefore = validatedPreview.manifest;
     const phaseOrder = [
@@ -190262,6 +190292,9 @@ async function handleStagingResetExecute(req, res) {
       await lockRef.set({ phase, checkpoint: 0 }, { merge: true });
       const counter = { value: 0 };
       await deleteCollectionPage(collectionName, subcollections, counter);
+      for (const sub of subcollections) {
+        await deleteCollectionGroupPage(sub);
+      }
       await lockRef.set({ checkpoint: counter.value }, { merge: true });
       return lock.resumed ? expectedCount : counter.value;
     };
@@ -190393,7 +190426,7 @@ async function handleStagingResetExecute(req, res) {
       cleanupHistoryDeleted: cleanupCount,
       roomsRestored: roomRestoreCount,
       failedItems,
-      integrityErrors: integrityErrors.length > 0 ? integrityErrors : void 0,
+      integrityErrors: integrityErrors.length > 0 ? integrityErrors : [],
       manifestBefore: {
         bookings: manifestBefore.bookings,
         storeOrders: manifestBefore.storeOrders,
@@ -192326,9 +192359,12 @@ async function handleMarkPaymentConfirmed(req, res) {
   }
 }
 async function handleVerifyAndRecordPayment(req, res) {
-  const { bookingId, amount, method, transactionReference, note } = req.body || {};
+  const { bookingId, paymentId, amount, method, transactionReference, note } = req.body || {};
   if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  if (!paymentId || !PREALLOCATED_PAYMENT_ID_REGEX.test(String(paymentId))) {
+    return res.status(400).json({ success: false, error: "A valid payment ID is required." });
   }
   if (!method) {
     return res.status(400).json({ success: false, error: "Payment method is required." });
@@ -192342,6 +192378,7 @@ async function handleVerifyAndRecordPayment(req, res) {
   }
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
+  const paymentNote = safeNote || "Verified payment proof";
   const staffUid = req.staff?.uid || "staff";
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -192350,12 +192387,27 @@ async function handleVerifyAndRecordPayment(req, res) {
     let totalPrice = 0;
     let fullyPaid = false;
     let idempotentReplay = false;
-    let paymentId = "";
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
       bookingData2 = data;
+      const paymentsRef = bookingRef.collection("payments");
+      const paymentsSnapshot = await transaction.get(paymentsRef);
+      const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
+        return sum + Number(docSnap.data().amount || 0);
+      }, 0);
+      const existingPayment = paymentsSnapshot.docs.find((docSnap) => docSnap.id === paymentId);
+      if (existingPayment) {
+        const existingData = existingPayment.data();
+        const sameRequest = Number(existingData.amount) === numericAmount && String(existingData.method) === String(method) && String(existingData.note || "") === paymentNote && String(existingData.transactionReference || "") === (safeTransactionReference || "");
+        if (!sameRequest) throw new Error("PAYMENT_ID_CONFLICT");
+        idempotentReplay = true;
+        totalPrice = Number(data.totalPrice || 0);
+        totalCollected = existingPaid;
+        fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
+        return;
+      }
       if (data.status === "payment-confirmed" || data.status === "confirmed") {
         throw new Error("ALREADY_CONFIRMED");
       }
@@ -192372,24 +192424,6 @@ async function handleVerifyAndRecordPayment(req, res) {
           throw new Error("Transaction reference is required for this payment method.");
         }
       }
-      const paymentsRef = bookingRef.collection("payments");
-      const paymentsSnapshot = await transaction.get(paymentsRef);
-      const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
-        return sum + Number(docSnap.data().amount || 0);
-      }, 0);
-      const matchedPayment = paymentsSnapshot.docs.find((docSnap) => {
-        const d = docSnap.data();
-        return Number(d.amount) === numericAmount && String(d.method) === String(method) && (d.transactionReference || "") === (safeTransactionReference || "");
-      });
-      if (matchedPayment) {
-        idempotentReplay = true;
-        paymentId = matchedPayment.id;
-        totalPrice = Number(data.totalPrice || 0);
-        totalCollected = existingPaid;
-        fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
-        return;
-      }
-      paymentId = paymentsRef.doc().id;
       totalPrice = Number(data.totalPrice || 0);
       totalCollected = existingPaid + numericAmount;
       fullyPaid = totalPrice > 0 && totalCollected >= totalPrice;
@@ -192397,7 +192431,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         type: "payment",
         amount: numericAmount,
         method,
-        note: safeNote || "Verified payment proof",
+        note: paymentNote,
         transactionReference: safeTransactionReference,
         reason: null,
         approvedBy: null,
@@ -192475,6 +192509,12 @@ async function handleVerifyAndRecordPayment(req, res) {
     }
     if (error?.message?.includes("Transaction reference is required")) {
       return res.status(400).json({ success: false, error: error.message });
+    }
+    if (error?.message === "PAYMENT_ID_CONFLICT") {
+      return res.status(409).json({
+        success: false,
+        error: "Payment ID has already been used for different payment details."
+      });
     }
     console.error("Verify and record payment handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "Unable to verify and record payment." });

@@ -397,6 +397,9 @@ describe("/api/bookings/create", () => {
       // candidate physical rooms of that type. The mock must
       // expose the same shape the real Firestore doc has.
       "hotelConfig": {
+        paymentMethods: [
+          { method: "cash", requireReferenceNumber: false }
+        ],
         roomTypes: [
           {
             value: "standard-double",
