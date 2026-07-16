@@ -315,14 +315,14 @@ Reduce the cognitive load of the booking drawer without removing operational, fi
 
 ### Folio workspace hierarchy *(BDUX-05k–05n shipped 2026-07-16)*
 
-- [x] Desktop Folio uses a two-column operational workspace: charge/payment history in the main column and a sticky financial summary in the side column. Mobile retains the same content in a single-column sequence.
+- [x] Desktop Folio uses independent columns: charge/payment history flows continuously in the main column while the financial summary remains sticky in the side column. Mobile retains the same content in a single-column sequence.
 - [x] The sticky summary shows charge-inclusive Total, Paid, and Balance/Settled/Overpaid states plus a visible category breakdown for booking charges, billed-to-room store orders, and incidentals.
 - [x] Collect is the only primary Folio action and lives in the existing sticky drawer footer. It replaces unrelated lifecycle guidance while an eligible booking has an outstanding balance.
 - [x] Discount, refund, incidental, and receipt controls use compact secondary actions so they do not compete with settlement.
 - [x] Payment and incidental empty states remain informative without reserving large blank ledger cards.
 - [x] Repeated outstanding-balance and checkout-summary blocks were removed; receipt actions consume the same authoritative Folio summary.
 - [x] Existing payment/refund eligibility, append-only ledgers, checkout gates, proof verification, rate details, and receipt behavior remain unchanged.
-- [x] Regression coverage locks the responsive columns, sticky summary, default category breakdown, and single Collect action.
+- [x] Regression coverage locks the independent responsive columns (without shared grid-row whitespace), sticky summary, default category breakdown, and single Collect action.
 
 ### Remaining tranche
 

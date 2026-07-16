@@ -2966,10 +2966,10 @@ export function BookingsPage() {
       >
         {selectedBooking && (
           <div className={activeBookingSection === "folio"
-            ? "grid grid-cols-1 gap-6 text-sm lg:grid-cols-12 lg:items-start"
+            ? "flow-root space-y-6 text-sm"
             : "space-y-6 text-sm"
           }>
-            <div className={activeBookingSection === "folio" ? "lg:col-span-12" : undefined}>
+            <div>
             <BookingDrawerWorkspaceHeader
               booking={selectedBooking}
               activeSection={activeBookingSection}
@@ -3355,7 +3355,7 @@ export function BookingsPage() {
               section="folio"
               activeSection={activeBookingSection}
               primary
-              className="lg:col-span-4 lg:col-start-9 lg:row-start-2 lg:self-start lg:sticky lg:top-20"
+              className="lg:sticky lg:top-20 lg:float-right lg:w-[calc(33.333%-1rem)]"
             >
             <div className="space-y-4 rounded-card border border-gray-200 bg-white p-4 shadow-sm">
               <div>
@@ -3561,7 +3561,7 @@ export function BookingsPage() {
             )}
             </BookingDrawerSectionPanel>
 
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:col-span-8 lg:col-start-1">
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
             {(() => {
               const hasVoucherOrDiscount = selectedBooking.discountType || selectedBooking.voucherCode;
               return (
@@ -3738,7 +3738,7 @@ export function BookingsPage() {
             )}
             </BookingDrawerSectionPanel>
 
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:col-span-8 lg:col-start-1">
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
             {selectedBooking.memberId && ["confirmed", "checked-in", "checked-out"].includes(selectedBooking.status) && (
               <div className="rounded-card border border-primary/20 bg-primary-light/30 p-4 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -4103,7 +4103,7 @@ export function BookingsPage() {
             </div>
             </BookingDrawerSectionPanel>
 
-            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:col-span-8 lg:col-start-1">
+            <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
             {(["confirmed", "checked-in", "checked-out"] as string[]).includes(selectedBooking.status) && (
               <div className="rounded-card border border-gray-200 bg-white p-4 space-y-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

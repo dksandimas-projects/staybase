@@ -63,11 +63,12 @@ describe("Phase 12 — booking drawer folio interaction (BDUX-05g)", () => {
     expect(pageSrc).toMatch(/openRecordPaymentForBalance\(selectedBookingFolio\.balance\)/);
   });
 
-  it("uses a two-column desktop folio with a sticky summary", () => {
-    expect(pageSrc).toMatch(/lg:grid-cols-12 lg:items-start/);
-    expect(pageSrc).toMatch(/lg:col-span-4 lg:col-start-9 lg:row-start-2/);
-    expect(pageSrc).toMatch(/lg:col-span-8 lg:col-start-1/);
+  it("uses independent desktop folio columns with a sticky summary", () => {
+    expect(pageSrc).toMatch(/flow-root space-y-6 text-sm/);
+    expect(pageSrc).toMatch(/lg:float-right lg:w-\[calc\(33\.333%-1rem\)\]/);
+    expect(pageSrc).toMatch(/lg:w-\[calc\(66\.667%-0\.5rem\)\]/);
     expect(pageSrc).toMatch(/lg:sticky lg:top-20/);
+    expect(pageSrc).not.toMatch(/lg:row-start-2/);
   });
 
   it("shows the category charge breakdown without another disclosure", () => {
