@@ -491,8 +491,9 @@ describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
 
   it("returns 500 when integrity scan finds remaining data", async () => {
     // Setup consumes 21 reads; nine root deletion phases plus cleanup history
-    // consume ten more. The first integrity root read is call 32 (1-based).
-    const INTEGRITY_START = 32;
+    // consume ten more. Nine additional collection group reads are done for subcollections.
+    // The first integrity root read is call 41 (1-based).
+    const INTEGRITY_START = 41;
     const setup = STEPS_FULL_SUCCESS;
     let callIdx = 0;
     mockGet.mockImplementation(async () => {

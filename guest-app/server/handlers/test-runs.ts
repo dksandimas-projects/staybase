@@ -735,6 +735,27 @@ export async function handleStagingResetExecute(req: any, res: any) {
     }
   }
 
+  // Shared paginated deletion helper for orphaned subcollections via collection groups
+  async function deleteCollectionGroupPage(groupName: string) {
+    let lastDoc: any = null;
+    while (true) {
+      let q: any = adminDb.collectionGroup(groupName).limit(RESET_BATCH_SIZE);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      const failuresBeforePage = failedItems.length;
+      for (const doc of snap.docs) {
+        try {
+          await doc.ref.delete();
+        } catch { failedItems.push(`${groupName}/${doc.id}`); }
+      }
+      if (failedItems.length > failuresBeforePage) {
+        throw new Error(`Deletion failed in collection group ${groupName}; retry this reset job to resume.`);
+      }
+    }
+  }
+
   // ETR-S11: wrap entire execution in fail-closed semantics
   try {
     manifestBefore = validatedPreview.manifest;
@@ -758,6 +779,9 @@ export async function handleStagingResetExecute(req: any, res: any) {
       await lockRef.set({ phase, checkpoint: 0 }, { merge: true });
       const counter = { value: 0 };
       await deleteCollectionPage(collectionName, subcollections, counter);
+      for (const sub of subcollections) {
+        await deleteCollectionGroupPage(sub);
+      }
       await lockRef.set({ checkpoint: counter.value }, { merge: true });
       return lock.resumed ? expectedCount : counter.value;
     };
