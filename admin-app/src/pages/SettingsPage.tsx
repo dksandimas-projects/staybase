@@ -1172,7 +1172,8 @@ export function SettingsPage() {
     testRunsLoading,
     createTestRun,
     closeTestRun,
-    deleteTestRun
+    deleteTestRun,
+    refreshTestRuns
   } = useAdmin();
   const toast = useToast();
   const { isMobile } = useBreakpoint();
@@ -1446,6 +1447,13 @@ export function SettingsPage() {
   const [newRunDuration, setNewRunDuration] = useState(60);
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<TestRun | null>(null);
 
+  // Staging Reset (ETR-S)
+  const [stagingResetPreview, setStagingResetPreview] = useState<any>(null);
+  const [stagingResetLoading, setStagingResetLoading] = useState(false);
+  const [stagingResetConfirmText, setStagingResetConfirmText] = useState("");
+  const [stagingResetProjectName, setStagingResetProjectName] = useState("");
+  const [showStagingResetModal, setShowStagingResetModal] = useState(false);
+
   // Breakfast item CRUD states
   const [isBreakfastItemModalOpen, setIsBreakfastItemModalOpen] = useState(false);
   const [editingSilogItem, setEditingSilogItem] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
@@ -1675,6 +1683,65 @@ export function SettingsPage() {
       toast.error("Failed to clean up", result.error || "Unknown error");
     }
     setConfirmDeleteRun(null);
+  };
+
+  // Staging Reset handlers (ETR-S)
+  const handleStagingResetPreview = async () => {
+    try {
+      setStagingResetLoading(true);
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/staging-reset-preview`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStagingResetPreview(data.data);
+        setShowStagingResetModal(true);
+      } else {
+        toast.error("Staging reset unavailable", data.error || "This project is not authorized for reset.");
+      }
+    } catch (err: any) {
+      toast.error("Failed to preview", err?.message || "Could not reach server.");
+    } finally {
+      setStagingResetLoading(false);
+    }
+  };
+
+  const handleStagingResetExecute = async () => {
+    try {
+      setStagingResetLoading(true);
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/test-runs/staging-reset-execute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          confirmation: stagingResetConfirmText,
+          projectName: stagingResetProjectName
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        toast.success("Staging reset complete", `${data.data.bookingsDeleted} bookings, ${data.data.storeOrdersDeleted} orders removed.`);
+        setShowStagingResetModal(false);
+        setStagingResetPreview(null);
+        setStagingResetConfirmText("");
+        setStagingResetProjectName("");
+        refreshTestRuns();
+      } else {
+        toast.error("Reset failed", data.error || "Could not execute staging reset.");
+      }
+    } catch (err: any) {
+      toast.error("Reset failed", err?.message || "Could not reach server.");
+    } finally {
+      setStagingResetLoading(false);
+    }
   };
 
   // Handle Form submissions
@@ -5210,6 +5277,32 @@ export function SettingsPage() {
                   {!testRunsLoading && testRuns.length === 0 && (
                     <p className="text-gray-500 italic">No test runs yet. Create one above.</p>
                   )}
+
+                  {/* Reset operational data (staging only) */}
+                  <div className="border-t border-red-200 pt-6 mt-8">
+                    <div className="rounded-lg border border-red-300 p-5 space-y-4">
+                      <div className="flex items-center gap-2.5">
+                        <AlertTriangle size={16} className="text-red-600" />
+                        <h4 className="font-bold text-red-800">Reset Operational Data</h4>
+                      </div>
+                      <p className="text-red-700 text-xs leading-relaxed">
+                        Deletes all bookings, store orders, notifications, intercom history, and test runs.
+                        Preserves hotel settings, rooms, rates, staff accounts, catalog, and vouchers.
+                        <strong className="block mt-1">This is a staging-only action.</strong>
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleStagingResetPreview}
+                          disabled={stagingResetLoading}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-xs font-bold text-red-800 hover:bg-red-100 disabled:opacity-50 transition"
+                        >
+                          <RefreshCw size={14} className={stagingResetLoading ? "animate-spin" : ""} />
+                          Preview & reset
+                        </button>
+                        {stagingResetLoading && <span className="text-xs text-gray-500">Generating manifest...</span>}
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
             </div>
@@ -5848,6 +5941,101 @@ export function SettingsPage() {
             >
               <Trash2 size={14} />
               Clean up data
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Staging Reset confirmation modal */}
+      <Modal
+        title="Reset operational data?"
+        open={showStagingResetModal}
+        onClose={() => {
+          setShowStagingResetModal(false);
+          setStagingResetConfirmText("");
+          setStagingResetProjectName("");
+        }}
+      >
+        <div className="space-y-5 text-xs">
+          {stagingResetPreview && (
+            <>
+              <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-red-800 space-y-2">
+                <p className="font-bold flex items-center gap-2">
+                  <AlertTriangle size={14} />
+                  This will permanently delete all operational data
+                </p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px]">
+                  <span>Project:</span>
+                  <span className="font-mono font-bold">{stagingResetPreview.projectId}</span>
+                  <span>Bookings:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.bookings}</span>
+                  <span>Store orders:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.storeOrders}</span>
+                  <span>Notifications:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.notifications}</span>
+                  <span>Intercom stays:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.intercomStays}</span>
+                  <span>Test runs:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.testRuns}</span>
+                  <span>Affected rooms:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.affectedRooms.length}</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-blue-800">
+                <p className="font-bold">The following are preserved:</p>
+                <ul className="mt-1 list-disc list-inside text-[11px] space-y-0.5">
+                  <li>Hotel settings, branding, legal content</li>
+                  <li>Rooms, room types, rates</li>
+                  <li>Staff accounts</li>
+                  <li>Payment methods</li>
+                  <li>Store catalog and items</li>
+                  <li>Vouchers and corporate codes</li>
+                  <li>Reference counters (no reused references)</li>
+                </ul>
+              </div>
+
+              <div className="space-y-3">
+                <p className="font-bold text-gray-900">Type <code className="text-red-600">RESET STAGING</code> to confirm:</p>
+                <input
+                  type="text"
+                  value={stagingResetConfirmText}
+                  onChange={(e) => setStagingResetConfirmText(e.target.value)}
+                  placeholder="RESET STAGING"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-red-400 focus:outline-none font-mono"
+                />
+                <p className="font-bold text-gray-900">Type the project name to confirm:</p>
+                <input
+                  type="text"
+                  value={stagingResetProjectName}
+                  onChange={(e) => setStagingResetProjectName(e.target.value)}
+                  placeholder={stagingResetPreview.projectId}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs focus:border-red-400 focus:outline-none font-mono"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => {
+                setShowStagingResetModal(false);
+                setStagingResetConfirmText("");
+                setStagingResetProjectName("");
+              }}
+              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleStagingResetExecute}
+              disabled={stagingResetLoading || stagingResetConfirmText !== "RESET STAGING" || stagingResetProjectName !== stagingResetPreview?.projectId}
+              className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-red-600 px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50 active:scale-95"
+            >
+              <Trash2 size={14} />
+              {stagingResetLoading ? "Resetting..." : "Execute reset"}
             </button>
           </div>
         </div>

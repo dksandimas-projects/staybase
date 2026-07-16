@@ -18,7 +18,7 @@ import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
-import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns } from "./handlers/test-runs";
+import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -1200,6 +1200,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleListTestRuns(req, res);
+  }
+
+  // ── Staging Reset (ETR-S) ─────────────────────────────────
+  if (domain === "test-runs" && action === "staging-reset-preview" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can preview staging reset." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingResetPreview(req, res);
+  }
+
+  if (domain === "test-runs" && action === "staging-reset-execute" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-reset:${ip}`, 2, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many reset requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can execute staging reset." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingResetExecute(req, res);
   }
 
   // Fallback 404

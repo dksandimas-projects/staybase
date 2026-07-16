@@ -363,6 +363,286 @@ export async function handleDeleteTestRun(req: any, res: any) {
   }
 }
 
+function isStagingProject(): boolean {
+  const projectId = process.env.FIREBASE_PROJECT_ID || "";
+  const allowlistRaw = process.env.STAGING_ALLOWLIST_PROJECT_IDS || "";
+  const allowlist = allowlistRaw.split(",").map(s => s.trim()).filter(Boolean);
+  return allowlist.includes(projectId);
+}
+
+async function collectStagingManifest(): Promise<{
+  bookings: number;
+  storeOrders: number;
+  notifications: number;
+  intercomStays: number;
+  testRuns: number;
+  affectedRooms: string[];
+  affectedStockItems: string[];
+}> {
+  const [bookingsSnap, storeSnap, notifSnap, intercomSnap, testRunSnap] = await Promise.all([
+    adminDb.collection("bookings").get(),
+    adminDb.collection("storeOrders").get(),
+    adminDb.collection("notifications").get(),
+    adminDb.collection("intercoms").get(),
+    adminDb.collection("testRuns").get()
+  ]);
+
+  const affectedRooms = new Set<string>();
+  const affectedStockItems = new Set<string>();
+
+  bookingsSnap.docs.forEach(d => {
+    const room = d.data().roomNumber;
+    if (room) affectedRooms.add(room);
+  });
+  storeSnap.docs.forEach(d => {
+    (d.data().items || []).forEach((i: any) => {
+      if (i.itemId) affectedStockItems.add(i.itemId);
+    });
+  });
+
+  return {
+    bookings: bookingsSnap.docs.length,
+    storeOrders: storeSnap.docs.length,
+    notifications: notifSnap.docs.length,
+    intercomStays: intercomSnap.docs.length,
+    testRuns: testRunSnap.docs.length,
+    affectedRooms: [...affectedRooms].filter(Boolean),
+    affectedStockItems: [...affectedStockItems].filter(Boolean)
+  };
+}
+
+const stagingResetConfirmSchema = z.object({
+  confirmation: z.literal("RESET STAGING"),
+  projectName: z.string().trim().min(1).max(120)
+}).strict();
+
+export async function handleStagingResetPreview(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can preview staging reset." });
+  }
+
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "This project is not authorized for operational reset. Staging allowlist check failed."
+    });
+  }
+
+  try {
+    const projectId = process.env.FIREBASE_PROJECT_ID || "unknown";
+    const manifest = await collectStagingManifest();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId,
+        isStaging: true,
+        manifest,
+        confirmedAt: new Date().toISOString()
+      }
+    });
+  } catch (error: any) {
+    console.error("Staging reset preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to generate staging reset preview."
+    });
+  }
+}
+
+export async function handleStagingResetExecute(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can execute staging reset." });
+  }
+
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "This project is not authorized for operational reset. Staging allowlist check failed."
+    });
+  }
+
+  const parsed = stagingResetConfirmSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Type RESET STAGING and provide the project name to confirm."
+    });
+  }
+
+  const { confirmation, projectName } = parsed.data;
+  const currentProject = process.env.FIREBASE_PROJECT_ID || "";
+
+  if (projectName !== currentProject) {
+    return res.status(400).json({
+      success: false,
+      error: `Project name mismatch. Expected "${currentProject}".`
+    });
+  }
+
+  try {
+    const manifestBefore = await collectStagingManifest();
+    const startedAt = new Date();
+    let bookingCount = 0;
+    let storeOrderCount = 0;
+    let notifCount = 0;
+    let intercomCount = 0;
+    let testRunCount = 0;
+    const failedItems: string[] = [];
+    const batchSize = 20;
+
+    // Delete all bookings with subcollections
+    let lastDoc: any = null;
+    while (true) {
+      let q: any = adminDb.collection("bookings").limit(batchSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          for (const sub of ["payments", "incidentalCharges", "notifications", "audit"]) {
+            const subSnap = await adminDb.collection("bookings").doc(doc.id).collection(sub).get();
+            await Promise.all(subSnap.docs.map(sd => sd.ref.delete()));
+          }
+          await doc.ref.delete();
+          bookingCount++;
+        } catch { failedItems.push(`booking/${doc.id}`); }
+      }
+    }
+
+    // Delete all store orders with tenders
+    lastDoc = null;
+    while (true) {
+      let q: any = adminDb.collection("storeOrders").limit(batchSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const tenderSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
+          await Promise.all(tenderSnap.docs.map(td => td.ref.delete()));
+          await doc.ref.delete();
+          storeOrderCount++;
+        } catch { failedItems.push(`storeOrder/${doc.id}`); }
+      }
+    }
+
+    // Delete all notifications
+    lastDoc = null;
+    while (true) {
+      let q: any = adminDb.collection("notifications").limit(batchSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try { await doc.ref.delete(); notifCount++; }
+        catch { failedItems.push(`notification/${doc.id}`); }
+      }
+    }
+
+    // Delete all intercom stays with messages
+    lastDoc = null;
+    while (true) {
+      let q: any = adminDb.collection("intercoms").limit(batchSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const msgSnap = await adminDb.collection("intercoms").doc(doc.id).collection("messages").get();
+          await Promise.all(msgSnap.docs.map(md => md.ref.delete()));
+          await doc.ref.delete();
+          intercomCount++;
+        } catch { failedItems.push(`intercom/${doc.id}`); }
+      }
+    }
+
+    // Delete all test runs
+    lastDoc = null;
+    while (true) {
+      let q: any = adminDb.collection("testRuns").limit(batchSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try { await doc.ref.delete(); testRunCount++; }
+        catch { failedItems.push(`testRun/${doc.id}`); }
+      }
+    }
+
+    // Restore rooms to baseline
+    for (const roomNumber of manifestBefore.affectedRooms) {
+      if (!roomNumber) continue;
+      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+      for (const doc of roomsSnap.docs) {
+        await doc.ref.set({
+          status: "available",
+          housekeepingStatus: "clean"
+        }, { merge: true });
+      }
+    }
+
+    // Audit trail
+    const completedAt = new Date();
+    const auditResult = {
+      type: "staging-reset",
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount,
+      notificationsDeleted: notifCount,
+      intercomStaysDeleted: intercomCount,
+      testRunsDeleted: testRunCount,
+      failedItems,
+      manifestBefore: {
+        bookings: manifestBefore.bookings,
+        storeOrders: manifestBefore.storeOrders,
+        notifications: manifestBefore.notifications,
+        intercomStays: manifestBefore.intercomStays,
+        testRuns: manifestBefore.testRuns
+      },
+      startedAt,
+      completedAt,
+      completedBy: staff.email || "",
+      projectId: currentProject
+    };
+    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId: currentProject,
+        bookingsDeleted: bookingCount,
+        storeOrdersDeleted: storeOrderCount,
+        notificationsDeleted: notifCount,
+        intercomStaysDeleted: intercomCount,
+        testRunsDeleted: testRunCount,
+        roomsRestored: manifestBefore.affectedRooms.length,
+        failedItems: failedItems.length
+      }
+    });
+  } catch (error: any) {
+    console.error("Staging reset execution failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to execute staging reset."
+    });
+  }
+}
+
 export async function handleListTestRuns(req: any, res: any) {
   if (req.method !== "GET") {
     return res.status(405).json({ success: false, error: "Method not allowed." });

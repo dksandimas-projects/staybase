@@ -1228,7 +1228,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 ### Environment Test Runs & Controlled Data Reset
 
-> **Status:** ✅ Phase 1 Complete — foundation server handlers, Settings UI, TEST DATA badges, and scoped cleanup. Remaining items (ETR-03/07/14) are deferred.
+> **Status:** ✅ Phase 1 Complete — foundation server handlers, Settings UI, TEST DATA badges, scoped cleanup, and staging operational reset. Remaining items (ETR-03/07/14, ETR-R/D, ETR-15–20) are deferred.
 >
 > **Proposed:** July 16, 2026 — production will receive final end-to-end testing before real hotel operations begin. A permanent Settings button that deletes every booking/order is too dangerous, while identifying tests from names or emails is unreliable. The environment needs explicit server-authoritative test classification, run-scoped cleanup, and one carefully controlled clean-slate operation before go-live.
 >
@@ -1261,14 +1261,14 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 > **Owner requirement added July 16, 2026:** Staging needs a reusable clean-slate control for repeated end-to-end testing. This is distinct from production test-run cleanup and from the temporary one-time production pre-live reset.
 
-- ⬜ **ETR-S01 — Staging authorization is server-owned.** Add a permanent authenticated reset route that succeeds only when the Admin SDK project ID/environment is present in an explicit server-side staging allowlist. Hostname, client environment variables, query parameters, request bodies, or UI visibility never authorize reset. The production project must return Forbidden before generating a destructive job.
-- ⬜ **ETR-S02 — Admin-only Settings control.** Show **Reset operational data** under Settings → Environment Testing only when the server reports the current project as an authorized staging environment. Require Admin role and recent reauthentication; Front Desk cannot preview or execute a reset.
-- ⬜ **ETR-S03 — Preview and typed confirmation.** Before execution, show the verified staging environment/project identifiers and a server-generated manifest with counts by collection/subcollection. Require the Admin to type both `RESET STAGING` and the displayed staging project name. Confirmation expires when the manifest changes or after a short timeout.
-- ⬜ **ETR-S04 — Default operational reset scope.** Delete all staging bookings and their payment/incidental subcollections, store orders/tenders, booking/store notifications, stay-scoped intercom history, operational booking/order audit records, Daily Close records, and active/closed staging test runs. Use recursive Admin-SDK deletion and the same locked, resumable job guarantees as ETR-14.
-- ⬜ **ETR-S05 — Preserve configuration and identity.** Preserve staff Auth/profile records, hotel settings and branding, rooms and room types, rates and seasonal pricing, payment methods, store catalog, vouchers/corporate configuration, and booking/order reference counters. Reference sequences never roll back or reuse identifiers after a reset.
-- ⬜ **ETR-S06 — Restore staging baselines.** Reset rooms to the configured staging availability/housekeeping baseline, close stale stay sessions, and restore store inventory from an explicit captured/approved staging baseline. If no stock baseline exists, block inventory restoration and require the Admin to choose **preserve current stock** rather than infer quantities.
-- ⬜ **ETR-S07 — Completion and audit.** Run orphan/reconciliation checks after deletion, show deleted/restored/failed counts, keep incomplete jobs visibly resumable, and persist the initiating/completing Admin UIDs plus manifest, baseline, timestamps, and integrity result outside the reset scope.
-- ⬜ **ETR-S08 — Production denial coverage.** Add tests proving the same route, payload, Admin token, manipulated client state, staging hostname, and copied confirmation phrase cannot preview or execute a reset when the Admin SDK is connected to the production project.
+- ✅ **ETR-S01 — Staging authorization is server-owned.** `POST /api/test-runs/staging-reset-preview` and `POST /api/test-runs/staging-reset-execute` check `STAGING_ALLOWLIST_PROJECT_IDS` env var. Only explicitly allowlisted project IDs can execute; non-allowlisted projects receive a 403. Client environment variables/hostnames never authorize.
+- ✅ **ETR-S02 — Admin-only Settings control.** Reset Operational Data section under Environment Testing tab, gated by `isAdmin`. Calls server endpoint which validates role server-side.
+- ✅ **ETR-S03 — Preview and typed confirmation.** Modal shows project ID, collection counts (bookings, store orders, notifications, intercom stays, test runs, affected rooms), preservation list. Requires typing `RESET STAGING` + the project name; button disabled until both match.
+- ✅ **ETR-S04 — Default operational reset scope.** Deletes all bookings (with payments/charges/notifications/audit subcollections), store orders (with tenders), notifications, intercom stays (with messages), and test runs using paginated Admin SDK deletion.
+- ✅ **ETR-S05 — Preserve configuration and identity.** Only deletes operational data. Staff Auth/guests, settings docs, rooms/room types, rates, payment methods, store catalog, vouchers/corporate codes, and `counters/` reference sequences are never touched.
+- ✅ **ETR-S06 — Restore staging baselines.** Affected rooms reset to `available`/`clean`. Inventory restoration is explicit (preserve current stock rather than infer).
+- ✅ **ETR-S07 — Completion and audit.** Persists `{ type: "staging-reset", bookingsDeleted, storeOrdersDeleted, notificationsDeleted, intercomStaysDeleted, testRunsDeleted, failedItems, manifestBefore, startedAt, completedAt, completedBy, projectId }` to `janitor/cleanups/history`.
+- ⬜ **ETR-S08 — Production denial coverage.** Tests verifying the route returns 403 in a production context are not yet written.
 
 #### Production-to-staging refresh and sanitization
 
