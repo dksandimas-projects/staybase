@@ -524,9 +524,11 @@ export function BookingsPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeBookingSection, setActiveBookingSection] = useState<BookingDrawerSection>("overview");
+  const [showEditRegistration, setShowEditRegistration] = useState(false);
 
   useEffect(() => {
     setActiveBookingSection("overview");
+    setShowEditRegistration(false);
   }, [selectedBooking?.id]);
 
 
@@ -3019,7 +3021,10 @@ export function BookingsPage() {
                 missingItems={selectedBookingCheckInReadiness.missingItems}
               />
             )}
-            {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
+            {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
+              const reg = selectedBooking.guestRegistration;
+              const isComplete = reg?.signatureStatus === "signed" && reg?.nationality && reg?.dateOfBirth && reg?.gender && reg?.idNumber && reg?.address && reg?.emergencyContact;
+              return (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -3027,130 +3032,154 @@ export function BookingsPage() {
                     Check-in Registration
                   </h3>
                   <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
-                    selectedBooking.guestRegistration?.signatureStatus === "signed"
+                    reg?.signatureStatus === "signed"
                       ? "bg-emerald-50 text-emerald-700"
                       : "bg-orange-50 text-orange-700"
                   }`}>
-                    {selectedBooking.guestRegistration?.signatureStatus === "signed" ? "Signed" : "Pending"}
+                    {reg?.signatureStatus === "signed" ? "Signed" : "Pending"}
                   </span>
                 </div>
 
-                <form onSubmit={handleRegistrationSubmit} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Nationality
-                      <input
-                        name="nationality"
-                        defaultValue={selectedBooking.guestRegistration?.nationality ?? "Filipino"}
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Date of Birth
-                      <input
-                        name="dateOfBirth"
-                        type="date"
-                        defaultValue={selectedBooking.guestRegistration?.dateOfBirth ?? ""}
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Gender
-                      <select
-                        name="gender"
-                        defaultValue={selectedBooking.guestRegistration?.gender ?? ""}
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      >
-                        <option value="">Select</option>
-                        <option value="female">Female</option>
-                        <option value="male">Male</option>
-                        <option value="prefer-not-to-say">Prefer not to say</option>
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Valid ID Type
-                      <select
-                        name="idType"
-                        defaultValue={selectedBooking.guestRegistration?.idType ?? "passport"}
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      >
-                        <option value="passport">Passport</option>
-                        <option value="drivers-license">Driver's License</option>
-                        <option value="national-id">National ID</option>
-                        <option value="umid">UMID</option>
-                        <option value="other">Other Government ID</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                    ID Number
-                    <input
-                      name="idNumber"
-                      defaultValue={selectedBooking.guestRegistration?.idNumber ?? ""}
-                      placeholder="Government ID reference"
-                      className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                    Home Address
-                    <textarea
-                      name="address"
-                      rows={2}
-                      defaultValue={selectedBooking.guestRegistration?.address ?? ""}
-                      placeholder="Guest residential address"
-                      className="rounded border border-gray-200 p-2 text-xs text-gray-800"
-                    />
-                  </label>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Emergency Contact
-                      <input
-                        name="emergencyContact"
-                        defaultValue={selectedBooking.guestRegistration?.emergencyContact ?? ""}
-                        placeholder="Name / Phone"
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-                      Vehicle Plate
-                      <input
-                        name="vehiclePlate"
-                        defaultValue={selectedBooking.guestRegistration?.vehiclePlate ?? ""}
-                        placeholder="Optional"
-                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
-                      />
-                    </label>
-                  </div>
-                  <label className="flex min-h-[38px] items-center gap-2 rounded border border-gray-200 px-2 text-[10px] font-bold text-gray-700">
-                    <input
-                      type="checkbox"
-                      name="signatureStatus"
-                      value="signed"
-                      defaultChecked={selectedBooking.guestRegistration?.signatureStatus === "signed"}
-                      className="h-4 w-4 accent-primary"
-                    />
-                    Guest signed physical registration form
-                  </label>
-                  <div className="flex flex-col gap-2 border-t border-gray-100 pt-3 sm:flex-row sm:justify-end">
+                {isComplete && !showEditRegistration ? (
+                  <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                      <div><span className="text-gray-400">Nationality:</span> <span className="font-medium text-gray-800">{reg?.nationality}</span></div>
+                      <div><span className="text-gray-400">DOB:</span> <span className="font-medium text-gray-800">{reg?.dateOfBirth}</span></div>
+                      <div><span className="text-gray-400">Gender:</span> <span className="font-medium text-gray-800 capitalize">{reg?.gender}</span></div>
+                      <div><span className="text-gray-400">ID Type:</span> <span className="font-medium text-gray-800 capitalize">{reg?.idType?.replace(/-/g, " ")}</span></div>
+                      <div><span className="text-gray-400">ID Number:</span> <span className="font-medium text-gray-800">{reg?.idNumber}</span></div>
+                      <div><span className="text-gray-400">Emergency:</span> <span className="font-medium text-gray-800">{reg?.emergencyContact}</span></div>
+                      <div className="col-span-2"><span className="text-gray-400">Address:</span> <span className="font-medium text-gray-800">{reg?.address}</span></div>
+                      {reg?.vehiclePlate && <div className="col-span-2"><span className="text-gray-400">Vehicle:</span> <span className="font-medium text-gray-800">{reg?.vehiclePlate}</span></div>}
+                    </div>
                     <button
                       type="button"
-                      onClick={printRegistrationPDF}
+                      onClick={() => setShowEditRegistration(true)}
                       className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
                     >
-                      <FileText size={13} />
-                      Preview Registration PDF
-                    </button>
-                    <button
-                      type="submit"
-                      className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
-                    >
                       <Save size={13} />
-                      Save Registration
+                      Edit registration
                     </button>
                   </div>
-                </form>
+                ) : (
+                  <form onSubmit={(e) => { handleRegistrationSubmit(e); setShowEditRegistration(false); }} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                        Nationality
+                        <input
+                          name="nationality"
+                          defaultValue={reg?.nationality ?? "Filipino"}
+                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                        Date of Birth
+                        <input
+                          name="dateOfBirth"
+                          type="date"
+                          defaultValue={reg?.dateOfBirth ?? ""}
+                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                        Gender
+                        <select
+                          name="gender"
+                          defaultValue={reg?.gender ?? ""}
+                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                        >
+                          <option value="">Select</option>
+                          <option value="female">Female</option>
+                          <option value="male">Male</option>
+                          <option value="prefer-not-to-say">Prefer not to say</option>
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                        Valid ID Type
+                        <select
+                          name="idType"
+                          defaultValue={reg?.idType ?? "passport"}
+                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                        >
+                          <option value="passport">Passport</option>
+                          <option value="drivers-license">Driver's License</option>
+                          <option value="national-id">National ID</option>
+                          <option value="umid">UMID</option>
+                          <option value="other">Other Government ID</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      ID Number
+                      <input
+                        name="idNumber"
+                        defaultValue={reg?.idNumber ?? ""}
+                        placeholder="Government ID reference"
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                      Home Address
+                      <textarea
+                        name="address"
+                        rows={2}
+                        defaultValue={reg?.address ?? ""}
+                        placeholder="Guest residential address"
+                        className="rounded border border-gray-200 p-2 text-xs text-gray-800"
+                      />
+                    </label>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                        Emergency Contact
+                        <input
+                          name="emergencyContact"
+                          defaultValue={reg?.emergencyContact ?? ""}
+                          placeholder="Name / Phone"
+                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+                        Vehicle Plate
+                        <input
+                          name="vehiclePlate"
+                          defaultValue={reg?.vehiclePlate ?? ""}
+                          placeholder="Optional"
+                          className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                        />
+                      </label>
+                    </div>
+                    <label className="flex min-h-[38px] items-center gap-2 rounded border border-gray-200 px-2 text-[10px] font-bold text-gray-700">
+                      <input
+                        type="checkbox"
+                        name="signatureStatus"
+                        value="signed"
+                        defaultChecked={reg?.signatureStatus === "signed"}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      Guest signed physical registration form
+                    </label>
+                    <div className="flex flex-col gap-2 border-t border-gray-100 pt-3 sm:flex-row sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={printRegistrationPDF}
+                        className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+                      >
+                        <FileText size={13} />
+                        Preview Registration PDF
+                      </button>
+                      <button
+                        type="submit"
+                        className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+                      >
+                        <Save size={13} />
+                        Save Registration
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
-            )}
+              );
+            })()}
 
             {/* Guest ID upload */}
             {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
@@ -3508,57 +3537,77 @@ export function BookingsPage() {
 
             {/* Breakfast selections */}
             <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
-            {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
+            {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
+              const breakfastKeys = Object.keys(selectedBooking.breakfastSelections ?? {});
+              const recordedCount = breakfastKeys.filter((key) => selectedBooking.breakfastSelections?.[key]).length;
+              const totalSlots = selectedBooking.numGuests * getStayDates(selectedBooking).length;
+              return (
               <div className="space-y-3">
                 <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
                   <Utensils size={14} className="text-primary" />
                   Breakfast Selections
                 </h3>
-                <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-3">
-                  <p className="text-[10px] leading-relaxed text-gray-500">
-                    Front desk records silog selections from the physical registration form. These are shown by guest and date.
-                  </p>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-150 text-left text-[9px] font-bold uppercase tracking-wider text-gray-400">
-                          <th className="py-2 pr-3">Guest</th>
-                          {getStayDates(selectedBooking).map((date) => (
-                            <th key={date} className="min-w-[140px] px-2 py-2">{date}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {Array.from({ length: selectedBooking.numGuests }, (_, guestIndex) => (
-                          <tr key={guestIndex}>
-                            <td className="py-2 pr-3 font-semibold text-gray-800">Guest {guestIndex + 1}</td>
-                            {getStayDates(selectedBooking).map((date) => {
-                              const key = `${date}-guest-${guestIndex + 1}`;
-                              return (
-                                <td key={key} className="px-2 py-2">
-                                  <select
-                                    value={selectedBooking.breakfastSelections?.[key] ?? ""}
-                                    onChange={(event) => handleBreakfastSelection(key, event.target.value)}
-                                    className="min-h-[34px] w-full rounded border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700"
-                                  >
-                                    <option value="">Select meal</option>
-                                    {breakfastConfig.silogItems
-                                      .filter((item: { id: string; name: string; isActive: boolean }) => item.isActive)
-                                      .map((item: { id: string; name: string; isActive: boolean }) => (
-                                        <option key={item.id} value={item.name}>{item.name}</option>
-                                      ))}
-                                  </select>
-                                </td>
-                              );
-                            })}
+                <details className="group rounded-lg border border-gray-200 bg-white open:shadow-sm">
+                  <summary className="flex cursor-pointer items-center justify-between gap-3 p-4 text-xs font-semibold text-gray-700 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+                    <span className="flex items-center gap-2">
+                      <ChevronRight size={14} className="transition-transform group-open:rotate-90 text-gray-400" />
+                      {recordedCount > 0 ? (
+                        <span>{recordedCount} of {totalSlots} selections recorded</span>
+                      ) : (
+                        <span>Record breakfast selections</span>
+                      )}
+                    </span>
+                    {recordedCount > 0 && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-700">{recordedCount}/{totalSlots}</span>
+                    )}
+                  </summary>
+                  <div className="border-t border-gray-200 p-5 space-y-3">
+                    <p className="text-[10px] leading-relaxed text-gray-500">
+                      Front desk records silog selections from the physical registration form. These are shown by guest and date.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-150 text-left text-[9px] font-bold uppercase tracking-wider text-gray-400">
+                            <th className="py-2 pr-3">Guest</th>
+                            {getStayDates(selectedBooking).map((date) => (
+                              <th key={date} className="min-w-[140px] px-2 py-2">{date}</th>
+                            ))}
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {Array.from({ length: selectedBooking.numGuests }, (_, guestIndex) => (
+                            <tr key={guestIndex}>
+                              <td className="py-2 pr-3 font-semibold text-gray-800">Guest {guestIndex + 1}</td>
+                              {getStayDates(selectedBooking).map((date) => {
+                                const key = `${date}-guest-${guestIndex + 1}`;
+                                return (
+                                  <td key={key} className="px-2 py-2">
+                                    <select
+                                      value={selectedBooking.breakfastSelections?.[key] ?? ""}
+                                      onChange={(event) => handleBreakfastSelection(key, event.target.value)}
+                                      className="min-h-[34px] w-full rounded border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700"
+                                    >
+                                      <option value="">Select meal</option>
+                                      {breakfastConfig.silogItems
+                                        .filter((item: { id: string; name: string; isActive: boolean }) => item.isActive)
+                                        .map((item: { id: string; name: string; isActive: boolean }) => (
+                                          <option key={item.id} value={item.name}>{item.name}</option>
+                                        ))}
+                                    </select>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                </details>
               </div>
-            )}
+              );
+            })()}
             </BookingDrawerSectionPanel>
 
             <BookingDrawerSectionPanel section="folio" activeSection={activeBookingSection} className="lg:w-[calc(66.667%-0.5rem)]">
@@ -3812,23 +3861,37 @@ export function BookingsPage() {
               </div>
               
               <div className="space-y-2">
-                {selectedBookingPayments.length > 0 ? (
-                  <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50/50">
-                    {selectedBookingPayments.map((pay) => (
-                      <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
-                        <div>
-                          <p className="font-semibold text-gray-800">{pay.type === "refund" ? `Refund — ${pay.reason || pay.note}` : pay.note || "Onsite Payment"}</p>
-                          <p className="text-[9px] text-gray-400">
-                            {pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}
-                            {pay.transactionReference ? ` · Ref: ${pay.transactionReference}` : ""}
-                            {pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}
-                          </p>
+                {selectedBookingPayments.length > 0 ? (() => {
+                  const paymentList = (
+                    <div className="divide-y divide-gray-100 border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50/50">
+                      {selectedBookingPayments.map((pay) => (
+                        <div key={pay.id} className="pt-2 first:pt-0 flex justify-between items-center text-xs">
+                          <div>
+                            <p className="font-semibold text-gray-800">{pay.type === "refund" ? `Refund — ${pay.reason || pay.note}` : pay.note || "Onsite Payment"}</p>
+                            <p className="text-[9px] text-gray-400">
+                              {pay.recordedAt.split("T")[0]} via {getOnsitePaymentMethodLabel(pay.method)}
+                              {pay.transactionReference ? ` · Ref: ${pay.transactionReference}` : ""}
+                              {pay.approvedBy ? ` · approved by ${pay.approvedBy}` : ""}
+                            </p>
+                          </div>
+                          <span className={`font-bold ${pay.type === "refund" ? "text-red-600" : "text-green-700"}`}>{pay.amount >= 0 ? "+" : ""}{formatPrice(pay.amount)}</span>
                         </div>
-                        <span className={`font-bold ${pay.type === "refund" ? "text-red-600" : "text-green-700"}`}>{pay.amount >= 0 ? "+" : ""}{formatPrice(pay.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
+                      ))}
+                    </div>
+                  );
+                  if (selectedBookingPayments.length >= 4) {
+                    return (
+                      <details className="group" defaultChecked>
+                        <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-800 [&::-webkit-details-marker]:hidden">
+                          <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+                          {selectedBookingPayments.length} entries
+                        </summary>
+                        <div className="mt-2">{paymentList}</div>
+                      </details>
+                    );
+                  }
+                  return paymentList;
+                })() : (
                   <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">No onsite payments recorded.</p>
                 )}
 
@@ -4044,62 +4107,70 @@ export function BookingsPage() {
                 <Mail size={14} className="text-primary" />
                 Resend Transactional Email
               </h3>
-              <div className="rounded-lg border border-gray-200 bg-white p-5 space-y-4">
-                <p className="text-[10px] leading-relaxed text-gray-500">
-                  Select an email template below to resend to the guest (<strong>{selectedBooking.guestEmail}</strong>).
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {(() => {
-                    const getRecommendedEmailAction = (status: Booking["status"]) => {
-                      if (status === "pending" || status === "payment-uploaded") return "booking-submitted";
-                      if (status === "payment-confirmed") return "payment-confirmed";
-                      if (status === "confirmed") return "booking-confirmed";
-                      if (status === "checked-in") return "checkin-reminder";
-                      if (status === "checked-out") return "payment-confirmed";
-                      if (status === "cancelled") return "booking-cancelled";
-                      return null;
-                    };
+              <details className="group rounded-lg border border-gray-200 bg-white open:shadow-sm">
+                <summary className="flex cursor-pointer items-center justify-between gap-3 p-4 text-xs font-semibold text-gray-600 hover:text-gray-800 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+                  <span className="flex items-center gap-2">
+                    <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+                    Resend email to {selectedBooking.guestEmail}
+                  </span>
+                </summary>
+                <div className="border-t border-gray-200 p-5 space-y-4">
+                  <p className="text-[10px] leading-relaxed text-gray-500">
+                    Select an email template below to resend to the guest (<strong>{selectedBooking.guestEmail}</strong>).
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(() => {
+                      const getRecommendedEmailAction = (status: Booking["status"]) => {
+                        if (status === "pending" || status === "payment-uploaded") return "booking-submitted";
+                        if (status === "payment-confirmed") return "payment-confirmed";
+                        if (status === "confirmed") return "booking-confirmed";
+                        if (status === "checked-in") return "checkin-reminder";
+                        if (status === "checked-out") return "payment-confirmed";
+                        if (status === "cancelled") return "booking-cancelled";
+                        return null;
+                      };
 
-                    const recommendedAction = getRecommendedEmailAction(selectedBooking.status);
+                      const recommendedAction = getRecommendedEmailAction(selectedBooking.status);
 
-                    return [
-                      { action: "booking-submitted", label: "Booking Submitted" },
-                      { action: "booking-confirmed", label: "Booking Confirmed" },
-                      { action: "payment-confirmed", label: "Payment Confirmed" },
-                      { action: "checkin-reminder", label: "Check-in Reminder" },
-                      { action: "booking-cancelled", label: "Booking Cancelled" },
-                      { action: "discount-rejected", label: "Discount Rejected" },
-                    ].map(({ action, label }) => {
-                      const isRecommended = recommendedAction === action || (action === "discount-rejected" && selectedBooking.discountRejected);
-                      const isPending = resendingEmailAction === action;
+                      return [
+                        { action: "booking-submitted", label: "Booking Submitted" },
+                        { action: "booking-confirmed", label: "Booking Confirmed" },
+                        { action: "payment-confirmed", label: "Payment Confirmed" },
+                        { action: "checkin-reminder", label: "Check-in Reminder" },
+                        { action: "booking-cancelled", label: "Booking Cancelled" },
+                        { action: "discount-rejected", label: "Discount Rejected" },
+                      ].map(({ action, label }) => {
+                        const isRecommended = recommendedAction === action || (action === "discount-rejected" && selectedBooking.discountRejected);
+                        const isPending = resendingEmailAction === action;
 
-                      return (
-                        <button
-                          key={action}
-                          type="button"
-                          disabled={resendingEmailAction !== null}
-                          onClick={() => handleResendEmail(action)}
-                          className={`min-h-[40px] px-3 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 active:scale-95 ${
-                            isRecommended
-                              ? "bg-primary hover:bg-primary-dark text-white border-transparent shadow-sm"
-                              : "bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 disabled:opacity-50"
-                          }`}
-                        >
-                          {isPending ? (
-                            <Loader2 size={12} className="animate-spin" />
-                          ) : null}
-                          {label}
-                          {isRecommended && !isPending && (
-                            <span className="ml-1 rounded bg-white/20 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-white">
-                              Rec
-                            </span>
-                          )}
-                        </button>
-                      );
-                    });
-                  })()}
+                        return (
+                          <button
+                            key={action}
+                            type="button"
+                            disabled={resendingEmailAction !== null}
+                            onClick={() => handleResendEmail(action)}
+                            className={`min-h-[40px] px-3 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1.5 active:scale-95 ${
+                              isRecommended
+                                ? "bg-primary hover:bg-primary-dark text-white border-transparent shadow-sm"
+                                : "bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 disabled:opacity-50"
+                            }`}
+                          >
+                            {isPending ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : null}
+                            {label}
+                            {isRecommended && !isPending && (
+                              <span className="ml-1 rounded bg-white/20 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wider text-white">
+                                Rec
+                              </span>
+                            )}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
                 </div>
-              </div>
+              </details>
             </div>
             </BookingDrawerSectionPanel>
 
@@ -4128,28 +4199,42 @@ export function BookingsPage() {
                 <div className="space-y-3">
                   {selectedBookingCharges.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2.5 text-xs text-gray-500">No incidental charges recorded.</p>
-                  ) : (
-                    <div className="divide-y divide-gray-100 rounded-lg border border-gray-150">
-                      {selectedBookingCharges.map((charge) => (
-                        <div key={charge.id} className="flex items-center justify-between gap-3 p-3 text-xs">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-gray-800">{charge.label}</p>
-                            <p className="mt-0.5 text-[10px] text-gray-500 capitalize">
-                              {charge.category.replace(/-/g, " ")} · {charge.addedAt ? charge.addedAt.slice(0, 10) : "Pending timestamp"}
-                              {charge.voidOf ? " · reversal" : ""}
-                            </p>
-                            {charge.note ? <p className="mt-1 text-[10px] text-gray-500">{charge.note}</p> : null}
+                  ) : (() => {
+                    const chargeList = (
+                      <div className="divide-y divide-gray-100 rounded-lg border border-gray-150">
+                        {selectedBookingCharges.map((charge) => (
+                          <div key={charge.id} className="flex items-center justify-between gap-3 p-3 text-xs">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-gray-800">{charge.label}</p>
+                              <p className="mt-0.5 text-[10px] text-gray-500 capitalize">
+                                {charge.category.replace(/-/g, " ")} · {charge.addedAt ? charge.addedAt.slice(0, 10) : "Pending timestamp"}
+                                {charge.voidOf ? " · reversal" : ""}
+                              </p>
+                              {charge.note ? <p className="mt-1 text-[10px] text-gray-500">{charge.note}</p> : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className={`font-bold ${charge.amount < 0 ? "text-red-600" : "text-gray-900"}`}>{formatPrice(charge.amount)}</span>
+                              {!charge.voidOf && charge.amount > 0 && !selectedBookingCharges.some((entry) => entry.voidOf === charge.id) && selectedBooking.status !== "checked-out" ? (
+                                <button type="button" onClick={() => setChargeToVoid(charge)} className="min-h-[44px] rounded-lg px-3 text-[10px] font-bold text-red-600 hover:bg-red-50">Void</button>
+                              ) : null}
+                            </div>
                           </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <span className={`font-bold ${charge.amount < 0 ? "text-red-600" : "text-gray-900"}`}>{formatPrice(charge.amount)}</span>
-                            {!charge.voidOf && charge.amount > 0 && !selectedBookingCharges.some((entry) => entry.voidOf === charge.id) && selectedBooking.status !== "checked-out" ? (
-                              <button type="button" onClick={() => setChargeToVoid(charge)} className="min-h-[44px] rounded-lg px-3 text-[10px] font-bold text-red-600 hover:bg-red-50">Void</button>
-                            ) : null}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                        ))}
+                      </div>
+                    );
+                    if (selectedBookingCharges.length >= 4) {
+                      return (
+                        <details className="group" defaultChecked>
+                          <summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-800 [&::-webkit-details-marker]:hidden">
+                            <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+                            {selectedBookingCharges.length} entries
+                          </summary>
+                          <div className="mt-2">{chargeList}</div>
+                        </details>
+                      );
+                    }
+                    return chargeList;
+                  })()}
 
                 </div>
               </div>
