@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 16, 2026 (Roadmap — revised **Environment Test Runs & Controlled Data Reset** so **Refresh staging from production** includes a default-on sanitization checkbox that Admin may turn off for exact reproduction; disabling it automatically converts staging into a narrowly scoped, expiring Restricted Diagnostic Mode with access lock, outbound suppression, sensitive-file opt-in, audit, cleanup, and restoration. The plan also includes staging reset, production test runs/scoped cleanup, and the guarded pre-live reset. Other improvements are documented below.)
+> Last updated: July 16, 2026 (Roadmap — ETR-03 implemented: test token validation on `POST /api/bookings/create` stamps `isTestData` + `testRunId` on test-run bookings. Other improvements are documented below.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1245,7 +1245,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 - ✅ **ETR-01 — Admin-only Environment Testing section.** Settings tab (FlaskConical icon) with create/close/cleanup UI, active run warning banner, and run history. Front Desk sees an "Admin only" lockout notice; Admin sees full controls.
 - ✅ **ETR-02 — Start and close a test run.** `POST /api/test-runs/create` and `POST /api/test-runs/close` with Zod validation, admin auth, single-active-production-run enforcement, opaque run ID (CSPRNG hex), token hash, and Firestore persistence.
-- ⬜ **ETR-03 — Temporary public-flow access.** Not yet implemented — the token is generated and returned on creation but public booking APIs do not yet validate it.
+- ✅ **ETR-03 — Temporary public-flow access.** The token is validated in `POST /api/bookings/create`: when a `testToken` is present in the body, the server hashes it, looks up the matching active test run, checks expiry, and stamps `isTestData: true` + `testRunId` on the booking document. Invalid/expired tokens return 403 with a clear message. `hashToken` exported from `test-runs.ts` for reuse.
 - ✅ **ETR-04 — Server-side test run creation.** Admin creates a named run through the authenticated server route; the returned token is server-owned. Walk-in/other staff-side test records can be associated server-side via the active run.
 - ✅ **ETR-05 — Persistent visual distinction.** **TEST DATA** badges on booking/order rows (desktop + mobile), booking drawer header, and store order drawer header. Active run warning banner on BookingsPage.
 

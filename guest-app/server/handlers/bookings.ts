@@ -1,4 +1,5 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
+import { hashToken } from "./test-runs";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
 import { writeNotification } from "../lib/notifications";
@@ -297,6 +298,10 @@ interface CreateBookingBody {
   // converted corporate inquiry. The convert-to-booking UI (per audit
   // 1.4 SEV-1 #2) populates this field; normal bookings send null.
   linkedInquiryId?: string | null;
+  // Per ETR-03: optional test token for production test runs. When
+  // provided the server validates it against active test runs and
+  // stamps isTestData / testRunId on the booking.
+  testToken?: string;
 }
 
 // Per BF-42 (booking-flow audit 2026-06-26): the
@@ -332,7 +337,8 @@ export async function handleCreateBooking(req: any, res: any) {
     paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
-    linkedInquiryId
+    linkedInquiryId,
+    testToken
   } = body;
 
   // Basic Input Validation
@@ -395,6 +401,31 @@ export async function handleCreateBooking(req: any, res: any) {
   const numNights = Math.max(Math.round((endMs - startMs) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // ETR-03: validate test token before entering the transaction
+  let validatedTestRunId: string | null = null;
+  if (testToken) {
+    const hashed = hashToken(testToken);
+    const activeRuns = await adminDb
+      .collection("testRuns")
+      .where("tokenHash", "==", hashed)
+      .where("status", "==", "active")
+      .get();
+    if (activeRuns.empty) {
+      return res.status(403).json({
+        success: false,
+        error: "Invalid or expired test token. Please create a new test run from the admin Settings."
+      });
+    }
+    const run = activeRuns.docs[0].data();
+    if (run.expiresAt && new Date(run.expiresAt.toDate?.() || run.expiresAt) < new Date()) {
+      return res.status(403).json({
+        success: false,
+        error: "Test token has expired. Please create a new test run from the admin Settings."
+      });
+    }
+    validatedTestRunId = run.id;
   }
 
   try {
@@ -1061,6 +1092,9 @@ export async function handleCreateBooking(req: any, res: any) {
                     : "chargeback"
               }
             }
+          : {}),
+        ...(validatedTestRunId
+          ? { isTestData: true, testRunId: validatedTestRunId }
           : {}),
         createdAt: new Date(),
         updatedAt: new Date()
