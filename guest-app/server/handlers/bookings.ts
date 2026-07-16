@@ -1277,7 +1277,8 @@ export async function handleCreateWalkin(req: any, res: any) {
     totalPriceOverride,
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
-    linkedInquiryId
+    linkedInquiryId,
+    testRunId: requestedTestRunId
   } = parsedWalkin.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
@@ -1296,6 +1297,31 @@ export async function handleCreateWalkin(req: any, res: any) {
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+
+  let validatedTestRunId: string | null = null;
+  if (requestedTestRunId) {
+    const runDoc = await adminDb.collection("testRuns").doc(requestedTestRunId).get();
+    if (!runDoc.exists) {
+      return res.status(400).json({
+        success: false,
+        error: "Selected test run does not exist."
+      });
+    }
+    const run = runDoc.data()!;
+    if (run.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        error: "Selected test run is not active."
+      });
+    }
+    if (run.expiresAt && new Date(run.expiresAt.toDate?.() || run.expiresAt) < new Date()) {
+      return res.status(400).json({
+        success: false,
+        error: "Selected test run has expired. Please select an active test run."
+      });
+    }
+    validatedTestRunId = run.id;
+  }
 
   try {
     let finalBookingRef = "";
@@ -1556,6 +1582,9 @@ export async function handleCreateWalkin(req: any, res: any) {
         breakfastSelections: {},
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
+        ...(validatedTestRunId
+          ? { isTestData: true, testRunId: validatedTestRunId }
+          : {}),
         createdAt: new Date(),
         updatedAt: new Date()
       };

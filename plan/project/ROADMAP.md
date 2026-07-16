@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 16, 2026 (Roadmap — ETR-03 implemented: test token validation on `POST /api/bookings/create` stamps `isTestData` + `testRunId` on test-run bookings. Other improvements are documented below.)
+> Last updated: July 16, 2026 (Roadmap — ETR-07 implemented: walk-in bookings inherit `isTestData` + `testRunId` classification, with admin UI selector for active test runs. Other improvements are documented below.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1252,7 +1252,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 #### Canonical classification and propagation
 
 - ✅ **ETR-06 — Server-owned root metadata.** `TestRun` shared type with `id`, `name`, `environment`, `createdByUid`, `status`, `tokenHash`. Booking/StoreOrder types carry `isTestData` and `testRunId` fields.
-- ⬜ **ETR-07 — Inherit classification automatically.** Not yet implemented — the cleanup handler does delete subcollections by parent's `testRunId`, but classification inheritance during writes is not wired.
+- ✅ **ETR-07 — Inherit classification automatically.** Walk-in bookings now accept an optional `testRunId`: the server validates the run is active/not expired and stamps `isTestData: true` + `testRunId` on the booking. Admin walk-in modal has a test-run selector (shown when active runs exist) that passes `testRunId` to the API. Subcollection cleanup (payments, charges) is already handled by recursive deletion.
 - ✅ **ETR-08 — Live-by-default safety.** Classification lives on the root `testRuns` doc and individual booking/order docs. Missing metadata = live/no test status.
 - ✅ **ETR-09 — Reference integrity.** Cleanup preserves reference counters (`counters/` collection is never touched).
 

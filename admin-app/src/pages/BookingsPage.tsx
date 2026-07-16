@@ -655,6 +655,7 @@ export function BookingsPage() {
   const [priceOverride, setPriceOverride] = useState("");
   const [walkinDiscountType, setWalkinDiscountType] = useState<"" | "senior" | "pwd">("");
   const [walkinVoucherCode, setWalkinVoucherCode] = useState("");
+  const [walkinTestRunId, setWalkinTestRunId] = useState("");
   const [staffDiscountType, setStaffDiscountType] = useState<"" | "senior" | "pwd">("");
   const [staffVoucherCode, setStaffVoucherCode] = useState("");
   const [isApplyingStaffDiscount, setIsApplyingStaffDiscount] = useState(false);
@@ -2390,7 +2391,8 @@ export function BookingsPage() {
         breakfastRate: hasBreakfast ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0,
         guestIdPhotoUrl: null,
         handledBy: currentUser?.uid || "staff",
-        cancellationReason: ""
+        cancellationReason: "",
+        testRunId: walkinTestRunId || null
       });
 
       if (result.success) {
@@ -2402,6 +2404,7 @@ export function BookingsPage() {
         setHasBreakfast(false);
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
+        setWalkinTestRunId("");
         setIsModalOpen(false);
         toast.success("Walk-in booking created", `Room ${roomNumber} for ${guestName}`);
       } else {
@@ -4522,6 +4525,17 @@ export function BookingsPage() {
               Voucher Code
               <input value={walkinVoucherCode} onChange={(e) => setWalkinVoucherCode(e.target.value.toUpperCase())} maxLength={40} placeholder="Optional" className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs uppercase" />
             </label>
+            {testRuns.filter(r => r.status === "active").length > 0 && (
+              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                Mark as Test Data
+                <select value={walkinTestRunId} onChange={(e) => setWalkinTestRunId(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
+                  <option value="">Live data (not a test)</option>
+                  {testRuns.filter(r => r.status === "active").map(run => (
+                    <option key={run.id} value={run.id}>{run.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">

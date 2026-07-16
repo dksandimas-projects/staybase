@@ -54,7 +54,8 @@ export const WalkinBookingSchema = z.object({
   totalPriceOverride: z.coerce.number().finite().min(0).max(1_000_000).optional(),
   discountType: z.enum(["", "senior", "pwd"]).optional().default(""),
   voucherCode: z.string().trim().max(40).optional().default(""),
-  linkedInquiryId: z.string().trim().max(64).nullable().optional()
+  linkedInquiryId: z.string().trim().max(64).nullable().optional(),
+  testRunId: z.string().trim().max(64).nullable().optional()
 }).strict();
 
 export type BookingDatesInput = z.infer<typeof BookingDatesSchema>;

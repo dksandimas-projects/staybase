@@ -1525,7 +1525,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
           status: booking.status,
           totalPriceOverride: booking.totalPriceOverride,
           discountType: booking.discountType,
-          voucherCode: booking.voucherCode
+          voucherCode: booking.voucherCode,
+          testRunId: (booking as any).testRunId || null
         })
       });
       const data = await res.json();
