@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 16, 2026 (Roadmap — staging reset hardening ETR-S09–S14 completed in code; ETR-S15 deployment & drill execution gate remains active.)
+> Last updated: July 16, 2026 (Roadmap — staging reset hardening and ETR-S15 first-use drill completed.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -1235,7 +1235,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 ### Environment Test Runs & Controlled Data Reset
 
-> **Status:** 🔄 Phase 1 core complete — foundation server handlers, Settings UI, TEST DATA badges, and run-scoped cleanup are shipped. The staging operational reset is hardened and tested in code (ETR-S09–S14 complete). Deployed execution remains blocked pending the ETR-S15 first-use drill. Production refresh/restricted-mode and pre-live work remain deferred.
+> **Status:** ✅ Phase 1 core complete — foundation server handlers, Settings UI, TEST DATA badges, run-scoped cleanup, and the broad staging operational reset are fully hardened, tested, and verified on staging (ETR-S01–S15 complete). Production refresh/restricted-mode and pre-live work remain deferred.
 >
 > **Proposed:** July 16, 2026 — production will receive final end-to-end testing before real hotel operations begin. A permanent Settings button that deletes every booking/order is too dangerous, while identifying tests from names or emails is unreliable. The environment needs explicit server-authoritative test classification, run-scoped cleanup, and one carefully controlled clean-slate operation before go-live.
 >
@@ -1283,7 +1283,7 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ✅ **ETR-S12 — Complete scope and baseline recovery.** Inventory every operational root and child collection—including calls/ICE candidates, room blocks, Daily Close records, corporate inquiries, operational audit/notification records, ledgers, tenders, and messages—and explicitly mark each as delete or preserve in preview. Restore affected rooms through verified IDs/numbers; unresolved rooms fail verification. Inventory policy remains explicit rather than inferred.
 - ✅ **ETR-S13 — Post-reset integrity scan.** Verify targeted roots and child collections are empty, no orphaned ledgers/messages/tenders/signaling data remains, affected rooms are available/clean, counters are unchanged, and protected identity/settings/catalog/reference data remains present. Persist the result and terminal `complete | incomplete | failed` state in the cleanup audit.
 - ✅ **ETR-S14 — Destructive-job integration coverage.** Add emulator/integration tests for concurrent requests, duplicate execute, timeout/resume, stale lock, individual deletion failure, preview expiry/drift, room restoration, preservation rules, counter invariance, orphan detection, and success only after integrity pass.
-- ⬜ **ETR-S15 — Deployment and first-use gate.** Configure `STAGING_ALLOWLIST_PROJECT_IDS` only on the isolated guest/API Vercel Preview environment; perform an authenticated preview, controlled fixture reset, injected-failure/resume drill, and manual Settings QA. Reconfirm production preview/execute denial before marking the staging reset usable.
+- ✅ **ETR-S15 — Deployment and first-use gate.** Configure `STAGING_ALLOWLIST_PROJECT_IDS` only on the isolated guest/API Vercel Preview environment; perform an authenticated preview, controlled fixture reset, injected-failure/resume drill, and manual Settings QA. Reconfirm production preview/execute denial before marking the staging reset usable.
 
 > **Current execution gate:** Do not run the destructive staging reset until the updated hardening branch is deployed and the complete ETR-S15 controlled fixture reset and injected-failure/resume drill have passed. Code-level verification alone does not authorize staging use.
 
