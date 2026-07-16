@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import crypto from "node:crypto";
 
 // ── Mock Firebase Admin ────────────────────────────────────────────
 const { mockGet, mockCollection, mockRunTransaction } = vi.hoisted(() => {
@@ -38,6 +39,7 @@ function installDefaultMock() {
 vi.mock("../../server/lib/firebase-admin", () => ({
   adminDb: {
     collection: mockCollection,
+    collectionGroup: mockCollection,
     runTransaction: (fn: any) => mockRunTransaction(fn)
   },
   adminAuth: {},
@@ -68,12 +70,27 @@ function snapWithDocs(count: number): any {
   return { docs, empty: count === 0, size: count, forEach: (fn: any) => docs.forEach(fn) };
 }
 
-function emptyManifestHash(): string {
-  return hashManifest({
+function emptyProtectedState() {
+  const collections = Object.fromEntries([
+    "counters", "settings", "guests", "members", "storeItems", "vouchers", "corporateCodes"
+  ].map((name) => [name, {
+    count: 0,
+    hash: crypto.createHash("sha256").update("[]").digest("hex")
+  }]));
+  return { collections, roomsCount: 0 };
+}
+
+function emptyManifest() {
+  return {
     bookings: 0, storeOrders: 0, notifications: 0, intercomStays: 0,
     testRuns: 0, calls: 0, dailyCloses: 0, corporateInquiries: 0,
-    roomBlocks: 0, cleanupHistory: 0, affectedRooms: [], affectedStockItems: []
-  });
+    roomBlocks: 0, cleanupHistory: 0, affectedRooms: [], affectedStockItems: [],
+    protectedState: emptyProtectedState()
+  };
+}
+
+function emptyManifestHash(): string {
+  return hashManifest(emptyManifest());
 }
 
 function validPreviewDoc() {
@@ -82,6 +99,7 @@ function validPreviewDoc() {
     data: () => ({
       projectId: "spark-inn-stg",
       manifestHash: emptyManifestHash(),
+      manifest: emptyManifest(),
       createdAt: new Date(Date.now() + 60000)
     })
   };
@@ -97,22 +115,24 @@ function buildSequence(returns: any[]): () => any {
 }
 
 const STEPS_VALID_PREVIEW = [
-  /* 1 */  { exists: true, data: () => ({ projectId: "spark-inn-stg", manifestHash: emptyManifestHash(), createdAt: new Date(Date.now() + 60000) }) },
+  /* 1 */ validPreviewDoc(),
 ];
 const STEPS_MANIFEST_EMPTY = [
-  /* 1-10: collectFullManifest → 0 docs */
+  /* 1-10: operational collections; 11-18: protected collections + rooms */
   snapWithDocs(0), snapWithDocs(0), snapWithDocs(0), snapWithDocs(0), snapWithDocs(0),
   snapWithDocs(0), snapWithDocs(0), snapWithDocs(0), snapWithDocs(0), snapWithDocs(0),
+  snapWithDocs(0), snapWithDocs(0), snapWithDocs(0), snapWithDocs(0), snapWithDocs(0),
+  snapWithDocs(0), snapWithDocs(0), snapWithDocs(0),
 ];
 const STEPS_LOCK_NONE = [
   /* 1 */  { exists: false, data: () => undefined },
 ];
-// Full success sequence: preview + drift empty + lock none + manifestBefore empty
+// Full success: preview + preflight lock read + drift manifest + transaction lock read.
 const STEPS_FULL_SUCCESS = [
   ...STEPS_VALID_PREVIEW,
-  ...STEPS_MANIFEST_EMPTY,
   ...STEPS_LOCK_NONE,
   ...STEPS_MANIFEST_EMPTY,
+  ...STEPS_LOCK_NONE,
 ];
 
 describe("ETR-S08 — Staging reset production denial", () => {
@@ -334,10 +354,11 @@ describe("ETR-S09 — Atomic lock acquisition", () => {
   });
 
   it("returns 409 when lock is held by another running job (not stale)", async () => {
+    const runningLock = { exists: true, data: () => ({ previewId: "valid", projectId: "spark-inn-stg", status: "running", startedAt: new Date() }) };
     mockGet.mockImplementation(buildSequence([
       ...STEPS_VALID_PREVIEW,
-      ...STEPS_MANIFEST_EMPTY,
-      { exists: true, data: () => ({ projectId: "spark-inn-stg", status: "running", startedAt: new Date() }) },
+      runningLock,
+      runningLock,
     ]));
 
     const res = mockResponse();
@@ -353,11 +374,11 @@ describe("ETR-S09 — Atomic lock acquisition", () => {
 
   it("recovers stale lock (older than 30 min)", async () => {
     const oldStart = new Date(Date.now() - 31 * 60 * 1000);
+    const staleLock = { exists: true, data: () => ({ previewId: "valid", projectId: "spark-inn-stg", status: "running", phase: "bookings", startedAt: oldStart }) };
     mockGet.mockImplementation(buildSequence([
       ...STEPS_VALID_PREVIEW,
-      ...STEPS_MANIFEST_EMPTY,
-      { exists: true, data: () => ({ projectId: "spark-inn-stg", status: "running", startedAt: oldStart }) },
-      ...STEPS_MANIFEST_EMPTY,
+      staleLock,
+      staleLock,
     ]));
 
     const res = mockResponse();
@@ -371,12 +392,13 @@ describe("ETR-S09 — Atomic lock acquisition", () => {
     expect(res.json.mock.calls[0][0].data.terminalStatus).toBe("complete");
   });
 
-  it("recovers lock from completed/failed state", async () => {
+  it("rejects reuse of an already completed preview job", async () => {
+    const completedLock = { exists: true, data: () => ({ previewId: "valid", projectId: "spark-inn-stg", status: "complete", startedAt: new Date(Date.now() - 10000) }) };
     mockGet.mockImplementation(buildSequence([
       ...STEPS_VALID_PREVIEW,
+      completedLock,
       ...STEPS_MANIFEST_EMPTY,
-      { exists: true, data: () => ({ projectId: "spark-inn-stg", status: "complete", startedAt: new Date(Date.now() - 10000) }) },
-      ...STEPS_MANIFEST_EMPTY,
+      completedLock,
     ]));
 
     const res = mockResponse();
@@ -386,8 +408,8 @@ describe("ETR-S09 — Atomic lock acquisition", () => {
       previewId: "valid"
     }), res);
 
-    expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json.mock.calls[0][0].data.terminalStatus).toBe("complete");
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].error).toMatch(/already completed/i);
   });
 });
 
@@ -405,14 +427,11 @@ describe("ETR-S11 — Fail-closed semantics", () => {
   });
 
   it("returns 500 when a deletion phase throws", async () => {
+    const setup = STEPS_FULL_SUCCESS;
     let callIdx = 0;
     mockGet.mockImplementation(async () => {
-      callIdx++;
-      if (callIdx <= 22) {
-        if (callIdx === 1) return validPreviewDoc();
-        if (callIdx === 12) return { exists: false, data: () => undefined };
-        return snapWithDocs(0);
-      }
+      const index = callIdx++;
+      if (index < setup.length) return setup[index];
       throw new Error("Simulated Firestore failure");
     });
 
@@ -425,11 +444,25 @@ describe("ETR-S11 — Fail-closed semantics", () => {
 
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json.mock.calls[0][0].success).toBe(false);
-    expect(res.json.mock.calls[0][0].error).toMatch(/unable to execute/i);
+    expect(res.json.mock.calls[0][0].error).toMatch(/resumable/i);
   });
 });
 
 describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
+  it("deletes and verifies every current booking/store ledger and call signaling child", async () => {
+    const source = await import("node:fs/promises").then((fs) => fs.readFile(
+      new URL("../../server/handlers/test-runs.ts", import.meta.url),
+      "utf8"
+    ));
+
+    expect(source).toContain('["payments", "charges", "incidentalCharges", "notifications", "audit"]');
+    expect(source).toContain('["payments", "tenders"]');
+    expect(source).toContain('"calls", "calls", ["iceCandidates"]');
+    expect(source).toContain('verifyCollectionGroup("payments")');
+    expect(source).toContain('verifyCollectionGroup("charges")');
+    expect(source).toContain('verifyCollectionGroup("iceCandidates")');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     installDefaultMock();
@@ -457,17 +490,14 @@ describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
   });
 
   it("returns 500 when integrity scan finds remaining data", async () => {
-    // Deletion phases consume 1 get call per collection (10 total).
-    // Integrity scan starts at call 23+10 = 33. Set bookings check to return 1 doc.
-    const INTEGRITY_START = 33;
+    // Setup consumes 21 reads; nine root deletion phases plus cleanup history
+    // consume ten more. The first integrity root read is call 32 (1-based).
+    const INTEGRITY_START = 32;
+    const setup = STEPS_FULL_SUCCESS;
     let callIdx = 0;
     mockGet.mockImplementation(async () => {
       callIdx++;
-      if (callIdx <= 22) {
-        if (callIdx === 1) return validPreviewDoc();
-        if (callIdx === 12) return { exists: false, data: () => undefined };
-        return snapWithDocs(0);
-      }
+      if (callIdx <= setup.length) return setup[callIdx - 1];
       if (callIdx === INTEGRITY_START) return snapWithDocs(1);
       return snapWithDocs(0);
     });

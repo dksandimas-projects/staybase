@@ -187827,7 +187827,8 @@ var WalkinBookingSchema = external_exports.object({
   totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
   discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
   voucherCode: external_exports.string().trim().max(40).optional().default(""),
-  linkedInquiryId: external_exports.string().trim().max(64).nullable().optional()
+  linkedInquiryId: external_exports.string().trim().max(64).nullable().optional(),
+  testRunId: external_exports.string().trim().max(64).nullable().optional()
 }).strict();
 
 // ../shared/schemas/paymentMethod.ts
@@ -189611,6 +189612,906 @@ async function pruneNotifications(maxAgeMs, batchSize = 500) {
   };
 }
 
+// server/handlers/test-runs.ts
+var import_node_crypto = __toESM(require("node:crypto"));
+function getStaff(req) {
+  return req.staff || {};
+}
+function generateRunId() {
+  return import_node_crypto.default.randomBytes(16).toString("hex");
+}
+function hashToken(token2) {
+  return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
+}
+var createTestRunSchema = external_exports.object({
+  name: external_exports.string().trim().min(1).max(120),
+  environment: external_exports.enum(["staging", "production"]),
+  durationMinutes: external_exports.number().int().min(5).max(43200)
+}).strict();
+var closeTestRunSchema = external_exports.object({
+  runId: external_exports.string().trim().min(1).max(64)
+}).strict();
+var deleteTestRunSchema = external_exports.object({
+  runId: external_exports.string().trim().min(1).max(64)
+}).strict();
+async function collectManifest(runId) {
+  const affectedRooms = /* @__PURE__ */ new Set();
+  const affectedStockItems = /* @__PURE__ */ new Set();
+  const bookingsSnap = await adminDb.collection("bookings").where("testRunId", "==", runId).get();
+  const bookingIds = bookingsSnap.docs.map((d) => {
+    affectedRooms.add(d.data().roomNumber || "");
+    return d.id;
+  });
+  const storeSnap = await adminDb.collection("storeOrders").where("testRunId", "==", runId).get();
+  storeSnap.docs.forEach((d) => {
+    const itemIds = (d.data().items || []).map((i2) => i2.itemId);
+    itemIds.forEach((id) => {
+      if (id) affectedStockItems.add(id);
+    });
+  });
+  return {
+    bookings: bookingIds.length,
+    storeOrders: storeSnap.docs.length,
+    affectedRooms: [...affectedRooms].filter(Boolean),
+    affectedStockItems: [...affectedStockItems].filter(Boolean)
+  };
+}
+async function handleCreateTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can create test runs." });
+  }
+  const parsed = createTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run name, environment, and duration."
+    });
+  }
+  const { name: name2, environment, durationMinutes } = parsed.data;
+  try {
+    if (environment === "production") {
+      const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
+      if (!activeRuns.empty) {
+        return res.status(409).json({
+          success: false,
+          error: "There is already an active production test run. Close it before creating a new one."
+        });
+      }
+    }
+    const now = /* @__PURE__ */ new Date();
+    const runId = generateRunId();
+    const tokenBytes = import_node_crypto.default.randomBytes(24);
+    const token2 = tokenBytes.toString("base64url");
+    const run = {
+      id: runId,
+      name: name2,
+      environment,
+      createdBy: staff.email || "",
+      createdByUid: staff.uid || "",
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + durationMinutes * 6e4),
+      closedAt: null,
+      closedBy: null,
+      status: "active",
+      tokenHash: hashToken(token2)
+    };
+    await adminDb.collection("testRuns").doc(runId).set(run);
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: runId,
+        name: name2,
+        environment,
+        token: token2,
+        expiresAt: run.expiresAt.toISOString(),
+        durationMinutes
+      }
+    });
+  } catch (error) {
+    console.error("Test run creation failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to create test run. Please try again."
+    });
+  }
+}
+async function handleCloseTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can close test runs." });
+  }
+  const parsed = closeTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run ID."
+    });
+  }
+  const { runId } = parsed.data;
+  try {
+    const runRef = adminDb.collection("testRuns").doc(runId);
+    const runDoc = await runRef.get();
+    if (!runDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Test run not found."
+      });
+    }
+    const runData = runDoc.data();
+    if (runData.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        error: "This test run is not active and cannot be closed."
+      });
+    }
+    const manifest = await collectManifest(runId);
+    const now = /* @__PURE__ */ new Date();
+    await runRef.set({
+      closedAt: now,
+      closedBy: staff.email || "",
+      status: "closed",
+      manifest
+    }, { merge: true });
+    return res.status(200).json({
+      success: true,
+      data: { runId, closedAt: now.toISOString(), manifest }
+    });
+  } catch (error) {
+    console.error("Test run close failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to close test run. Please try again."
+    });
+  }
+}
+var CLEANUP_TIMEOUT_MS = 5 * 60 * 1e3;
+async function handleDeleteTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can delete test data." });
+  }
+  const parsed = deleteTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run ID."
+    });
+  }
+  const { runId } = parsed.data;
+  const runRef = adminDb.collection("testRuns").doc(runId);
+  const now = /* @__PURE__ */ new Date();
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const runDoc = await transaction.get(runRef);
+      if (!runDoc.exists) {
+        throw new Error("NOT_FOUND");
+      }
+      const runData = runDoc.data();
+      const status = runData.status;
+      if (status === "cleaned") {
+        throw new Error("ALREADY_CLEANED");
+      }
+      if (status === "closed") {
+        transaction.set(runRef, {
+          status: "cleanup-in-progress",
+          cleanupStartedAt: now,
+          cleanupCursor: null
+        }, { merge: true });
+        return;
+      }
+      if (status === "cleanup-in-progress") {
+        const startedAt = runData.cleanupStartedAt?.toDate?.() || runData.cleanupStartedAt;
+        if (startedAt && now.getTime() - new Date(startedAt).getTime() < CLEANUP_TIMEOUT_MS) {
+          throw new Error("CLEANUP_IN_PROGRESS");
+        }
+        transaction.set(runRef, {
+          status: "cleanup-in-progress",
+          cleanupStartedAt: now
+        }, { merge: true });
+        return;
+      }
+      throw new Error("INVALID_STATUS");
+    });
+  } catch (txError) {
+    const msg = txError.message || "";
+    if (msg === "NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Test run not found." });
+    }
+    if (msg === "ALREADY_CLEANED") {
+      return res.status(400).json({ success: false, error: "This test run has already been cleaned up." });
+    }
+    if (msg === "CLEANUP_IN_PROGRESS") {
+      return res.status(409).json({
+        success: false,
+        error: "Cleanup is already in progress. Please wait for it to complete or try again after a few minutes."
+      });
+    }
+    if (msg === "INVALID_STATUS") {
+      return res.status(400).json({ success: false, error: "Only closed test runs can be cleaned up. Close the run first." });
+    }
+    throw txError;
+  }
+  try {
+    let bookingCount = 0;
+    let storeOrderCount = 0;
+    let failedItems = [];
+    const batchSize = 20;
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("bookings").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const subcollections = ["payments", "incidentalCharges", "notifications", "audit"];
+          for (const sub of subcollections) {
+            const subSnap = await adminDb.collection("bookings").doc(doc.id).collection(sub).get();
+            const deletes = subSnap.docs.map((sd) => sd.ref.delete());
+            await Promise.all(deletes);
+          }
+          await doc.ref.delete();
+          bookingCount++;
+          if (bookingCount % 20 === 0) {
+            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {
+            });
+          }
+        } catch (err) {
+          failedItems.push(`booking/${doc.id}`);
+        }
+      }
+    }
+    lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("storeOrders").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
+          await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          await doc.ref.delete();
+          storeOrderCount++;
+          if (storeOrderCount % 20 === 0) {
+            await runRef.set({ cleanupCursor: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount } }, { merge: true }).catch(() => {
+            });
+          }
+        } catch (err) {
+          failedItems.push(`storeOrder/${doc.id}`);
+        }
+      }
+    }
+    let notifQ = adminDb.collection("notifications").where("testRunId", "==", runId);
+    const notifSnap = await notifQ.get();
+    for (const doc of notifSnap.docs) {
+      try {
+        await doc.ref.delete();
+      } catch {
+        failedItems.push(`notification/${doc.id}`);
+      }
+    }
+    let intercomQ = adminDb.collection("intercoms").where("testRunId", "==", runId);
+    const intercomSnap = await intercomQ.get();
+    for (const doc of intercomSnap.docs) {
+      try {
+        const msgSnap = await adminDb.collection("intercoms").doc(doc.id).collection("messages").get();
+        await Promise.all(msgSnap.docs.map((md) => md.ref.delete()));
+        await doc.ref.delete();
+      } catch {
+        failedItems.push(`intercom/${doc.id}`);
+      }
+    }
+    const auditResult = {
+      type: "test-run-cleanup",
+      runId,
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount,
+      failedItems,
+      completedAt: now,
+      completedBy: staff.email || ""
+    };
+    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
+    const runDoc = await runRef.get();
+    const runData = runDoc.data();
+    const affectedRooms = runData.manifest?.affectedRooms || [];
+    for (const roomNumber of affectedRooms) {
+      if (!roomNumber) continue;
+      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+      for (const doc of roomsSnap.docs) {
+        await doc.ref.set({
+          status: "available",
+          housekeepingStatus: "clean"
+        }, { merge: true });
+      }
+    }
+    await runRef.set({
+      status: "cleaned",
+      cleanupCompletedAt: now,
+      cleanupCursor: null,
+      cleanupResult: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount, failedItems: failedItems.length }
+    }, { merge: true });
+    return res.status(200).json({
+      success: true,
+      data: {
+        runId,
+        bookingsDeleted: bookingCount,
+        storeOrdersDeleted: storeOrderCount,
+        failedItems: failedItems.length,
+        roomsRestored: affectedRooms.length
+      }
+    });
+  } catch (error) {
+    console.error("Test run cleanup failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to clean up test data. Please try again."
+    });
+  }
+}
+function isStagingProject() {
+  const projectId = process.env.FIREBASE_PROJECT_ID || "";
+  const allowlistRaw = process.env.STAGING_ALLOWLIST_PROJECT_IDS || "";
+  const allowlist = allowlistRaw.split(",").map((s4) => s4.trim()).filter(Boolean);
+  return allowlist.includes(projectId);
+}
+var PREVIEW_TTL_MS = 5 * 60 * 1e3;
+var LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
+var RESET_BATCH_SIZE = 20;
+var stagingResetConfirmSchema = external_exports.object({
+  confirmation: external_exports.literal("RESET STAGING"),
+  projectName: external_exports.string().trim().min(1).max(120),
+  previewId: external_exports.string().trim().min(1).max(64)
+}).strict();
+async function acquireResetLock(staff, currentProject, previewId) {
+  const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
+  const now = /* @__PURE__ */ new Date();
+  try {
+    let acquired = false;
+    let message;
+    let resumed = false;
+    let resumePhase = "starting";
+    await adminDb.runTransaction(async (tx) => {
+      const lockDoc = await tx.get(lockRef);
+      if (lockDoc.exists) {
+        const data = lockDoc.data();
+        const startedAt = data.startedAt?.toDate?.() || data.startedAt;
+        if (data.status === "running" && startedAt && now.getTime() - new Date(startedAt).getTime() < LOCK_TIMEOUT_MS) {
+          message = "A staging reset is already in progress. Please wait for it to complete or try again after 30 minutes.";
+          return;
+        }
+        if (data.previewId === previewId && data.status === "complete") {
+          message = "This staging reset job has already completed. Run a new preview for another reset.";
+          return;
+        }
+        if (data.previewId === previewId && (data.status === "failed" || data.status === "incomplete" || data.status === "running")) {
+          resumed = true;
+          resumePhase = data.phase || "starting";
+        }
+      }
+      const lockData = {
+        projectId: currentProject,
+        startedAt: now,
+        status: "running",
+        previewId,
+        phase: resumed ? resumePhase : "starting",
+        startedBy: staff.email || "",
+        resumedAt: resumed ? now : null
+      };
+      if (!resumed) lockData.checkpoint = 0;
+      tx.set(lockRef, lockData, { merge: resumed });
+      acquired = true;
+    });
+    return { acquired, message, resumed, resumePhase };
+  } catch {
+    return { acquired: false, message: "Unable to acquire reset lock. Please try again.", resumed: false, resumePhase: "starting" };
+  }
+}
+async function releaseResetLock(lockRef, status, phase, checkpoint) {
+  try {
+    await lockRef.set({ status, phase, checkpoint, completedAt: /* @__PURE__ */ new Date() }, { merge: true });
+  } catch {
+  }
+}
+var PROTECTED_RESET_COLLECTIONS = [
+  "counters",
+  "settings",
+  "guests",
+  "members",
+  "storeItems",
+  "vouchers",
+  "corporateCodes"
+];
+async function collectProtectedState() {
+  const [protectedSnapshots, roomsSnapshot] = await Promise.all([
+    Promise.all(PROTECTED_RESET_COLLECTIONS.map(async (name2) => [name2, await adminDb.collection(name2).get()])),
+    adminDb.collection("rooms").get()
+  ]);
+  const collections = Object.fromEntries(protectedSnapshots.map(([name2, snapshot]) => {
+    const documents = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b3) => a.id.localeCompare(b3.id));
+    return [name2, {
+      count: documents.length,
+      hash: import_node_crypto.default.createHash("sha256").update(JSON.stringify(documents)).digest("hex")
+    }];
+  }));
+  return { collections, roomsCount: roomsSnapshot.docs.length };
+}
+async function collectFullManifest() {
+  const [bookingsSnap, storeSnap, notifSnap, intercomSnap, testRunSnap, callsSnap, dailyCloseSnap, corpInquirySnap, roomBlocksSnap, cleanupSnap] = await Promise.all([
+    adminDb.collection("bookings").get(),
+    adminDb.collection("storeOrders").get(),
+    adminDb.collection("notifications").get(),
+    adminDb.collection("intercoms").get(),
+    adminDb.collection("testRuns").get(),
+    adminDb.collection("calls").get(),
+    adminDb.collection("dailyCloses").get(),
+    adminDb.collection("corporateInquiries").get(),
+    adminDb.collection("roomBlocks").get(),
+    adminDb.collection("janitor").doc("cleanups").collection("history").get()
+  ]);
+  const affectedRooms = /* @__PURE__ */ new Set();
+  bookingsSnap.docs.forEach((d) => {
+    const r3 = d.data().roomNumber;
+    if (r3) affectedRooms.add(r3);
+  });
+  roomBlocksSnap.docs.forEach((d) => {
+    const r3 = d.data().roomNumber;
+    if (r3) affectedRooms.add(r3);
+  });
+  const protectedState = await collectProtectedState();
+  return {
+    bookings: bookingsSnap.docs.length,
+    storeOrders: storeSnap.docs.length,
+    notifications: notifSnap.docs.length,
+    intercomStays: intercomSnap.docs.length,
+    testRuns: testRunSnap.docs.length,
+    calls: callsSnap.docs.length,
+    dailyCloses: dailyCloseSnap.docs.length,
+    corporateInquiries: corpInquirySnap.docs.length,
+    roomBlocks: roomBlocksSnap.docs.length,
+    cleanupHistory: cleanupSnap.docs.length,
+    affectedRooms: [...affectedRooms].filter(Boolean),
+    affectedStockItems: [],
+    protectedState
+  };
+}
+function hashManifest(manifest) {
+  return import_node_crypto.default.createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16);
+}
+async function handleStagingResetPreview(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can preview staging reset." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "This project is not authorized for operational reset. Staging allowlist check failed."
+    });
+  }
+  try {
+    const projectId = process.env.FIREBASE_PROJECT_ID || "unknown";
+    const manifest = await collectFullManifest();
+    const previewId = hashManifest({ projectId, manifest, ts: Date.now() });
+    await adminDb.collection("janitor").doc("previews").collection("items").doc(previewId).set({
+      projectId,
+      manifest,
+      manifestHash: hashManifest(manifest),
+      createdAt: /* @__PURE__ */ new Date(),
+      createdBy: staff.email || ""
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId,
+        isStaging: true,
+        manifest,
+        previewId,
+        confirmedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+  } catch (error) {
+    console.error("Staging reset preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to generate staging reset preview."
+    });
+  }
+}
+async function handleStagingResetExecute(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can execute staging reset." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "This project is not authorized for operational reset. Staging allowlist check failed."
+    });
+  }
+  const parsed = stagingResetConfirmSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Preview ID, typed RESET STAGING, and project name are required."
+    });
+  }
+  const { confirmation, projectName, previewId } = parsed.data;
+  const currentProject = process.env.FIREBASE_PROJECT_ID || "";
+  if (projectName !== currentProject) {
+    return res.status(400).json({
+      success: false,
+      error: `Project name mismatch. Expected "${currentProject}".`
+    });
+  }
+  let validatedPreview;
+  let resumeAllowed = false;
+  try {
+    const previewRef = adminDb.collection("janitor").doc("previews").collection("items").doc(previewId);
+    const previewDoc = await previewRef.get();
+    if (!previewDoc.exists) {
+      return res.status(400).json({ success: false, error: "Preview not found. Please run a new preview." });
+    }
+    const preview = previewDoc.data();
+    validatedPreview = preview;
+    const existingLockDoc = await adminDb.collection("janitor").doc("staging-reset-lock").get();
+    if (existingLockDoc.exists) {
+      const existingLock = existingLockDoc.data();
+      resumeAllowed = existingLock.previewId === previewId && ["running", "failed", "incomplete"].includes(existingLock.status);
+    }
+    const createdAt = preview.createdAt?.toDate?.() || preview.createdAt;
+    if (!resumeAllowed && createdAt && Date.now() - new Date(createdAt).getTime() > PREVIEW_TTL_MS) {
+      return res.status(400).json({ success: false, error: "Preview has expired. Please run a new preview." });
+    }
+    if (preview.projectId !== currentProject) {
+      return res.status(400).json({ success: false, error: "Preview was created for a different project." });
+    }
+    const currentManifest = resumeAllowed ? null : await collectFullManifest();
+    if (currentManifest && hashManifest(currentManifest) !== preview.manifestHash) {
+      return res.status(409).json({
+        success: false,
+        error: "Staging data has changed since preview. Please run a new preview."
+      });
+    }
+  } catch (error) {
+    console.error("Preview validation failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to validate preview." });
+  }
+  const lock = await acquireResetLock(staff, currentProject, previewId);
+  if (!lock.acquired) {
+    const isConflict = lock.message?.includes("already in progress") || lock.message?.includes("already completed");
+    return res.status(isConflict ? 409 : 500).json({
+      success: false,
+      error: lock.message || "Unable to acquire reset lock."
+    });
+  }
+  const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
+  const startedAt = /* @__PURE__ */ new Date();
+  const failedItems = [];
+  let bookingCount = 0, storeOrderCount = 0, notifCount = 0;
+  let intercomCount = 0, testRunCount = 0, callCount = 0;
+  let dailyCloseCount = 0, corpInquiryCount = 0, roomBlockCount = 0, cleanupCount = 0;
+  let roomRestoreCount = 0;
+  let integrityFailed = false;
+  let manifestBefore;
+  async function deleteCollectionPage(collectionName, subcollections, counter) {
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection(collectionName).limit(RESET_BATCH_SIZE);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      const failuresBeforePage = failedItems.length;
+      for (const doc of snap.docs) {
+        try {
+          for (const sub of subcollections) {
+            const subSnap = await adminDb.collection(collectionName).doc(doc.id).collection(sub).get();
+            await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          }
+          await doc.ref.delete();
+          counter.value++;
+        } catch {
+          failedItems.push(`${collectionName}/${doc.id}`);
+        }
+      }
+      if (failedItems.length > failuresBeforePage) {
+        throw new Error(`Deletion failed in ${collectionName}; retry this reset job to resume.`);
+      }
+    }
+  }
+  try {
+    manifestBefore = validatedPreview.manifest;
+    const phaseOrder = [
+      "bookings",
+      "storeOrders",
+      "notifications",
+      "intercoms",
+      "testRuns",
+      "calls",
+      "dailyCloses",
+      "corporateInquiries",
+      "roomBlocks",
+      "cleanupHistory",
+      "rooms",
+      "integrity"
+    ];
+    const storedPhaseIndex = lock.resumed ? phaseOrder.indexOf(lock.resumePhase) : 0;
+    const resumePhaseIndex = storedPhaseIndex >= 0 ? storedPhaseIndex : 0;
+    const shouldRunPhase = (phase) => phaseOrder.indexOf(phase) >= resumePhaseIndex;
+    const runDeletionPhase = async (phase, collectionName, subcollections, expectedCount) => {
+      if (!shouldRunPhase(phase)) return expectedCount;
+      await lockRef.set({ phase, checkpoint: 0 }, { merge: true });
+      const counter = { value: 0 };
+      await deleteCollectionPage(collectionName, subcollections, counter);
+      await lockRef.set({ checkpoint: counter.value }, { merge: true });
+      return lock.resumed ? expectedCount : counter.value;
+    };
+    bookingCount = await runDeletionPhase(
+      "bookings",
+      "bookings",
+      ["payments", "charges", "incidentalCharges", "notifications", "audit"],
+      manifestBefore.bookings
+    );
+    storeOrderCount = await runDeletionPhase(
+      "storeOrders",
+      "storeOrders",
+      ["payments", "tenders"],
+      manifestBefore.storeOrders
+    );
+    notifCount = await runDeletionPhase("notifications", "notifications", [], manifestBefore.notifications);
+    intercomCount = await runDeletionPhase("intercoms", "intercoms", ["messages"], manifestBefore.intercomStays);
+    testRunCount = await runDeletionPhase("testRuns", "testRuns", [], manifestBefore.testRuns);
+    callCount = await runDeletionPhase("calls", "calls", ["iceCandidates"], manifestBefore.calls);
+    dailyCloseCount = await runDeletionPhase("dailyCloses", "dailyCloses", [], manifestBefore.dailyCloses);
+    corpInquiryCount = await runDeletionPhase(
+      "corporateInquiries",
+      "corporateInquiries",
+      [],
+      manifestBefore.corporateInquiries
+    );
+    roomBlockCount = await runDeletionPhase("roomBlocks", "roomBlocks", [], manifestBefore.roomBlocks);
+    if (shouldRunPhase("cleanupHistory")) {
+      await lockRef.set({ phase: "cleanupHistory", checkpoint: 0 }, { merge: true });
+      const clCounter = { value: 0 };
+      const cleanupSnap = await adminDb.collection("janitor").doc("cleanups").collection("history").get();
+      for (const doc of cleanupSnap.docs) {
+        try {
+          await doc.ref.delete();
+          clCounter.value++;
+        } catch {
+          failedItems.push(`cleanupHistory/${doc.id}`);
+        }
+      }
+      cleanupCount = lock.resumed ? manifestBefore.cleanupHistory : clCounter.value;
+      await lockRef.set({ checkpoint: cleanupCount }, { merge: true });
+    } else {
+      cleanupCount = manifestBefore.cleanupHistory;
+    }
+    if (failedItems.length > 0) {
+      throw new Error("Cleanup-history deletion was incomplete; retry this reset job to resume.");
+    }
+    if (shouldRunPhase("rooms")) {
+      await lockRef.set({ phase: "rooms", checkpoint: 0 }, { merge: true });
+      for (const roomNumber of manifestBefore.affectedRooms) {
+        if (!roomNumber) continue;
+        const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+        if (roomsSnap.empty) {
+          failedItems.push(`room/${roomNumber} (not found)`);
+          continue;
+        }
+        for (const doc of roomsSnap.docs) {
+          await doc.ref.set({ status: "available", housekeepingStatus: "clean" }, { merge: true });
+          roomRestoreCount++;
+        }
+      }
+      await lockRef.set({ checkpoint: roomRestoreCount }, { merge: true });
+    } else {
+      roomRestoreCount = manifestBefore.affectedRooms.length;
+    }
+    if (failedItems.length > 0) {
+      throw new Error("Room baseline restoration was incomplete; retry this reset job to resume.");
+    }
+    await lockRef.set({ phase: "integrity", checkpoint: roomRestoreCount }, { merge: true });
+    const integrityErrors = [];
+    const verifyCollection = async (name2) => {
+      const snap = await adminDb.collection(name2).limit(1).get();
+      if (!snap.empty) integrityErrors.push(`${name2} still has ${snap.size} document(s)`);
+    };
+    await Promise.all([
+      verifyCollection("bookings"),
+      verifyCollection("storeOrders"),
+      verifyCollection("notifications"),
+      verifyCollection("intercoms"),
+      verifyCollection("testRuns"),
+      verifyCollection("calls"),
+      verifyCollection("dailyCloses"),
+      verifyCollection("corporateInquiries"),
+      verifyCollection("roomBlocks")
+    ]);
+    const verifyCollectionGroup = async (name2) => {
+      const snap = await adminDb.collectionGroup(name2).limit(1).get();
+      if (!snap.empty) integrityErrors.push(`orphaned ${name2} subcollection data remains`);
+    };
+    await Promise.all([
+      verifyCollectionGroup("payments"),
+      verifyCollectionGroup("charges"),
+      verifyCollectionGroup("incidentalCharges"),
+      verifyCollectionGroup("notifications"),
+      verifyCollectionGroup("audit"),
+      verifyCollectionGroup("tenders"),
+      verifyCollectionGroup("messages"),
+      verifyCollectionGroup("iceCandidates")
+    ]);
+    for (const roomNumber of manifestBefore.affectedRooms) {
+      if (!roomNumber) continue;
+      const snap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        if (d.status !== "available" || d.housekeepingStatus !== "clean") {
+          integrityErrors.push(`room ${roomNumber} is ${d.status}/${d.housekeepingStatus}`);
+        }
+      }
+    }
+    const protectedStateAfter = await collectProtectedState();
+    if (JSON.stringify(protectedStateAfter) !== JSON.stringify(manifestBefore.protectedState)) {
+      integrityErrors.push("protected settings, identity, catalog, counters, or room count changed during reset");
+    }
+    if (integrityErrors.length > 0 || failedItems.length > 0) {
+      integrityFailed = true;
+      failedItems.push(...integrityErrors.map((e3) => `integrity: ${e3}`));
+    }
+    const auditResult = {
+      type: "staging-reset",
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount,
+      notificationsDeleted: notifCount,
+      intercomStaysDeleted: intercomCount,
+      testRunsDeleted: testRunCount,
+      callsDeleted: callCount,
+      dailyClosesDeleted: dailyCloseCount,
+      corporateInquiriesDeleted: corpInquiryCount,
+      roomBlocksDeleted: roomBlockCount,
+      cleanupHistoryDeleted: cleanupCount,
+      roomsRestored: roomRestoreCount,
+      failedItems,
+      integrityErrors: integrityErrors.length > 0 ? integrityErrors : void 0,
+      manifestBefore: {
+        bookings: manifestBefore.bookings,
+        storeOrders: manifestBefore.storeOrders,
+        notifications: manifestBefore.notifications,
+        intercomStays: manifestBefore.intercomStays,
+        testRuns: manifestBefore.testRuns,
+        calls: manifestBefore.calls,
+        dailyCloses: manifestBefore.dailyCloses,
+        corporateInquiries: manifestBefore.corporateInquiries,
+        roomBlocks: manifestBefore.roomBlocks,
+        cleanupHistory: manifestBefore.cleanupHistory
+      },
+      startedAt,
+      completedAt: /* @__PURE__ */ new Date(),
+      completedBy: staff.email || "",
+      projectId: currentProject,
+      previewId,
+      resumed: lock.resumed,
+      protectedStateVerified: true,
+      terminalStatus: integrityFailed ? "incomplete" : "complete"
+    };
+    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
+    if (integrityFailed) {
+      await releaseResetLock(lockRef, "incomplete", "integrity", 0);
+      return res.status(500).json({
+        success: false,
+        error: "Reset completed with integrity errors.",
+        data: {
+          projectId: currentProject,
+          bookingsDeleted: bookingCount,
+          storeOrdersDeleted: storeOrderCount,
+          roomBlocksDeleted: roomBlockCount,
+          failedItems: failedItems.length,
+          integrityErrors,
+          terminalStatus: "incomplete"
+        }
+      });
+    }
+    await releaseResetLock(lockRef, "complete", "done", 0);
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId: currentProject,
+        bookingsDeleted: bookingCount,
+        storeOrdersDeleted: storeOrderCount,
+        notificationsDeleted: notifCount,
+        intercomStaysDeleted: intercomCount,
+        testRunsDeleted: testRunCount,
+        callsDeleted: callCount,
+        dailyClosesDeleted: dailyCloseCount,
+        corporateInquiriesDeleted: corpInquiryCount,
+        roomBlocksDeleted: roomBlockCount,
+        cleanupHistoryDeleted: cleanupCount,
+        roomsRestored: roomRestoreCount,
+        failedItems: failedItems.length,
+        terminalStatus: "complete"
+      }
+    });
+  } catch (error) {
+    console.error("Staging reset execution failed:", error);
+    try {
+      await lockRef.set({
+        status: "failed",
+        failedAt: /* @__PURE__ */ new Date(),
+        failureMessage: error?.message || "Unknown reset failure"
+      }, { merge: true });
+      await adminDb.collection("janitor").doc("cleanups").collection("history").add({
+        type: "staging-reset",
+        terminalStatus: "failed",
+        previewId,
+        projectId: currentProject,
+        failedItems,
+        startedAt,
+        failedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || "",
+        failureMessage: error?.message || "Unknown reset failure"
+      });
+    } catch {
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Unable to execute staging reset. The job remains resumable; retry with the same preview after resolving the reported failure."
+    });
+  }
+}
+async function handleListTestRuns(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can list test runs." });
+  }
+  try {
+    const snap = await adminDb.collection("testRuns").orderBy("createdAt", "desc").limit(50).get();
+    const runs = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        name: data.name,
+        environment: data.environment,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+        expiresAt: data.expiresAt?.toDate?.()?.toISOString() || data.expiresAt,
+        closedAt: data.closedAt?.toDate?.()?.toISOString() || null,
+        closedBy: data.closedBy || null,
+        status: data.status,
+        manifest: data.manifest || null,
+        cleanupResult: data.cleanupResult || null
+      };
+    });
+    return res.status(200).json({ success: true, data: runs });
+  } catch (error) {
+    console.error("List test runs failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to list test runs." });
+  }
+}
+
 // server/lib/rate-breakdown.ts
 function nonNegativeFinite(value) {
   const numeric = Number(value);
@@ -189892,7 +190793,8 @@ async function handleCreateBooking(req, res) {
     paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
-    linkedInquiryId
+    linkedInquiryId,
+    testToken
   } = body;
   if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
     return res.status(400).json({ success: false, error: "Missing required booking fields." });
@@ -189929,6 +190831,25 @@ async function handleCreateBooking(req, res) {
   const numNights = Math.max(Math.round((endMs - startMs) / 864e5), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+  let validatedTestRunId = null;
+  if (testToken) {
+    const hashed = hashToken(testToken);
+    const activeRuns = await adminDb.collection("testRuns").where("tokenHash", "==", hashed).where("status", "==", "active").get();
+    if (activeRuns.empty) {
+      return res.status(403).json({
+        success: false,
+        error: "Invalid or expired test token. Please create a new test run from the admin Settings."
+      });
+    }
+    const run = activeRuns.docs[0].data();
+    if (run.expiresAt && new Date(run.expiresAt.toDate?.() || run.expiresAt) < /* @__PURE__ */ new Date()) {
+      return res.status(403).json({
+        success: false,
+        error: "Test token has expired. Please create a new test run from the admin Settings."
+      });
+    }
+    validatedTestRunId = run.id;
   }
   try {
     let finalBookingRef = "";
@@ -190354,6 +191275,7 @@ async function handleCreateBooking(req, res) {
             billingArrangement: guestDetails.preferredBillingArrangement === "personal" ? "personal" : "chargeback"
           }
         } : {},
+        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId } : {},
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -190483,7 +191405,8 @@ async function handleCreateWalkin(req, res) {
     totalPriceOverride,
     discountType: requestedDiscountType,
     voucherCode: requestedVoucherCode,
-    linkedInquiryId
+    linkedInquiryId,
+    testRunId: requestedTestRunId
   } = parsedWalkin.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
@@ -190498,6 +191421,30 @@ async function handleCreateWalkin(req, res) {
   }
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+  let validatedTestRunId = null;
+  if (requestedTestRunId) {
+    const runDoc = await adminDb.collection("testRuns").doc(requestedTestRunId).get();
+    if (!runDoc.exists) {
+      return res.status(400).json({
+        success: false,
+        error: "Selected test run does not exist."
+      });
+    }
+    const run = runDoc.data();
+    if (run.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        error: "Selected test run is not active."
+      });
+    }
+    if (run.expiresAt && new Date(run.expiresAt.toDate?.() || run.expiresAt) < /* @__PURE__ */ new Date()) {
+      return res.status(400).json({
+        success: false,
+        error: "Selected test run has expired. Please select an active test run."
+      });
+    }
+    validatedTestRunId = run.id;
+  }
   try {
     let finalBookingRef = "";
     let finalTotalPrice = 0;
@@ -190702,6 +191649,7 @@ async function handleCreateWalkin(req, res) {
         breakfastSelections: {},
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
+        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId } : {},
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -193108,7 +194056,7 @@ var STAY_STATUSES = [
 function getAuthUser(req) {
   return req.user || {};
 }
-function getStaff(req) {
+function getStaff2(req) {
   return req.staff || {};
 }
 async function linkBookingsByEmail(email, uid, explicitBookingId) {
@@ -193300,7 +194248,7 @@ async function handleRedeemMemberPoints(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = getStaff(req);
+  const staff = getStaff2(req);
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
@@ -193405,7 +194353,7 @@ async function handleUndoMemberPointsRedemption(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = getStaff(req);
+  const staff = getStaff2(req);
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
@@ -193494,7 +194442,7 @@ async function handleSetMemberActive(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = getStaff(req);
+  const staff = getStaff2(req);
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
@@ -193697,7 +194645,7 @@ var updateStaffSchema = external_exports.object({
   role: staffRoleSchema,
   password: external_exports.string().min(8).max(128).optional().or(external_exports.literal(""))
 }).strict();
-function getStaff2(req) {
+function getStaff3(req) {
   return req.staff || {};
 }
 async function hasAnotherActiveAdmin(uidToDisable) {
@@ -193712,7 +194660,7 @@ async function handleCreateStaff(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = getStaff2(req);
+  const staff = getStaff3(req);
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can create staff accounts." });
   }
@@ -193780,7 +194728,7 @@ async function handleDisableStaff(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = getStaff2(req);
+  const staff = getStaff3(req);
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can disable staff accounts." });
   }
@@ -193862,7 +194810,7 @@ async function handleUpdateStaff(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const staff = getStaff2(req);
+  const staff = getStaff3(req);
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
   }
@@ -194767,340 +195715,6 @@ async function handleNotificationsPrune(req, res) {
   }
 }
 
-// server/handlers/test-runs.ts
-var import_node_crypto = __toESM(require("node:crypto"));
-function getStaff3(req) {
-  return req.staff || {};
-}
-function generateRunId() {
-  return import_node_crypto.default.randomBytes(16).toString("hex");
-}
-function hashToken(token2) {
-  return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
-}
-var createTestRunSchema = external_exports.object({
-  name: external_exports.string().trim().min(1).max(120),
-  environment: external_exports.enum(["staging", "production"]),
-  durationMinutes: external_exports.number().int().min(5).max(43200)
-}).strict();
-var closeTestRunSchema = external_exports.object({
-  runId: external_exports.string().trim().min(1).max(64)
-}).strict();
-var deleteTestRunSchema = external_exports.object({
-  runId: external_exports.string().trim().min(1).max(64)
-}).strict();
-async function collectManifest(runId) {
-  const affectedRooms = /* @__PURE__ */ new Set();
-  const affectedStockItems = /* @__PURE__ */ new Set();
-  const bookingsSnap = await adminDb.collection("bookings").where("testRunId", "==", runId).get();
-  const bookingIds = bookingsSnap.docs.map((d) => {
-    affectedRooms.add(d.data().roomNumber || "");
-    return d.id;
-  });
-  const storeSnap = await adminDb.collection("storeOrders").where("testRunId", "==", runId).get();
-  storeSnap.docs.forEach((d) => {
-    const itemIds = (d.data().items || []).map((i2) => i2.itemId);
-    itemIds.forEach((id) => {
-      if (id) affectedStockItems.add(id);
-    });
-  });
-  return {
-    bookings: bookingIds.length,
-    storeOrders: storeSnap.docs.length,
-    affectedRooms: [...affectedRooms].filter(Boolean),
-    affectedStockItems: [...affectedStockItems].filter(Boolean)
-  };
-}
-async function handleCreateTestRun(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff3(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can create test runs." });
-  }
-  const parsed = createTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid test run name, environment, and duration."
-    });
-  }
-  const { name: name2, environment, durationMinutes } = parsed.data;
-  try {
-    if (environment === "production") {
-      const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
-      if (!activeRuns.empty) {
-        return res.status(409).json({
-          success: false,
-          error: "There is already an active production test run. Close it before creating a new one."
-        });
-      }
-    }
-    const now = /* @__PURE__ */ new Date();
-    const runId = generateRunId();
-    const tokenBytes = import_node_crypto.default.randomBytes(24);
-    const token2 = tokenBytes.toString("base64url");
-    const run = {
-      id: runId,
-      name: name2,
-      environment,
-      createdBy: staff.email || "",
-      createdByUid: staff.uid || "",
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + durationMinutes * 6e4),
-      closedAt: null,
-      closedBy: null,
-      status: "active",
-      tokenHash: hashToken(token2)
-    };
-    await adminDb.collection("testRuns").doc(runId).set(run);
-    return res.status(200).json({
-      success: true,
-      data: {
-        id: runId,
-        name: name2,
-        environment,
-        token: token2,
-        expiresAt: run.expiresAt.toISOString(),
-        durationMinutes
-      }
-    });
-  } catch (error) {
-    console.error("Test run creation failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to create test run. Please try again."
-    });
-  }
-}
-async function handleCloseTestRun(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff3(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can close test runs." });
-  }
-  const parsed = closeTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid test run ID."
-    });
-  }
-  const { runId } = parsed.data;
-  try {
-    const runRef = adminDb.collection("testRuns").doc(runId);
-    const runDoc = await runRef.get();
-    if (!runDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Test run not found."
-      });
-    }
-    const runData = runDoc.data();
-    if (runData.status !== "active") {
-      return res.status(400).json({
-        success: false,
-        error: "This test run is not active and cannot be closed."
-      });
-    }
-    const manifest = await collectManifest(runId);
-    const now = /* @__PURE__ */ new Date();
-    await runRef.set({
-      closedAt: now,
-      closedBy: staff.email || "",
-      status: "closed",
-      manifest
-    }, { merge: true });
-    return res.status(200).json({
-      success: true,
-      data: { runId, closedAt: now.toISOString(), manifest }
-    });
-  } catch (error) {
-    console.error("Test run close failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to close test run. Please try again."
-    });
-  }
-}
-async function handleDeleteTestRun(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff3(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can delete test data." });
-  }
-  const parsed = deleteTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid test run ID."
-    });
-  }
-  const { runId } = parsed.data;
-  try {
-    const runRef = adminDb.collection("testRuns").doc(runId);
-    const runDoc = await runRef.get();
-    if (!runDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Test run not found."
-      });
-    }
-    const runData = runDoc.data();
-    if (runData.status !== "closed") {
-      return res.status(400).json({
-        success: false,
-        error: "Only closed test runs can be cleaned up. Close the run first."
-      });
-    }
-    await runRef.set({ status: "cleanup-in-progress" }, { merge: true });
-    let bookingCount = 0;
-    let storeOrderCount = 0;
-    let failedItems = [];
-    const batchSize = 20;
-    let lastDoc = null;
-    while (true) {
-      let q3 = adminDb.collection("bookings").where("testRunId", "==", runId).limit(batchSize);
-      if (lastDoc) q3 = q3.startAfter(lastDoc);
-      const snap = await q3.get();
-      if (snap.empty) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-      for (const doc of snap.docs) {
-        try {
-          const subcollections = ["payments", "incidentalCharges", "notifications", "audit"];
-          for (const sub of subcollections) {
-            const subSnap = await adminDb.collection("bookings").doc(doc.id).collection(sub).get();
-            const deletes = subSnap.docs.map((sd) => sd.ref.delete());
-            await Promise.all(deletes);
-          }
-          await doc.ref.delete();
-          bookingCount++;
-        } catch (err) {
-          failedItems.push(`booking/${doc.id}`);
-        }
-      }
-    }
-    lastDoc = null;
-    while (true) {
-      let q3 = adminDb.collection("storeOrders").where("testRunId", "==", runId).limit(batchSize);
-      if (lastDoc) q3 = q3.startAfter(lastDoc);
-      const snap = await q3.get();
-      if (snap.empty) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-      for (const doc of snap.docs) {
-        try {
-          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
-          await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
-          await doc.ref.delete();
-          storeOrderCount++;
-        } catch (err) {
-          failedItems.push(`storeOrder/${doc.id}`);
-        }
-      }
-    }
-    let notifQ = adminDb.collection("notifications").where("testRunId", "==", runId);
-    const notifSnap = await notifQ.get();
-    for (const doc of notifSnap.docs) {
-      try {
-        await doc.ref.delete();
-      } catch {
-        failedItems.push(`notification/${doc.id}`);
-      }
-    }
-    let intercomQ = adminDb.collection("intercoms").where("testRunId", "==", runId);
-    const intercomSnap = await intercomQ.get();
-    for (const doc of intercomSnap.docs) {
-      try {
-        const msgSnap = await adminDb.collection("intercoms").doc(doc.id).collection("messages").get();
-        await Promise.all(msgSnap.docs.map((md) => md.ref.delete()));
-        await doc.ref.delete();
-      } catch {
-        failedItems.push(`intercom/${doc.id}`);
-      }
-    }
-    const now = /* @__PURE__ */ new Date();
-    const auditResult = {
-      type: "test-run-cleanup",
-      runId,
-      bookingsDeleted: bookingCount,
-      storeOrdersDeleted: storeOrderCount,
-      failedItems,
-      completedAt: now,
-      completedBy: staff.email || ""
-    };
-    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
-    const affectedRooms = runData.manifest?.affectedRooms || [];
-    for (const roomNumber of affectedRooms) {
-      if (!roomNumber) continue;
-      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
-      for (const doc of roomsSnap.docs) {
-        await doc.ref.set({
-          status: "available",
-          housekeepingStatus: "clean"
-        }, { merge: true });
-      }
-    }
-    await runRef.set({
-      status: "cleaned",
-      cleanupCompletedAt: now,
-      cleanupResult: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount, failedItems: failedItems.length }
-    }, { merge: true });
-    return res.status(200).json({
-      success: true,
-      data: {
-        runId,
-        bookingsDeleted: bookingCount,
-        storeOrdersDeleted: storeOrderCount,
-        failedItems: failedItems.length,
-        roomsRestored: affectedRooms.length
-      }
-    });
-  } catch (error) {
-    console.error("Test run cleanup failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to clean up test data. Please try again."
-    });
-  }
-}
-async function handleListTestRuns(req, res) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff3(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can list test runs." });
-  }
-  try {
-    const snap = await adminDb.collection("testRuns").orderBy("createdAt", "desc").limit(50).get();
-    const runs = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        name: data.name,
-        environment: data.environment,
-        createdBy: data.createdBy,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-        expiresAt: data.expiresAt?.toDate?.()?.toISOString() || data.expiresAt,
-        closedAt: data.closedAt?.toDate?.()?.toISOString() || null,
-        closedBy: data.closedBy || null,
-        status: data.status,
-        manifest: data.manifest || null,
-        cleanupResult: data.cleanupResult || null
-      };
-    });
-    return res.status(200).json({ success: true, data: runs });
-  } catch (error) {
-    console.error("List test runs failed:", error);
-    return res.status(500).json({ success: false, error: "Unable to list test runs." });
-  }
-}
-
 // server/apiRouter.ts
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
@@ -195950,6 +196564,31 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleListTestRuns(req, res);
+  }
+  if (domain === "test-runs" && action === "staging-reset-preview" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can preview staging reset." });
+    }
+    req.staff = authResult;
+    return await handleStagingResetPreview(req, res);
+  }
+  if (domain === "test-runs" && action === "staging-reset-execute" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-reset:${ip}`, 2, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many reset requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can execute staging reset." });
+    }
+    req.staff = authResult;
+    return await handleStagingResetExecute(req, res);
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }

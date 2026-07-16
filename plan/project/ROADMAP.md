@@ -1285,6 +1285,8 @@ The refactor must retain all current drawer capabilities: booking status and cha
 - ⬜ **ETR-S14 — Destructive-job integration coverage.** Add emulator/integration tests for concurrent requests, duplicate execute, timeout/resume, stale lock, individual deletion failure, preview expiry/drift, room restoration, preservation rules, counter invariance, orphan detection, and success only after integrity pass.
 - ⬜ **ETR-S15 — Deployment and first-use gate.** Configure `STAGING_ALLOWLIST_PROJECT_IDS` only on the isolated guest/API Vercel Preview environment; perform an authenticated preview, controlled fixture reset, injected-failure/resume drill, and manual Settings QA. Reconfirm production preview/execute denial before marking the staging reset usable.
 
+> **Current execution gate:** Do not run the destructive staging reset until the updated hardening branch is deployed and the complete ETR-S15 controlled fixture reset and injected-failure/resume drill have passed. Code-level verification alone does not authorize staging use.
+
 #### Production-to-staging refresh and sanitization
 
 > **Owner requirement added July 16, 2026; revised the same day:** Admin needs a way to refresh staging from production and may need exact source values to reproduce a defect. The UI therefore includes a default-on sanitization checkbox. Turning it off does not create an ordinary refresh: it automatically activates the restricted diagnostic controls and automatic destruction defined below.

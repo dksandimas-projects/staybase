@@ -437,12 +437,21 @@ const stagingResetConfirmSchema = z.object({
   previewId: z.string().trim().min(1).max(64)
 }).strict();
 
-async function acquireResetLock(staff: any, currentProject: string): Promise<{ acquired: boolean; message?: string }> {
+interface ResetLockResult {
+  acquired: boolean;
+  message?: string;
+  resumed: boolean;
+  resumePhase: string;
+}
+
+async function acquireResetLock(staff: any, currentProject: string, previewId: string): Promise<ResetLockResult> {
   const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
   const now = new Date();
   try {
     let acquired = false;
     let message: string | undefined;
+    let resumed = false;
+    let resumePhase = "starting";
     await adminDb.runTransaction(async (tx) => {
       const lockDoc = await tx.get(lockRef);
       if (lockDoc.exists) {
@@ -452,20 +461,31 @@ async function acquireResetLock(staff: any, currentProject: string): Promise<{ a
           message = "A staging reset is already in progress. Please wait for it to complete or try again after 30 minutes.";
           return;
         }
+        if (data.previewId === previewId && data.status === "complete") {
+          message = "This staging reset job has already completed. Run a new preview for another reset.";
+          return;
+        }
+        if (data.previewId === previewId && (data.status === "failed" || data.status === "incomplete" || data.status === "running")) {
+          resumed = true;
+          resumePhase = data.phase || "starting";
+        }
       }
-      tx.set(lockRef, {
+      const lockData: Record<string, unknown> = {
         projectId: currentProject,
         startedAt: now,
         status: "running",
-        phase: "starting",
-        checkpoint: 0,
-        startedBy: staff.email || ""
-      });
+        previewId,
+        phase: resumed ? resumePhase : "starting",
+        startedBy: staff.email || "",
+        resumedAt: resumed ? now : null
+      };
+      if (!resumed) lockData.checkpoint = 0;
+      tx.set(lockRef, lockData, { merge: resumed });
       acquired = true;
     });
-    return { acquired, message };
+    return { acquired, message, resumed, resumePhase };
   } catch {
-    return { acquired: false, message: "Unable to acquire reset lock. Please try again." };
+    return { acquired: false, message: "Unable to acquire reset lock. Please try again.", resumed: false, resumePhase: "starting" };
   }
 }
 
@@ -475,10 +495,37 @@ async function releaseResetLock(lockRef: any, status: string, phase: string, che
   } catch { /* best-effort */ }
 }
 
+const PROTECTED_RESET_COLLECTIONS = [
+  "counters", "settings", "guests", "members", "storeItems", "vouchers", "corporateCodes"
+] as const;
+
+async function collectProtectedState(): Promise<{
+  collections: Record<string, { count: number; hash: string }>;
+  roomsCount: number;
+}> {
+  const [protectedSnapshots, roomsSnapshot] = await Promise.all([
+    Promise.all(PROTECTED_RESET_COLLECTIONS.map(async (name) => [name, await adminDb.collection(name).get()] as const)),
+    adminDb.collection("rooms").get()
+  ]);
+
+  const collections = Object.fromEntries(protectedSnapshots.map(([name, snapshot]) => {
+    const documents = snapshot.docs
+      .map((doc: any) => ({ id: doc.id, data: doc.data() }))
+      .sort((a: any, b: any) => a.id.localeCompare(b.id));
+    return [name, {
+      count: documents.length,
+      hash: crypto.createHash("sha256").update(JSON.stringify(documents)).digest("hex")
+    }];
+  }));
+
+  return { collections, roomsCount: roomsSnapshot.docs.length };
+}
+
 async function collectFullManifest(): Promise<{
   bookings: number; storeOrders: number; notifications: number; intercomStays: number;
   testRuns: number; calls: number; dailyCloses: number; corporateInquiries: number;
   roomBlocks: number; cleanupHistory: number; affectedRooms: string[]; affectedStockItems: string[];
+  protectedState: Awaited<ReturnType<typeof collectProtectedState>>;
 }> {
   const [bookingsSnap, storeSnap, notifSnap, intercomSnap, testRunSnap, callsSnap, dailyCloseSnap, corpInquirySnap, roomBlocksSnap, cleanupSnap] = await Promise.all([
     adminDb.collection("bookings").get(),
@@ -487,7 +534,7 @@ async function collectFullManifest(): Promise<{
     adminDb.collection("intercoms").get(),
     adminDb.collection("testRuns").get(),
     adminDb.collection("calls").get(),
-    adminDb.collection("dailyClose").get(),
+    adminDb.collection("dailyCloses").get(),
     adminDb.collection("corporateInquiries").get(),
     adminDb.collection("roomBlocks").get(),
     adminDb.collection("janitor").doc("cleanups").collection("history").get()
@@ -496,6 +543,7 @@ async function collectFullManifest(): Promise<{
   const affectedRooms = new Set<string>();
   bookingsSnap.docs.forEach(d => { const r = d.data().roomNumber; if (r) affectedRooms.add(r); });
   roomBlocksSnap.docs.forEach(d => { const r = d.data().roomNumber; if (r) affectedRooms.add(r); });
+  const protectedState = await collectProtectedState();
 
   return {
     bookings: bookingsSnap.docs.length,
@@ -509,7 +557,8 @@ async function collectFullManifest(): Promise<{
     roomBlocks: roomBlocksSnap.docs.length,
     cleanupHistory: cleanupSnap.docs.length,
     affectedRooms: [...affectedRooms].filter(Boolean),
-    affectedStockItems: []
+    affectedStockItems: [],
+    protectedState
   };
 }
 
@@ -602,6 +651,9 @@ export async function handleStagingResetExecute(req: any, res: any) {
     });
   }
 
+  let validatedPreview: any;
+  let resumeAllowed = false;
+
   // ETR-S10: validate preview
   try {
     const previewRef = adminDb.collection("janitor").doc("previews").collection("items").doc(previewId);
@@ -610,16 +662,23 @@ export async function handleStagingResetExecute(req: any, res: any) {
       return res.status(400).json({ success: false, error: "Preview not found. Please run a new preview." });
     }
     const preview = previewDoc.data()!;
+    validatedPreview = preview;
+    const existingLockDoc = await adminDb.collection("janitor").doc("staging-reset-lock").get();
+    if (existingLockDoc.exists) {
+      const existingLock = existingLockDoc.data()!;
+      resumeAllowed = existingLock.previewId === previewId
+        && ["running", "failed", "incomplete"].includes(existingLock.status);
+    }
     const createdAt = preview.createdAt?.toDate?.() || preview.createdAt;
-    if (createdAt && (Date.now() - new Date(createdAt).getTime()) > PREVIEW_TTL_MS) {
+    if (!resumeAllowed && createdAt && (Date.now() - new Date(createdAt).getTime()) > PREVIEW_TTL_MS) {
       return res.status(400).json({ success: false, error: "Preview has expired. Please run a new preview." });
     }
     if (preview.projectId !== currentProject) {
       return res.status(400).json({ success: false, error: "Preview was created for a different project." });
     }
     // Check for material drift
-    const currentManifest = await collectFullManifest();
-    if (hashManifest(currentManifest) !== preview.manifestHash) {
+    const currentManifest = resumeAllowed ? null : await collectFullManifest();
+    if (currentManifest && hashManifest(currentManifest) !== preview.manifestHash) {
       return res.status(409).json({
         success: false,
         error: "Staging data has changed since preview. Please run a new preview."
@@ -631,9 +690,10 @@ export async function handleStagingResetExecute(req: any, res: any) {
   }
 
   // ETR-S09: acquire atomic lock
-  const lock = await acquireResetLock(staff, currentProject);
+  const lock = await acquireResetLock(staff, currentProject, previewId);
   if (!lock.acquired) {
-    return res.status(lock.message?.includes("already in progress") ? 409 : 500).json({
+    const isConflict = lock.message?.includes("already in progress") || lock.message?.includes("already completed");
+    return res.status(isConflict ? 409 : 500).json({
       success: false,
       error: lock.message || "Unable to acquire reset lock."
     });
@@ -658,6 +718,7 @@ export async function handleStagingResetExecute(req: any, res: any) {
       const snap = await q.get();
       if (snap.empty) break;
       lastDoc = snap.docs[snap.docs.length - 1];
+      const failuresBeforePage = failedItems.length;
       for (const doc of snap.docs) {
         try {
           for (const sub of subcollections) {
@@ -668,91 +729,94 @@ export async function handleStagingResetExecute(req: any, res: any) {
           counter.value++;
         } catch { failedItems.push(`${collectionName}/${doc.id}`); }
       }
+      if (failedItems.length > failuresBeforePage) {
+        throw new Error(`Deletion failed in ${collectionName}; retry this reset job to resume.`);
+      }
     }
   }
 
   // ETR-S11: wrap entire execution in fail-closed semantics
   try {
-    manifestBefore = await collectFullManifest();
+    manifestBefore = validatedPreview.manifest;
 
-    // Phase: bookings
-    await lockRef.set({ phase: "bookings", checkpoint: 0 }, { merge: true });
-    const bCounter = { value: 0 };
-    await deleteCollectionPage("bookings", ["payments", "incidentalCharges", "notifications", "audit"], bCounter);
-    bookingCount = bCounter.value;
+    const phaseOrder = [
+      "bookings", "storeOrders", "notifications", "intercoms", "testRuns",
+      "calls", "dailyCloses", "corporateInquiries", "roomBlocks",
+      "cleanupHistory", "rooms", "integrity"
+    ];
+    const storedPhaseIndex = lock.resumed ? phaseOrder.indexOf(lock.resumePhase) : 0;
+    const resumePhaseIndex = storedPhaseIndex >= 0 ? storedPhaseIndex : 0;
+    const shouldRunPhase = (phase: string) => phaseOrder.indexOf(phase) >= resumePhaseIndex;
 
-    // Phase: store orders
-    await lockRef.set({ phase: "storeOrders", checkpoint: bookingCount }, { merge: true });
-    const sCounter = { value: 0 };
-    await deleteCollectionPage("storeOrders", ["tenders"], sCounter);
-    storeOrderCount = sCounter.value;
+    const runDeletionPhase = async (
+      phase: string,
+      collectionName: string,
+      subcollections: string[],
+      expectedCount: number
+    ) => {
+      if (!shouldRunPhase(phase)) return expectedCount;
+      await lockRef.set({ phase, checkpoint: 0 }, { merge: true });
+      const counter = { value: 0 };
+      await deleteCollectionPage(collectionName, subcollections, counter);
+      await lockRef.set({ checkpoint: counter.value }, { merge: true });
+      return lock.resumed ? expectedCount : counter.value;
+    };
 
-    // Phase: notifications
-    await lockRef.set({ phase: "notifications", checkpoint: storeOrderCount }, { merge: true });
-    const nCounter = { value: 0 };
-    await deleteCollectionPage("notifications", [], nCounter);
-    notifCount = nCounter.value;
-
-    // Phase: intercom stays
-    await lockRef.set({ phase: "intercoms", checkpoint: notifCount }, { merge: true });
-    const iCounter = { value: 0 };
-    await deleteCollectionPage("intercoms", ["messages"], iCounter);
-    intercomCount = iCounter.value;
-
-    // Phase: test runs
-    await lockRef.set({ phase: "testRuns", checkpoint: intercomCount }, { merge: true });
-    const tCounter = { value: 0 };
-    await deleteCollectionPage("testRuns", [], tCounter);
-    testRunCount = tCounter.value;
-
-    // ETR-S12: additional collections
-    // Calls + ICE candidates
-    await lockRef.set({ phase: "calls", checkpoint: testRunCount }, { merge: true });
-    const cCounter = { value: 0 };
-    await deleteCollectionPage("calls", [], cCounter);
-    callCount = cCounter.value;
-
-    // Daily Close records
-    await lockRef.set({ phase: "dailyClose", checkpoint: callCount }, { merge: true });
-    const dCounter = { value: 0 };
-    await deleteCollectionPage("dailyClose", [], dCounter);
-    dailyCloseCount = dCounter.value;
-
-    // Corporate inquiries
-    await lockRef.set({ phase: "corporateInquiries", checkpoint: dailyCloseCount }, { merge: true });
-    const ciCounter = { value: 0 };
-    await deleteCollectionPage("corporateInquiries", [], ciCounter);
-    corpInquiryCount = ciCounter.value;
-
-    // Room blocks
-    await lockRef.set({ phase: "roomBlocks", checkpoint: corpInquiryCount }, { merge: true });
-    const rbCounter = { value: 0 };
-    await deleteCollectionPage("roomBlocks", [], rbCounter);
-    roomBlockCount = rbCounter.value;
+    bookingCount = await runDeletionPhase(
+      "bookings", "bookings", ["payments", "charges", "incidentalCharges", "notifications", "audit"], manifestBefore.bookings
+    );
+    storeOrderCount = await runDeletionPhase(
+      "storeOrders", "storeOrders", ["payments", "tenders"], manifestBefore.storeOrders
+    );
+    notifCount = await runDeletionPhase("notifications", "notifications", [], manifestBefore.notifications);
+    intercomCount = await runDeletionPhase("intercoms", "intercoms", ["messages"], manifestBefore.intercomStays);
+    testRunCount = await runDeletionPhase("testRuns", "testRuns", [], manifestBefore.testRuns);
+    callCount = await runDeletionPhase("calls", "calls", ["iceCandidates"], manifestBefore.calls);
+    dailyCloseCount = await runDeletionPhase("dailyCloses", "dailyCloses", [], manifestBefore.dailyCloses);
+    corpInquiryCount = await runDeletionPhase(
+      "corporateInquiries", "corporateInquiries", [], manifestBefore.corporateInquiries
+    );
+    roomBlockCount = await runDeletionPhase("roomBlocks", "roomBlocks", [], manifestBefore.roomBlocks);
 
     // Cleanup history
-    await lockRef.set({ phase: "cleanupHistory", checkpoint: roomBlockCount }, { merge: true });
-    const clCounter = { value: 0 };
-    const cleanupSnap = await adminDb.collection("janitor").doc("cleanups").collection("history").get();
-    for (const doc of cleanupSnap.docs) {
-      try { await doc.ref.delete(); clCounter.value++; }
-      catch { failedItems.push(`cleanupHistory/${doc.id}`); }
+    if (shouldRunPhase("cleanupHistory")) {
+      await lockRef.set({ phase: "cleanupHistory", checkpoint: 0 }, { merge: true });
+      const clCounter = { value: 0 };
+      const cleanupSnap = await adminDb.collection("janitor").doc("cleanups").collection("history").get();
+      for (const doc of cleanupSnap.docs) {
+        try { await doc.ref.delete(); clCounter.value++; }
+        catch { failedItems.push(`cleanupHistory/${doc.id}`); }
+      }
+      cleanupCount = lock.resumed ? manifestBefore.cleanupHistory : clCounter.value;
+      await lockRef.set({ checkpoint: cleanupCount }, { merge: true });
+    } else {
+      cleanupCount = manifestBefore.cleanupHistory;
     }
-    cleanupCount = clCounter.value;
+    if (failedItems.length > 0) {
+      throw new Error("Cleanup-history deletion was incomplete; retry this reset job to resume.");
+    }
 
     // Restore rooms to baseline
-    await lockRef.set({ phase: "rooms", checkpoint: cleanupCount }, { merge: true });
-    for (const roomNumber of manifestBefore.affectedRooms) {
-      if (!roomNumber) continue;
-      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
-      if (roomsSnap.empty) {
-        failedItems.push(`room/${roomNumber} (not found)`);
-        continue;
+    if (shouldRunPhase("rooms")) {
+      await lockRef.set({ phase: "rooms", checkpoint: 0 }, { merge: true });
+      for (const roomNumber of manifestBefore.affectedRooms) {
+        if (!roomNumber) continue;
+        const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+        if (roomsSnap.empty) {
+          failedItems.push(`room/${roomNumber} (not found)`);
+          continue;
+        }
+        for (const doc of roomsSnap.docs) {
+          await doc.ref.set({ status: "available", housekeepingStatus: "clean" }, { merge: true });
+          roomRestoreCount++;
+        }
       }
-      for (const doc of roomsSnap.docs) {
-        await doc.ref.set({ status: "available", housekeepingStatus: "clean" }, { merge: true });
-        roomRestoreCount++;
-      }
+      await lockRef.set({ checkpoint: roomRestoreCount }, { merge: true });
+    } else {
+      roomRestoreCount = manifestBefore.affectedRooms.length;
+    }
+    if (failedItems.length > 0) {
+      throw new Error("Room baseline restoration was incomplete; retry this reset job to resume.");
     }
 
     // ETR-S13: post-reset integrity scan
@@ -769,9 +833,23 @@ export async function handleStagingResetExecute(req: any, res: any) {
       verifyCollection("intercoms"),
       verifyCollection("testRuns"),
       verifyCollection("calls"),
-      verifyCollection("dailyClose"),
+      verifyCollection("dailyCloses"),
       verifyCollection("corporateInquiries"),
       verifyCollection("roomBlocks")
+    ]);
+    const verifyCollectionGroup = async (name: string) => {
+      const snap = await adminDb.collectionGroup(name).limit(1).get();
+      if (!snap.empty) integrityErrors.push(`orphaned ${name} subcollection data remains`);
+    };
+    await Promise.all([
+      verifyCollectionGroup("payments"),
+      verifyCollectionGroup("charges"),
+      verifyCollectionGroup("incidentalCharges"),
+      verifyCollectionGroup("notifications"),
+      verifyCollectionGroup("audit"),
+      verifyCollectionGroup("tenders"),
+      verifyCollectionGroup("messages"),
+      verifyCollectionGroup("iceCandidates")
     ]);
     // Verify room baselines
     for (const roomNumber of manifestBefore.affectedRooms) {
@@ -784,8 +862,12 @@ export async function handleStagingResetExecute(req: any, res: any) {
         }
       }
     }
+    const protectedStateAfter = await collectProtectedState();
+    if (JSON.stringify(protectedStateAfter) !== JSON.stringify(manifestBefore.protectedState)) {
+      integrityErrors.push("protected settings, identity, catalog, counters, or room count changed during reset");
+    }
 
-    if (integrityErrors.length > 0) {
+    if (integrityErrors.length > 0 || failedItems.length > 0) {
       integrityFailed = true;
       failedItems.push(...integrityErrors.map(e => `integrity: ${e}`));
     }
@@ -822,12 +904,15 @@ export async function handleStagingResetExecute(req: any, res: any) {
       completedAt: new Date(),
       completedBy: staff.email || "",
       projectId: currentProject,
+      previewId,
+      resumed: lock.resumed,
+      protectedStateVerified: true,
       terminalStatus: integrityFailed ? "incomplete" : "complete"
     };
     await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
 
     if (integrityFailed) {
-      await releaseResetLock(lockRef, "failed", "integrity", 0);
+      await releaseResetLock(lockRef, "incomplete", "integrity", 0);
       return res.status(500).json({
         success: false,
         error: "Reset completed with integrity errors.",
@@ -866,10 +951,27 @@ export async function handleStagingResetExecute(req: any, res: any) {
     });
   } catch (error: any) {
     console.error("Staging reset execution failed:", error);
-    await releaseResetLock(lockRef, "failed", "error", 0);
+    try {
+      await lockRef.set({
+        status: "failed",
+        failedAt: new Date(),
+        failureMessage: error?.message || "Unknown reset failure"
+      }, { merge: true });
+      await adminDb.collection("janitor").doc("cleanups").collection("history").add({
+        type: "staging-reset",
+        terminalStatus: "failed",
+        previewId,
+        projectId: currentProject,
+        failedItems,
+        startedAt,
+        failedAt: new Date(),
+        completedBy: staff.email || "",
+        failureMessage: error?.message || "Unknown reset failure"
+      });
+    } catch { /* best-effort failure audit; lock state remains the primary resume record */ }
     return res.status(500).json({
       success: false,
-      error: "Unable to execute staging reset. The reset lock has been released and you can retry after a moment."
+      error: "Unable to execute staging reset. The job remains resumable; retry with the same preview after resolving the reported failure."
     });
   }
 }

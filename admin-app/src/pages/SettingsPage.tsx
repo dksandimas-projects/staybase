@@ -1724,7 +1724,8 @@ export function SettingsPage() {
         },
         body: JSON.stringify({
           confirmation: stagingResetConfirmText,
-          projectName: stagingResetProjectName
+          projectName: stagingResetProjectName,
+          previewId: stagingResetPreview?.previewId
         })
       });
       const data = await res.json();
@@ -5990,6 +5991,16 @@ export function SettingsPage() {
                   <span className="font-bold">{stagingResetPreview.manifest.intercomStays}</span>
                   <span>Test runs:</span>
                   <span className="font-bold">{stagingResetPreview.manifest.testRuns}</span>
+                  <span>Call sessions:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.calls}</span>
+                  <span>Daily Close records:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.dailyCloses}</span>
+                  <span>Corporate inquiries:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.corporateInquiries}</span>
+                  <span>Room blocks:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.roomBlocks}</span>
+                  <span>Cleanup history:</span>
+                  <span className="font-bold">{stagingResetPreview.manifest.cleanupHistory}</span>
                   <span>Affected rooms:</span>
                   <span className="font-bold">{stagingResetPreview.manifest.affectedRooms.length}</span>
                 </div>
