@@ -943,6 +943,45 @@ export function BookingsPage() {
     return 5;
   };
 
+  // Folio helpers must be initialized before the filteredRows useMemo below.
+  // Advanced payment-state filters calculate each booking's live folio during
+  // render, so leaving these const declarations below that memo triggers the
+  // temporal dead zone in production builds.
+  const getBookingPaymentsTotal = (booking: Booking) => {
+    if (selectedBooking && selectedBooking.id === booking.id) {
+      return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
+    }
+    return (booking.onsitePayments || []).reduce((sum, payment) => sum + payment.amount, 0);
+  };
+
+  const getBookingStoreCharges = (booking: Booking) => {
+    return storeOrders.filter(
+      (order) =>
+        order.bookingId === booking.id &&
+        order.paymentMethod === "add-to-bill" &&
+        order.status === "delivered" &&
+        order.isBilled
+    );
+  };
+
+  const getBookingFolio = (booking: Booking) => {
+    const storeCharges = getBookingStoreCharges(booking);
+    const storeTotal = storeCharges.reduce((sum, order) => sum + order.totalAmount, 0);
+    const paymentsTotal = getBookingPaymentsTotal(booking);
+    const charges = selectedBooking?.id === booking.id ? selectedBookingCharges : [];
+    const chargesTotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
+    const grandTotal = booking.totalPrice + storeTotal + chargesTotal;
+    return {
+      storeCharges,
+      storeTotal,
+      charges,
+      chargesTotal,
+      paymentsTotal,
+      grandTotal,
+      balance: grandTotal - paymentsTotal
+    };
+  };
+
   // FSO-08/09: Advanced filter predicates
   const matchesBookingAdvanced = (booking: Booking): boolean => {
     const folio = getBookingFolio(booking);
@@ -1984,41 +2023,6 @@ export function BookingsPage() {
       pdfWindow?.close();
       toast.error("Receipt PDF failed", error instanceof Error ? error.message : "Please try again.");
     }
-  };
-
-  const getBookingPaymentsTotal = (booking: Booking) => {
-    if (selectedBooking && selectedBooking.id === booking.id) {
-      return selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
-    }
-    return (booking.onsitePayments || []).reduce((sum, payment) => sum + payment.amount, 0);
-  };
-
-  const getBookingStoreCharges = (booking: Booking) => {
-    return storeOrders.filter(
-      (order) =>
-        order.bookingId === booking.id &&
-        order.paymentMethod === "add-to-bill" &&
-        order.status === "delivered" &&
-        order.isBilled
-    );
-  };
-
-  const getBookingFolio = (booking: Booking) => {
-    const storeCharges = getBookingStoreCharges(booking);
-    const storeTotal = storeCharges.reduce((sum, order) => sum + order.totalAmount, 0);
-    const paymentsTotal = getBookingPaymentsTotal(booking);
-    const charges = selectedBooking?.id === booking.id ? selectedBookingCharges : [];
-    const chargesTotal = charges.reduce((sum, charge) => sum + charge.amount, 0);
-    const grandTotal = booking.totalPrice + storeTotal + chargesTotal;
-    return {
-      storeCharges,
-      storeTotal,
-      charges,
-      chargesTotal,
-      paymentsTotal,
-      grandTotal,
-      balance: grandTotal - paymentsTotal
-    };
   };
 
   const selectedBookingCheckInReadiness = selectedBooking
