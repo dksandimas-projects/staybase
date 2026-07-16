@@ -911,7 +911,7 @@ export async function handleStagingResetExecute(req: any, res: any) {
       cleanupHistoryDeleted: cleanupCount,
       roomsRestored: roomRestoreCount,
       failedItems,
-      integrityErrors: integrityErrors.length > 0 ? integrityErrors : undefined,
+      integrityErrors: integrityErrors.length > 0 ? integrityErrors : [],
       manifestBefore: {
         bookings: manifestBefore.bookings,
         storeOrders: manifestBefore.storeOrders,
