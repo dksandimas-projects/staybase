@@ -259,6 +259,13 @@ These are documented here for awareness. Define before starting Phase 2:
 - [x] Disable member — member cannot sign in
 - [x] `/account/*` routes redirect to `/signin` when not authenticated
 
+## Known Issues (Audit 2026-07-18)
+
+Findings from the Spark Rewards feature audit — full report in `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`.
+
+- **HIGH — Email-based booking match trusts unverified email claims.** Member-scoped booking access matches on the Firebase ID token's `email` claim with no `email_verified` check, in three places: registration booking-linkage (`linkBookingsByEmail`), `GET /api/members/stays` (`handleListMemberStays`), and `POST /api/email/early-checkin-request` (`findBooking` member email branch). Firebase email/password signup lets a user claim an arbitrary unverified email, so an attacker registering with a victim's email (victims who booked anonymously and never created an account) can link the victim's bookings, read them via `/api/members/stays` — whose guest-safe projection leaks `bookingRef` **and** `lookupToken`, the public lookup/cancel credential, enabling **cancellation of a stranger's booking** — and fire early check-in writes against them. Fix: require `email_verified === true` before using the `email` claim for any booking link/match; send a verification email on email/password signup. Tracked in `plan/project/ROADMAP.md`.
+- **LOW — My Stays page omits early check-in status.** Spec (this file, §Guest visibility) lists both My Stays and My Rewards as surfaces; `GET /api/members/stays` returns the `earlyCheckIn` map, My Rewards renders it, but `StaysPage.tsx` does not. Either render it on My Stays or amend the spec to name My Rewards as the sole surface.
+
 ## References
 
 - Guest auth vs admin auth: `plan/features/AUTH-ROLES.md`

@@ -226,6 +226,17 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ---
 
+## Spark Rewards Feature Audit (2026-07-18) — open findings
+
+Full report: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`. Sections 1–3 audited; 4–5 pending. CRITICAL/HIGH items only listed here (MED/LOW live in the report).
+
+**Section 3 — Early Check-In / cross-cutting (§1 registration + stays):**
+- ⬜ **HIGH-1 — Email-based booking match trusts unverified `email` token claims.** `authenticateUser` never surfaces `email_verified`, and `linkBookingsByEmail` (registration), `handleListMemberStays`, and `findBooking` (early check-in) all grant access on `guestEmail == token.email`. An attacker registering email/password with a stranger's (unverified) email can link, read (stays projection leaks `bookingRef` + `lookupToken` → public cancel), and act on that stranger's anonymous bookings. Fix: require `email_verified === true` before any email-based booking match; verify email on email/password signup. See `plan/docs/GOTCHAS.md §Auth & Security` and `plan/features/SPARK-REWARDS.md §Known Issues (Audit 2026-07-18)`.
+
+_No CRITICAL/HIGH from Sections 1–2 (highest was MED-1: manual points adjustment is a client-side write; see report + `GOTCHAS.md §Security & PII`)._
+
+---
+
 ## References
 
 - **Archive (historical, non-canonical):** `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` — full pre-compaction roadmap: Phases 0–9 checklists, Phase 11.5/11.6 batches 1–20, Wave 1–4 decision triage, Phase 11.7 implementation record, PR 1/PR 3 implementation detail, all closed audit-fix lists (FIN, FR, FL, PF, QA, NC, AUD, SA, live bugs)
