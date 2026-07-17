@@ -655,28 +655,29 @@ export function IntercomPage() {
       return;
     }
 
+    // G-04 (E2E audit 2026-07-17): guest messages are now routed
+    // through the rate-limited API endpoint instead of direct
+    // Firestore writes. Firestore rules block guest creates.
     try {
-      await setDoc(doc(db, "intercoms", roomNumber), {
-        roomId: roomNumber,
-        roomNumber,
-        guestName,
-        currentStayId,
-        resolved: false,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-
-      await addDoc(collection(db, "intercoms", roomNumber, "messages"), {
-        text,
-        sender: "guest",
-        guestName,
-        timestamp: serverTimestamp(),
-        isRead: false,
-        isQuickRequest: !!options?.isQuickRequest,
-        isStoreOrder: !!options?.isStoreOrder,
-        orderRef: options?.orderRef || "",
-        isEarlyCheckInRequest: !!options?.isEarlyCheckInRequest,
-        currentStayId
+      const response = await fetch("/api/intercom/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomNumber,
+          guestName,
+          currentStayId,
+          text,
+          isQuickRequest: !!options?.isQuickRequest,
+          isStoreOrder: !!options?.isStoreOrder,
+          orderRef: options?.orderRef || "",
+          isEarlyCheckInRequest: !!options?.isEarlyCheckInRequest,
+          isCancelledOrder: !!options?.isCancelledOrder
+        })
       });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Message was not sent.");
+      }
     } catch (error) {
       console.error("Failed to send intercom message:", error);
       setMessageError("Your message was not sent. Please try again or call the front desk.");

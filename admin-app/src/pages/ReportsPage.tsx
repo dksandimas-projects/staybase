@@ -1012,7 +1012,7 @@ export function ReportsPage() {
     const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
     triggerDownload(
       new Blob([csv], { type: "text/csv;charset=utf-8;" }),
-      `sparkinn_collections_${periodStartKey}_to_${periodEndKey}.csv`
+      `${config.hotelId}_collections_${periodStartKey}_to_${periodEndKey}.csv`
     );
   };
 
@@ -1025,7 +1025,7 @@ export function ReportsPage() {
       row.billed, row.collected, row.outstanding, row.uncollectedAddToBill
     ]);
     const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
-    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `sparkinn_receivables_${new Date().toISOString().slice(0, 10)}.csv`);
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `${config.hotelId}_receivables_${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
   // ── CSV Export (Performance-style ledger) ──
@@ -1041,7 +1041,7 @@ export function ReportsPage() {
       csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${b.paymentReferenceNumber || ""}"\n`;
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    triggerDownload(blob, `sparkinn_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
+    triggerDownload(blob, `${config.hotelId}_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
   };
 
   const handlePrintReport = () => {
@@ -1095,7 +1095,7 @@ export function ReportsPage() {
         heightLeft -= pageHeight;
       }
 
-      pdf.save(`sparkinn_${activeTab}_report_${periodStartKey}_to_${periodEndKey}.pdf`);
+      pdf.save(`${config.hotelId}_${activeTab}_report_${periodStartKey}_to_${periodEndKey}.pdf`);
       toast.success("PDF downloaded", "Your report PDF has been downloaded successfully.");
     } catch (err) {
       console.error(err);
@@ -1292,7 +1292,7 @@ export function ReportsPage() {
 
       const wb_out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const blob = new Blob([wb_out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      triggerDownload(blob, `spark-inn-full-backup-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      triggerDownload(blob, `${config.hotelId}-full-backup-${new Date().toISOString().slice(0, 10)}.xlsx`);
       toast.success("Backup downloaded", "Full hotel backup export is ready.");
       setFullBackupConfirmOpen(false);
     } catch (error) {
@@ -1344,7 +1344,7 @@ export function ReportsPage() {
       ["Total Store Orders (delivered)", deliveredStoreOrders.length],
       ["Total Transactions", totalTransactions],
       [],
-      ["Discounts & Adjustments", "Value (₱)"],
+      ["Discounts & Adjustments", `Value (${config.currencySymbol})`],
       ["Gross Bookings (Room + Breakfast)", discountsSummary.grossRoomAndBreakfast],
       ["Senior Citizen & PWD Deductions", discountsSummary.seniorPwdDiscounts],
       ["Promo Voucher Deductions", discountsSummary.voucherDiscounts],
@@ -1356,16 +1356,17 @@ export function ReportsPage() {
       ["Total Outstanding Points", loyaltyLiability.totalPoints],
       ["Points Redemption Liability", loyaltyLiability.liability],
       [],
-      ["Payment Method", "Count", "Total (₱)"],
+      ["Payment Method", "Count", `Total (${config.currencySymbol})`],
       ...combinedPaymentMethods.map(m => [m.name, m.count, m.total])
     ];
 
+    const currSymbol = config.currencySymbol;
     const bookingsHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Check-Out", "Nights",
       "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
-      "Discount Type", "Discount %", "Senior/PWD Discount (₱)", "Voucher Code", "Voucher Discount (₱)",
-      "Member Discount (₱)", "Points Redeemed Value (₱)", "Gross Subtotal (₱)", "Net Total Price (₱)",
-      "Total Collected (₱)", "Outstanding Balance (₱)", "Payment Method", "Payment Reference Number", "Source", "Status"
+      "Discount Type", "Discount %", `Senior/PWD Discount (${currSymbol})`, "Voucher Code", `Voucher Discount (${currSymbol})`,
+      `Member Discount (${currSymbol})`, `Points Redeemed Value (${currSymbol})`, `Gross Subtotal (${currSymbol})`, `Net Total Price (${currSymbol})`,
+      `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference Number", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
@@ -1483,7 +1484,7 @@ export function ReportsPage() {
       "Paid By": invoice.paidBy || ""
     }))), "Corporate Invoices");
 
-    XLSX.writeFile(wb, `spark-inn-sales-${periodStartKey}.xlsx`);
+    XLSX.writeFile(wb, `${config.hotelId}-sales-${periodStartKey}.xlsx`);
   };
 
   const totalBookingsInRange = rangeBookings.length;

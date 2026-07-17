@@ -23,7 +23,7 @@ describe("SA-01 performance report PDF export must use jsPDF", () => {
 
   it("draws captured image and saves PDF with dynamic file naming", () => {
     expect(reports).toMatch(/pdf\.addImage\(imgData, "PNG",/);
-    expect(reports).toMatch(/pdf\.save\(`sparkinn_\$\{activeTab\}_report_/);
+    expect(reports).toMatch(/pdf\.save\(`\$\{config\.hotelId\}_\$\{activeTab\}_report_\$\{periodStartKey\}_to_\$\{periodEndKey\}/);
   });
 
   it("renders Export PDF button for performance and sales reports in header", () => {

@@ -621,7 +621,13 @@ function isStaffRole(role: unknown): role is StaffRole {
   return role === "admin" || role === "front-desk";
 }
 
-export function AdminProvider({ children }: { children: ReactNode }) {
+// FD-01 (E2E audit 2026-07-17): export the idle timeout constant
+// so tests can reference it. AdminProvider accepts an optional
+// idleTimeoutMs prop so the duration is injectable for testing
+// without waiting 8 hours.
+export const DEFAULT_ADMIN_IDLE_TIMEOUT_MS = ADMIN_IDLE_TIMEOUT_MS;
+
+export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode; idleTimeoutMs?: number }) {
   // Auth State
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AdminContextType["currentUser"]>(null);
@@ -672,7 +678,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         void firebaseSignOut(auth).finally(() => {
           setCurrentUser(null);
         });
-      }, ADMIN_IDLE_TIMEOUT_MS);
+      }, idleTimeoutMs ?? ADMIN_IDLE_TIMEOUT_MS);
     };
 
     const events = ["click", "keydown", "mousemove", "scroll", "touchstart", "visibilitychange"];
@@ -685,7 +691,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
       events.forEach((eventName) => window.removeEventListener(eventName, resetIdleTimer));
     };
-  }, [currentUser]);
+  }, [currentUser, idleTimeoutMs]);
 
   const signIn = async (email: string, password: string) => {
     setAuthLoading(true);
@@ -1935,7 +1941,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             email: data.email || "",
             phone: data.phone || "",
             numRooms: data.numRooms || 0,
-            preferredDates: data.preferredDates || { from: "", to: "" },
+            // C-03 (E2E audit 2026-07-17): normalize legacy string
+            // records and nulls to structured { from, to } shape.
+            preferredDates: !data.preferredDates
+              ? { from: "", to: "" }
+              : typeof data.preferredDates === "string"
+                ? (() => {
+                    const parts = data.preferredDates.split(" to ");
+                    return { from: parts[0] || data.preferredDates, to: parts[1] || "" };
+                  })()
+                : data.preferredDates,
             specialRequirements: data.specialRequirements || "",
             status: data.status || "new",
             handler: data.handler || "",

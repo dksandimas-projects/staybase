@@ -279,7 +279,7 @@ export function CorporateInquiriesPage() {
       <p className="text-base font-bold text-gray-900">{row.companyName}</p>
       <p className="text-xs text-gray-600">{row.contactPerson}</p>
       <p className="text-[10px] text-gray-400">
-        Submitted {new Date(row.createdAt).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}
+        Submitted {new Date(row.createdAt).toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" })}
       </p>
     </div>
   );

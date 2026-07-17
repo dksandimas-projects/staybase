@@ -1,8 +1,27 @@
+import { z } from "zod";
 import { adminDb } from "../lib/firebase-admin";
 
 const MAX_ROOM_NUMBER_LENGTH = 12;
 const MAX_LAST_NAME_LENGTH = 80;
 const MAX_BOOKING_ID_LENGTH = 128;
+
+// G-04 (E2E audit 2026-07-17): strict-Zod validated guest intercom
+// message submission. Staff replies bypass this endpoint and are
+// written directly via Firestore rules. We do not expose booking
+// PII through this route — only roomNumber, guestName, and
+// currentStayId are accepted.
+const guestMessageSchema = z.object({
+  roomNumber: z.string().trim().min(1).max(MAX_ROOM_NUMBER_LENGTH),
+  guestName: z.string().trim().min(1).max(120),
+  currentStayId: z.string().trim().min(1).max(128),
+  text: z.string().trim().min(1).max(1000),
+  isQuickRequest: z.boolean().optional().default(false),
+  isStoreOrder: z.boolean().optional().default(false),
+  orderRef: z.string().trim().max(80).optional().default(""),
+  isEarlyCheckInRequest: z.boolean().optional().default(false),
+  isCancelledOrder: z.boolean().optional().default(false)
+}).strict();
+
 
 interface VerifyGuestBody {
   roomNumber?: string;
@@ -48,6 +67,86 @@ async function getCurrentStay(roomNumber: string) {
     .get();
 
   return snapshot.empty ? null : snapshot.docs[0];
+}
+
+// Simple in-memory rate-limit store for guest messages (not exported;
+// the apiRouter has its own but this handler routes directly).
+const guestMessageRateLimit = new Map<string, { count: number; resetTime: number }>();
+
+function isGuestMessageRateLimited(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  const record = guestMessageRateLimit.get(key);
+  if (!record || now > record.resetTime) {
+    guestMessageRateLimit.set(key, { count: 1, resetTime: now + windowMs });
+    return false;
+  }
+  record.count++;
+  return record.count > limit;
+}
+
+// G-04 (E2E audit 2026-07-17): guest intercom messages are routed
+// through this server-side endpoint instead of direct Firestore
+// writes. Enforces ~30 messages per room per 10 minutes, with an
+// IP/room composite key. Does not expose booking PII outside the
+// roomNumber/guestName/currentStayId already verified client-side.
+export async function handleSendGuestMessage(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const parsed = guestMessageSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check your message and try again."
+    });
+  }
+
+  const { roomNumber, guestName, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
+
+  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
+
+  // Rate limit: 30 messages per room per 10 minutes, keyed by
+  // IP + room number to prevent a single IP flooding all rooms.
+  if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1000)) {
+    return res.status(429).json({
+      success: false,
+      error: "Too many messages. Please wait a few minutes or call the front desk."
+    });
+  }
+
+  try {
+    await adminDb.collection("intercoms").doc(roomNumber).set({
+      roomId: roomNumber,
+      roomNumber,
+      guestName,
+      currentStayId,
+      resolved: false,
+      updatedAt: new Date()
+    }, { merge: true });
+
+    await adminDb.collection("intercoms").doc(roomNumber).collection("messages").add({
+      text,
+      sender: "guest",
+      guestName,
+      timestamp: new Date(),
+      isRead: false,
+      isQuickRequest,
+      isStoreOrder,
+      orderRef: orderRef || "",
+      isEarlyCheckInRequest,
+      currentStayId
+    });
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Failed to send intercom message:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Your message was not sent. Please try again or call the front desk."
+    });
+  }
 }
 
 export async function handleVerifyIntercomGuest(req: any, res: any) {

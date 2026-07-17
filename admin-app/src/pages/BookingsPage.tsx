@@ -1379,7 +1379,7 @@ export function BookingsPage() {
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
-    const generatedAt = new Date().toLocaleString("en-PH", {
+    const generatedAt = new Date().toLocaleString(config.locale, {
       timeZone: config.timezone || "Asia/Manila",
       dateStyle: "medium",
       timeStyle: "short"
@@ -1672,7 +1672,7 @@ export function BookingsPage() {
       const labelColX = 20;
       let y = 15;
 
-      const generatedAt = new Date().toLocaleString("en-PH", {
+      const generatedAt = new Date().toLocaleString(config.locale, {
         timeZone: config.timezone || "Asia/Manila",
         dateStyle: "medium",
         timeStyle: "short"
@@ -1699,7 +1699,7 @@ export function BookingsPage() {
       const amountX = marginR - 5; // Exactly X: 190, matching the Stay card right alignment
 
       const formatAmount = (value: number) =>
-        `PHP ${Math.round(value || 0).toLocaleString("en-PH")}`;
+        `${config.currencySymbol}${Math.round(value || 0).toLocaleString(config.locale)}`;
 
       const formatPaymentMethod = (method?: string) =>
         method
@@ -1932,7 +1932,7 @@ export function BookingsPage() {
           pdf.setFontSize(9);
           pdf.setTextColor(50, 50, 50);
           const recordedDate = pay.recordedAt
-            ? new Date(pay.recordedAt).toLocaleDateString("en-PH", {
+            ? new Date(pay.recordedAt).toLocaleDateString(config.locale, {
                 timeZone: config.timezone || "Asia/Manila",
                 year: "numeric",
                 month: "short",
@@ -3809,7 +3809,7 @@ export function BookingsPage() {
                       </div>
                       <div>
                         <p className="text-[10px] text-gray-500 uppercase font-bold">Submitted</p>
-                        <p className="font-semibold text-gray-900">{eci.requestedAt ? new Date(eci.requestedAt).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" }) : "—"}</p>
+                        <p className="font-semibold text-gray-900">{eci.requestedAt ? new Date(eci.requestedAt).toLocaleDateString(config.locale, { month: "short", day: "numeric", year: "numeric" }) : "—"}</p>
                       </div>
                       {eci.notes && (
                         <div className="sm:col-span-2">

@@ -15,7 +15,9 @@ import {
   generateLookupToken,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getLockedManualNightlyRate,
-  WalkinBookingSchema
+  WalkinBookingSchema,
+  MAX_STAY_NIGHTS,
+  MAX_ADVANCE_DAYS
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { z } from "zod";
@@ -384,6 +386,25 @@ export async function handleCreateBooking(req: any, res: any) {
   const numNights = Math.max(Math.round((endMs - startMs) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // G-02 (E2E audit 2026-07-17): enforce maximum stay length and
+  // advance-booking window server-side before any Firestore work.
+  // Permits same-day bookings (checkIn === manilaToday). Walk-ins
+  // are exempt from the advance window.
+  if (numNights > MAX_STAY_NIGHTS) {
+    return res.status(400).json({
+      success: false,
+      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten your stay.`
+    });
+  }
+
+  const advanceDays = Math.round((checkInDate.getTime() - currentManilaDate.getTime()) / 86400000);
+  if (advanceDays > MAX_ADVANCE_DAYS) {
+    return res.status(400).json({
+      success: false,
+      error: `Bookings can be made at most ${MAX_ADVANCE_DAYS} days in advance. Please choose a closer check-in date.`
+    });
   }
 
   // ETR-03: validate test token before entering the transaction
@@ -1281,6 +1302,16 @@ export async function handleCreateWalkin(req: any, res: any) {
   const numNights = Math.max(Math.round((endMs - startMs) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // G-02 (E2E audit 2026-07-17): enforce maximum stay length for
+  // walk-ins. Walk-ins are exempt from the advance-booking window
+  // since staff may legitimately backfill past stays.
+  if (numNights > MAX_STAY_NIGHTS) {
+    return res.status(400).json({
+      success: false,
+      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
+    });
   }
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();

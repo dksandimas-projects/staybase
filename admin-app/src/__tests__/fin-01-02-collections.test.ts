@@ -28,7 +28,7 @@ describe("FIN-01 and FIN-02 collections reporting", () => {
   });
 
   it("exports collection rows to CSV and XLSX", () => {
-    expect(reports).toMatch(/sparkinn_collections_/);
+    expect(reports).toMatch(/config\.hotelId\}_collections_/);
     expect(reports).toMatch(/"Collections"\)/);
     expect(reports).toMatch(/collectionHeaders/);
   });
