@@ -10,7 +10,7 @@
 | 1 | Guest | ✅ Complete (2026-07-17) |
 | 2 | Corporate guest | ✅ Complete (2026-07-17) |
 | 3 | Front desk | ✅ Complete (2026-07-17) |
-| 4 | Admin (incl. reports data accuracy) | ⬜ Pending |
+| 4 | Admin (incl. reports data accuracy) | ✅ Complete (2026-07-17) |
 | 5 | Cross-cutting | ⬜ Pending |
 
 ---
@@ -23,7 +23,9 @@ The corporate journey (role 2) confirmed the public `/corporate/book` path is se
 
 The front-desk journey (role 3) is clean at the CRITICAL/HIGH tier. Role gating is claims-based (`getIdTokenResult`, non-staff rejected, least-privilege fallback), `/rates`, `/members`, and `/settings` render an Access Denied state for front desk, and admin-only API routes (`create-staff`, `disable-staff`, `publish-seo`) re-check `role === "admin"` server-side. Walk-in creation is strictly Zod-validated (unlike the public path — sharpening G-01's fix) and runs the full conflict/block/lingering-checkout transaction. The housekeeping cycle matches Decision #88, receipts are folio-based with the payments ledger, and booking status transitions are blocked client-side by the Firestore field allowlist. Two MEDs: the 8-hour inactivity auto-logout specified in SECURITY.md is not implemented (session persistence is tab-scoped, which mitigates), and the `guests/{uid}` rule lets any signed-in user — including guest-app Rewards members in the same Firebase project — self-write a `role` field that the Settings staff list queries, allowing phantom staff rows (no privilege escalation; authorization is claims-only).
 
-**Provisional verdict (3 of 5 roles audited): NO-GO until G-01 and C-01 are fixed** — both are small fixes that prevent revenue-data corruption (unauthenticated `NaN`/discounted totals; staff-triggered ₱0 confirmed bookings). Everything else found so far is shippable-with-known-issues.
+The admin journey (role 4) — including the mandated reports data-accuracy trace — came back **clean at the CRITICAL/HIGH tier**. Occupancy, revenue, and bookings-by-source are all computed from the same live `AdminContext.bookings` `onSnapshot` that Bookings Management renders (no cache, no second collection). The revenue-eligibility rules correctly exclude cancelled and pending/payment-uploaded bookings, exclude past-confirmed no-shows from revenue while surfacing their retained cash separately (FL-14), prorate multi-period stays by timezone-correct overlap nights, reflect voucher/senior/member discounts by construction (net `totalPrice` split proportionally over locked gross rates), count corporate flat-rate bookings at their contracted rate, and use dynamic room counts for occupancy. Manual traces of three representative bookings (voucher-discounted online, corporate flat-rate, cancelled-with-retained-payment) all land in the correct totals. The report layer even neutralizes `NaN` totals (`nonNegativeFinite`), softening G-01's blast radius — though raw CSV/XLSX exports would still carry a poisoned `totalPrice` verbatim. Findings are three LOW docs-drift items.
+
+**Provisional verdict (4 of 5 roles audited): NO-GO until G-01 and C-01 are fixed** — both are small fixes that prevent revenue-data corruption (unauthenticated `NaN`/discounted totals; staff-triggered ₱0 confirmed bookings). Everything else found so far is shippable-with-known-issues.
 
 ---
 
@@ -69,6 +71,15 @@ The `guests` rule allows `create, update: if isAdmin() || (signedIn() && request
 **FD-03 · Front desk · docs contradiction — Decision #81's premise that "Rates is admin+front-desk accessible" is false; vouchers are not reachable by front desk** *(Confidence: HIGH)*
 `/rates` is admin-only in both `AdminLayout.tsx:92-94` and `plan/admin-app/CLAUDE.md`, but Decision #81 moved voucher CRUD to the Rates page *because* front desk supposedly could reach it ("Vouchers need front-desk access for walk-in redemptions"). Operationally, front desk can still *apply* a voucher code during walk-in creation (validated server-side), but cannot view or look up voucher campaigns. **Fix:** product decision — either grant front desk read-only voucher visibility or amend Decision #81/VOUCHERS.md to record the admin-only reality. **Effort:** docs 15 min, or ~2 h for a read-only voucher view.
 
+**A-01 · Admin · `plan/features/REPORTS.md:57,136` vs `admin-app/src/pages/ReportsPage.tsx:415-418` — spec's revenue status filter is stale** *(Confidence: HIGH)*
+REPORTS.md says revenue queries use `["confirmed", "checked-in", "checked-out"]`; the code deliberately adds `payment-confirmed` (with an inline rationale tying it to Collections/Receivables consistency). The code is right; the MD should be updated. **Fix:** docs only. **Effort:** 5 min.
+
+**A-02 · Admin · `plan/docs/SECURITY.md:138` vs `firebase/firestore.rules:205-208` — corporateCodes write rule is staff-wide, spec says admin-only** *(Confidence: HIGH)*
+SECURITY.md declares `corporateCodes` "Write: admin only," but the rule allows all staff — operationally required, since access codes are generated from the front-desk-accessible Corporate Inquiries page. **Fix:** amend SECURITY.md (or tighten the rule and move code generation behind an admin-gated API if the owner wants admin-only codes). **Effort:** docs 10 min.
+
+**A-03 · Admin · `admin-app/src/pages/ReportsPage.tsx:437-443` — future custom date ranges understate occupancy** *(Confidence: MED — depends on owners using future ranges)*
+The revenue-eligibility rule that excludes future `confirmed` bookings with zero recorded payments also feeds `rangeBookings`, which drives occupancy and bookings-by-source. For historical ranges (the primary use) this is correct; for a future custom range ("next month's occupancy"), unpaid confirmed bookings vanish from the forecast. **Fix:** if forward-looking reporting matters, split occupancy eligibility from revenue eligibility. **Effort:** ~1 h.
+
 **C-04 · Corporate · `guest-app/src/pages/CorporateBookingPage.tsx:701` — honeypot layer is decorative on `/corporate/book`** *(Confidence: HIGH)*
 The create payload hardcodes `_hp: ""` and the page renders no hidden honeypot input (the "Terms and honeypot" block at `:1653` contains only the consent checkbox and Turnstile). Bots on this route are never honeypot-caught; Turnstile + 5/min rate limit still apply. **Fix:** render the same CSS-hidden input as `BookingPage.tsx:1483-1491` and bind it. **Effort:** <30 min.
 
@@ -111,6 +122,26 @@ Both fields are arbitrary strings persisted verbatim and rendered in the admin d
 - **Housekeeping cycle** matches Decision #88: clean → dirty → in-progress → clean (`AdminContext.tsx:819-831`).
 - **Receipts are folio-based** — `printBookingReceiptPDF` (`BookingsPage.tsx:1658`) renders from `getBookingFolio` + the `payments` subcollection with amount-due math; registration and receipt PDFs have regression tests.
 - **Session persistence is tab-scoped** (`browserSessionPersistence`, `AdminContext.tsx:597,660`) per SECURITY.md; AdminContext's 25 `onSnapshot` listeners all return cleanup functions.
+
+---
+
+## Verified-Good (Admin role — reports data accuracy)
+
+**Single source of truth:** ReportsPage consumes `bookings`, `payments` (collection-group), `charges` (collection-group), and `storeOrders` from the same `AdminContext` `onSnapshot` subscriptions that Bookings Management renders — no stale cache, no parallel collection (`ReportsPage.tsx:186-199`).
+
+**Eligibility rules** (`ReportsPage.tsx:415-447`): revenue counts `payment-confirmed | confirmed | checked-in | checked-out` only — `cancelled`, `pending`, and `payment-uploaded` are excluded; past `confirmed` no-shows are excluded from revenue but surfaced with their retained cash in the FL-14 table (`:527-532`); future unpaid `confirmed` bookings are excluded until money is recorded.
+
+**Computation checks:**
+- **Revenue** — `splitBookingRevenue` (`admin-app/src/utils/finance.ts:168-193`) splits the *net* `totalPrice` proportionally over locked gross room/breakfast amounts, so voucher, senior/PWD, and member deductions are reflected by construction and room+breakfast always re-sum to booking revenue. Multi-period stays prorate by `getOverlapNights` (`ReportsPage.tsx:135-150`), which uses `config.timezone` day-keys and excludes the checkout day (FL-15). `NaN`/negative totals are coerced to 0 (`nonNegativeFinite`).
+- **Occupancy** — dynamic active-room counts per type (never hardcoded), occupied nights from the same `rangeBookings` via overlap-night math (`:869-884`, `:1494-1501`).
+- **Bookings by source** — grouped over the same `rangeBookings`; all three create paths stamp `source` server-side (`online`/`corporate` at `bookings.ts:1043`, `walk-in` at `:1570`, converted inquiries `corporate` per Decision #103).
+
+**Manual spot-checks (traced through the code):**
+1. *Voucher-discounted online booking* (3 nights fully in range, ₱500 voucher, no breakfast): eligible → overlap 3/3 → room revenue = net `totalPrice` (voucher already deducted server-side at creation) — no path re-adds the discount.
+2. *Corporate flat-rate checked-in booking*: eligible → `totalPrice` = contracted flat rate × nights (locked at creation, `bookings.ts:782-794`) → counted at the contracted amount; source pie shows "Corporate Codes."
+3. *Cancelled booking with a retained ₱2,000 payment*: absent from revenue/occupancy/source (status filter), its cash appears in Collections by `recordedAt` and in the cancelled/no-show retained table — counted once, in the right place.
+
+**Admin scope elsewhere:** Settings writes are admin-only at the rules layer (`firestore.rules:136-139`), staff CRUD goes through admin-re-checked API routes, rate management edits the admin-only `settings/hotelConfig`, voucher CRUD sits on the admin-only Rates page with staff-level rules, QR regeneration is a staff-permitted room update, and the Full Backup button is admin-gated (`ReportsPage.tsx:1744`).
 
 ---
 
