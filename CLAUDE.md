@@ -99,6 +99,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/BOOKING-LOOKUP.md` — `/my-booking`, ref + email lookup
 - `plan/features/INTERCOM-GUEST.md` — QR chat, quick request panel
 - `plan/features/STATIC-PAGES.md` — About Us, Corporate Stays (marketing), Contact Us, 404
+- `plan/features/CONTACT-INQUIRIES.md` — Contact form → staff inquiry pipeline
 
 ### plan/features/ — Admin App
 - `plan/features/AUTH-ROLES.md` — Login, protected routes, role-based access
@@ -106,6 +107,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/BOOKINGS-MANAGEMENT.md` — Booking table, drawer, walk-in creation, receipt
 - `plan/features/ROOM-MANAGEMENT.md` — Edit rooms, photos, status, block reason
 - `plan/features/RATE-MANAGEMENT.md` — Rates, weekend rates, corporate rate, discounts
+- `plan/features/RATE-CALENDAR.md` — Month grid of effective rates, seasonal overrides, holiday labels
 - `plan/features/CORPORATE-INQUIRIES.md` — Pipeline, notes log, access code generation
 - `plan/features/VOUCHERS.md` — Promo voucher management
 - `plan/features/REPORTS.md` — Occupancy, revenue, bookings by source, export
@@ -113,6 +115,8 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/QR-MANAGEMENT.md` — QR per room, regenerate, print
 - `plan/features/SETTINGS.md` — Hotel info, payment methods, staff accounts, website content
 - `plan/features/ADMIN-MOBILE.md` — Admin app responsive layout (Phase 11.7, shipped 2026-06-18) — sidebar / header / drawer / data table for < 768px + `useBreakpoint` + Toast + ConfirmForm + BottomTabBar + focus trap
+- `plan/features/NOTIFICATION-CENTER.md` — Persistent header bell, `notifications` collection, retention cron
+- `plan/features/ENVIRONMENT-TEST-RESET.md` — Test runs, TEST DATA tagging, staging reset, pre-live production reset (open spec: ETR-R/D/15-21)
 
 ### plan/features/ — Spark Rewards
 - `plan/features/SPARK-REWARDS.md` — guest auth, member registration, profile portal, points, admin member management
@@ -125,6 +129,20 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions
 - `plan/features/EMAIL-PDF-STORAGE.md` — Resend email flows, jsPDF receipts, Storage uploads
+- `plan/features/EMAIL-AUDIT-EXTENSIONS.md` — The 8 W4.4 email templates added by the 2026-06 audit
+
+### plan/project/ — Status & operations (load only when the task needs them)
+- `plan/project/ROADMAP.md` — Current build status and open work only (completed history lives in the archive)
+- `plan/project/DEPLOY.md` / `plan/project/PROD-CUTOVER-RUNBOOK.md` / `plan/project/SETUP-GUIDE.md` — operational procedures
+- `plan/project/QA-SCENARIOS.md` — manual QA scenario bank
+- `plan/project/context/spark-inn-MASTER-CONTEXT.md` — business context + doc index; load for planning/cross-feature work only
+
+### Historical — never load during implementation
+- `plan/project/archive/` — archived snapshots (old roadmap detail, pre-build master context)
+- `plan/project/AUDIT-*.md` — closed audit reports (open findings are tracked in ROADMAP.md; the one current report is `plan/docs/AUDIT-E2E-REPORT.md`)
+- `plan/project/AI-MD-SYSTEM-PROMPT.md` (reusable template) · `plan/project/context/spark-inn-MD-PLAN.md` (historical reference) · `plan/stitch/` (generated design exports; `plan/stitch/design.md` is the canonical design-token reference for wireframe work only)
+
+Run `npm run docs:audit` after any documentation change — it checks links, context budgets, and historical markers (see `plan/docs/CONTRIBUTING.md §Documentation Budgets & Lifecycle`).
 
 ---
 

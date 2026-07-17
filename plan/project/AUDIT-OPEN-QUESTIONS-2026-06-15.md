@@ -1,4 +1,5 @@
 # Audit Open Questions — Decision Triage
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 > Generated 2026-06-15 from `plan/project/AUDIT-E2E-2026-06-15.md`
 > Purpose: batch-resolve the 51 spec-clarification questions raised by the audit. Each gets a proposed default. Approve all defaults, or override specific ones. Approved decisions are copied to `plan/docs/DECISIONS-FEATURES.md` as new rows.
 

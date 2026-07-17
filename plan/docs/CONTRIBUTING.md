@@ -22,7 +22,12 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | Wireframe workflow, screen checklist, Stitch asset map | `plan/docs/WIREFRAME-WORKFLOW.md` |
 | IP ownership, ToS, GDPR, accessibility commitment, licensing, support terms | `plan/docs/LEGAL.md` |
 | Master TOC + read bundles + hard rules | `CLAUDE.md` |
-| Session bootstrapping context | `plan/project/context/spark-inn-MASTER-CONTEXT.md` |
+| Business context (client, personas, goals, contract) + doc index | `plan/project/context/spark-inn-MASTER-CONTEXT.md` |
+| Current build status + open work | `plan/project/ROADMAP.md` (open items only — shipped detail moves to the archive) |
+| Completed-phase history, closed audit fixes | `plan/project/archive/` + Git history |
+| Audit findings (open MED/LOW of the current audit) | `plan/docs/AUDIT-E2E-REPORT.md` (closed audits: `plan/project/AUDIT-*.md`, historical) |
+| Operational procedures (deploy, cutover, setup, QA scenarios) | `plan/project/DEPLOY.md` / `PROD-CUTOVER-RUNBOOK.md` / `SETUP-GUIDE.md` / `QA-SCENARIOS.md` |
+| Contract goodwill / scope extras | `plan/project/GOODWILL-SCOPE-LOG.md` |
 
 ---
 
@@ -148,8 +153,41 @@ Rule of thumb: **if it changes the data model, adds a screen, or takes more than
 ## Adding a New MD
 
 If a new feature or concern warrants a new MD:
-1. Create the file in the appropriate folder (`plan/docs/` or `plan/features/`)
-2. Add it to `CLAUDE.md` Table of Contents
-3. Add it to the ownership table in this file
-4. Add a `> Requires:` line at the top listing its dependencies
-5. Commit with `docs:` prefix
+1. First check whether an existing MD already owns the topic (table above) — extend it instead of creating a near-duplicate
+2. Create the file in the appropriate folder (`plan/docs/` or `plan/features/`)
+3. Add it to `CLAUDE.md` Table of Contents
+4. Add it to the ownership table in this file
+5. Add a `> Requires:` line at the top listing its dependencies
+6. Run `npm run docs:audit` and commit with `docs:` prefix
+
+---
+
+## Documentation Budgets & Lifecycle
+
+`npm run docs:audit` (also part of `npm run preflight`) enforces these limits. Estimated tokens ≈ character count ÷ 4. The audit warns at 90% of a ceiling and fails above it (links and markers fail outright).
+
+| Active context | Ceiling (est. tokens) |
+|---|---:|
+| `CLAUDE.md` (always-read agent entry) | 5,000 |
+| `plan/project/ROADMAP.md` | 6,000 — above the 3,000 default because the project is mid-launch with several parallel open operational checklists (Phase 8/10/11 QA, cutover, E2E-audit fixes); open work is never deleted to satisfy a budget. Re-tighten to 3,000 after launch. |
+| `plan/project/context/spark-inn-MASTER-CONTEXT.md` | 5,000 |
+| Any single `plan/features/*.md` | 8,000 |
+| Any single `plan/docs/*.md` (domain doc) | 10,000 |
+| **Ratchet exceptions** (pre-existing oversized contract docs — ceiling set just above current size so further growth fails; compact toward the standard ceiling next time the feature is materially touched): `ADMIN-MOBILE.md` 12,500 · `SETTINGS.md` 10,000 · `BOOKINGS-MANAGEMENT.md` 9,000 · `BACKEND.md` 12,000 | — |
+| Combined always-read (`CLAUDE.md` + `GOTCHAS.md`) | 10,000 |
+| Entire active MD system | warn above 120,000 |
+
+**Excluded from active totals:** `plan/project/archive/`, `plan/project/AUDIT-*.md`, `plan/project/AI-MD-SYSTEM-PROMPT.md`, `plan/project/context/spark-inn-MD-PLAN.md`, `plan/stitch/`, `node_modules`/build output.
+
+**Compaction rules:**
+- One fact, one home — everything else links to it (see §MD Ownership Rules).
+- When a phase, audit batch, or feature fully ships, move its diary/detail to `plan/project/archive/` (with a `HISTORICAL ARCHIVE` marker) and keep a one-line ✅ status in the active doc. Take an archive snapshot **before** materially compacting any large active doc.
+- Keep active: current behavior, requirements, acceptance criteria, unresolved risks, security/data invariants, deferral decisions with their triggers. Move out: branch/commit diaries, passing test logs, completed walkthroughs, superseded proposals.
+- Archives and historical audits are never part of a normal implementation read bundle.
+
+**Review triggers** — run a documentation review (inventory, dedupe, compact/archive):
+- Before starting a major roadmap phase, and after roughly five roadmap items ship
+- Whenever `docs:audit` warns or fails
+- When one task repeatedly needs > 30,000 documentation tokens to complete
+- Before creating a new canonical MD
+- When a single change grows a doc by more than 10% — decide explicitly: keep, compact, or archive

@@ -1,4 +1,5 @@
 # Finance & Reports Audit — 2026-07-11
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 
 > Finance/audit-perspective review of the Reports & Metrics feature set:
 > does the system contain everything needed to properly account for

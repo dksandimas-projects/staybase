@@ -1,4 +1,5 @@
 # Admin App Features & Functionality Audit — 2026-07-07
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 
 > Full wiring audit of every admin-app page and the shared `AdminContext`
 > against the feature specs. Read-only at audit time — no fixes applied.

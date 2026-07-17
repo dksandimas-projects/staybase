@@ -234,7 +234,7 @@ This creates:
 - Allows sign-in at `admin.sparkinnbohol.com/login`
 
 ### Step 7.5 — Collect and address feedback
-Use a shared feedback doc (e.g. `plan/project/FEEDBACK-staging.md`) for client notes. Address critical issues, defer non-critical to post-launch.
+Use a shared feedback doc for client notes — create it as FEEDBACK-staging.md under `plan/project/` when the staging review starts. Address critical issues, defer non-critical to post-launch.
 
 ---
 

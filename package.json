@@ -20,6 +20,7 @@
     "test:shared": "npm run test -w shared",
     "test:guest:api": "npm run test:api -w guest-app",
     "check:api-bundle": "node scripts/check-api-bundle.mjs",
+    "docs:audit": "node scripts/docs-audit.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project spark-inn-rules-test \"vitest run --config vitest.rules.config.ts\"",
     "preflight": "node scripts/preflight.mjs"
   },
