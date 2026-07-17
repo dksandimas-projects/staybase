@@ -130,3 +130,4 @@ Things agents must never do. Check this file before implementing any feature.
 - **Never add code snippets to MD files** — MDs are high-level specs only. Code lives in the codebase.
 - **`FIREBASE_PRIVATE_KEY` in `api/.env` contains literal `\n` characters** — use `.replace(/\\n/g, '\n')` when initializing the Firebase Admin SDK, or the key will be malformed.
 - **Brand name is always `spark inn`** — all lowercase. Never "Spark Inn" or "SPARK INN" in any UI copy.
+- **Never Zod-validate only part of a public API request body** — validate the entire body, including top-level scalar fields, with one strict schema. `/api/bookings/create` once validated only the nested `guestDetails` object while the top-level `guests` count reached price math unvalidated, letting negative/non-numeric values manipulate `totalPrice` (G-01, E2E audit 2026-07-17). Numeric fields that feed pricing must be validated as finite, integral, and range-bounded server-side.

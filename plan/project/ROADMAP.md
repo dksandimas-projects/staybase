@@ -1628,3 +1628,11 @@ The refactor must retain all current drawer capabilities: booking status and cha
 
 *Update the progress table when completing a phase.*
 *Commit message: `docs: update ROADMAP.md`*
+
+## E2E User Journey Audit (2026-07-17)
+
+Full-journey audit across all 5 roles (guest, corporate, front desk, admin, cross-cutting). Report: `plan/docs/AUDIT-E2E-REPORT.md`. CRITICAL/HIGH items tracked here as tasks; MED/LOW live in the report.
+
+### Guest journey (role 1 of 5 — audited 2026-07-17)
+
+- [ ] **G-01 (HIGH)** — Zod-validate the full `/api/bookings/create` (and `create-walkin`) body: `guests` must be a finite integer ≥ 1; add `Number.isFinite` backstop on computed `totalPrice`. Unvalidated `guests` currently allows unauthenticated price manipulation (negative breakfast line) and `NaN` totals that poison revenue reports. `guest-app/server/handlers/bookings.ts:345,562,807`
