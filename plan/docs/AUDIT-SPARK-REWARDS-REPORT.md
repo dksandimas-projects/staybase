@@ -12,7 +12,7 @@
 | 1. Auth & registration | ✅ Audited | LOW |
 | 2. Points economy | ✅ Audited | MEDIUM |
 | 3. Early check-in (Phase 12) | ✅ Audited | HIGH (HIGH-1 also affects §1 surfaces) |
-| 4. Admin member management | ⏳ Pending | — |
+| 4. Admin member management | ✅ Audited | LOW |
 | 5. Edge cases & RA 10173 | ⏳ Pending | — |
 
 **Feature go/no-go:** _Deferred until all 5 sections complete._
@@ -101,12 +101,30 @@ The Phase 12 mechanics are correctly built to spec. Auth **was** tightened as do
 
 **Minor note (not a finding):** `handleResolveEarlyCheckin` only checks that an `earlyCheckIn` map exists, not that its status is still `requested`, and does not re-check booking status server-side (the drawer gates that). A staff caller could re-resolve or resolve on a since-cancelled booking via direct API, firing a guest email. Staff-only and low-impact; note for hardening.
 
+### Section 4 — Admin Member Management
+
+No CRITICAL, HIGH, or MEDIUM findings. All four audited concerns check out. One LOW documentation-accuracy nit.
+
+**LOW-6 · Spec calls the member export "CSV"; the shipped export is an XLSX sheet**
+- `admin-app/src/pages/ReportsPage.tsx:1233-1243` (Members sheet in the full-backup workbook) vs `SPARK-REWARDS.md:147` ("Export members list as CSV").
+- Issue: member export ships as a **Members** worksheet inside the admin-only full-data-backup `.xlsx` (`XLSX.utils.json_to_sheet`), not a `.csv`. The member data itself is correct and complete (member number, full name, email, phone, auth provider, rewards points, tier, active, member since). Purely a doc-wording mismatch; the audit's "includes member data correctly" requirement is satisfied.
+- Fix: reword the spec checklist to say "via the full data backup (XLSX) export," or add a dedicated CSV button if a CSV artifact is specifically required.
+- Effort: <10 min · Confidence: HIGH.
+
+**Verified correct (Section 4):**
+- `members` collection `onSnapshot` returns its unsubscribe from `useEffect` cleanup and re-subscribes on `currentUser` change (`AdminContext.tsx:2061-2095`). The drawer's `pointsHistory` subcollection `onSnapshot` also cleans up, gated on `selectedMember?.id && isDrawerOpen` (`MembersPage.tsx:40-75`).
+- Disable/enable writes **both** `isActive` in Firestore **and** `adminAuth.updateUser(uid, { disabled })` (equivalent to `disableUser`), sequentially, with a Firestore rollback if the Auth sync throws; admin-only (`members.ts:505-553`, 403 for non-admin at :505).
+- Manual adjustment requires a non-empty `reason` at both the UI guard (`MembersPage.tsx:84`) and the context transaction guard (`AdminContext.tsx:2109`) before the write; the member balance and `pointsHistory` entry are written together in one client `runTransaction` (see MED-1 for the rules-layer caveat).
+- Search filters by name, email, and member number case-insensitively (`MembersPage.tsx:194-197`). Tier filter is deferred to Phase 2 per spec (tiers not yet defined).
+- Full-backup member export is admin-only (`ReportsPage.tsx:1135`) and carries correct member fields; it excludes `pointsHistory` (current balance only), which is acceptable for a member roster export.
+
 ## Quick Wins (<30 min)
 
 - LOW-1: add Privacy/Terms disclosure under the Rewards landing one-click enroll button.
 - LOW-2: set `browserLocalPersistence` explicitly in guest-app firebase config.
 - LOW-4: delete/consolidate the divergent `calculateEarnedPoints` shared helper.
 - LOW-5: render early check-in status on the My Stays page.
+- LOW-6: reword the member-export spec line from "CSV" to "XLSX full backup."
 
 ---
 
@@ -127,3 +145,4 @@ The Phase 12 mechanics are correctly built to spec. Auth **was** tightened as do
 - Section 1: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, created). No CRITICAL/HIGH findings → no `SPARK-REWARDS.md §Known Issues`, `GOTCHAS.md`, or `ROADMAP.md` additions required for this section.
 - Section 2: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). `plan/docs/GOTCHAS.md` — appended a "never do" rule under §Security & PII capturing the MED-1 balance-integrity boundary (client-side `rewardsPoints` writes). No CRITICAL/HIGH → no `SPARK-REWARDS.md §Known Issues` or `ROADMAP.md` additions required.
 - Section 3: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). HIGH-1 → added `plan/features/SPARK-REWARDS.md §Known Issues (Audit 2026-07-18)`, a "never do" rule in `plan/docs/GOTCHAS.md §Auth & Security` (verify `email_verified` before email-based booking matches), and a HIGH item under a new dated section in `plan/project/ROADMAP.md`.
+- Section 4: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). No CRITICAL/HIGH → no `SPARK-REWARDS.md §Known Issues`, `GOTCHAS.md`, or `ROADMAP.md` additions required (LOW-6 is a spec-wording nit only).
