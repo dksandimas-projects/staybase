@@ -133,9 +133,9 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
   anonymous visitors can no longer dump every access code, company
   name, and negotiated `ratePerRoomType` via a collection query.
 - Validation endpoint `/api/validate/corporate-code` is the only
-  sanctioned path for the public — it returns only the rate map and
-  the public code label, never the full document.
-- Write: admin only
+   sanctioned path for the public — it returns only the rate map and
+   the public code label, never the full document.
+- Write: staff/admin
 
 ### `vouchers`
 - Read: staff/admin only — same BI-08 tightening as

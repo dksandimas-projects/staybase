@@ -230653,6 +230653,12 @@ var guestDetailsSchema = external_exports.object({
   purposeOfStay: external_exports.string().trim().max(120).optional().default(""),
   preferredBillingArrangement: external_exports.string().trim().max(40).optional().default("")
 }).strict();
+var storageBucketUrl = process.env.FIREBASE_STORAGE_BUCKET ? `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/` : null;
+var storageUrlRefiner = (val) => {
+  if (val === null) return true;
+  if (!storageBucketUrl) return true;
+  return val.startsWith(storageBucketUrl);
+};
 var createBookingSchema = external_exports.object({
   bookingId: external_exports.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
   roomType: external_exports.string().trim().min(1).max(120),
@@ -230662,11 +230668,15 @@ var createBookingSchema = external_exports.object({
   hasBreakfast: external_exports.boolean(),
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
-  discountIdPhotoUrl: external_exports.string().url().max(2048).nullable(),
+  discountIdPhotoUrl: external_exports.string().url().max(2048).nullable().refine(storageUrlRefiner, {
+    message: "discount ID photo URL must point to the project's Firebase Storage bucket"
+  }),
   discountIdPhotoPath: external_exports.string().trim().max(512).nullable().optional().default(null),
   voucherCode: external_exports.string().trim().max(80).optional().default(""),
   paymentMethod: external_exports.string().trim().min(1).max(80),
-  paymentProofUrl: external_exports.string().url().max(2048).nullable().optional().default(null),
+  paymentProofUrl: external_exports.string().url().max(2048).nullable().optional().default(null).refine(storageUrlRefiner, {
+    message: "payment proof URL must point to the project's Firebase Storage bucket"
+  }),
   paymentProofPath: external_exports.string().trim().max(512).nullable().optional().default(null),
   paymentReferenceNumber: external_exports.string().trim().max(160).nullable().optional().default(null),
   corporateCode: external_exports.string().trim().max(120).optional().default(""),

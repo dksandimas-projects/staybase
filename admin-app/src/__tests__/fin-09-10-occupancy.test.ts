@@ -11,7 +11,7 @@ describe("FIN-09 & FIN-10 occupancy clipping and revenue proration", () => {
     expect(reports).toMatch(/overlapEnd = Math\.min\(dateKeyDayNumber/);
   });
 
-  it("filters rangeBookings to include overlapping stays", () => {
+  it("filters occupancyBookings to include overlapping stays", () => {
     expect(reports).toMatch(/overlaps = checkInKey <= periodEndKey && checkOutKey > periodStartKey/);
     expect(reports).toMatch(/if \(!overlaps\) return false;/);
   });
@@ -28,7 +28,7 @@ describe("FIN-09 & FIN-10 occupancy clipping and revenue proration", () => {
   });
 
   it("calculates total room nights and room type occupancy using overlap nights", () => {
-    expect(reports).toMatch(/totalRoomNights = rangeBookings\.reduce\(\(sum, b\) => sum \+ getOverlapNights/);
-    expect(reports).toMatch(/occupiedNights = rangeBookings[\s\S]+?getOverlapNights/);
+    expect(reports).toMatch(/totalRoomNights = occupancyBookings\.reduce\(\(sum, b\) => sum \+ getOverlapNights/);
+    expect(reports).toMatch(/occupiedNights = occupancyBookings[\s\S]+?getOverlapNights/);
   });
 });

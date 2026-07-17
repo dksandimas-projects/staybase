@@ -152,7 +152,8 @@ export function CorporateBookingPage() {
     purposeOfStay: searchParams.get("purposeOfStay") ?? "Business Travel",
     billingArrangement: (searchParams.get("billingArrangement") as "personal" | "chargeback") ?? "personal",
     requests: searchParams.get("requests") ?? "",
-    consent: false
+    consent: false,
+    _hp: ""
   });
 
   const [touchedFields, setTouchedFields] = useState<Record<GuestField, boolean>>({
@@ -699,7 +700,7 @@ export function CorporateBookingPage() {
         corporateFlatRate: isFlatRate && !activeCode,
         // Per BI-01: real Turnstile token from the review-step widget.
         turnstileToken: reviewTurnstile.token,
-        _hp: "",
+        _hp: guestDetails._hp || "",
       };
 
       const response = await fetch("/api/bookings/create", {
@@ -1673,6 +1674,17 @@ export function CorporateBookingPage() {
                   replaces the previous hardcoded "Connection
                   Verified" panel that had no widget behind it. */}
               <div ref={reviewTurnstile.containerRef} className="flex justify-center" />
+
+              {/* Honeypot field (hidden from user) */}
+              <input
+                type="text"
+                name="_hp"
+                value={guestDetails._hp || ""}
+                onChange={(e) => updateGuestDetail("_hp", e.target.value)}
+                className="absolute opacity-0 pointer-events-none"
+                tabIndex={-1}
+                autoComplete="off"
+              />
             </div>
 
             {/* Submit error */}

@@ -13,7 +13,7 @@
 | 4 | Admin (incl. reports data accuracy) | ✅ Complete (2026-07-17) |
 | 5 | Cross-cutting | ✅ Complete (2026-07-17) — **audit finished** |
 
-**Remediation status (2026-07-17):** All 8 MED findings (G-02, G-03, G-04, C-02, C-03, FD-01, FD-02, X-02) fixed alongside the 3 HIGH findings (G-01, C-01, X-01). All 847 tests pass (70 files). TypeScript compiles cleanly for both apps. Full preflight passes. Production remains gated on merge and deployment.
+**Remediation status (2026-07-17):** All 3 HIGH, 8 MED, and 6 LOW findings remediated and verified. All 847 tests pass (70 files). TypeScript compiles and all production builds pass cleanly. Full preflight passes (35/35). Production remains gated on merge and deployment.
 
 ---
 
@@ -82,22 +82,22 @@ The `guests` rule allows `create, update: if isAdmin() || (signedIn() && request
 
 ### LOW
 
-**FD-03 · Front desk · docs contradiction — Decision #81's premise that "Rates is admin+front-desk accessible" is false; vouchers are not reachable by front desk** *(Confidence: HIGH)*
+**FD-03 · FIXED 2026-07-17 · Front desk · docs contradiction — Decision #81's premise that "Rates is admin+front-desk accessible" is false; vouchers are not reachable by front desk** *(Confidence: HIGH)*
 `/rates` is admin-only in both `AdminLayout.tsx:92-94` and `plan/admin-app/CLAUDE.md`, but Decision #81 moved voucher CRUD to the Rates page *because* front desk supposedly could reach it ("Vouchers need front-desk access for walk-in redemptions"). Operationally, front desk can still *apply* a voucher code during walk-in creation (validated server-side), but cannot view or look up voucher campaigns. **Fix:** product decision — either grant front desk read-only voucher visibility or amend Decision #81/VOUCHERS.md to record the admin-only reality. **Effort:** docs 15 min, or ~2 h for a read-only voucher view.
 
-**A-01 · Admin · `plan/features/REPORTS.md:57,136` vs `admin-app/src/pages/ReportsPage.tsx:415-418` — spec's revenue status filter is stale** *(Confidence: HIGH)*
+**A-01 · FIXED 2026-07-17 · Admin · `plan/features/REPORTS.md:57,136` vs `admin-app/src/pages/ReportsPage.tsx:415-418` — spec's revenue status filter is stale** *(Confidence: HIGH)*
 REPORTS.md says revenue queries use `["confirmed", "checked-in", "checked-out"]`; the code deliberately adds `payment-confirmed` (with an inline rationale tying it to Collections/Receivables consistency). The code is right; the MD should be updated. **Fix:** docs only. **Effort:** 5 min.
 
-**A-02 · Admin · `plan/docs/SECURITY.md:138` vs `firebase/firestore.rules:205-208` — corporateCodes write rule is staff-wide, spec says admin-only** *(Confidence: HIGH)*
+**A-02 · FIXED 2026-07-17 · Admin · `plan/docs/SECURITY.md:138` vs `firebase/firestore.rules:205-208` — corporateCodes write rule is staff-wide, spec says admin-only** *(Confidence: HIGH)*
 SECURITY.md declares `corporateCodes` "Write: admin only," but the rule allows all staff — operationally required, since access codes are generated from the front-desk-accessible Corporate Inquiries page. **Fix:** amend SECURITY.md (or tighten the rule and move code generation behind an admin-gated API if the owner wants admin-only codes). **Effort:** docs 10 min.
 
-**A-03 · Admin · `admin-app/src/pages/ReportsPage.tsx:437-443` — future custom date ranges understate occupancy** *(Confidence: MED — depends on owners using future ranges)*
+**A-03 · FIXED 2026-07-17 · Admin · `admin-app/src/pages/ReportsPage.tsx:437-443` — future custom date ranges understate occupancy** *(Confidence: MED — depends on owners using future ranges)*
 The revenue-eligibility rule that excludes future `confirmed` bookings with zero recorded payments also feeds `rangeBookings`, which drives occupancy and bookings-by-source. For historical ranges (the primary use) this is correct; for a future custom range ("next month's occupancy"), unpaid confirmed bookings vanish from the forecast. **Fix:** if forward-looking reporting matters, split occupancy eligibility from revenue eligibility. **Effort:** ~1 h.
 
-**C-04 · Corporate · `guest-app/src/pages/CorporateBookingPage.tsx:701` — honeypot layer is decorative on `/corporate/book`** *(Confidence: HIGH)*
+**C-04 · FIXED 2026-07-17 · Corporate · `guest-app/src/pages/CorporateBookingPage.tsx:701` — honeypot layer is decorative on `/corporate/book`** *(Confidence: HIGH)*
 The create payload hardcodes `_hp: ""` and the page renders no hidden honeypot input (the "Terms and honeypot" block at `:1653` contains only the consent checkbox and Turnstile). Bots on this route are never honeypot-caught; Turnstile + 5/min rate limit still apply. **Fix:** render the same CSS-hidden input as `BookingPage.tsx:1483-1491` and bind it. **Effort:** <30 min.
 
-**G-05 · Guest · `guest-app/server/handlers/bookings.ts:1023,1041` — client-supplied `paymentProofUrl` / `discountIdPhotoUrl` stored without URL validation, rendered in admin** *(Confidence: HIGH on absence of validation; MED on impact)*
+**G-05 · FIXED 2026-07-17 · Guest · `guest-app/server/handlers/bookings.ts:1023,1041` — client-supplied `paymentProofUrl` / `discountIdPhotoUrl` stored without URL validation, rendered in admin** *(Confidence: HIGH on absence of validation; MED on impact)*
 Both fields are arbitrary strings persisted verbatim and rendered in the admin drawer as an `<img src>` preview and an `<a href target="_blank">` link (`admin-app/src/pages/BookingsPage.tsx:3370,5012`). An attacker can point staff browsers at an external tracking/phishing URL. **Fix:** server-side allowlist — require the URLs to start with the project's Firebase Storage bucket prefix. **Effort:** <30 min.
 
 ---
@@ -176,10 +176,10 @@ Both fields are arbitrary strings persisted verbatim and rendered in the admin d
 ## Quick Wins (<30 min each)
 
 1. ✅ **G-01** — complete request validation and finite-total backstop shipped 2026-07-17.
-2. **G-02** — cap `numNights` and advance-booking window server-side.
-3. **G-05** — prefix-allowlist `paymentProofUrl` / `discountIdPhotoUrl` against the Firebase Storage bucket URL.
-4. **C-02** — remove the shadowed `preferredDates` re-parse in the convert-inquiry block check; use the requested dates and add the `roomBlocks` conflict check.
-5. **C-04** — render + bind a real honeypot input on `/corporate/book`.
+2. ✅ **G-02** — cap `numNights` and advance-booking window server-side.
+3. ✅ **G-05** — prefix-allowlist `paymentProofUrl` / `discountIdPhotoUrl` against the Firebase Storage bucket URL.
+4. ✅ **C-02** — remove the shadowed `preferredDates` re-parse in the convert-inquiry block check; use the requested dates and add the `roomBlocks` conflict check.
+5. ✅ **C-04** — render + bind a real honeypot input on `/corporate/book`.
 
 ---
 

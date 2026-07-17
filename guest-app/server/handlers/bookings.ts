@@ -274,6 +274,17 @@ const guestDetailsSchema = z.object({
 // stay a finite positive integer so it cannot create negative breakfast
 // lines or NaN totals. Router-consumed bot fields remain part of the
 // strict wire contract even though business logic does not persist them.
+
+const storageBucketUrl = process.env.FIREBASE_STORAGE_BUCKET
+  ? `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/`
+  : null;
+
+const storageUrlRefiner = (val: string | null) => {
+  if (val === null) return true;
+  if (!storageBucketUrl) return true;
+  return val.startsWith(storageBucketUrl);
+};
+
 const createBookingSchema = z.object({
   bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
   roomType: z.string().trim().min(1).max(120),
@@ -283,11 +294,15 @@ const createBookingSchema = z.object({
   hasBreakfast: z.boolean(),
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
-  discountIdPhotoUrl: z.string().url().max(2048).nullable(),
+  discountIdPhotoUrl: z.string().url().max(2048).nullable().refine(storageUrlRefiner, {
+    message: "discount ID photo URL must point to the project's Firebase Storage bucket"
+  }),
   discountIdPhotoPath: z.string().trim().max(512).nullable().optional().default(null),
   voucherCode: z.string().trim().max(80).optional().default(""),
   paymentMethod: z.string().trim().min(1).max(80),
-  paymentProofUrl: z.string().url().max(2048).nullable().optional().default(null),
+  paymentProofUrl: z.string().url().max(2048).nullable().optional().default(null).refine(storageUrlRefiner, {
+    message: "payment proof URL must point to the project's Firebase Storage bucket"
+  }),
   paymentProofPath: z.string().trim().max(512).nullable().optional().default(null),
   paymentReferenceNumber: z.string().trim().max(160).nullable().optional().default(null),
   corporateCode: z.string().trim().max(120).optional().default(""),

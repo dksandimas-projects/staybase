@@ -446,6 +446,31 @@ export function ReportsPage() {
     });
   }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey, payments]);
 
+  // ── Occupancy-eligible bookings (same as rangeBookings but includes future unpaid confirmed bookings) ──
+  // Future confirmed bookings with no payments recorded are excluded from revenue (correct)
+  // but counted for occupancy and acquisition metrics since the room is still reserved.
+  const occupancyBookings = useMemo(() => {
+    return revenueBookings.filter(b => {
+      const checkInKey = reportDateKey(b.checkIn);
+      const checkOutKey = reportDateKey(b.checkOut);
+      if (!checkInKey || !checkOutKey) return false;
+
+      // 1. Must overlap with the selected range
+      const overlaps = checkInKey <= periodEndKey && checkOutKey > periodStartKey;
+      if (!overlaps) return false;
+
+      // 2. Exclude past confirmed bookings (entirely in the past and never checked in / no-show)
+      if (b.status === "confirmed" && checkOutKey <= hotelTodayKey) {
+        return false;
+      }
+
+      // NOTE: rule #3 (exclude future unpaid confirmed) intentionally omitted —
+      // occupancy should count all future bookings regardless of payment status.
+
+      return true;
+    });
+  }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey]);
+
   const rangeStoreOrders = useMemo(
     () => storeOrders.filter(o => isWithinSelectedRange(o.status === "delivered" ? (o.deliveredAt || o.createdAt) : o.createdAt)),
     [storeOrders, periodStart, periodEnd]
@@ -858,13 +883,13 @@ export function ReportsPage() {
     const sources = ["online", "walk-in", "corporate", "phone", "facebook"];
     const counts: Record<string, number> = {};
     sources.forEach(s => { counts[s] = 0; });
-    rangeBookings.forEach(b => {
+    occupancyBookings.forEach(b => {
       if (counts[b.source] !== undefined) counts[b.source] += 1;
     });
     return sources
       .map((s, i) => ({ name: labelMap[s], count: counts[s], color: chartColors[i % chartColors.length] }))
       .filter(s => s.count > 0);
-  }, [rangeBookings, chartColors]);
+  }, [occupancyBookings, chartColors]);
 
   // ── Occupancy by room type (Performance) ──
   const roomTypeOccupancy = useMemo(() => {
@@ -874,14 +899,14 @@ export function ReportsPage() {
       const possibleNights = totalRoomsOfType * days;
 
       // Sum overlapping nights for bookings in this room type
-      const occupiedNights = rangeBookings
+      const occupiedNights = occupancyBookings
         .filter(b => b.roomType === rt.value)
         .reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
 
       const ratio = possibleNights > 0 ? Math.round((occupiedNights / possibleNights) * 100) : 0;
       return { name: rt.label, occupied: occupiedNights, total: possibleNights, occupancyRate: ratio };
     });
-  }, [roomTypes, rooms, rangeBookings, periodStart, periodEnd]);
+  }, [roomTypes, rooms, occupancyBookings, periodStart, periodEnd]);
 
   // ── Store: top-selling items ──
   const topStoreItems = useMemo(() => {
@@ -1487,13 +1512,13 @@ export function ReportsPage() {
     XLSX.writeFile(wb, `${config.hotelId}-sales-${periodStartKey}.xlsx`);
   };
 
-  const totalBookingsInRange = rangeBookings.length;
+  const totalBookingsInRange = occupancyBookings.length;
   const avgNights = totalBookingsInRange > 0
-    ? Math.round((rangeBookings.reduce((sum, b) => sum + b.numNights, 0) / totalBookingsInRange) * 10) / 10
+    ? Math.round((occupancyBookings.reduce((sum, b) => sum + b.numNights, 0) / totalBookingsInRange) * 10) / 10
     : 0;
 
   // Per W3.5: Avg. Occupancy + Busiest Room Type (replaces Avg. Length of Stay).
-  const totalRoomNights = rangeBookings.reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
+  const totalRoomNights = occupancyBookings.reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
   const daysInRange = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / 86_400_000));
   const totalActiveRooms = rooms.filter(r => r.isActive).length;
   const possibleRoomNights = totalActiveRooms * daysInRange;
@@ -1621,7 +1646,7 @@ export function ReportsPage() {
   }, [roomTypes, rangeBookings, periodStart, periodEnd]);
 
   const typeCounts = new Map<string, number>();
-  rangeBookings.forEach((b: any) => {
+  occupancyBookings.forEach((b: any) => {
     if (!b.roomType) return;
     typeCounts.set(b.roomType, (typeCounts.get(b.roomType) || 0) + 1);
   });
