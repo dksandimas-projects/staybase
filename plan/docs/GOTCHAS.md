@@ -23,6 +23,7 @@ Things agents must never do. Check this file before implementing any feature.
 - **Never validate voucher or corporate access codes client-side only** — always call the validation API route. Client-side validation is for UX feedback only; server-side is authoritative.
 - **Never allow public registration for admin/front-desk accounts** — admin creates all staff accounts manually.
 - **Always verify Firebase ID token in API routes** — use `Authorization: Bearer <token>` header and verify with Admin SDK before processing any authenticated request.
+- **Never match or link a booking to a member by the token's `email` claim without checking `email_verified`** — Firebase email/password signup lets a user claim an arbitrary, unverified email. Any code that grants booking access based on `guestEmail == token.email` (registration `linkBookingsByEmail`, `/api/members/stays`, `/api/email/early-checkin-request` `findBooking`) must require `decodedToken.email_verified === true` first, or an attacker who registers with a stranger's email can link, read (the stays projection leaks `bookingRef` + `lookupToken` = the public cancel credential), and act on that stranger's bookings (Spark Rewards audit 2026-07-18, HIGH-1). Matching by `memberId == token.uid` is always safe; only the email path needs the `email_verified` gate.
 
 ---
 
