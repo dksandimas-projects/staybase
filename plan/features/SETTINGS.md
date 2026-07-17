@@ -250,7 +250,7 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 
 Source: `settings/websiteContent` — `setDoc` on save per section.
 
-**Room Types** *(cross-reference — lives on the Room Types tab, not here)* — per W3.5/W3.6/W3.7, the room type entry owns its `imageUrls[]` gallery, rate matrix, `maxCapacity`, `bedDefinition`, `description`, and `amenities`. The Settings → Room Types table is the single edit surface (Add/Edit capture every type field; the Photos modal handles the gallery — max `MAX_ROOM_TYPE_PHOTOS` = 10, stored at `room-types/{typeValue}/{filename}`, public read / staff write). The Rates tab remains for bulk rate review. Rooms inherit all type properties by joining `Room.type` at read time. Source: `settings/hotelConfig.roomTypes[]`.
+**Room Types & Room Type Photos** *(cross-reference — lives on the Room Types tab, not here)* — per W3.5/W3.6/W3.7, the room type entry owns its `imageUrls[]` gallery, rate matrix, `maxCapacity`, `bedDefinition`, `description`, and `amenities`. The Settings → Room Types table is the single edit surface (Add/Edit capture every type field; the Photos modal handles the gallery — max `MAX_ROOM_TYPE_PHOTOS` = 10, stored at `room-types/{typeValue}/{filename}`, public read / staff write). The Rates tab remains for bulk rate review. Rooms inherit all type properties by joining `Room.type` at read time. Source: `settings/hotelConfig.roomTypes[]`.
 
 ---
 
