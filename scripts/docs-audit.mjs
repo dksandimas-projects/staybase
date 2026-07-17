@@ -39,10 +39,9 @@ const FILE_BUDGETS = [
   { match: (r) => r === "CLAUDE.md", ceiling: 5000, label: "agent entry" },
   { match: (r) => r === "plan/project/ROADMAP.md", ceiling: 6000, label: "roadmap (elevated pre-launch; re-tighten to 3000 after launch)" },
   { match: (r) => r === "plan/project/context/spark-inn-MASTER-CONTEXT.md", ceiling: 5000, label: "master context" },
-  { match: (r) => r === "plan/features/ADMIN-MOBILE.md", ceiling: 12500, label: "ratchet — compact toward 8000 on next touch", ratchet: true },
-  { match: (r) => r === "plan/features/SETTINGS.md", ceiling: 10000, label: "ratchet — compact toward 8000 on next touch", ratchet: true },
-  { match: (r) => r === "plan/features/BOOKINGS-MANAGEMENT.md", ceiling: 9000, label: "ratchet — compact toward 8000 on next touch", ratchet: true },
-  { match: (r) => r === "plan/docs/BACKEND.md", ceiling: 12000, label: "ratchet — compact toward 10000 on next touch", ratchet: true },
+  { match: (r) => r === "plan/features/ADMIN-MOBILE.md", ceiling: 10500, label: "ratchet — compact toward 8000 on next touch", ratchet: true },
+  { match: (r) => r === "plan/features/SETTINGS.md", ceiling: 9000, label: "ratchet — compact toward 8000 on next touch", ratchet: true },
+  { match: (r) => r === "plan/docs/BACKEND.md", ceiling: 12500, label: "ratchet — grew for PRC/UCO/ETR schema sync 2026-07-17; compact toward 10000 on next touch", ratchet: true },
   { match: (r) => r.startsWith("plan/features/"), ceiling: 8000, label: "feature spec" },
   { match: (r) => r.startsWith("plan/docs/"), ceiling: 10000, label: "domain doc" }
 ];

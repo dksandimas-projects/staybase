@@ -1,3 +1,8 @@
+# ⚠️ HISTORICAL ARCHIVE — NOT CANONICAL
+> Verbatim snapshot of `plan/docs/BACKEND.md` as of 2026-07-17, before PRC/UCO/ETR schema sync (transactionReference, unpaid-checkout audit fields, test-run fields) and compaction of the 2026-07-02 index-outage narrative. The active schema doc is `plan/docs/BACKEND.md`.
+
+---
+
 # Backend — Firestore & Firebase
 > Requires: CLAUDE.md
 
@@ -121,7 +126,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `paymentMethod` | string | `"pay-at-hotel"` \| `"gcash"` \| `"paypal"` \| other |
 | `paymentProofUrl` | string \| null | Firebase Storage URL. `null` is the canonical "no proof" value (not `""`) per BF-45. |
 | `paymentProofPath` | string \| null | Private Storage object path for new uploads; preferred over the legacy URL field |
-| `paymentReferenceNumber` | string \| null | **Narrow meaning (PRC-01, 2026-07-16):** only the reference submitted with the *original* booking payment intent/proof (guest-entered GCash ref, bank trace). Labeled "Original booking payment reference" in the drawer; immutable submission evidence. Never the canonical reference for later deposits, onsite collection, or post-checkout settlement — those live on each payment ledger entry's `transactionReference`. Displayed in dashboard pending-payment alerts. |
+| `paymentReferenceNumber` | string \| null | Guest-entered reference (GCash/bank ref #) for staff cross-check. Displayed in the dashboard pending payment alerts. Per Phase 12 — Dashboard Payment Rejection & Reference Verification (2026-07-15). |
 | `paymentRejectionReason` | string \| null | Staff reason when a pending payment proof is rejected from the dashboard. Bounces the booking back to `pending` (room stays held) and emails the guest with the reason. Per Phase 12 — Dashboard Payment Rejection & Reference Verification (2026-07-15). |
 | `paymentRejectedAt` | timestamp \| null | Server timestamp set by `/api/bookings/reject-payment`. |
 | `paymentRejectedBy` | string \| null | Staff UID who rejected. |
@@ -138,17 +143,9 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `pendingLoyaltyPoints` | number | Locked checkout award waiting for final folio settlement; cleared atomically when awarded |
 | `loyaltyAwardStatus` | string | `pending-payment`, `awarded`, or `ineligible`; transaction/idempotency state for checkout earnings |
 | `pointsAwardedAt` | timestamp \| null | When checkout earnings were credited; null while pending/ineligible |
-| `checkedOutAt` / `checkedOutBy` | timestamp / string | Checkout time + verified staff UID |
 | `checkedOutWithBalance` | number | Immutable charge-inclusive outstanding balance stamped at checkout; remains the audit record even after later settlement |
 | `checkedOutFolioTotal` | number | Checkout snapshot of booking total + net incidentals + delivered billed-to-room store orders |
 | `checkedOutCollectedTotal` | number | Net payment-ledger total at checkout, including refunds |
-| `unpaidCheckoutReason` | string | Required staff reason (≤500 chars) when checkout leaves a positive balance (UCO-02); absent on settled checkouts |
-| `unpaidCheckoutApprovalThreshold` | number | Snapshot of `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000) at checkout time (UCO-03/06) |
-| `unpaidCheckoutApprovedBy` | string \| null | Admin UID when the balance exceeded the threshold and required elevated approval; null for below-threshold Front Desk checkouts |
-| `unpaidCheckoutApprovedAt` | timestamp | When the unpaid departure was authorized |
-| `unpaidCheckoutSnapshotFolioTotal` / `unpaidCheckoutSnapshotCollectedTotal` / `unpaidCheckoutSnapshotBalance` | number | Immutable departure-time folio/collected/balance snapshot (UCO-06); later settlement never rewrites these |
-| `isTestData` | boolean \| absent | `true` only when created under an active test run (ETR-03/06); missing = live data |
-| `testRunId` | string \| absent | Owning test run for deterministic scoped cleanup (`plan/features/ENVIRONMENT-TEST-RESET.md`) |
 | `earlyCheckoutOriginalCheckOut` | timestamp \| null | Original departure timestamp retained when early checkout shortens the operational stay |
 | `hasBreakfast` | boolean | `true` if breakfast add-on purchased |
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
@@ -166,33 +163,24 @@ the idempotency guard for the guest payment-confirmed email. Staff may then
 transition `payment-confirmed` to `confirmed`, or check in directly when the
 registration gate is otherwise complete.
 
-A staff member verifying an uploaded online payment uses **Verify & Record
-Payment** (PRC-13, 2026-07-16): one server transaction re-reads the booking and
-payment ledger, validates amount/method/`transactionReference` against the
-payment-method config, creates one immutable idempotent payment record
-(client-preallocated ID), and transitions `payment-uploaded` →
-`payment-confirmed` only when the collected total satisfies the booking total.
-A partial verified payment is recorded without marking the booking paid. The
-legacy status-only `POST /api/bookings/mark-payment-confirmed` remains
-deployed for in-flight backward compatibility but is unreachable from the UI.
-Firestore client rules do not allow direct status updates.
+A staff member verifying an uploaded online payment uses
+`POST /api/bookings/mark-payment-confirmed`. That route transactionally permits
+only `payment-uploaded` → `payment-confirmed`, stamps `handledBy` and
+`paymentConfirmedAt`, treats an already-confirmed booking as an idempotent
+retry, and sends the guest email only after a new transition commits. Firestore
+client rules do not allow direct status updates.
 
-Checkout with a positive charge-inclusive balance is a controlled flow (UCO,
-2026-07-16): a staff reason is required, balances above
-`hotelConfig.unpaidCheckoutApprovalThreshold` require an authenticated admin
-claim (enforced server-side inside the checkout transaction), and the departure
-snapshot fields above are stamped immutably. The booking stays in Receivables
-until later ledger payments settle it. Eligible Spark Rewards awards are
-deferred until final payment; points are based only on net `totalPrice`
-(room/breakfast), not incidentals or store orders. Early departure retains the
-contracted total and adds a guest-visible retained-total line to the rebuilt
-rate breakdown.
+Checkout does not hard-block an unsettled folio. It records the charge-inclusive
+balance for audit/receivables and defers any eligible Spark Rewards award until
+the final payment. Points are based only on net `totalPrice` (room/breakfast),
+not incidentals or store orders. Early departure retains the contracted total
+and adds a guest-visible retained-total line to the rebuilt rate breakdown.
 
 > **Store charges are not denormalized onto the booking document.** The checkout folio in `admin-app/src/pages/BookingsPage.tsx` (`getBookingStoreCharges`) derives the billed store orders for a booking at read time by filtering the `storeOrders` collection on `bookingId === booking.id && paymentMethod === "add-to-bill" && status === "delivered" && isBilled === true`. This avoids denormalization drift between the booking and store order lifecycles. `storeOrders.isBilled` and `storeOrders.billedAt` are the source of truth (set by the front desk "Add to Booking Bill" action in the admin Bookings drawer).
 
 > **Manual walk-in pricing is durable across room/date moves.** A walk-in created with a manual override stores a `manual` room line in its locked rate breakdown. Rescheduling derives the exact nightly basis from that line's subtotal and nights, rescales it for the new stay length, and does not replace it with the target room's live standard/seasonal rate or add a separate breakfast line. Non-manual bookings continue to recalculate against the target room/date pricing basis.
 
-> **Composite indexes must be deployed, not just committed.** `firebase/firestore.indexes.json` being present and correct in the repo does not mean the indexes exist in the live project — there is no CI step or pre-deploy hook that runs `firebase deploy --only firestore:indexes`. If a new query needs a composite index, add it to `firestore.indexes.json` **and** deploy it. (Learned from the 2026-07-02 production outage where all 5 committed indexes had never been deployed — full incident record in `plan/project/archive/BACKEND-ARCHIVE-2026-07-17.md`. The stg-named-project-serving-production concern flagged then is now being resolved by the environment split in `plan/project/PROD-CUTOVER-RUNBOOK.md`.)
+> **Fixed 2026-07-02: `GET /api/rooms/availability` was 500ing in production** with a Firestore `FAILED_PRECONDITION: The query requires an index` error on the composite `status` (ASC) + `checkIn` (ASC) query. All 5 composite indexes defined in `firebase/firestore.indexes.json` (4 on `bookings`, 1 on `rooms`) existed in source control but had never actually been deployed to the live project — confirmed via `firestore_list_indexes` that zero indexes existed before the fix. Resolved by creating all 5 directly against the live project (`spark-inn-stg-7a7ad`); all now `READY` and `/api/rooms/availability` returns `200`. **Lesson: `firebase/firestore.indexes.json` being present and correct in the repo does not mean it's deployed** — there is no CI step or pre-deploy hook that runs `firebase deploy --only firestore:indexes` automatically. If a new query needs a composite index, add it to `firestore.indexes.json` **and** deploy it (via `firebase deploy --only firestore:indexes` or the Firebase MCP `firestore_create_index` tool) — don't assume the JSON file alone is sufficient. Separately still worth confirming with whoever owns the Firebase project config: the live `FIREBASE_PROJECT_ID` used by both the Preview and Production Vercel environments is `spark-inn-stg-7a7ad` (a "stg"-named project serving production traffic) — may be intentional (single project, historically named), but flagging since it reads like a staging/production mixup.
 
 
 ---
@@ -206,8 +194,7 @@ Subcollection — audit trail of all onsite payments, uploaded-payment verificat
 | `type` | string | `payment` or `refund`; legacy positive entries default to `payment` |
 | `amount` | number | Positive amount collected or negative refund outflow |
 | `method` | string | `"cash"` \| `"gcash"` \| `"paypal"` \| other method name from `hotelConfig.paymentMethods` |
-| `transactionReference` | string \| null | Tender-specific identifier for **this** ledger entry (GCash ref, bank trace) — distinct from `Booking.paymentReferenceNumber` (original submission evidence, never auto-copied here). Required only when the method's `requireReferenceNumber` config says so, resolved server-side; cash and legacy entries omit it. Part of the idempotency comparison (amount + method + reference + note). Shown separately from `note` in ledger rows, Collections, Daily Close, and exports (PRC-05..08). |
-| `note` | string | Optional internal context (e.g. "Balance after discount rejection") — never holds the transaction reference |
+| `note` | string | Optional context (e.g. "Balance after discount rejection") |
 | `reason` | string \| null | Required refund reason; null for payments |
 | `approvedBy` | string \| null | Admin UID for refunds; null for payments |
 | `recordedBy` | string | Staff UID |
