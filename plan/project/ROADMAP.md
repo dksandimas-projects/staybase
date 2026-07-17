@@ -1640,3 +1640,7 @@ Full-journey audit across all 5 roles (guest, corporate, front desk, admin, cros
 ### Corporate journey (role 2 of 5 — audited 2026-07-17)
 
 - [ ] **C-01 (HIGH)** — Fix `handleConvertInquiryToBooking` to resolve capacity + rates from the RoomType entry in `settings/hotelConfig.roomTypes[]` instead of dead room-document fields (`pricePerNight`/`corporateRate`/`maxCapacity` moved off room docs in W3.6/W3.7). Currently a conversion without a manual rate override or attached access-code rate creates a confirmed booking at ₱0/night and the capacity check never fires. Reject a resolved rate of 0 without explicit override. `guest-app/server/handlers/corporate-inquiries.ts:183,217,229,253-257`
+
+### Front desk journey (role 3 of 5 — audited 2026-07-17)
+
+- No CRITICAL/HIGH findings. Two MEDs (FD-01 missing 8h inactivity auto-logout per SECURITY.md; FD-02 `guests/{uid}` rule allows self-written `role` fields → phantom staff rows in Settings) and one LOW docs contradiction (FD-03, Decision #81 vs admin-only Rates page) are tracked in `plan/docs/AUDIT-E2E-REPORT.md`.

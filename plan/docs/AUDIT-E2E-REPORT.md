@@ -9,7 +9,7 @@
 |---|---|---|
 | 1 | Guest | ✅ Complete (2026-07-17) |
 | 2 | Corporate guest | ✅ Complete (2026-07-17) |
-| 3 | Front desk | ⬜ Pending |
+| 3 | Front desk | ✅ Complete (2026-07-17) |
 | 4 | Admin (incl. reports data accuracy) | ⬜ Pending |
 | 5 | Cross-cutting | ⬜ Pending |
 
@@ -21,7 +21,9 @@ The guest journey (browse → availability → 4-step booking with voucher → c
 
 The corporate journey (role 2) confirmed the public `/corporate/book` path is server-authoritative end-to-end — dual live Turnstile gates, code validation returning only the rate map, in-transaction re-validation with usage-count increments, a powerless flat-rate intent flag, and vouchers correctly blocked. The staff-side **convert-inquiry** path is the weak link: it still reads `pricePerNight` / `corporateRate` / `maxCapacity` off room documents, but those fields moved to the RoomType entry in W3.6/W3.7 — so a conversion without a manual rate override or attached access-code rate creates a **confirmed booking at ₱0/night** and its capacity check is dead code (C-01, HIGH). Its blocked-room check also parses the free-text `preferredDates` string instead of the requested dates (C-02, MED), and the inquiry pipeline UI shows blank dates for every guest-submitted inquiry due to a string-vs-struct schema drift (C-03, MED).
 
-**Provisional verdict (2 of 5 roles audited): NO-GO until G-01 and C-01 are fixed** — both are small fixes that prevent revenue-data corruption (unauthenticated `NaN`/discounted totals; staff-triggered ₱0 confirmed bookings). Everything else found so far is shippable-with-known-issues.
+The front-desk journey (role 3) is clean at the CRITICAL/HIGH tier. Role gating is claims-based (`getIdTokenResult`, non-staff rejected, least-privilege fallback), `/rates`, `/members`, and `/settings` render an Access Denied state for front desk, and admin-only API routes (`create-staff`, `disable-staff`, `publish-seo`) re-check `role === "admin"` server-side. Walk-in creation is strictly Zod-validated (unlike the public path — sharpening G-01's fix) and runs the full conflict/block/lingering-checkout transaction. The housekeeping cycle matches Decision #88, receipts are folio-based with the payments ledger, and booking status transitions are blocked client-side by the Firestore field allowlist. Two MEDs: the 8-hour inactivity auto-logout specified in SECURITY.md is not implemented (session persistence is tab-scoped, which mitigates), and the `guests/{uid}` rule lets any signed-in user — including guest-app Rewards members in the same Firebase project — self-write a `role` field that the Settings staff list queries, allowing phantom staff rows (no privilege escalation; authorization is claims-only).
+
+**Provisional verdict (3 of 5 roles audited): NO-GO until G-01 and C-01 are fixed** — both are small fixes that prevent revenue-data corruption (unauthenticated `NaN`/discounted totals; staff-triggered ₱0 confirmed bookings). Everything else found so far is shippable-with-known-issues.
 
 ---
 
@@ -56,7 +58,16 @@ Decision #82 (DECISIONS-FEATURES.md) says the booking receipt PDF is "reused as 
 **G-04 · Guest · `guest-app/src/pages/IntercomPage.tsx:599-613` + `firebase/firestore.rules:213-219` — intercom message rate limit is client-side only** *(Confidence: HIGH)*
 SECURITY.md §Intercom Abuse Mitigation specifies ~30 messages/room/10 min. The only enforcement is `canSendGuestMessage()` reading `localStorage` — trivially bypassed since Firestore rules allow unauthenticated `create` on `intercoms/{roomId}/messages` (key-allowlisted, but unlimited volume). A script can flood the staff inbox, which plays a notification sound per message. The verify-guest gate (last name + active booking) raises the bar for the chat UI but does not gate raw Firestore writes. **Fix:** route guest sends through a rate-limited API endpoint, or accept and document the residual risk (physical-QR + name-gate model already accepts openness). **Effort:** ~0.5 day.
 
+**FD-01 · Front desk · admin-app (absent) — 8-hour inactivity auto-logout from SECURITY.md §Session Management is not implemented** *(Confidence: HIGH — grep across `admin-app/src` finds no idle timer or `signOut` timeout)*
+SECURITY.md specifies "Auto-logout after 8 hours of inactivity — implemented client-side via a `setTimeout` reset on any user interaction." Only `browserSessionPersistence` is implemented (`AdminContext.tsx:597,660`), which clears the session on tab/browser close but not on an unattended open tab — the stated threat model (shared front-desk computers left unattended between shifts). **Fix:** add an idle timer hook in `AdminLayout` (reset on interaction events, `signOut()` + redirect on expiry) or amend SECURITY.md if tab-scoped persistence is deemed sufficient. **Effort:** ~1 h.
+
+**FD-02 · Front desk · `firebase/firestore.rules:110-113` — any signed-in user can self-write a `role` field into `guests/{uid}`, polluting the staff list** *(Confidence: HIGH)*
+The `guests` rule allows `create, update: if isAdmin() || (signedIn() && request.auth.uid == userId)` with no field restrictions. Guest-app Spark Rewards members authenticate against the same Firebase project, so any member can write `guests/{their-uid}` with `role: "front-desk"` — and the Settings staff list subscribes to `guests where role in ["front-desk","admin"]` (`AdminContext.tsx:4368`), so a phantom "staff" row appears in the admin UI (social-engineering surface: an admin might grant it a real account/claims via the edit flow). No direct privilege escalation — `isStaff()`/`isAdmin()` check custom claims only. **Fix:** constrain self-writes with `diff().affectedKeys()` to exclude `role` (and other staff-mirror fields), reserving `role` writes for `isAdmin()`/server. **Effort:** <1 h.
+
 ### LOW
+
+**FD-03 · Front desk · docs contradiction — Decision #81's premise that "Rates is admin+front-desk accessible" is false; vouchers are not reachable by front desk** *(Confidence: HIGH)*
+`/rates` is admin-only in both `AdminLayout.tsx:92-94` and `plan/admin-app/CLAUDE.md`, but Decision #81 moved voucher CRUD to the Rates page *because* front desk supposedly could reach it ("Vouchers need front-desk access for walk-in redemptions"). Operationally, front desk can still *apply* a voucher code during walk-in creation (validated server-side), but cannot view or look up voucher campaigns. **Fix:** product decision — either grant front desk read-only voucher visibility or amend Decision #81/VOUCHERS.md to record the admin-only reality. **Effort:** docs 15 min, or ~2 h for a read-only voucher view.
 
 **C-04 · Corporate · `guest-app/src/pages/CorporateBookingPage.tsx:701` — honeypot layer is decorative on `/corporate/book`** *(Confidence: HIGH)*
 The create payload hardcodes `_hp: ""` and the page renders no hidden honeypot input (the "Terms and honeypot" block at `:1653` contains only the consent checkbox and Turnstile). Bots on this route are never honeypot-caught; Turnstile + 5/min rate limit still apply. **Fix:** render the same CSS-hidden input as `BookingPage.tsx:1483-1491` and bind it. **Effort:** <30 min.
@@ -88,6 +99,18 @@ Both fields are arbitrary strings persisted verbatim and rendered in the admin d
 - **Consent enforced** with Privacy/Terms links at Step 2 (`:1398-1419`) plus the server-side consent check shared with the standard flow.
 - **Conversion is atomic** — `linkedInquiryId` on the booking and `convertedBookingId` + status flip on the inquiry are written in the same transaction (`corporate-inquiries.ts:365,399-405`), booking lands as `source: "corporate"` (Decision #103); double-conversion rejected.
 - **Public inquiry endpoint** (`/api/corporate/inquiry`) has strict Zod, silent-success honeypot, Turnstile, and 5/IP/min rate limit (router:775-794).
+
+---
+
+## Verified-Good (Front desk role)
+
+- **Role gate is claims-based and fails closed** — `getIdTokenResult(user, true)` with a strict `isStaffRole` check that signs out non-staff tokens (`AdminContext.tsx:607-618`); `/rates`, `/members`, `/settings` show an Access Denied overlay for front desk (`AdminLayout.tsx:92-94,307-333`) per AUTH-ROLES.md (visible-but-restricted, not hidden).
+- **Admin-only API routes re-check role server-side** — `create-staff`, `disable-staff`, `publish-seo` all reject `role !== "admin"` with 403 (router:945-981); `authenticateStaff` itself rejects tokens without a staff role claim.
+- **Walk-in creation is the model citizen** — strict shared Zod schema (`shared/schemas/booking.ts:43-59`: `guests` int 1–100, `totalPriceOverride` finite 0–1M, `.strict()`), staff-authenticated, and the transaction runs the same candidate/overlap/roomBlocks/lingering-checked-in checks as the public path, resolving capacity and rates from the RoomType entry (`bookings.ts:1362-1385`) — the exact pattern C-01's convert path should copy.
+- **Client-side booking writes are structurally limited** — Firestore rules allowlist only operational fields via `diff().affectedKeys().hasOnly(...)` (`firestore.rules:45-58`); status, pricing, and rewards mutations must go through the authenticated API routes. Incidental charges have per-field validation and deterministic void IDs.
+- **Housekeeping cycle** matches Decision #88: clean → dirty → in-progress → clean (`AdminContext.tsx:819-831`).
+- **Receipts are folio-based** — `printBookingReceiptPDF` (`BookingsPage.tsx:1658`) renders from `getBookingFolio` + the `payments` subcollection with amount-due math; registration and receipt PDFs have regression tests.
+- **Session persistence is tab-scoped** (`browserSessionPersistence`, `AdminContext.tsx:597,660`) per SECURITY.md; AdminContext's 25 `onSnapshot` listeners all return cleanup functions.
 
 ---
 
