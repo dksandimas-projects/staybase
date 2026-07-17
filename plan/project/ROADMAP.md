@@ -1636,3 +1636,7 @@ Full-journey audit across all 5 roles (guest, corporate, front desk, admin, cros
 ### Guest journey (role 1 of 5 — audited 2026-07-17)
 
 - [ ] **G-01 (HIGH)** — Zod-validate the full `/api/bookings/create` (and `create-walkin`) body: `guests` must be a finite integer ≥ 1; add `Number.isFinite` backstop on computed `totalPrice`. Unvalidated `guests` currently allows unauthenticated price manipulation (negative breakfast line) and `NaN` totals that poison revenue reports. `guest-app/server/handlers/bookings.ts:345,562,807`
+
+### Corporate journey (role 2 of 5 — audited 2026-07-17)
+
+- [ ] **C-01 (HIGH)** — Fix `handleConvertInquiryToBooking` to resolve capacity + rates from the RoomType entry in `settings/hotelConfig.roomTypes[]` instead of dead room-document fields (`pricePerNight`/`corporateRate`/`maxCapacity` moved off room docs in W3.6/W3.7). Currently a conversion without a manual rate override or attached access-code rate creates a confirmed booking at ₱0/night and the capacity check never fires. Reject a resolved rate of 0 without explicit override. `guest-app/server/handlers/corporate-inquiries.ts:183,217,229,253-257`

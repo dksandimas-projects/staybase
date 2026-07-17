@@ -79,3 +79,9 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
 - Corporate booking guest flow: `plan/features/CORPORATE-BOOKING.md`
 - Corporate inquiry form (guest side): `plan/features/STATIC-PAGES.md §Corporate Stays`
 - New corporate inquiry email: `plan/features/EMAIL-PDF-STORAGE.md`
+
+## Known Issues (Audit 2026-07-17)
+
+- **C-01 (HIGH, open):** `handleConvertInquiryToBooking` still reads `pricePerNight`, `corporateRate`, and `maxCapacity` from the **room document** — those fields moved to the RoomType entry in `settings/hotelConfig.roomTypes[]` (W3.6/W3.7). Consequence: converting an inquiry with no attached access-code rate and no manual rate override creates a **confirmed booking at ₱0/night**, and the guest-capacity check never fires (`guests > undefined`). Fix: resolve the type entry inside the transaction (same pattern as `handleCreateBooking`). `guest-app/server/handlers/corporate-inquiries.ts:183,217,229,253-257`
+- **C-02 (MED, open):** the convert path's blocked-room window check parses the free-text `preferredDates` string instead of the requested check-in/out (shadowed variables → NaN comparisons → block never detected), and it never checks the `roomBlocks` collection. A blocked room can be converted into a confirmed booking inside its block window. `corporate-inquiries.ts:171-182`
+- **C-03 (MED, open):** `preferredDates` schema drift — the guest inquiry form submits a free-text string, but the admin app types/renders it as `{ from, to }`, so the pipeline table, drawer, and convert-modal prefill show blank dates for every guest-submitted inquiry. Align on one shape (struct preferred) with a read-time fallback.
