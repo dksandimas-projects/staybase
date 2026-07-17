@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 17, 2026 (Roadmap compacted: completed-phase diaries moved to `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`; ETR spec moved to `plan/features/ENVIRONMENT-TEST-RESET.md`.)
+> Last updated: July 17, 2026 (E2E audit section updated — all 17 findings merged to `dev`; remaining gate is the cutover deploy incl. Storage rules.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -194,9 +194,11 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ---
 
-## E2E User Journey Audit (2026-07-17) — fixes ready for deployment
+## E2E User Journey Audit (2026-07-17) — all findings remediated
 
-🔄 G-01, C-01, and X-01 are implemented on `fix/e2e-launch-blockers`, with guest/admin typechecks and full regression suites passing. **Production remains NO-GO until this branch is merged and the app/API plus `firebase/storage.rules` are deployed.** After deployment, the audit's CRITICAL/HIGH gate is cleared. Remaining MED/LOW recommendations, including X-02 before a second white-label client, live in `plan/docs/AUDIT-E2E-REPORT.md`.
+✅ All 17 findings are fixed **and merged to `dev`**: the 3 HIGHs (`aae6808` — G-01 full-body Zod validation, C-01 RoomType-sourced conversion pricing, X-01 Storage-rule public-read removal), the 8 MEDs (`cfe6581`), and the 6 LOWs (`9b9c85e`). All 847 tests, typecheck, builds, and preflight pass. Report: `plan/docs/AUDIT-E2E-REPORT.md`.
+
+⬜ **Remaining gate:** the fixes reach production only when `dev → main` merges and the app/API **plus `firebase/storage.rules`** deploy at cutover (PC-06 covers this) — verify the deployed Storage rules match the repo before go-live. X-02's white-label sweep landed for Spark Inn; re-verify it before onboarding a second white-label client.
 
 ---
 

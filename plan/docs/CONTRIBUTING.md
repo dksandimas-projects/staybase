@@ -173,7 +173,7 @@ If a new feature or concern warrants a new MD:
 | `plan/project/context/spark-inn-MASTER-CONTEXT.md` | 5,000 |
 | Any single `plan/features/*.md` | 8,000 |
 | Any single `plan/docs/*.md` (domain doc) | 10,000 |
-| **Ratchet exceptions** (pre-existing oversized contract docs — ceiling set just above current size so further growth fails; compact toward the standard ceiling next time the feature is materially touched): `ADMIN-MOBILE.md` 12,500 · `SETTINGS.md` 10,000 · `BOOKINGS-MANAGEMENT.md` 9,000 · `BACKEND.md` 12,000 | — |
+| **Ratchet exceptions** (oversized contract docs — ceiling set just above current size so further growth fails; compact toward the standard ceiling next time the feature is materially touched): `ADMIN-MOBILE.md` 10,500 · `SETTINGS.md` 9,000 · `BACKEND.md` 12,500 (grew for the 2026-07-17 PRC/UCO/ETR schema sync). `BOOKINGS-MANAGEMENT.md` was compacted back under the standard ceiling on 2026-07-17 and no longer has an exception. | — |
 | Combined always-read (`CLAUDE.md` + `GOTCHAS.md`) | 10,000 |
 | Entire active MD system | warn above 120,000 |
 

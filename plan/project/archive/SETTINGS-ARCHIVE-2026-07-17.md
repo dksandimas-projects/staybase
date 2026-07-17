@@ -1,3 +1,8 @@
+# ⚠️ HISTORICAL ARCHIVE — NOT CANONICAL
+> Verbatim snapshot of `plan/features/SETTINGS.md` as of 2026-07-17, before compaction (stale §15 Environment Testing hardening checklist — since shipped as ETR-S09..S15 — replaced with a pointer to `plan/features/ENVIRONMENT-TEST-RESET.md`; duplicate cross-references and completed-migration narration trimmed). The active spec is `plan/features/SETTINGS.md`.
+
+---
+
 # Settings
 > App: admin-app
 > Phase: Phase 9 — Remaining Features
@@ -83,10 +88,11 @@ Fully dynamic CRUD for the booking payment list. The list rendered on `/book` St
 - [x] QR files are compressed client-side via `compressImageFile(file, { maxWidth: 800, maxHeight: 800, quality: 0.9, mimeType: "image/png" })` — PNG is critical because QR codes are sharp monochrome and JPEG artifacts destroy scannability. Maximum file size `MAX_PAYMENT_METHOD_QR_BYTES` (2 MB) enforced pre-compression with a clear error toast.
 - [x] Source: `settings/hotelConfig.paymentMethods[]`. Storage path: `assets/payment-methods/{method}/{timestamp}-{filename}`.
 
-**One-time read migrations (live idempotent code in `AdminContext`, each gated by a `useRef` to once per session)**
+**One-time read migration (handled in `AdminContext`)**
 
-- [x] Legacy `bookingPaymentMethods` docs are reshaped on first snapshot: `accountInfo` splits into `accountName` (first line) + `accountNumber` (rest). The legacy key stays on the doc (merged `setDoc` can't remove fields; dead data is harmless).
-- [x] **Protected-method backfill** — missing `PROTECTED_PAYMENT_METHODS` entries (currently `pay-at-hotel`) are appended with sensible defaults and persisted. Only protected keys are backfilled — an admin who removed `maya`/`bank` keeps that decision. Extend via `BACKFILL_DEFAULTS` in `AdminContext.tsx` + `PROTECTED_PAYMENT_METHODS` in `shared/constants`.
+- [x] On first snapshot, if the doc carries the legacy `bookingPaymentMethods` key (the pre-feature field name) and no `paymentMethods` key, the entries are reshaped in place: `accountInfo` (single free-text field) is split into `accountName` (first line) + `accountNumber` (the rest, or empty when only one line). The legacy key is left in place on the doc — `setDoc(..., { merge: true })` cannot remove fields, and the few KB of dead data are harmless.
+- [x] The migration is gated by a `useRef` so it runs at most once per session and is idempotent.
+- [x] **One-shot protected-method backfill** — On first snapshot, if `paymentMethods[]` exists but does not contain every key in `PROTECTED_PAYMENT_METHODS` (currently `["pay-at-hotel"]`), the missing entries are appended with sensible defaults (e.g. `{ method: "pay-at-hotel", label: "Pay at Hotel", accountName: "", accountNumber: "", qrUrl: "", isEnabled: true }`) and the merged array is persisted via `setDoc(settings/hotelConfig, { paymentMethods: next }, { merge: true })`. Gated by a separate `useRef` (`hasBackfilledProtectedPaymentMethodsRef`) so it runs at most once per session and is idempotent. This is the safe backfill for deployments that configured their list before "Pay at Hotel" was added to the default seed. Only `pay-at-hotel` is backfilled — `maya` and `bank` are NOT, so an admin who previously removed them keeps their decision. To add more backfill entries, extend `BACKFILL_DEFAULTS` in `AdminContext.tsx` and `PROTECTED_PAYMENT_METHODS` in `shared/constants`.
 
 **See also**
 
@@ -209,7 +215,7 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 - [x] A picked type that has no active rooms is silently skipped (no empty card)
 - [x] Source: `settings/websiteContent.homepage.featuredTypeValues`
 
-**Legacy `featuredRoomIds` migration (live read-migration in `AdminContext.mergeWebsiteContent`)** — docs still carrying the old per-room `featuredRoomIds` (and no `featuredTypeValues`) are mapped id → room type, deduped, and returned as the new field; the next admin save persists it. Guest localStorage cache key is `publicSiteContent:v2` so pre-migration cached entries are ignored.
+**Migration from the old per-room picker** — the previous model was `featuredRoomIds: string[]` (a list of physical room doc IDs). That was wrong: every card field is type-driven, so picking "Room 201" vs "Room 202" (both `executive`) rendered identically. `AdminContext.mergeWebsiteContent` does a one-time migration on read: if the doc still carries the old `featuredRoomIds` and no new `featuredTypeValues`, it maps each id to its room type via the `roomTypes` already in context, dedupes, and returns the new field. The next admin save writes the new field and the old one is dropped. localStorage cache key bumped from `publicSiteContent:v1` to `v2` so old cached entries are ignored.
 
 **Homepage Services** (two-up service cards)
 - [x] Add / remove / reorder the service cards. Each row: title, description, icon, isEnabled toggle
@@ -250,7 +256,11 @@ List-shaped editable content for the public homepage. Hero copy + photos were mo
 
 Source: `settings/websiteContent` — `setDoc` on save per section.
 
-**Room Types** *(cross-reference — lives on the Room Types tab, not here)* — per W3.5/W3.6/W3.7, the room type entry owns its `imageUrls[]` gallery, rate matrix, `maxCapacity`, `bedDefinition`, `description`, and `amenities`. The Settings → Room Types table is the single edit surface (Add/Edit capture every type field; the Photos modal handles the gallery — max `MAX_ROOM_TYPE_PHOTOS` = 10, stored at `room-types/{typeValue}/{filename}`, public read / staff write). The Rates tab remains for bulk rate review. Rooms inherit all type properties by joining `Room.type` at read time. Source: `settings/hotelConfig.roomTypes[]`.
+**Room Type Photos** *(per W3.5 — type-driven gallery, cross-reference)* — lives on the **Room Types** tab. The room type entry owns its `imageUrls[]` plus rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. Photos are stored at `room-types/{typeValue}/{filename}` in Storage (public read, staff write). Maximum `MAX_ROOM_TYPE_PHOTOS` (currently 10) per type — enforced in the upload UI. Source: `settings/hotelConfig.roomTypes[].imageUrls`.
+
+**Room Type Photos** *(per W3.5 — type-driven gallery)* — note: lives on the **Room Types** tab, not here. Documented for cross-reference only.
+
+> **W3.6 + W3.7 update:** The room type entry owns the rate matrix + `maxCapacity` (W3.6) and `bedDefinition` + `description` + `amenities` (W3.7). The Settings → Room Types table is the single edit surface: Add captures every type field including rates; the **Edit** modal updates every type field; the **Photos** modal handles the type's gallery. The **Rates** tab still exists for bulk rate review but rates can also be edited per-type from Settings. Rooms created against a type inherit all of these properties by joining `Room.type` at read time.
 
 ---
 
@@ -345,9 +355,36 @@ Saving Hotel Settings compares the schema-relevant operational fields with the l
 
 ### 15. Environment Testing and Staging Reset
 
-Admin-only tab. Test-run creation, close, and run-scoped cleanup are the normal tools for repeatable testing (TEST DATA badges, active-run banner, manifest-confirmed deletion). **Reset Operational Data** is the broader staging-only clean-slate operation — server-allowlisted by `STAGING_ALLOWLIST_PROJECT_IDS`, admin-re-validated, typed double confirmation (`RESET STAGING` + exact project ID), preview-manifest-bound execution, atomic job lock with resumable checkpoints, fail-closed integrity scan, and durable audit record. Production never renders the execute action; production Settings links to staging instead.
+The Environment Testing tab is Admin-only. Test-run creation and run-scoped cleanup are the normal tools for repeatable testing. **Reset Operational Data** is a broader staging-only clean-slate operation and must never be exposed as an executable production action.
 
-The hardening checklist and first-use fixture/injected-failure drill (ETR-S01..S15) completed 2026-07-16. Full shipped contract, open spec (production→staging refresh, Restricted Diagnostic Mode, pre-live production reset), and the current execution-gate caveat: `plan/features/ENVIRONMENT-TEST-RESET.md` — that file is the single source of truth for this tab's behavior; do not restate it here.
+**Current safety status (reviewed July 16, 2026)**
+
+- [x] Staging and production API targets are separated by the Admin host/environment.
+- [x] Production does not expose the staging-reset route; production Settings links to staging instead of rendering the execute action.
+- [x] The server requires an authenticated Admin, an exact server-side project allowlist match, the `RESET STAGING` phrase, and the exact Firebase project ID.
+- [x] Preview displays collection counts and the preservation list before confirmation.
+- [ ] **Do not execute the broad staging reset until the hardening checklist below is complete and verified in the deployed staging environment.**
+
+**Required hardening before first use**
+
+- [ ] Add an atomic reset-job lock. Concurrent requests must resolve to one job; stale locks need bounded recovery, and retries must resume safely rather than begin another deletion pass.
+- [ ] Bind execution to a short-lived preview manifest identifier/hash. Reject expired previews, project mismatches, and material scope drift; require a new preview instead of deleting against an unreviewed dataset.
+- [ ] Fail closed on partial deletion. Any failed item or phase must return an incomplete/failed result—not `200 success`—keep the Settings workflow visibly unresolved, and provide an idempotent retry path.
+- [ ] Persist phase checkpoints and progress counts outside collections being deleted. The job must survive function timeout/restart and never lose its recovery cursor when `testRuns` is cleared.
+- [ ] Reconcile the full operational scope. Explicitly classify calls/ICE candidates, room blocks, Daily Close records, corporate inquiries, operational notifications/audits, and every known child collection as deleted or preserved; show those decisions in preview.
+- [ ] Restore room state using verified room IDs and room numbers, then confirm every affected room is `available` and `clean`. Missing/renamed rooms must be reported as integrity failures.
+- [ ] Run a post-reset integrity scan: target collections empty, no orphaned ledgers/messages/tenders/signaling children, no stale active-room state, counters unchanged, and protected settings/identity/catalog/configuration still present.
+- [ ] Record a terminal audit state (`complete`, `incomplete`, or `failed`) with manifest ID, checkpoints, counts, failed items, integrity results, initiating/completing Admin, project ID, and timestamps.
+- [ ] Add emulator/integration coverage for concurrent execution, timeout/resume, individual delete failures, room restoration, scope preservation, counter preservation, preview expiry/drift, and post-reset orphan detection.
+- [ ] Configure `STAGING_ALLOWLIST_PROJECT_IDS` only in the guest/API Vercel Preview environment, verify an authenticated preview against the exact staging project, and re-confirm that production preview/execute remain unavailable.
+
+**First-use acceptance**
+
+- [ ] A controlled fixture reset completes from preview through integrity scan with matching before/deleted/remaining counts.
+- [ ] Injected failures produce an incomplete state, never a success toast, and the same job resumes to a verified clean result.
+- [ ] Two simultaneous execute requests cannot create overlapping jobs.
+- [ ] Configuration, staff identity, catalog, vouchers/corporate codes, and reference counters match their pre-reset values.
+- [ ] The deployed production Admin/API cannot preview or execute the broad reset regardless of authenticated role or client request.
 
 ---
 

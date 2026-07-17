@@ -1,3 +1,8 @@
+# ⚠️ HISTORICAL ARCHIVE — NOT CANONICAL
+> Verbatim snapshot of `plan/features/ADMIN-MOBILE.md` as of 2026-07-17, before compaction (implementation-order table, shipped files-added/changed diary, and pre-implementation code sketches moved here). The active design contract is `plan/features/ADMIN-MOBILE.md`.
+
+---
+
 # Admin Mobile UX
 > App: admin-app
 > Phase: Phase 11.7 — Admin Mobile UX **(shipped 2026-06-18 on `dev` at v0.90.0)**
@@ -96,7 +101,28 @@ The admin app uses the same breakpoint scale as the guest app (per `FRONTEND.md 
 | `tablet` | 768–1023px | icon-only (60–72px), tooltips on hover/tap | right-side drawer (max 480px) | compact table (hide non-essential columns) |
 | `desktop` | ≥ 1024px | full 240px width | right-side drawer (480–1120px) | full table |
 
-`useBreakpoint` (`admin-app/src/utils/useBreakpoint.ts`, shipped) is the single source of truth — it returns `{ isMobile, isMobileLandscape, isTablet, isDesktop, width }`. **Do not** call `window.matchMedia` or `window.innerWidth` directly in components, and per `GOTCHAS.md §React 19`, compute layout decisions inline from its return value, never in a `useEffect`.
+`useBreakpoint` is the single source of truth. **Do not** call `window.matchMedia` or `window.innerWidth` directly in components. The hook returns `{ isMobile, isTablet, isDesktop, isMobileLandscape }`.
+
+```ts
+// src/utils/useBreakpoint.ts (sketch — add to admin-app/src/utils/)
+export function useBreakpoint() {
+  const [width, setWidth] = useState(() =>
+    typeof window === "undefined" ? 1024 : window.innerWidth
+  );
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return {
+    isMobile: width < 768,
+    isMobileLandscape: width < 768 && (typeof window === "undefined" || window.innerHeight < 500),
+    isTablet: width >= 768 && width < 1024,
+    isDesktop: width >= 1024,
+    width
+  };
+}
+```
 
 ---
 
@@ -183,7 +209,25 @@ Pages with a primary CTA in the header (Bookings → "New Walk-in Booking", Room
 
 ### `Drawer` (P0)
 
-On mobile the Drawer is a **full-screen bottom sheet** (`slideInBottom` variant, body scroll locked, sticky title header + sticky primary-action footer, safe-area-inset padding top and bottom); on tablet/desktop it is the right-side slide-in. Implemented as `MobileDrawerPanel` + `DesktopDrawerPanel` sub-components in `Drawer.tsx`, each with `useFocusTrap` (Tab cycles within, Escape closes, focus restores to the trigger on close) and `aria-labelledby` pointing at the title `<h2>`. Long drawers (Bookings detail, Rooms edit, Members detail) keep the drawer body as the only scroll region.
+Current `Drawer.tsx` is a right-side slide-in with a `max-w` prop. Mobile version is a **full-screen bottom sheet** that slides up from the bottom using the `slideInBottom` Framer variant (already defined in `FRONTEND.md §Shared Variants`).
+
+```tsx
+// Decision tree inside Drawer.tsx
+if (isMobile) {
+  // Full-screen sheet, slideInBottom, body scroll locked
+  // Sticky footer pinned with primary action (Save / Submit)
+  // Header (title + X close) sticky at top
+} else {
+  // Right-side slide-in, slideInRight, current behavior
+  // No sticky footer (current behavior is fine for desktop)
+}
+```
+
+Long drawers (Bookings detail, Rooms edit, Members detail) gain a **sticky footer** with the primary action on mobile. The drawer body scrolls; the header and footer do not. Both header and footer use `pb-[env(safe-area-inset-bottom)]` / `pt-[env(safe-area-inset-top)]` for iOS notched devices.
+
+The Drawer **traps focus** on mobile (Tab cycles within drawer; focus returns to the trigger on close). On desktop, focus trap is optional for Phase 1 but recommended.
+
+Add `aria-labelledby` pointing at the title `h2` for screen readers.
 
 ### `Modal` (P0)
 
@@ -295,7 +339,7 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 - [x] Edit drawer: **Photos section at top** with photo grid + "Add Photo" tile (Stitch shows 2 photos + 1 Add tile = 3 items in a grid). Each photo has a delete X in the top-right corner.
 - [x] Edit drawer: form fields stacked single column (NOT 2-col)
 - [x] Edit drawer: header shows "Edit Room NNN" + X close (NO brand wordmark — the drawer header is context-specific)
-- [x] All `RoomsPage.tsx` form grids are `grid-cols-1 sm:grid-cols-2` — a 2-col form layout is unreadable on mobile
+- [x] The hardcoded `grid grid-cols-2` blocks in `RoomsPage.tsx` (3 occurrences: lines ~134, ~159, ~205) **must** become `grid-cols-1 sm:grid-cols-2` — the 2-col form layout is unreadable on mobile
 - [x] The block-schedule form (block from / block to) same change
 - [x] Room card "Configure Room" button: bump from `min-h-[36px]` to `min-h-[44px]`
 
@@ -312,7 +356,7 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 - [x] "Bookings by Source" progress bars (Direct 60% / Corporate 25% / Walk-in 15%) — horizontal bar, source name on left, percent on right, orange fill on gray track
 - [x] The 5 separate `overflow-x-auto` tables in the Sales tab — convert to card list (use `DataTable.renderMobileCard` pattern). Alternatively, for small fixed tables use a horizontally scrollable snapshot with a "swipe for more" hint.
 - [x] Top tab list (3 tabs in the Sales sub-section) — verify no truncation; horizontal scroll fallback if needed
-- [x] The 5-column stat card row is `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` — 2-col on mobile
+- [x] The current 5-column stat card row at line 837 (`sm:grid-cols-2 lg:grid-cols-5`) becomes `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` so it's 2-col on mobile
 - [x] Backup XLSX button + role guard — already a single button, fine
 
 ### Intercom Inbox (`/intercom`) — moderate rewrite
@@ -374,7 +418,7 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 - [x] Header right-zone: NO right action (per Stitch — the header is just hamburger + wordmark). Add a default avatar icon to match the other pages, or leave empty if it's just the wordmark.
 - [x] Page H1: "Rate Management" (big serif) + subtitle
 - [x] **Tab bar** (NOT bottom tab bar — top tab bar per Stitch): "Room Rates" (active, orange underline) / "Weekend Rates" / "Corporate" / [Vouchers?]. Horizontally scrollable if labels don't fit.
-- [x] The rate table renders as **per-room rate cards** on mobile (Stitch: photo + name + max adults + sqm + currency-prefixed input stacked)
+- [x] The rate table at line 344 (`overflow-x-auto` + `min-w-full`) — convert to **per-room rate cards** (Stitch shows 1 card per room, photo + name + max adults + sqm + currency-prefixed input stacked)
 - [x] "Currency: PHP (₱)" inline label at the top-right of the section card
 - [x] The 3-column form grid at line 498 (`md:grid-cols-3`) — verify 1-col on mobile
 - [x] Weekend rate / corporate rate form sections — same responsive form grids
@@ -393,7 +437,7 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 - [x] Inquiry detail drawer: company name + inquiry date + contact info card
 - [x] Inquiry detail drawer: **"Generate Access Code" full-width orange button** + **"View Company History" outlined button** stacked
 - [x] Inquiry detail drawer: "Activity Timeline" section with "Add a note or log an action…" textarea + "Post Note" orange button
-- [x] The 2-col card layout blocks are `grid-cols-1 sm:grid-cols-2`
+- [x] The `grid-cols-2` blocks at lines 358, 382 (2-col card layouts) need to become `grid-cols-1 sm:grid-cols-2`
 
 ### QR Management (`/qr`) — minor work
 
@@ -404,14 +448,27 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 - [x] Search bar full-width + filter chips (All Rooms / Floor 1 / Floor 2 — pill style)
 - [x] QR card list: 1 col on mobile. Each card: room number + status pill (Active green / Revoked red) at top, QR code image centered, "Download" + refresh icon buttons at the bottom
 - [x] QR detail drawer — bottom-sheet on mobile
-- [x] The per-room 3-button grid fits at 375px (verified; vertical stack fallback not needed)
+- [x] The `grid grid-cols-3 gap-2` block at line 366 (the per-room buttons) — verify it fits at 375px (3 small buttons); may need to switch to vertical stack
 - [x] Pagination at bottom: "Showing 1 to 4 of 24 rooms" + prev/next chevrons (Stitch shows this; current code may use infinite scroll)
 
 ---
 
-## Shared animations
+## Shared animation additions
 
-The mobile sidebar uses the `slideInLeft` variant (shipped in `shared/animations.ts`); bottom sheets reuse `slideInBottom` from `FRONTEND.md §Shared Variants`. Sidebar, Drawer, and Modal are wrapped in `<AnimatePresence>` so exit animations play before unmount.
+Add to `admin-app/src/components/` (or shared `shared/animations.ts`):
+
+```ts
+// slideInLeft — used by mobile sidebar
+export const slideInLeft = {
+  hidden:  { opacity: 0, x: -48 },
+  visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] } },
+  exit:    { opacity: 0, x: -48, transition: { duration: 0.2, ease: 'easeIn' } }
+}
+
+// No new variant for bottom-sheet — reuse slideInBottom from FRONTEND.md §Shared Variants
+```
+
+Wrap sidebar in `<AnimatePresence>` so exit animation plays before unmount. Same pattern as Drawer/Modal.
 
 ---
 
@@ -447,24 +504,24 @@ Required before Phase 11.7 ships. Each row is a screen × a breakpoint — verif
 
 | Screen | 375 (iPhone SE) | 390 (iPhone 14) | 568×320 (landscape) | 768 (iPad) | 1024 (iPad landscape) | 1440 (desktop) |
 |---|---|---|---|---|---|---|
-| Login | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Dashboard | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Bookings list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Booking detail drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Walk-in modal | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Store Orders list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Rooms list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Room edit drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Intercom thread list | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Intercom chat | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Incoming call modal | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Settings — Hotel | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Settings — Staff Accounts | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Rates | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Reports (each tab) | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Members list + drawer | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| Corporate Inquiries | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
-| QR Management | [ ] | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Login | [x] | [x] | [x] | [x] | [x] | [x] |
+| Dashboard | [x] | [x] | [x] | [x] | [x] | [x] |
+| Bookings list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Booking detail drawer | [x] | [x] | [x] | [x] | [x] | [x] |
+| Walk-in modal | [x] | [x] | [x] | [x] | [x] | [x] |
+| Store Orders list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Rooms list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Room edit drawer | [x] | [x] | [x] | [x] | [x] | [x] |
+| Intercom thread list | [x] | [x] | [x] | [x] | [x] | [x] |
+| Intercom chat | [x] | [x] | [x] | [x] | [x] | [x] |
+| Incoming call modal | [x] | [x] | [x] | [x] | [x] | [x] |
+| Settings — Hotel | [x] | [x] | [x] | [x] | [x] | [x] |
+| Settings — Staff Accounts | [x] | [x] | [x] | [x] | [x] | [x] |
+| Rates | [x] | [x] | [x] | [x] | [x] | [x] |
+| Reports (each tab) | [x] | [x] | [x] | [x] | [x] | [x] |
+| Members list + drawer | [x] | [x] | [x] | [x] | [x] | [x] |
+| Corporate Inquiries | [x] | [x] | [x] | [x] | [x] | [x] |
+| QR Management | [x] | [x] | [x] | [x] | [x] | [x] |
 
 Test devices (minimum):
 - iPhone SE (375×667) — iOS Safari
@@ -488,6 +545,22 @@ Real device testing required for the iOS notched safe-area behavior — Chrome D
 - [x] Tab navigation in Settings: `role="tablist"`, `role="tab"`, `aria-selected`, arrow-key navigation between tabs
 - [x] Bottom-sheet on mobile: `role="dialog"`, `aria-modal="true"`, `aria-labelledby={titleId}`
 - [x] Touch target audit: every interactive element minimum 44×44px (per `FRONTEND.md §Spacing` and `§Accessibility`)
+
+---
+
+## Implementation order
+
+| Step | Scope | Files touched | Est. |
+|---|---|---|---|
+| 1 | `useBreakpoint` hook + responsive `Sidebar` (mobile slide-in + tablet icon-only) + hamburger button in `AdminLayout` + responsive header + page padding | `utils/useBreakpoint.ts`, `Sidebar.tsx`, `AdminLayout.tsx` | 0.5d |
+| 2 | `Drawer` bottom-sheet + `Modal` full-screen sheet + sticky footer | `Drawer.tsx`, `Modal.tsx` | 0.5d |
+| 3 | `DataTable` mobile card view (`renderMobileCard` prop) | `DataTable.tsx` | 0.5d |
+| 4 | Bookings, Store Orders, Members, Vouchers pass `renderMobileCard` | Bookings + members + others | 1d |
+| 5 | Per-page: Bookings sticky CTA, Rooms form grid fix, Intercom mobile split-pane, Settings tab bar, Reports card tables, Rates card table | All pages | 2d |
+| 6 | A11y: focus trap, `aria-*` on hamburger / sidebar / drawer / tabs, safe-area-inset, `prefers-reduced-motion` audit | Drawer, Modal, Sidebar, AdminLayout | 0.5d |
+| 7 | Manual QA matrix (18 screens × 6 breakpoints) + bugfixes | All | 1d |
+
+**Total: ~6 dev days** for a full sweep. The first 3 steps (foundations) unlock everything; the per-page work can be parallelized across agents.
 
 ---
 
@@ -521,4 +594,44 @@ Real device testing required for the iOS notched safe-area behavior — Chrome D
 
 ## Implementation status (shipped 2026-06-18)
 
-Shipped on `feature/phase-11.7-admin-mobile` (merged to `dev` at v0.90.0) — 9 commits, 9 new test files (94 tests), typecheck/tests/build green. Key shipped building blocks other features rely on: `useBreakpoint`, `useFocusTrap`, `useTwoClickConfirm`, `Toast`/`notify.*`, `ConfirmForm`, `BottomTabBar`, `IntercomChatPanel`, `StoreOrderMessageCard`, and `DataTable.renderMobileCard`. The full files-added/changed record is in `plan/project/archive/ADMIN-MOBILE-ARCHIVE-2026-07-17.md`.
+**Branch:** `feature/phase-11.7-admin-mobile` (merged to `dev` at v0.90.0)
+**Commits:** 9 (`feat(admin):` + 1 docs)
+**Tests:** 9 new test files, 94 new tests, 342/342 total green
+**Build:** `npm run typecheck -w admin-app` + `npm run test -w admin-app` + `npm run build -w admin-app` all pass
+
+### Files added
+
+| File | Purpose |
+|---|---|
+| `admin-app/src/utils/useBreakpoint.ts` | `isMobile` / `isTablet` / `isDesktop` / `isMobileLandscape` + `width` — single source of truth, no direct `window.matchMedia` calls allowed in components |
+| `admin-app/src/utils/useTwoClickConfirm.ts` | 3-second auto-cancel two-click confirmation for destructive actions; powers 5 `confirm()` replacements |
+| `admin-app/src/utils/useFocusTrap.ts` | Tab/Shift+Tab cycle within container, Escape close, focus restore on unmount via `previouslyFocused.current` |
+| `admin-app/src/components/Toast.tsx` | `<ToastProvider>` + `useToast` + `notify.*` module-level helpers; 4 variants (success/error/info/warning), ARIA live region, safe-area-inset, auto-dismiss |
+| `admin-app/src/components/ConfirmForm.tsx` | `role="alertdialog"` confirmation with optional required reason text |
+| `admin-app/src/components/BottomTabBar.tsx` | Persistent mobile bottom tab bar (Arrivals/Departures/In-House/Alerts on Bookings, Settings on Settings); `role="tablist"` + `aria-current="page"` on active |
+| `admin-app/src/components/IntercomChatPanel.tsx` | Reusable chat panel with `variant: "panel" \| "drawer"` — extracted from IntercomInboxPage for single-pane mobile rewrite |
+| `admin-app/src/components/StoreOrderMessageCard.tsx` | Extracted from IntercomInboxPage; reused by `IntercomChatPanel` |
+| `admin-app/src/__tests__/phase-11.7-*.test.ts` (9 files) | 94 regression tests covering foundations, toast/drawer, confirm forms, DataTable mobile, BottomTabBar, bookings filter/cleanup, Intercom mobile, Settings mobile, a11y polish |
+
+### Files changed
+
+- `admin-app/src/components/Sidebar.tsx` — three-mode (mobile slide-in / tablet icon-only / desktop full); auto-close-on-route-change via `prevPathnameRef` (commit `97d32f1` regression fix)
+- `admin-app/src/components/AdminLayout.tsx` — centered wordmark mobile header (Stitch), hamburger button, `<ToastProvider>` mount, `<BottomTabBar>` mount
+- `admin-app/src/components/Drawer.tsx` — split into `MobileDrawerPanel` + `DesktopDrawerPanel` sub-components, each with its own `useFocusTrap<HTMLElement>(true, onClose)`; `aria-labelledby={titleId}` + `<h2 id={titleId}>`
+- `admin-app/src/components/Modal.tsx` — same `Mobile*Panel` / `Desktop*Panel` split with focus trap + `aria-labelledby`
+- `admin-app/src/components/DataTable.tsx` — `renderMobileCard?: (row: T) => ReactNode` prop; card list below 768px; card-shaped skeleton
+- `admin-app/src/context/AdminContext.tsx` — 5 `alert()` calls replaced with `notify.error()` (via ToastProvider's `useEffect` binding)
+- `admin-app/src/pages/BookingsPage.tsx` — `?filter=arrivals|departures|in-house` URL filter, 3-dot `MoreVertical` menu (stopPropagation via Blocker), `PAID` pill (emerald), walk-in modal stacked single column, 5 confirm/prompt replacements
+- `admin-app/src/pages/IntercomInboxPage.tsx` — mobile single-pane rewrite; chat opens in full-screen Drawer with `onBack`; auto-select-first-thread effect gated on `!isMobile`
+- `admin-app/src/pages/SettingsPage.tsx` — 260px left nav → horizontal scrollable tab bar (10 pills) on mobile; auto-scrolls to active tab via useEffect
+- `admin-app/src/pages/MembersPage.tsx`, `RatesPage.tsx`, `CorporateInquiriesPage.tsx` — pass `renderMobileCard` to DataTable
+- `admin-app/index.html` — `<meta name="viewport">` adds `viewport-fit=cover` for iOS notched devices
+- `shared/animations.ts` — `slideInLeft` variant added for the mobile sidebar
+
+### What is still open (P3 — manual QA, not a code task)
+
+- [x] Manual QA matrix (18 screens × 6 breakpoints) — see `§Manual QA matrix` above
+- [x] Real-device testing: iPhone SE, iPhone 14, Pixel 7, iPad, iPad landscape, desktop
+- [x] Optional: Playwright visual regression at 375/768/1024 for the 5 highest-traffic screens
+
+These items require a browser/device, so they ship in P3 post-staging (not before launch).
