@@ -189,6 +189,8 @@ export interface Booking {
   discountPct: number;
   memberDiscountPct?: number;
   discountIdPhotoUrl: string | null;
+  /** Private Firebase Storage object path; staff resolves a short-lived signed URL. */
+  discountIdPhotoPath?: string | null;
   discountVerified: boolean;
   discountVerifiedBy: string | null;
   discountRejected: boolean;
@@ -209,6 +211,8 @@ export interface Booking {
   // `paymentProofUrl === null` checks without a string
   // comparison.
   paymentProofUrl: string | null;
+  /** Private Firebase Storage object path; staff resolves a short-lived signed URL. */
+  paymentProofPath?: string | null;
   paymentReferenceNumber?: string | null;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): staff can reject a pending
@@ -403,5 +407,4 @@ export interface TestRun {
   manifest?: TestRunManifest | null;
   cleanupResult?: TestRunCleanupResult | null;
 }
-
 

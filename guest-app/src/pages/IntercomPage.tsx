@@ -21,7 +21,7 @@ import {
   updateDoc,
   where
 } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { ref, uploadBytes } from "firebase/storage";
 import config from "@config";
 import { db, storage } from "../firebase/config";
 import { formatPrice } from "../utils/format";
@@ -987,11 +987,12 @@ export function IntercomPage() {
     setStoreError("");
 
     try {
-      let paymentProofUrl = "";
+      let paymentProofPath = "";
       if (isOnlinePaymentMethod(paymentMethod) && gcashFile) {
-        const proofRef = ref(storage, `store-orders/${roomNumber}/payment-proof/${Date.now()}-${gcashFile.name}`);
+        const extension = gcashFile.name.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
+        const proofRef = ref(storage, `store-orders/${roomNumber}/payment-proof/${crypto.randomUUID()}${extension}`);
         const uploadResult = await uploadBytes(proofRef, gcashFile);
-        paymentProofUrl = await getDownloadURL(uploadResult.ref);
+        paymentProofPath = uploadResult.ref.fullPath;
       }
 
       const response = await fetch("/api/store/create-order", {
@@ -1003,7 +1004,7 @@ export function IntercomPage() {
           guestName,
           items: cart.map(({ item, quantity }) => ({ itemId: item.id, quantity })),
           paymentMethod,
-          paymentProofUrl
+          paymentProofPath
         })
       });
       const result = await response.json();

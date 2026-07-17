@@ -25,10 +25,10 @@ const convertInquirySchema = z.object({
   hasBreakfast: z.boolean().optional().default(false),
   paymentMethod: z.string().trim().min(1).max(40).optional().default("chargeback"),
   // Optional negotiated rate override. When omitted, the handler
-  // uses room.corporateRate. When a corporateCodes/{code} already
-  // exists for this inquiry, the handler uses its
+  // uses the RoomType corporate/base rate. When a corporateCodes/{code}
+  // already exists for this inquiry, the handler uses its
   // ratePerRoomType[roomType] if defined.
-  ratePerNightOverride: z.coerce.number().min(0).max(1000000).optional().nullable()
+  ratePerNightOverride: z.coerce.number().finite().min(0).max(1000000).optional().nullable()
 }).strict();
 
 export async function handleCreateCorporateInquiry(req: any, res: any) {
@@ -168,6 +168,26 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       if (!roomData.isActive) {
         throw new Error("Room is inactive.");
       }
+
+      // C-01 (E2E audit 2026-07-17): pricing and capacity moved off
+      // physical room documents in W3.6/W3.7. Resolve the authoritative
+      // RoomType entry in the same transaction as the booking write.
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      if (!hotelConfigDoc.exists) {
+        throw new Error("Room type catalog is not configured.");
+      }
+      const roomTypes = Array.isArray(hotelConfigDoc.data()?.roomTypes)
+        ? hotelConfigDoc.data()!.roomTypes
+        : [];
+      const typeEntry = roomTypes.find((entry: any) => entry && entry.value === roomData.type);
+      if (!typeEntry) {
+        throw new Error("Room type is not available.");
+      }
+      const typeMaxCapacity = Number(typeEntry.maxCapacity);
+      if (!Number.isFinite(typeMaxCapacity) || typeMaxCapacity < 1) {
+        throw new Error("Room type capacity is not configured.");
+      }
       if (roomData.status === "blocked") {
         const blockedFrom = toDateOrNull(roomData.blockedFrom);
         const blockedTo = toDateOrNull(roomData.blockedTo);
@@ -180,8 +200,8 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
           throw new Error("Room is blocked for the selected dates.");
         }
       }
-      if (guests > roomData.maxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
+      if (guests > typeMaxCapacity) {
+        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
 
       // 3. Overlapping booking check
@@ -212,11 +232,14 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
 
       // 5. Resolve negotiated rate
       // Order of precedence: explicit override > ratePerRoomType
-      // from attached access code > room.corporateRate >
-      // room.pricePerNight.
-      let ratePerNight = Number(roomData.pricePerNight || 0);
+      // from attached access code > RoomType corporateRate >
+      // RoomType pricePerNight.
+      const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
+      const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
+      const hasExplicitOverride = ratePerNightOverride !== undefined && ratePerNightOverride !== null;
+      let ratePerNight = typeCorporateRate || typeBaseRate;
       let codeUsageUpdate: { ref: any; data: any } | null = null;
-      if (ratePerNightOverride !== undefined && ratePerNightOverride !== null) {
+      if (hasExplicitOverride) {
         ratePerNight = ratePerNightOverride;
       } else if (inquiryData.accessCodeId) {
         const codeRef = adminDb.collection("corporateCodes").doc(inquiryData.accessCodeId);
@@ -226,8 +249,8 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
           const rateMap = codeData.ratePerRoomType || {};
           if (rateMap[roomData.type] !== undefined) {
             ratePerNight = rateMap[roomData.type];
-          } else if (roomData.corporateRate) {
-            ratePerNight = roomData.corporateRate;
+          } else if (typeCorporateRate) {
+            ratePerNight = typeCorporateRate;
           }
           // Per BI-07 (booking-intercom audit 2026-07-06):
           // the convert-inquiry path shares the same
@@ -250,11 +273,15 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
               updatedAt: new Date()
             }
           };
-        } else if (roomData.corporateRate) {
-          ratePerNight = roomData.corporateRate;
+        } else if (typeCorporateRate) {
+          ratePerNight = typeCorporateRate;
         }
-      } else if (roomData.corporateRate) {
-        ratePerNight = roomData.corporateRate;
+      } else if (typeCorporateRate) {
+        ratePerNight = typeCorporateRate;
+      }
+
+      if (!Number.isFinite(ratePerNight) || ratePerNight < 0 || (!hasExplicitOverride && ratePerNight === 0)) {
+        throw new Error("A valid room type rate is required before converting this inquiry.");
       }
 
       // 6. Generate booking reference
@@ -291,6 +318,9 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       const roomTotal = ratePerNight * numNights;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       finalTotalPrice = roomTotal + breakfastTotal;
+      if (!Number.isFinite(finalTotalPrice)) {
+        throw new Error("The converted booking total is invalid.");
+      }
 
       // 8. Guest details from inquiry. Split `contactPerson` into
       // first/last; the inquiry is always a real contact, so the

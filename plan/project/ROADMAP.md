@@ -32,7 +32,7 @@
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
-| E2E User Journey Audit (July 17) | 🔄 Audit complete | 3 HIGH fixes open — **launch NO-GO until fixed** (§below) |
+| E2E User Journey Audit (July 17) | 🔄 3 HIGH fixes implemented and verified | Merge + deploy app/API and Storage rules before clearing the production launch gate; MED/LOW remain in the audit report |
 
 ---
 
@@ -194,31 +194,9 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ---
 
-## E2E User Journey Audit (2026-07-17)
+## E2E User Journey Audit (2026-07-17) — fixes ready for deployment
 
-Full-journey audit across all 5 roles (guest, corporate, front desk, admin, cross-cutting). Report: `plan/docs/AUDIT-E2E-REPORT.md`. CRITICAL/HIGH items tracked here as tasks; MED/LOW live in the report.
-
-### Guest journey (role 1 of 5 — audited 2026-07-17)
-
-- [ ] **G-01 (HIGH)** — Zod-validate the full `/api/bookings/create` (and `create-walkin`) body: `guests` must be a finite integer ≥ 1; add `Number.isFinite` backstop on computed `totalPrice`. Unvalidated `guests` currently allows unauthenticated price manipulation (negative breakfast line) and `NaN` totals that poison revenue reports. `guest-app/server/handlers/bookings.ts:345,562,807`
-
-### Corporate journey (role 2 of 5 — audited 2026-07-17)
-
-- [ ] **C-01 (HIGH)** — Fix `handleConvertInquiryToBooking` to resolve capacity + rates from the RoomType entry in `settings/hotelConfig.roomTypes[]` instead of dead room-document fields (`pricePerNight`/`corporateRate`/`maxCapacity` moved off room docs in W3.6/W3.7). Currently a conversion without a manual rate override or attached access-code rate creates a confirmed booking at ₱0/night and the capacity check never fires. Reject a resolved rate of 0 without explicit override. `guest-app/server/handlers/corporate-inquiries.ts:183,217,229,253-257`
-
-### Front desk journey (role 3 of 5 — audited 2026-07-17)
-
-- No CRITICAL/HIGH findings. Two MEDs (FD-01 missing 8h inactivity auto-logout per SECURITY.md; FD-02 `guests/{uid}` rule allows self-written `role` fields → phantom staff rows in Settings) and one LOW docs contradiction (FD-03, Decision #81 vs admin-only Rates page) are tracked in `plan/docs/AUDIT-E2E-REPORT.md`.
-
-### Admin journey incl. reports accuracy (role 4 of 5 — audited 2026-07-17)
-
-- No CRITICAL/HIGH findings. Reports data accuracy verified: occupancy, revenue, and bookings-by-source compute from the same live AdminContext bookings snapshot as Bookings Management; cancelled/pending excluded, no-shows excluded from revenue but shown as retained cash (FL-14), voucher/senior/member discounts reflected via net totalPrice, corporate flat-rate counted at contract rate, timezone-correct overlap proration (FL-15), dynamic room counts. Three LOW docs-drift items (A-01 stale REPORTS.md status list, A-02 SECURITY.md corporateCodes write claim, A-03 future-range occupancy nuance) tracked in `plan/docs/AUDIT-E2E-REPORT.md`.
-
-### Cross-cutting (role 5 of 5 — audited 2026-07-17, audit complete)
-
-- [ ] **X-01 (HIGH)** — Remove `allow get: if true` from `firebase/storage.rules` on `bookings/{id}/payment-proof/`, `bookings/{id}/discount-id/`, and `store-orders/{roomNumber}/payment-proof/` — payment screenshots and OSCA/PWD government-ID photos are currently fetchable without authentication by path (store-order path keyed by guessable room number). Use local blob previews client-side, randomized upload filenames, and Admin-SDK-minted download URLs. `firebase/storage.rules:27-37,98-102`
-
-**Audit verdict:** NO-GO until G-01, C-01, X-01 land (~1 dev-day combined); GO afterward. MEDs (incl. X-02 white-label hardcoding sweep — mandatory before the second white-label client) tracked in `plan/docs/AUDIT-E2E-REPORT.md`.
+🔄 G-01, C-01, and X-01 are implemented on `fix/e2e-launch-blockers`, with guest/admin typechecks and full regression suites passing. **Production remains NO-GO until this branch is merged and the app/API plus `firebase/storage.rules` are deployed.** After deployment, the audit's CRITICAL/HIGH gate is cleared. Remaining MED/LOW recommendations, including X-02 before a second white-label client, live in `plan/docs/AUDIT-E2E-REPORT.md`.
 
 ---
 

@@ -178,9 +178,9 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Add to Calendar creates correct event with check-in/out times
 - [x] Double-booking prevented — test by opening two sessions simultaneously
 
-## Known Issues (Audit 2026-07-17)
+## Audit Remediation (2026-07-17)
 
-- **G-01 (HIGH, open):** `/api/bookings/create` Zod-validates only the nested `guestDetails` object — the top-level `guests` count is unvalidated. Negative values produce a negative breakfast line that reduces `totalPrice`; non-numeric values store `NaN` totals that poison report aggregations. Fix: Zod-validate the entire request body (`guests: int ≥ 1`) in both `handleCreateBooking` and `handleCreateWalkin`, plus a `Number.isFinite` backstop on the computed total. See `plan/docs/AUDIT-E2E-REPORT.md`.
+- **G-01 (HIGH, fixed):** `/api/bookings/create` now strict-Zod validates the complete request. `guests` is a finite integer from 1–100, unknown fields are rejected, and computed totals have a final `Number.isFinite` guard before the booking write. The already-strict walk-in schema remains unchanged.
 - **G-02 (MED, open):** No maximum stay length or advance-booking window server-side. Anonymous pay-at-hotel `pending` bookings occupy inventory until staff cancel them — long or far-future bookings can deny availability. Fix: cap `numNights` and the booking horizon in the create handlers and mirror in the date picker.
 
 ## References

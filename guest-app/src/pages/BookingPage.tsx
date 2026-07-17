@@ -24,7 +24,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { collection, doc, getDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import {
   calculateBookingTotal,
@@ -112,17 +112,9 @@ function formatStayDate(value: string) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
-function sanitizeUploadFileName(fileName: string) {
+function createPrivateUploadFileName(fileName: string) {
   const extension = fileName.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
-  const baseName = fileName
-    .replace(/\.[^.]+$/, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-
-  return `${Date.now()}-${baseName || "upload"}${extension}`;
+  return `${crypto.randomUUID()}${extension}`;
 }
 
 export function BookingPage() {
@@ -210,10 +202,9 @@ export function BookingPage() {
   // Per BF-30 (booking-flow audit 2026-06-26): the previous
   // shape was two parallel state vars (`discountIdFile` +
   // `discountIdUrl`) that could desync. Collapse to a single
-  // record `{ name, url } | null` so the file name and
-  // download URL are always written together. Same for the
-  // payment proof.
-  const [discountIdUpload, setDiscountIdUpload] = useState<{ name: string; url: string } | null>(null);
+  // record so the name, private object path, and local-only preview
+  // cannot desync. Anonymous uploads never mint download URLs.
+  const [discountIdUpload, setDiscountIdUpload] = useState<{ name: string; path: string; previewUrl: string } | null>(null);
   const [uploadingDiscountId, setUploadingDiscountId] = useState(false);
   const [discountIdUploadError, setDiscountIdUploadError] = useState("");
   const discountIdInputRef = useRef<HTMLInputElement | null>(null);
@@ -221,7 +212,7 @@ export function BookingPage() {
   useEffect(() => {
     if (!seniorPwdOnlineEnabled && discountType !== "none") {
       setDiscountType("none");
-      setDiscountIdUpload(null);
+      clearDiscountIdUpload();
       setDiscountIdUploadError("");
     }
   }, [seniorPwdOnlineEnabled, discountType]);
@@ -236,7 +227,7 @@ export function BookingPage() {
   // gets disabled (or the config that gets updated) while the page
   // is open cannot leave the user with an unselectable option.
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
-  const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; url: string } | null>(null);
+  const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; path: string; previewUrl: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
@@ -590,6 +581,20 @@ export function BookingPage() {
     }
   }
 
+  function clearDiscountIdUpload() {
+    setDiscountIdUpload((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return null;
+    });
+  }
+
+  function clearPaymentProofUpload() {
+    setPaymentProofUpload((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return null;
+    });
+  }
+
   function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
     setSelectedRoomType(typeValue);
     setRateChoice(nextRateChoice);
@@ -690,7 +695,7 @@ export function BookingPage() {
     setDiscountType(type);
     setDiscountIdUploadError("");
     if (type === "none" || type !== discountType) {
-      setDiscountIdUpload(null);
+      clearDiscountIdUpload();
       resetDiscountIdInput();
     }
   }
@@ -710,13 +715,13 @@ export function BookingPage() {
       setSubmitError("");
       try {
         const compressed = await compressImageFile(file, DISCOUNT_ID_COMPRESSION_OPTIONS);
-        const safeFileName = sanitizeUploadFileName(compressed.file.name);
+        const safeFileName = createPrivateUploadFileName(compressed.file.name);
         const storageRef = ref(storage, `bookings/${bookingId}/discount-id/${safeFileName}`);
-        await uploadBytes(storageRef, compressed.file);
-        const url = await getDownloadURL(storageRef);
+        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        const previewUrl = URL.createObjectURL(compressed.file);
         // Per BF-30: single state record so the name + url
         // are always written together (no desync race).
-        setDiscountIdUpload({ name: file.name, url });
+        setDiscountIdUpload({ name: file.name, path: uploadResult.ref.fullPath, previewUrl });
         e.target.value = "";
       } catch (err) {
         console.error("Discount ID upload failed:", err);
@@ -741,11 +746,12 @@ export function BookingPage() {
       setPaymentProofError("");
       try {
         const compressed = await compressImageFile(file);
-        const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
-        await uploadBytes(storageRef, compressed.file);
-        const url = await getDownloadURL(storageRef);
+        const safeFileName = createPrivateUploadFileName(compressed.file.name);
+        const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${safeFileName}`);
+        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        const previewUrl = URL.createObjectURL(compressed.file);
         // Per BF-30: single state record.
-        setPaymentProofUpload({ name: file.name, url });
+        setPaymentProofUpload({ name: file.name, path: uploadResult.ref.fullPath, previewUrl });
       } catch (err) {
         console.error("Payment proof upload failed:", err);
         setPaymentProofError("Receipt upload failed. Please check your connection and try again.");
@@ -798,10 +804,12 @@ export function BookingPage() {
             consent: termsConsent
           },
           discountType: discountType === "none" ? "" : discountType,
-          discountIdPhotoUrl: discountIdUpload?.url ?? null,
+          discountIdPhotoUrl: null,
+          discountIdPhotoPath: discountIdUpload?.path ?? null,
           voucherCode: voucherApplied ? voucherCode : "",
           paymentMethod,
-          paymentProofUrl: paymentProofUpload?.url ?? null,
+          paymentProofUrl: null,
+          paymentProofPath: paymentProofUpload?.path ?? null,
           paymentReferenceNumber: paymentReferenceNumber.trim() || null,
           // Per W1.3 / decision #79 / audit S1.5: the standard
           // online booking flow is never corporate. The server
@@ -1233,7 +1241,7 @@ export function BookingPage() {
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
-                            onClick={() => setImagePreview({ title: discountIdUpload.name, url: discountIdUpload.url })}
+                            onClick={() => setImagePreview({ title: discountIdUpload.name, url: discountIdUpload.previewUrl })}
                             className="text-xs font-semibold text-primary hover:underline"
                           >
                             Preview
@@ -1241,7 +1249,7 @@ export function BookingPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              setDiscountIdUpload(null);
+                              clearDiscountIdUpload();
                               setDiscountIdUploadError("");
                               resetDiscountIdInput();
                             }}
@@ -1419,7 +1427,7 @@ export function BookingPage() {
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
-                            onClick={() => setImagePreview({ title: paymentProofUpload.name, url: paymentProofUpload.url })}
+                            onClick={() => setImagePreview({ title: paymentProofUpload.name, url: paymentProofUpload.previewUrl })}
                             className="text-xs font-semibold text-primary hover:underline"
                           >
                             Preview
@@ -1427,7 +1435,7 @@ export function BookingPage() {
                           <button
                             type="button"
                             onClick={() => {
-                              setPaymentProofUpload(null);
+                              clearPaymentProofUpload();
                             }}
                             className="text-xs font-semibold text-red-600 hover:underline"
                           >

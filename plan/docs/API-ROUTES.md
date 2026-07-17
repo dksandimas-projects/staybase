@@ -70,7 +70,7 @@ All email routes use Resend. Templates are defined server-side. See `plan/featur
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/bookings/create` | POST | None | Create booking with Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Response includes the assigned `roomId` + `roomNumber` and persisted guest-safe `rateBreakdown` for the confirmation page. The corporate "Continue without code" path sends `corporateFlatRate: true` — an intent flag only; the server resolves the flat rate from `roomTypes[].corporateRate` (never a client-supplied number) and a validated `corporateCode` always wins (per BI-04, booking-intercom audit 2026-07-06). |
+| `/api/bookings/create` | POST | None | Strict-Zod validates the complete body, then creates the booking with a Firestore transaction (availability lock). Body sends `roomType` (not `roomId`); the transaction auto-assigns a physical room of that type. Private uploads send randomized `paymentProofPath` / `discountIdPhotoPath` object paths, never permanent download URLs. Response includes the assigned `roomId` + `roomNumber` and persisted guest-safe `rateBreakdown` for the confirmation page. The corporate "Continue without code" path sends `corporateFlatRate: true` — an intent flag only; the server resolves the flat rate from `roomTypes[].corporateRate` (never a client-supplied number) and a validated `corporateCode` always wins. |
 | `/api/bookings/create-walkin` | POST | Staff | Strict-Zod validate the full walk-in body, including nested guest details and an optional finite manual override capped at 1,000,000, before creating the booking with staff auth and transactional conflict checks |
 | `/api/bookings/cancel` | POST | None (owner by ref+email) | Cancel booking if status allows |
 | `/api/bookings/lookup` | POST | None (owner by ref+email or ref+lookup token) | Look up a single booking by `bookingRef` plus either `guestEmail` or magic-link `lookupToken` for the `/my-booking` page; case-insensitive email match; enriches response with the room name from `rooms/{roomId}`. Response payload intentionally includes `guestName`, `guestEmail`, `guestPhone`, `roomType`/`roomNumber`, and guest-safe `rateBreakdown` so the self-service page can display the booking back to the guest. These fields are the data-subject's own PII or non-sensitive pricing details (per RA 10173 right to be informed + the right to access), and the endpoint enforces ref+email or ref+token ownership before returning them. |
@@ -120,10 +120,18 @@ Never expose full `bookings` documents or any PII (guest name, email, phone, pay
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/corporate/inquiry` | POST | None | Submit the public corporate inquiry form; API verifies Turnstile, checks honeypot, creates `corporateInquiries/{id}` with `status: "new"`, and sends the staff notification email |
-| `/api/corporate/convert-inquiry` | POST | Staff | Convert a `new` / `contacted` / `negotiating` corporate inquiry into a real `bookings` document. Pre-fills guest name/email/phone/companyName/specialRequests from the inquiry, accepts `roomId` / `checkIn` / `checkOut` / `guests` / `hasBreakfast` / `paymentMethod` / optional `ratePerNightOverride` from the body. Resolves the negotiated rate from the inquiry's attached `accessCodeId` (using `ratePerRoomType[roomType]` when present) or `room.corporateRate`. Creates the booking with `linkedInquiryId`, `isCorporate: true` (server-derived), `source: "corporate"` (per W2.15 / decision #103), and status `confirmed`. In the same transaction: flips the inquiry status to `converted`, persists `convertedBookingId` + `convertedBookingRef`, and appends a "Converted to booking ..." note. Fires `booking-confirmed` email (best-effort). |
+| `/api/corporate/convert-inquiry` | POST | Staff | Convert a `new` / `contacted` / `negotiating` corporate inquiry into a real `bookings` document. Pre-fills guest details from the inquiry and resolves capacity plus fallback pricing from `settings/hotelConfig.roomTypes[]` inside the transaction. Rate order is explicit override, attached-code `ratePerRoomType[roomType]`, RoomType corporate rate, then RoomType base rate; a zero fallback rate is rejected. Creates the booking with `linkedInquiryId`, server-derived corporate fields, and status `confirmed`, then links the inquiry in the same transaction. |
 
 Guest-facing code must not create `corporateInquiries` directly with the Firestore client SDK. This route is the only public write path so bot checks and validation stay server-side.
 `/api/corporate/convert-inquiry` is staff-only because it mutates bookings + corporateInquiries together with a derived negotiated rate. It is the audit-mandated closure of SEV-1 #2 in `§1.4` (S4.2 — "Convert to booking" missing from Corporate Inquiries).
+
+---
+
+### Private Storage Routes (`/api/storage/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/storage/signed-url` | POST | Staff | Validate an allowlisted private payment-proof or discount-ID object path and return a one-hour Admin-SDK-signed read URL. Responses are `private, no-store`; anonymous callers and unrelated Storage paths are rejected. |
 
 ---
 

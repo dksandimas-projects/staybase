@@ -25,6 +25,7 @@ describe("firebase/storage.rules — store-orders payment-proof path", () => {
     );
     expect(matchBlock, "store-orders match block not found").toBeTruthy();
     expect(matchBlock![0]).toMatch(/allow\s+read:\s+if\s+isStaff\(\)/);
+    expect(matchBlock![0]).not.toMatch(/allow\s+get:\s+if\s+true/);
   });
 
   it("allows guests to write to the path (unauthenticated upload)", () => {

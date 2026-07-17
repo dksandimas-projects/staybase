@@ -133,6 +133,7 @@ Booking {
   discountType: DiscountType
   discountPct: number
   discountIdPhotoUrl: string | null   // OSCA/PWD ID uploaded by guest at Step 3
+  discountIdPhotoPath?: string | null // new private uploads; staff resolves a short-lived signed URL
   discountVerified: boolean           // staff marked ID as valid
   discountVerifiedBy: string | null   // staff UID
   discountRejected: boolean           // staff rejected the ID
@@ -153,6 +154,7 @@ Booking {
   // `paymentProofUrl === null` checks without a string
   // comparison.
   paymentProofUrl: string | null
+  paymentProofPath?: string | null    // new private uploads; staff resolves a short-lived signed URL
   // Per H2 (hardening batch 2026-06-26): 32-char hex
   // random token generated at booking-create time. The
   // email magic link carries `?ref={bookingRef}&token={
@@ -687,6 +689,7 @@ StoreOrder {
   // `add-to-bill`. The server enforces this rule — see
   // `guest-app/server/handlers/store.ts → handleCreateStoreOrder`.
   paymentProofUrl: string
+  paymentProofPath?: string           // private object path for new guest uploads
   status: StoreOrderStatus
   stockRestoredAt: Date | null
   deliveredAt: Date | null

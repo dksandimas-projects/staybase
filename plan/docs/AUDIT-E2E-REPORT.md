@@ -13,6 +13,8 @@
 | 4 | Admin (incl. reports data accuracy) | ✅ Complete (2026-07-17) |
 | 5 | Cross-cutting | ✅ Complete (2026-07-17) — **audit finished** |
 
+**Remediation status (2026-07-17):** G-01, C-01, and X-01 are implemented and covered by full guest/admin regression suites. The code-level CRITICAL/HIGH gate is cleared; production remains gated on merge and deployment of the app/API plus Storage rules.
+
 ---
 
 ## Executive Summary
@@ -27,7 +29,7 @@ The admin journey (role 4) — including the mandated reports data-accuracy trac
 
 The cross-cutting pass (role 5) confirmed the platform hygiene is excellent — 2 of 12 Vercel functions used, zero PII in logs across both apps and the server, `paymentProofUrl` never read into the guest client, every `onSnapshot` cleaned up, only `.env.example` files committed, full CSP/headers with `microphone=(self)`, comprehensive rate limiting, and a complete RA 10173 surface (consent gate, privacy/terms pages, DPO contact, server-side erasure flow with anonymized audit records). It also surfaced the audit's most sensitive finding: **the Storage rules grant `allow get: if true` on the payment-proof and discount-ID paths** (X-01, HIGH) — meaning payment screenshots and OSCA/PWD **government-ID photos** are fetchable without authentication by anyone who knows the file path, in direct contradiction of SECURITY.md's "never public" requirement; the store-order variant is keyed by guessable room number. A consolidated white-label finding (X-02, MED) rounds out the pass: seeded "Spark Inn Hotel Corp" payment defaults, `sparkinn_*` export filenames, and hardcoded `en-PH`/`₱`/`PHP` in receipts and CSVs — harmless for Spark Inn, broken for the next client.
 
-**FINAL VERDICT: NO-GO until the three HIGHs are fixed — G-01 (<30 min), C-01 (1–2 h), X-01 (2–4 h); roughly one dev-day total.** After those, the system is **GO** for the client, with the MED items (G-02..04, C-02/03, FD-01/02, X-02) recommended before or shortly after staff onboarding. The codebase's transaction discipline, server-authoritative pricing, and reports accuracy are genuinely strong — the fail points are three localized gaps, not systemic weaknesses.
+**CURRENT VERDICT: code-ready at the CRITICAL/HIGH tier; production NO-GO until deployment.** The three HIGH findings were remediated and verified on 2026-07-17. MED items (G-02..04, C-02/03, FD-01/02, X-02) remain recommended before or shortly after staff onboarding.
 
 ---
 
@@ -37,15 +39,18 @@ Severity order: CRITICAL → HIGH → MED → LOW. Confidence: HIGH = code path 
 
 ### HIGH
 
-**G-01 · Guest · `guest-app/server/handlers/bookings.ts:345,562,807` — top-level `guests` count is not validated; negative/non-numeric values manipulate `totalPrice`** *(Confidence: HIGH)*
+**G-01 · FIXED 2026-07-17 · Guest — top-level `guests` validation and finite-total guard** *(Confidence: HIGH)*
+**Remediation:** `createBookingSchema` now strict-validates the complete public body, requires a finite integer guest count from 1–100, rejects unknown fields, and checks the computed total before writing. The walk-in route was already protected by `WalkinBookingSchema`.
 `/api/bookings/create` Zod-validates only `guestDetails` (`bookings.ts:239-262`). The top-level `guests` field passes only a truthiness check (`:345`) and an upper-bound capacity check (`:562`). A request with `guests: -5` and `hasBreakfast: true` produces `breakfastTotal = rate × -5 × nights` (`:807`), a **negative** add-on that reduces the room subtotal — unauthenticated price manipulation (Turnstile is passable by a human). A non-numeric value (`guests: "abc"`) propagates `NaN` into `totalPrice`, which Firestore stores, and which then poisons any report that sums revenue. The stored `numGuests` also feeds the registration PDF and breakfast prep counts. Walk-in creation (`:1383`) has the same shape but is staff-authenticated (lower risk).
 **Fix:** validate the whole create body with Zod — `guests: z.coerce.number().int().min(1)` (and same for the walk-in handler); reject non-finite computed totals as a backstop. **Effort:** <30 min.
 
-**C-01 · Corporate · `guest-app/server/handlers/corporate-inquiries.ts:183,217,229,253-257` — convert-inquiry prices bookings from dead room-document fields; ₱0 confirmed bookings and a dead capacity check** *(Confidence: HIGH)*
+**C-01 · FIXED 2026-07-17 · Corporate — conversion now uses authoritative RoomType pricing and capacity** *(Confidence: HIGH)*
+**Remediation:** the transaction now reads `settings/hotelConfig.roomTypes[]`, uses the matching type entry for capacity and fallback pricing, preserves explicit/code rate precedence, and rejects a zero fallback rate.
 `handleConvertInquiryToBooking` resolves the nightly rate as `roomData.pricePerNight` with fallbacks to `roomData.corporateRate`, and checks `guests > roomData.maxCapacity`. All three fields were **moved off room documents onto the RoomType entry** in W3.6/W3.7 (`shared/types/index.ts:96-105`), so on any room created since (including the clean-slate production DB per Decision #119) they are `undefined`. Result: converting an inquiry with no attached access-code rate map and no manually typed rate override (the admin modal defaults the override to empty — `CorporateInquiriesPage.tsx:171,199-201`) creates a **`confirmed` booking with `ratePerNight: 0` and `totalPrice: 0`** (plus breakfast if selected), which flows straight into revenue reports; and the capacity guard never fires (`guests > undefined` is `false`). The public corporate create path is unaffected (it correctly reads the type entry — `bookings.ts:551-559`).
 **Fix:** inside the conversion transaction, resolve the type entry from `settings/hotelConfig.roomTypes[]` (same pattern as `handleCreateBooking`) for capacity, base rate, and corporate rate; reject a resolved rate of 0 without an explicit override. **Effort:** 1–2 h.
 
-**X-01 · Cross-cutting · `firebase/storage.rules:27-37,98-102` — `allow get: if true` makes payment proofs and government-ID photos publicly fetchable by path** *(Confidence: HIGH)*
+**X-01 · FIXED 2026-07-17 · Cross-cutting — sensitive uploads are staff-only with short-lived signed URLs** *(Confidence: HIGH)*
+**Remediation:** public `get` grants were removed. Guest clients use randomized filenames, persist object paths, and preview local blobs; authenticated staff resolve allowlisted paths through `/api/storage/signed-url`.
 The rules for `bookings/{bookingId}/payment-proof/`, `bookings/{bookingId}/discount-id/`, and `store-orders/{roomNumber}/payment-proof/` pair the intended `allow read: if isStaff()` with a second grant, `allow get: if true` (rules v2 granular method; allows are OR'd). Any unauthenticated caller who knows a file path can fetch the object — payment screenshots and **OSCA/PWD government-ID photos**. This directly contradicts SECURITY.md ("Read: authenticated staff/admin only — **never public**") and the GOTCHAS rule. Exposure: booking paths are guarded only by the ~120-bit `bookingId` (which appears in lookup/member-stays API responses) plus the guest's *original upload filename* (`BookingPage.tsx:714,744` — e.g. `IMG_1234.jpg`); the store-order path is keyed by a **guessable room number**. The grant likely exists so the anonymous uploader can call `getDownloadURL` after upload. The paired `allow write: if true` additionally makes these paths open anonymous file hosting (janitor sweeps orphans daily).
 **Fix:** remove `allow get: if true`; for the client preview use the local file (`URL.createObjectURL`) instead of the remote URL, upload under a server-safe randomized filename, and have the booking API resolve/verify the storage path server-side (Admin SDK) so staff-only reads hold. **Effort:** 2–4 h. RA 10173 relevance: these are exactly the artifacts a breach notification would cover.
 
@@ -170,7 +175,7 @@ Both fields are arbitrary strings persisted verbatim and rendered in the admin d
 
 ## Quick Wins (<30 min each)
 
-1. **G-01** — Zod-validate the full `/api/bookings/create` body (`guests` int ≥ 1); add a `Number.isFinite(totalPrice)` backstop before the doc write.
+1. ✅ **G-01** — complete request validation and finite-total backstop shipped 2026-07-17.
 2. **G-02** — cap `numNights` and advance-booking window server-side.
 3. **G-05** — prefix-allowlist `paymentProofUrl` / `discountIdPhotoUrl` against the Firebase Storage bucket URL.
 4. **C-02** — remove the shadowed `preferredDates` re-parse in the convert-inquiry block check; use the requested dates and add the `roomBlocks` conflict check.
@@ -180,13 +185,7 @@ Both fields are arbitrary strings persisted verbatim and rendered in the admin d
 
 ## Go / No-Go — FINAL
 
-**NO-GO as of 2026-07-17, convertible to GO in roughly one dev-day.** Three HIGH findings block shipping to the client:
-
-1. **G-01** — unauthenticated price manipulation / `NaN` totals via unvalidated `guests` (<30 min)
-2. **C-01** — ₱0 confirmed bookings from the inquiry-conversion path (1–2 h)
-3. **X-01** — payment proofs and government-ID photos publicly fetchable by path (2–4 h)
-
-No CRITICAL findings. After the three HIGHs land (plus the quick wins below, ~1 h more), ship it: the transaction discipline, server-authoritative pricing, reports accuracy, PII log hygiene, and RA 10173 surface are all verified strong. Address the remaining MEDs (G-02 stay-length cap, G-03 receipt-attachment decision, G-04 intercom flood, C-02/C-03 conversion robustness, FD-01 idle logout, FD-02 staff-mirror rule, X-02 white-label sweep) before or shortly after staff onboarding — and X-02 is mandatory before the second white-label client.
+**Code-ready at the CRITICAL/HIGH tier as of 2026-07-17; production remains NO-GO until the fixes and Storage rules are deployed.** No CRITICAL findings were found, and all three HIGH findings are implemented and verified. Address the remaining MEDs (G-02 stay-length cap, G-03 receipt-attachment decision, G-04 intercom flood, C-02/C-03 conversion robustness, FD-01 idle logout, FD-02 staff-mirror rule, X-02 white-label sweep) before or shortly after staff onboarding; X-02 remains mandatory before the second white-label client.
 
 ---
 

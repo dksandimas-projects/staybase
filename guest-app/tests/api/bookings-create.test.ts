@@ -426,6 +426,68 @@ describe("/api/bookings/create", () => {
     vi.clearAllMocks();
   });
 
+  test.each([
+    ["negative", -1],
+    ["fractional", 1.5],
+    ["non-numeric", "two"],
+    ["non-finite", Number.NaN]
+  ])("rejects a %s guest count before pricing or Firestore writes", async (_label, invalidGuests) => {
+    const req = mockRequest({
+      bookingId: "bookingG011",
+      roomType: "standard-double",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
+      guests: invalidGuests,
+      hasBreakfast: true,
+      guestDetails: {
+        firstName: "Daniel",
+        lastName: "Sandi",
+        email: "daniel@example.com",
+        phone: "09171234567",
+        consent: true
+      },
+      discountType: "",
+      discountIdPhotoUrl: null,
+      paymentMethod: "pay-at-hotel",
+      turnstileToken: "mock_token"
+    });
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(setCalls).toHaveLength(0);
+  });
+
+  test("rejects unknown top-level public booking fields", async () => {
+    const req = mockRequest({
+      bookingId: "bookingG012",
+      roomType: "standard-double",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
+      guests: 2,
+      hasBreakfast: false,
+      guestDetails: {
+        firstName: "Daniel",
+        lastName: "Sandi",
+        email: "daniel@example.com",
+        phone: "09171234567",
+        consent: true
+      },
+      discountType: "",
+      discountIdPhotoUrl: null,
+      paymentMethod: "pay-at-hotel",
+      isCorporate: true,
+      turnstileToken: "mock_token"
+    });
+    const res = mockResponse();
+
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(setCalls).toHaveLength(0);
+  });
+
   test("allows only one of two simultaneous bookings for the same room and dates", async () => {
     // Per the room-type booking refactor: the safety net is
     // per-physical-room, not per-type. Limit this test to a
@@ -450,7 +512,6 @@ describe("/api/bookings/create", () => {
       discountType: "",
       discountIdPhotoUrl: null,
       paymentMethod: "pay-at-hotel",
-      isCorporate: false,
       turnstileToken: "mock_token"
     };
 
@@ -523,7 +584,6 @@ describe("/api/bookings/create", () => {
       discountType: "",
       discountIdPhotoUrl: null,
       paymentMethod: "pay-at-hotel",
-      isCorporate: false,
       turnstileToken: "mock_token"
     };
 
@@ -558,7 +618,6 @@ describe("/api/bookings/create", () => {
       discountType: "",
       discountIdPhotoUrl: null,
       paymentMethod: "pay-at-hotel",
-      isCorporate: false,
       turnstileToken: "mock_token"
     };
 
@@ -595,7 +654,6 @@ describe("/api/bookings/create", () => {
       discountType: "",
       discountIdPhotoUrl: null,
       paymentMethod: "pay-at-hotel",
-      isCorporate: false,
       _hp: "some_bot_value" // Honeypot triggered
     };
 
@@ -645,7 +703,6 @@ describe("/api/bookings/create", () => {
       discountType: "",
       discountIdPhotoUrl: null,
       paymentMethod: "pay-at-hotel",
-      isCorporate: false,
       turnstileToken: "" // Missing/invalid token
     };
 

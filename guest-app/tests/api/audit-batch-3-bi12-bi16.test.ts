@@ -142,7 +142,7 @@ describe("Audit Batch 3 (BI-12 + BI-16) — past-date rejection + guest details 
       expect(schemaBody).not.toMatch(/consent:\s*z\.boolean\(\)\.optional/);
     });
 
-    it("handleCreateBooking parses the schema and returns 400 on validation failure", () => {
+    it("handleCreateBooking parses the complete schema and returns 400 on validation failure", () => {
       // A validation failure must short-circuit with a 400 +
       // a generic-but-actionable error message before any
       // Firestore work runs. The 400 path is shared with the
@@ -151,11 +151,11 @@ describe("Audit Batch 3 (BI-12 + BI-16) — past-date rejection + guest details 
       const fnStart = bookingsSrc.indexOf("export async function handleCreateBooking");
       const fnEnd = bookingsSrc.indexOf("export async function handleCreateWalkin", fnStart);
       const createFn = bookingsSrc.slice(fnStart, fnEnd);
-      expect(createFn).toMatch(/guestDetailsSchema\.safeParse\(rawGuestDetails\)/);
+      expect(createFn).toMatch(/createBookingSchema\.safeParse\(req\.body\s*\|\|\s*\{\}\)/);
       // The error message must be generic (no schema leak) but
       // actionable for the guest.
       expect(createFn).toMatch(
-        /Please check your guest details — a required field is missing or invalid/
+        /Please check the booking details — a required field is missing or invalid/
       );
     });
   });

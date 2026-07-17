@@ -13,12 +13,11 @@ describe("bookings.ts — linkedInquiryId on booking doc (decision #102)", () =>
     "utf8"
   );
 
-  it("CreateBookingBody interface includes linkedInquiryId", () => {
-    // The interface is defined early in the file. Slice to it.
-    const ifaceStart = src.indexOf("interface CreateBookingBody");
-    const ifaceEnd = src.indexOf("}", ifaceStart);
-    const ifaceBody = src.slice(ifaceStart, ifaceEnd);
-    expect(ifaceBody).toMatch(/linkedInquiryId\?:\s*string \| null/);
+  it("createBookingSchema includes linkedInquiryId", () => {
+    const schemaStart = src.indexOf("const createBookingSchema");
+    const schemaEnd = src.indexOf("}).strict();", schemaStart);
+    const schemaBody = src.slice(schemaStart, schemaEnd);
+    expect(schemaBody).toMatch(/linkedInquiryId:\s*z\.string\(\).*\.nullable\(\)\.optional\(\)/);
   });
 
   it("handleCreateBooking destructures linkedInquiryId from the body", () => {

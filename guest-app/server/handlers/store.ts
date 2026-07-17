@@ -22,6 +22,7 @@ interface CreateStoreOrderBody {
   // transaction below.
   paymentMethod: string;
   paymentProofUrl?: string;
+  paymentProofPath?: string;
 }
 
 interface CancelStoreOrderBody {
@@ -197,11 +198,18 @@ export async function handleCreateStoreOrder(req: any, res: any) {
   // Per #110 (store toggle): any non-`cod`/non-`add-to-bill`
   // method is an "online" payment that requires a proof of
   // transfer screenshot. Mirrors the client-side check in
-  // `IntercomPage.tsx → isOnlinePaymentMethod`. `paymentProofUrl`
-  // may be an empty string for `cod` / `add-to-bill` (we
+  // `IntercomPage.tsx → isOnlinePaymentMethod`. New uploads send a
+  // private object path; `paymentProofUrl` remains legacy-only.
+  // Either may be empty for `cod` / `add-to-bill` (we
   // coalesce to `""` when writing the order doc).
   const isOnlinePaymentMethod = body.paymentMethod !== "cod" && body.paymentMethod !== "add-to-bill";
-  if (isOnlinePaymentMethod && !body.paymentProofUrl) {
+  const expectedProofPrefix = `store-orders/${roomNumber}/payment-proof/`;
+  const paymentProofPath = typeof body.paymentProofPath === "string" ? body.paymentProofPath.trim() : "";
+  const proofFileName = paymentProofPath.slice(expectedProofPrefix.length);
+  if (paymentProofPath && (!paymentProofPath.startsWith(expectedProofPrefix) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(proofFileName))) {
+    return res.status(400).json({ success: false, error: "Invalid payment proof path." });
+  }
+  if (isOnlinePaymentMethod && !paymentProofPath && !body.paymentProofUrl) {
     return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
 
@@ -320,6 +328,7 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         totalAmount,
         paymentMethod: body.paymentMethod,
         paymentProofUrl: body.paymentProofUrl || "",
+        paymentProofPath: paymentProofPath || "",
         status: "placed",
         stockRestoredAt: null,
         stockDecrementedAt: null,

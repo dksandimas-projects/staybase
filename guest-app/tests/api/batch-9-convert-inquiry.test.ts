@@ -94,14 +94,19 @@ describe("Phase 11.6 Batch 9 — convert corporate inquiry to booking (audit S4.
       expect(inquiryUpdateBlock![0]).toMatch(/notes:\s*\[\.\.\.existingNotes\s*,\s*conversionNote\]/);
     });
 
-    it("handler resolves the negotiated rate from ratePerRoomType when a code is attached", () => {
+    it("handler resolves RoomType pricing and negotiated rates server-side", () => {
       // The rate resolution must follow this order: explicit
       // override > ratePerRoomType[roomType] from attached code
-      // > room.corporateRate > room.pricePerNight.
+      // > RoomType corporateRate > RoomType pricePerNight.
       const rateBlock = handlerSrc.match(
-        /if\s*\(\s*ratePerNightOverride\s*!==\s*undefined\s*&&\s*ratePerNightOverride\s*!==\s*null\s*\)[\s\S]*?else\s+if\s*\(\s*inquiryData\.accessCodeId\s*\)[\s\S]*?if\s*\(\s*codeSnap\.exists\s*\)[\s\S]*?if\s*\(\s*rateMap\[roomData\.type\]\s*!==\s*undefined\s*\)/);
+        /const\s+hasExplicitOverride[\s\S]*?else\s+if\s*\(\s*inquiryData\.accessCodeId\s*\)[\s\S]*?if\s*\(\s*codeSnap\.exists\s*\)[\s\S]*?if\s*\(\s*rateMap\[roomData\.type\]\s*!==\s*undefined\s*\)/);
       expect(rateBlock, "expected to find the rate resolution block").toBeTruthy();
       expect(rateBlock![0]).toMatch(/rateMap\[roomData\.type\]/);
+      expect(handlerSrc).toMatch(/settings["']\)\.doc\(["']hotelConfig/);
+      expect(handlerSrc).toMatch(/entry\.value\s*===\s*roomData\.type/);
+      expect(handlerSrc).not.toMatch(/roomData\.maxCapacity/);
+      expect(handlerSrc).not.toMatch(/roomData\.pricePerNight/);
+      expect(handlerSrc).not.toMatch(/roomData\.corporateRate/);
     });
 
     it("handler pre-fills guest info from the inquiry contactPerson / email / phone", () => {

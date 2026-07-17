@@ -29,14 +29,14 @@ const bookingPageSrc = readFileSync(
 
 describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomType", () => {
   describe("S1.5 — server-authoritative isCorporate / companyName", () => {
-    it("CreateBookingBody interface no longer declares isCorporate", () => {
-      // The interface must NOT have an `isCorporate: boolean;` field
-      // — the server derives it from a validated corporateCode.
-      const interfaceMatch = bookingsSrc.match(
-        /interface\s+CreateBookingBody\s*\{[\s\S]*?\}/
+    it("the strict create-booking schema does not accept isCorporate", () => {
+      // The server derives corporate status from a validated code; the
+      // complete request schema must not expose an isCorporate input.
+      const schemaMatch = bookingsSrc.match(
+        /const\s+createBookingSchema\s*=\s*z\.object\(\{[\s\S]*?\}\)\.strict\(\)/
       );
-      expect(interfaceMatch, "expected to find CreateBookingBody interface").toBeTruthy();
-      expect(interfaceMatch![0]).not.toMatch(/^\s*isCorporate\s*:/m);
+      expect(schemaMatch, "expected to find createBookingSchema").toBeTruthy();
+      expect(schemaMatch![0]).not.toMatch(/^\s*isCorporate\s*:/m);
     });
 
     it("booking handler no longer destructures isCorporate from body", () => {
