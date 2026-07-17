@@ -162,12 +162,14 @@ Full rules in `firebase/storage.rules`. Intent:
 ### Payment proof (`bookings/{bookingId}/payment-proof/{filename}`)
 - Read: authenticated staff/admin only — **never public**
 - Write: anyone (guests upload during booking flow — use a time-limited upload token approach or validate booking context)
-- URLs stored in Firestore `bookings` documents — access controlled via Firestore rules
+- Randomized object paths are stored in `paymentProofPath`; anonymous clients use local blob previews and never mint permanent download URLs
+- Admin UI resolves the path through staff-authenticated `/api/storage/signed-url`, which returns a one-hour signed URL
 - `bookingId` is preallocated by the booking flow before upload, then passed to `/api/bookings/create`; the API creates the booking document at that exact ID inside the transaction
 
 ### Discount ID photos (`bookings/{bookingId}/discount-id/{filename}`)
 - Read: authenticated staff/admin only — **never public**
 - Write: anyone (guests upload during booking flow before booking creation)
+- Randomized object paths are stored in `discountIdPhotoPath` and use the same staff-authenticated signed-URL flow
 - `bookingId` follows the same preallocated-ID contract as payment proof uploads
 
 ### Website content photos (`settings/website-content/**`)
@@ -348,6 +350,12 @@ See `plan/features/STATIC-PAGES.md §Privacy Policy` for UI implementation.
 Minimum required content is defined in `plan/docs/LEGAL.md §Guest Terms of Service`.
 
 See `plan/features/STATIC-PAGES.md §Terms of Service` for UI implementation.
+
+---
+
+## Audit Remediation (2026-07-17)
+
+- **X-01 (HIGH, fixed):** removed all public granular `get` grants from the three sensitive upload paths. Guest clients now upload to randomized filenames, retain only object paths, use local blob previews, and never call `getDownloadURL`; staff previews use the authenticated one-hour Admin SDK signed-URL route.
 
 ---
 

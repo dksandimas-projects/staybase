@@ -32,6 +32,13 @@ const PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 const RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
 
+function isExpectedBookingUploadPath(path: string | null | undefined, bookingId: string, folder: "payment-proof" | "discount-id") {
+  if (!path) return true;
+  const prefix = `bookings/${bookingId}/${folder}/`;
+  const fileName = path.slice(prefix.length);
+  return path.startsWith(prefix) && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(fileName);
+}
+
 function sumLedgerAmounts(snapshot: any): number {
   return snapshot.docs.reduce((sum: number, docSnap: any) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
@@ -258,51 +265,36 @@ const guestDetailsSchema = z.object({
     .max(40)
     .optional()
     .default("")
-});
+}).strict();
 
-interface CreateBookingBody {
-  bookingId: string;
-  // Per the room-type booking refactor: clients send the chosen
-  // `roomType` instead of a specific `roomId`. The transaction
-  // below picks the first non-conflicting physical room of that
-  // type and stores its `roomId` + `roomNumber` on the booking doc.
-  // Schema is unchanged — the booking still references a real
-  // `rooms/<id>` document.
-  roomType: string;
-  checkIn: string; // Yyyy-MM-DD
-  checkOut: string; // Yyyy-MM-DD
-  guests: number;
-  hasBreakfast: boolean;
-  guestDetails: GuestDetails;
-  discountType: "" | "senior" | "pwd";
-  discountIdPhotoUrl: string | null;
-  voucherCode?: string;
-  paymentMethod: string;
-  paymentProofUrl?: string | null;
-  paymentReferenceNumber?: string | null;
-  // Per W1.3 / decision #79 / audit S1.5: the client no longer
-  // sets `isCorporate` directly. The server derives it from a
-  // validated `corporateCode` lookup. The `companyName` on the
-  // booking is sourced from the `corporateCodes` document for
-  // the validated code, never from `guestDetails.companyName`.
-  corporateCode?: string;
-  // Per BI-04 (booking-intercom audit 2026-07-06): the corporate
-  // booking route's "Continue without code" path. The flag only
-  // expresses *intent* — the rate itself is always read from the
-  // server-side `roomTypes[].corporateRate` (public flat corporate
-  // pricing per CORPORATE-BOOKING.md), never from the client. The
-  // guest-entered `companyName` is stored as unverified contact
-  // metadata. A validated `corporateCode` always wins over this flag.
-  corporateFlatRate?: boolean;
-  // Per W2.14 / decision #102: set when this booking is created from a
-  // converted corporate inquiry. The convert-to-booking UI (per audit
-  // 1.4 SEV-1 #2) populates this field; normal bookings send null.
-  linkedInquiryId?: string | null;
-  // Per ETR-03: optional test token for production test runs. When
-  // provided the server validates it against active test runs and
-  // stamps isTestData / testRunId on the booking.
-  testToken?: string;
-}
+// G-01 (E2E audit 2026-07-17): validate the complete public request
+// before any pricing or Firestore work. In particular, `guests` must
+// stay a finite positive integer so it cannot create negative breakfast
+// lines or NaN totals. Router-consumed bot fields remain part of the
+// strict wire contract even though business logic does not persist them.
+const createBookingSchema = z.object({
+  bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
+  roomType: z.string().trim().min(1).max(120),
+  checkIn: z.string().trim().min(1).max(40),
+  checkOut: z.string().trim().min(1).max(40),
+  guests: z.number().finite().int().min(1).max(100),
+  hasBreakfast: z.boolean(),
+  guestDetails: guestDetailsSchema,
+  discountType: z.enum(["", "senior", "pwd"]),
+  discountIdPhotoUrl: z.string().url().max(2048).nullable(),
+  discountIdPhotoPath: z.string().trim().max(512).nullable().optional().default(null),
+  voucherCode: z.string().trim().max(80).optional().default(""),
+  paymentMethod: z.string().trim().min(1).max(80),
+  paymentProofUrl: z.string().url().max(2048).nullable().optional().default(null),
+  paymentProofPath: z.string().trim().max(512).nullable().optional().default(null),
+  paymentReferenceNumber: z.string().trim().max(160).nullable().optional().default(null),
+  corporateCode: z.string().trim().max(120).optional().default(""),
+  corporateFlatRate: z.boolean().optional().default(false),
+  linkedInquiryId: z.string().trim().max(160).nullable().optional().default(null),
+  testToken: z.string().trim().max(512).optional(),
+  turnstileToken: z.string().max(4096).optional(),
+  _hp: z.string().max(200).optional().default("")
+}).strict();
 
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated here twice
@@ -316,10 +308,15 @@ export async function handleCreateBooking(req: any, res: any) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const body = req.body as CreateBookingBody;
-  if (!body) {
-    return res.status(400).json({ success: false, error: "Invalid request body." });
+  const parsedBody = createBookingSchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the booking details — a required field is missing or invalid."
+    });
   }
+
+  const body = parsedBody.data;
 
   const {
     bookingId,
@@ -331,9 +328,11 @@ export async function handleCreateBooking(req: any, res: any) {
     guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
+    discountIdPhotoPath,
     voucherCode,
     paymentMethod,
     paymentProofUrl,
+    paymentProofPath,
     paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
@@ -341,30 +340,14 @@ export async function handleCreateBooking(req: any, res: any) {
     testToken
   } = body;
 
-  // Basic Input Validation
-  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
-    return res.status(400).json({ success: false, error: "Missing required booking fields." });
-  }
-  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
-    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
-  }
+  const guestDetails: GuestDetails = rawGuestDetails;
 
-  // Per BI-11 (booking-intercom audit 2026-07-06): validate +
-  // normalize guest details before any Firestore work. The
-  // parsed object replaces the raw body copy so every
-  // downstream read gets trimmed, length-capped, lowercase
-  // email, and a typed shape for the corporate metadata
-  // fields the handler will later persist conditionally.
-  // This also closes BI-16 (input validation): a garbage
-  // email or a 100KB `requests` blob never reaches Firestore.
-  const parsedGuest = guestDetailsSchema.safeParse(rawGuestDetails);
-  if (!parsedGuest.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please check your guest details — a required field is missing or invalid."
-    });
+  if (
+    !isExpectedBookingUploadPath(discountIdPhotoPath, bookingId, "discount-id")
+    || !isExpectedBookingUploadPath(paymentProofPath, bookingId, "payment-proof")
+  ) {
+    return res.status(400).json({ success: false, error: "Invalid booking upload path." });
   }
-  const guestDetails: GuestDetails = parsedGuest.data;
 
   if (!guestDetails.consent) {
     return res.status(400).json({ success: false, error: "Privacy policy consent is required." });
@@ -937,6 +920,9 @@ export async function handleCreateBooking(req: any, res: any) {
       const afterVoucher = afterSeniorPwd - voucherDiscount;
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      if (!Number.isFinite(totalPrice)) {
+        throw new Error("Invalid booking total.");
+      }
 
       // Canonical pre-discount pricing basis. Always stored, even when no
       // discount is present, so every downstream reader has one convention.
@@ -1021,6 +1007,7 @@ export async function handleCreateBooking(req: any, res: any) {
         discountType: discountType || "",
         discountPct,
         discountIdPhotoUrl: discountIdPhotoUrl || null,
+        discountIdPhotoPath: discountIdPhotoPath || null,
         discountVerified: false,
         discountVerifiedBy: null,
         discountRejected: false,
@@ -1032,13 +1019,14 @@ export async function handleCreateBooking(req: any, res: any) {
         corporateCode: corporateDetails.corporateCode,
         companyName: corporateDetails.companyName,
         specialRequests: guestDetails.requests || "",
-        status: paymentProofUrl ? "payment-uploaded" : "pending",
+        status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): write
         // `null` (not `""`) when no payment proof is attached.
         // `|| null` coalesces both `""` and `undefined` to
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
+        paymentProofPath: paymentProofPath || null,
         paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
@@ -2240,7 +2228,7 @@ export async function handleAddPayment(req: any, res: any) {
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData.status === "pending"
         || bookingData.status === "payment-uploaded";
-      hadPaymentProof = !!bookingData.paymentProofUrl;
+      hadPaymentProof = !!(bookingData.paymentProofPath || bookingData.paymentProofUrl);
       staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
 
       const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
@@ -2343,7 +2331,11 @@ export async function handleAddPayment(req: any, res: any) {
     if (hadPaymentProof && staffPaymentMarkerMissing) {
       await sendStaffNewPaymentTrigger(
         { ...bookingDataSnapshot, bookingRef: bookingDataSnapshot.bookingRef },
-        { ...paymentRecord, paymentProofUrl: bookingDataSnapshot.paymentProofUrl }
+        {
+          ...paymentRecord,
+          paymentProofUrl: bookingDataSnapshot.paymentProofUrl || null,
+          paymentProofPath: bookingDataSnapshot.paymentProofPath || null
+        }
       );
     }
   } catch (emailErr) {

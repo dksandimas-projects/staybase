@@ -1,4 +1,5 @@
 # Booking Flow (Regular + Corporate) Readiness Audit — 2026-07-08
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 > Focused readiness audit of the public booking flow and the corporate booking
 > flow, requested ahead of the next `dev → main` milestone. Read-only at audit
 > time. Successor to `plan/project/AUDIT-BOOKING-INTERCOM-2026-07-06.md`

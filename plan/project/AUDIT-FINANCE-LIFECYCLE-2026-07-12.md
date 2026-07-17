@@ -1,4 +1,5 @@
 # Finance Lifecycle Audit — 2026-07-12
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 
 > End-to-end audit of the money path: booking creation (online / corporate /
 > walk-in) → payments & refunds → discounts, vouchers, points → check-in →

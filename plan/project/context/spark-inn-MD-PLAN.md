@@ -1,4 +1,5 @@
 # Spark Inn — MD System Reference
+> **📁 HISTORICAL REFERENCE (v3.0, June 4, 2026) — non-canonical, do not load during normal implementation tasks.** Describes the MD system as originally designed; file counts and structure have drifted since. Canonical index: `CLAUDE.md` §Table of Contents · ownership + budgets: `plan/docs/CONTRIBUTING.md`.
 > v3.0 — June 4, 2026
 > Reference `spark-inn-MASTER-CONTEXT.md` for all project details.
 > All decisions finalized — no open questions.

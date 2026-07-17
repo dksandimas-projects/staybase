@@ -39,7 +39,7 @@ import {
   VERSION
 } from "@spark-inn/shared";
 import { collection, doc, getDoc, getFirestore } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { ref, uploadBytes } from "firebase/storage";
 import { storage } from "../firebase/config";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
@@ -172,7 +172,7 @@ export function CorporateBookingPage() {
   // state stored only the picked file's *name* — nothing was ever
   // uploaded, no `paymentProofUrl` was sent, and the booking was
   // recorded as `pay-at-hotel` with no trace of the transfer.
-  const [proofUpload, setProofUpload] = useState<{ name: string; url: string } | null>(null);
+  const [proofUpload, setProofUpload] = useState<{ name: string; path: string } | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
   const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
@@ -583,10 +583,10 @@ export function CorporateBookingPage() {
       setPaymentProofError("");
       try {
         const compressed = await compressImageFile(file);
-        const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${compressed.file.name}`);
-        await uploadBytes(storageRef, compressed.file);
-        const url = await getDownloadURL(storageRef);
-        setProofUpload({ name: file.name, url });
+        const extension = compressed.file.name.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
+        const storageRef = ref(storage, `bookings/${bookingId}/payment-proof/${crypto.randomUUID()}${extension}`);
+        const uploadResult = await uploadBytes(storageRef, compressed.file);
+        setProofUpload({ name: file.name, path: uploadResult.ref.fullPath });
       } catch (err) {
         console.error("Corporate payment proof upload failed:", err);
         setPaymentProofError("Receipt upload failed. Please try again.");
@@ -684,7 +684,8 @@ export function CorporateBookingPage() {
         // the transfer. Chargeback stays `pay-at-hotel` (settled
         // via LOU per decision #99).
         paymentMethod: isPersonalPay ? paymentMethod : "pay-at-hotel",
-        paymentProofUrl: isPersonalPay ? proofUpload?.url ?? null : null,
+        paymentProofUrl: null,
+        paymentProofPath: isPersonalPay ? proofUpload?.path ?? null : null,
         paymentReferenceNumber: isPersonalPay && paymentReferenceNumber.trim() ? paymentReferenceNumber.trim() : null,
         // Per W1.3 / decision #79 / audit S1.5: the server
         // derives `isCorporate` from the validated `corporateCode`

@@ -103,6 +103,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `discountType` | string | `""` \| `"senior"` \| `"pwd"` |
 | `discountPct` | number | `0` \| `20` |
 | `discountIdPhotoUrl` | string \| null | Firebase Storage URL of OSCA/PWD ID upload — staff-only read |
+| `discountIdPhotoPath` | string \| null | Private Storage object path for new uploads; resolved to a short-lived signed URL only for authenticated staff |
 | `discountVerified` | boolean | `false` until staff marks ID as verified in drawer |
 | `discountVerifiedBy` | string \| null | Staff UID who verified the discount ID |
 | `discountRejected` | boolean | `true` if staff rejected the discount ID |
@@ -119,6 +120,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `status` | string | `"pending"` \| `"payment-uploaded"` \| `"payment-confirmed"` \| `"confirmed"` \| `"checked-in"` \| `"checked-out"` \| `"cancelled"` |
 | `paymentMethod` | string | `"pay-at-hotel"` \| `"gcash"` \| `"paypal"` \| other |
 | `paymentProofUrl` | string \| null | Firebase Storage URL. `null` is the canonical "no proof" value (not `""`) per BF-45. |
+| `paymentProofPath` | string \| null | Private Storage object path for new uploads; preferred over the legacy URL field |
 | `paymentReferenceNumber` | string \| null | Guest-entered reference (GCash/bank ref #) for staff cross-check. Displayed in the dashboard pending payment alerts. Per Phase 12 — Dashboard Payment Rejection & Reference Verification (2026-07-15). |
 | `paymentRejectionReason` | string \| null | Staff reason when a pending payment proof is rejected from the dashboard. Bounces the booking back to `pending` (room stays held) and emails the guest with the reason. Per Phase 12 — Dashboard Payment Rejection & Reference Verification (2026-07-15). |
 | `paymentRejectedAt` | timestamp \| null | Server timestamp set by `/api/bookings/reject-payment`. |
@@ -511,6 +513,7 @@ Subcollection for ICE candidate exchange (both sides write here).
 | `totalAmount` | number | Computed at order creation |
 | `paymentMethod` | string | Open key from `settings/hotelConfig.paymentMethods[]` where `showInStore !== false`; `pay-at-hotel` excluded |
 | `paymentProofUrl` | string | Firebase Storage URL (required for any non-`cod`/non-`add-to-bill` method) |
+| `paymentProofPath` | string | Private Storage object path for new guest uploads; required for online methods unless reading a legacy record |
 | `status` | string | `"placed"` \| `"confirmed"` \| `"out-for-delivery"` \| `"delivered"` \| `"cancelled"` |
 | `stockRestoredAt` | timestamp \| null | Set once when reserved stock is restored after a placed order cancellation |
 | `deliveredAt` | timestamp \| null | Set by the staff delivery API; revenue-recognition and direct-tender timestamp |

@@ -1,6 +1,7 @@
 # SEO & Open Graph — Feature Spec
+> Requires: CLAUDE.md, plan/docs/FRONTEND.md, plan/docs/WHITE-LABEL.md
 
-> Status: 🔄 Spec — not yet implemented (base client-side meta exists; social/crawler layer missing)
+> Status: 🔄 Built (Phase 11.9, 2026-07-09 — G1–G6 + config shipped); remaining: owner OG-card approval (Q2), crawler/card verification, post-deploy sitemap submission — see `plan/project/ROADMAP.md §Phase 11.9`
 > Owner MD for: search indexability (Google / Bing / Yahoo) + link-preview cards (Facebook / Messenger / WhatsApp / Viber / X / LinkedIn / iMessage)
 > Read bundle: this file + `plan/docs/FRONTEND.md` + `plan/docs/WHITE-LABEL.md` + `plan/docs/GOTCHAS.md`
 

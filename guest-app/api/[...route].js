@@ -190690,6 +190690,12 @@ var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest 
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
+function isExpectedBookingUploadPath(path, bookingId, folder) {
+  if (!path) return true;
+  const prefix = `bookings/${bookingId}/${folder}/`;
+  const fileName = path.slice(prefix.length);
+  return path.startsWith(prefix) && /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(fileName);
+}
 function sumLedgerAmounts(snapshot) {
   return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
@@ -190801,15 +190807,42 @@ var guestDetailsSchema = external_exports.object({
   numRooms: external_exports.coerce.number().int().min(1).max(50).optional(),
   purposeOfStay: external_exports.string().trim().max(120).optional().default(""),
   preferredBillingArrangement: external_exports.string().trim().max(40).optional().default("")
-});
+}).strict();
+var createBookingSchema = external_exports.object({
+  bookingId: external_exports.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
+  roomType: external_exports.string().trim().min(1).max(120),
+  checkIn: external_exports.string().trim().min(1).max(40),
+  checkOut: external_exports.string().trim().min(1).max(40),
+  guests: external_exports.number().finite().int().min(1).max(100),
+  hasBreakfast: external_exports.boolean(),
+  guestDetails: guestDetailsSchema,
+  discountType: external_exports.enum(["", "senior", "pwd"]),
+  discountIdPhotoUrl: external_exports.string().url().max(2048).nullable(),
+  discountIdPhotoPath: external_exports.string().trim().max(512).nullable().optional().default(null),
+  voucherCode: external_exports.string().trim().max(80).optional().default(""),
+  paymentMethod: external_exports.string().trim().min(1).max(80),
+  paymentProofUrl: external_exports.string().url().max(2048).nullable().optional().default(null),
+  paymentProofPath: external_exports.string().trim().max(512).nullable().optional().default(null),
+  paymentReferenceNumber: external_exports.string().trim().max(160).nullable().optional().default(null),
+  corporateCode: external_exports.string().trim().max(120).optional().default(""),
+  corporateFlatRate: external_exports.boolean().optional().default(false),
+  linkedInquiryId: external_exports.string().trim().max(160).nullable().optional().default(null),
+  testToken: external_exports.string().trim().max(512).optional(),
+  turnstileToken: external_exports.string().max(4096).optional(),
+  _hp: external_exports.string().max(200).optional().default("")
+}).strict();
 async function handleCreateBooking(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const body = req.body;
-  if (!body) {
-    return res.status(400).json({ success: false, error: "Invalid request body." });
+  const parsedBody = createBookingSchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the booking details \u2014 a required field is missing or invalid."
+    });
   }
+  const body = parsedBody.data;
   const {
     bookingId,
     roomType,
@@ -190820,29 +190853,21 @@ async function handleCreateBooking(req, res) {
     guestDetails: rawGuestDetails,
     discountType,
     discountIdPhotoUrl,
+    discountIdPhotoPath,
     voucherCode,
     paymentMethod,
     paymentProofUrl,
+    paymentProofPath,
     paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
     linkedInquiryId,
     testToken
   } = body;
-  if (!bookingId || !roomType || !checkIn || !checkOut || !guests || !rawGuestDetails) {
-    return res.status(400).json({ success: false, error: "Missing required booking fields." });
+  const guestDetails = rawGuestDetails;
+  if (!isExpectedBookingUploadPath(discountIdPhotoPath, bookingId, "discount-id") || !isExpectedBookingUploadPath(paymentProofPath, bookingId, "payment-proof")) {
+    return res.status(400).json({ success: false, error: "Invalid booking upload path." });
   }
-  if (!PREALLOCATED_BOOKING_ID_REGEX.test(String(bookingId))) {
-    return res.status(400).json({ success: false, error: "Invalid booking ID format." });
-  }
-  const parsedGuest = guestDetailsSchema.safeParse(rawGuestDetails);
-  if (!parsedGuest.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please check your guest details \u2014 a required field is missing or invalid."
-    });
-  }
-  const guestDetails = parsedGuest.data;
   if (!guestDetails.consent) {
     return res.status(400).json({ success: false, error: "Privacy policy consent is required." });
   }
@@ -191183,6 +191208,9 @@ async function handleCreateBooking(req, res) {
       const afterVoucher = afterSeniorPwd - voucherDiscount;
       const memberDiscount = Math.round(afterVoucher * (appliedMemberDiscountPct / 100));
       const totalPrice = Math.max(afterVoucher - memberDiscount, 0);
+      if (!Number.isFinite(totalPrice)) {
+        throw new Error("Invalid booking total.");
+      }
       const originalTotalPrice = subtotal;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
@@ -191241,6 +191269,7 @@ async function handleCreateBooking(req, res) {
         discountType: discountType || "",
         discountPct,
         discountIdPhotoUrl: discountIdPhotoUrl || null,
+        discountIdPhotoPath: discountIdPhotoPath || null,
         discountVerified: false,
         discountVerifiedBy: null,
         discountRejected: false,
@@ -191252,13 +191281,14 @@ async function handleCreateBooking(req, res) {
         corporateCode: corporateDetails.corporateCode,
         companyName: corporateDetails.companyName,
         specialRequests: guestDetails.requests || "",
-        status: paymentProofUrl ? "payment-uploaded" : "pending",
+        status: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
         paymentMethod,
         // Per BF-45 (booking-flow audit 2026-06-26): write
         // `null` (not `""`) when no payment proof is attached.
         // `|| null` coalesces both `""` and `undefined` to
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
+        paymentProofPath: paymentProofPath || null,
         paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
@@ -192154,7 +192184,7 @@ async function handleAddPayment(req, res) {
       totalPrice = Number(bookingData2.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
       isConfirmableStatus = bookingData2.status === "pending" || bookingData2.status === "payment-uploaded";
-      hadPaymentProof = !!bookingData2.paymentProofUrl;
+      hadPaymentProof = !!(bookingData2.paymentProofPath || bookingData2.paymentProofUrl);
       staffPaymentMarkerMissing = !bookingData2.emailNotificationsSent?.staffNewPayment;
       const pendingLoyaltyPoints = Math.max(Number(bookingData2.pendingLoyaltyPoints || 0), 0);
       const settlesCheckedOutFolio = bookingData2.status === "checked-out" && bookingData2.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData2.checkedOutFolioTotal || 0);
@@ -192228,7 +192258,11 @@ async function handleAddPayment(req, res) {
     if (hadPaymentProof && staffPaymentMarkerMissing) {
       await sendStaffNewPaymentTrigger(
         { ...bookingDataSnapshot, bookingRef: bookingDataSnapshot.bookingRef },
-        { ...paymentRecord, paymentProofUrl: bookingDataSnapshot.paymentProofUrl }
+        {
+          ...paymentRecord,
+          paymentProofUrl: bookingDataSnapshot.paymentProofUrl || null,
+          paymentProofPath: bookingDataSnapshot.paymentProofPath || null
+        }
       );
     }
   } catch (emailErr) {
@@ -193629,10 +193663,10 @@ var convertInquirySchema = external_exports.object({
   hasBreakfast: external_exports.boolean().optional().default(false),
   paymentMethod: external_exports.string().trim().min(1).max(40).optional().default("chargeback"),
   // Optional negotiated rate override. When omitted, the handler
-  // uses room.corporateRate. When a corporateCodes/{code} already
-  // exists for this inquiry, the handler uses its
+  // uses the RoomType corporate/base rate. When a corporateCodes/{code}
+  // already exists for this inquiry, the handler uses its
   // ratePerRoomType[roomType] if defined.
-  ratePerNightOverride: external_exports.coerce.number().min(0).max(1e6).optional().nullable()
+  ratePerNightOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional().nullable()
 }).strict();
 async function handleCreateCorporateInquiry(req, res) {
   if (req.method !== "POST") {
@@ -193743,6 +193777,20 @@ async function handleConvertInquiryToBooking(req, res) {
       if (!roomData.isActive) {
         throw new Error("Room is inactive.");
       }
+      const hotelConfigRef = adminDb.collection("settings").doc("hotelConfig");
+      const hotelConfigDoc = await transaction.get(hotelConfigRef);
+      if (!hotelConfigDoc.exists) {
+        throw new Error("Room type catalog is not configured.");
+      }
+      const roomTypes = Array.isArray(hotelConfigDoc.data()?.roomTypes) ? hotelConfigDoc.data().roomTypes : [];
+      const typeEntry = roomTypes.find((entry) => entry && entry.value === roomData.type);
+      if (!typeEntry) {
+        throw new Error("Room type is not available.");
+      }
+      const typeMaxCapacity = Number(typeEntry.maxCapacity);
+      if (!Number.isFinite(typeMaxCapacity) || typeMaxCapacity < 1) {
+        throw new Error("Room type capacity is not configured.");
+      }
       if (roomData.status === "blocked") {
         const blockedFrom = toDateOrNull(roomData.blockedFrom);
         const blockedTo = toDateOrNull(roomData.blockedTo);
@@ -193753,8 +193801,8 @@ async function handleConvertInquiryToBooking(req, res) {
           throw new Error("Room is blocked for the selected dates.");
         }
       }
-      if (guests > roomData.maxCapacity) {
-        throw new Error(`Guest count exceeds room capacity of ${roomData.maxCapacity}.`);
+      if (guests > typeMaxCapacity) {
+        throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);
       }
       const bookingsQuery = adminDb.collection("bookings").where("roomId", "==", roomId).where("status", "!=", "cancelled");
       const bookingsSnapshot = await transaction.get(bookingsQuery);
@@ -193772,9 +193820,12 @@ async function handleConvertInquiryToBooking(req, res) {
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
       const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
       const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
-      let ratePerNight = Number(roomData.pricePerNight || 0);
+      const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
+      const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
+      const hasExplicitOverride = ratePerNightOverride !== void 0 && ratePerNightOverride !== null;
+      let ratePerNight = typeCorporateRate || typeBaseRate;
       let codeUsageUpdate = null;
-      if (ratePerNightOverride !== void 0 && ratePerNightOverride !== null) {
+      if (hasExplicitOverride) {
         ratePerNight = ratePerNightOverride;
       } else if (inquiryData.accessCodeId) {
         const codeRef = adminDb.collection("corporateCodes").doc(inquiryData.accessCodeId);
@@ -193784,8 +193835,8 @@ async function handleConvertInquiryToBooking(req, res) {
           const rateMap = codeData.ratePerRoomType || {};
           if (rateMap[roomData.type] !== void 0) {
             ratePerNight = rateMap[roomData.type];
-          } else if (roomData.corporateRate) {
-            ratePerNight = roomData.corporateRate;
+          } else if (typeCorporateRate) {
+            ratePerNight = typeCorporateRate;
           }
           codeUsageUpdate = {
             ref: codeRef,
@@ -193794,11 +193845,14 @@ async function handleConvertInquiryToBooking(req, res) {
               updatedAt: /* @__PURE__ */ new Date()
             }
           };
-        } else if (roomData.corporateRate) {
-          ratePerNight = roomData.corporateRate;
+        } else if (typeCorporateRate) {
+          ratePerNight = typeCorporateRate;
         }
-      } else if (roomData.corporateRate) {
-        ratePerNight = roomData.corporateRate;
+      } else if (typeCorporateRate) {
+        ratePerNight = typeCorporateRate;
+      }
+      if (!Number.isFinite(ratePerNight) || ratePerNight < 0 || !hasExplicitOverride && ratePerNight === 0) {
+        throw new Error("A valid room type rate is required before converting this inquiry.");
       }
       const { todayStr, todayCompact } = getManilaDateInfo();
       const counterRef = adminDb.collection("counters").doc(`bookings-${todayStr}`);
@@ -193820,6 +193874,9 @@ async function handleConvertInquiryToBooking(req, res) {
       const roomTotal = ratePerNight * numNights;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       finalTotalPrice = roomTotal + breakfastTotal;
+      if (!Number.isFinite(finalTotalPrice)) {
+        throw new Error("The converted booking total is invalid.");
+      }
       const contactName = String(inquiryData.contactPerson || "").trim();
       const [firstName, ...rest] = contactName.split(/\s+/);
       const lastName = rest.length > 0 ? rest.join(" ") : "\u2014";
@@ -195072,7 +195129,13 @@ async function handleCreateStoreOrder(req, res) {
     return res.status(400).json({ success: false, error: "Invalid store order item quantity." });
   }
   const isOnlinePaymentMethod = body.paymentMethod !== "cod" && body.paymentMethod !== "add-to-bill";
-  if (isOnlinePaymentMethod && !body.paymentProofUrl) {
+  const expectedProofPrefix = `store-orders/${roomNumber}/payment-proof/`;
+  const paymentProofPath = typeof body.paymentProofPath === "string" ? body.paymentProofPath.trim() : "";
+  const proofFileName = paymentProofPath.slice(expectedProofPrefix.length);
+  if (paymentProofPath && (!paymentProofPath.startsWith(expectedProofPrefix) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(proofFileName))) {
+    return res.status(400).json({ success: false, error: "Invalid payment proof path." });
+  }
+  if (isOnlinePaymentMethod && !paymentProofPath && !body.paymentProofUrl) {
     return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
   const normalizedItems = Array.from(
@@ -195153,6 +195216,7 @@ async function handleCreateStoreOrder(req, res) {
         totalAmount,
         paymentMethod: body.paymentMethod,
         paymentProofUrl: body.paymentProofUrl || "",
+        paymentProofPath: paymentProofPath || "",
         status: "placed",
         stockRestoredAt: null,
         stockDecrementedAt: null,
@@ -195755,6 +195819,50 @@ async function handleNotificationsPrune(req, res) {
   }
 }
 
+// server/handlers/storage.ts
+var privateStoragePathSchema = external_exports.object({
+  path: external_exports.string().trim().min(1).max(512)
+}).strict();
+var BOOKING_PRIVATE_PATH = /^bookings\/[A-Za-z0-9]{10,32}\/(?:payment-proof|discount-id)\/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
+var STORE_PRIVATE_PATH = /^store-orders\/[A-Za-z0-9_-]{1,32}\/payment-proof\/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/;
+var SIGNED_URL_TTL_MS = 60 * 60 * 1e3;
+function isAllowedPrivatePath(path) {
+  return BOOKING_PRIVATE_PATH.test(path) || STORE_PRIVATE_PATH.test(path);
+}
+async function handleGetPrivateStorageUrl(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  if (!req.staff?.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  const parsed = privateStoragePathSchema.safeParse(req.body || {});
+  if (!parsed.success || !isAllowedPrivatePath(parsed.data?.path || "")) {
+    return res.status(400).json({ success: false, error: "Invalid private file path." });
+  }
+  const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
+  if (!bucketName) {
+    return res.status(500).json({ success: false, error: "Storage is not configured." });
+  }
+  try {
+    const file = adminStorage.bucket(bucketName).file(parsed.data.path);
+    const [exists] = await file.exists();
+    if (!exists) {
+      return res.status(404).json({ success: false, error: "Private file not found." });
+    }
+    const expiresAt = Date.now() + SIGNED_URL_TTL_MS;
+    const [url] = await file.getSignedUrl({ action: "read", expires: expiresAt });
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.status(200).json({
+      success: true,
+      data: { url, expiresAt: new Date(expiresAt).toISOString() }
+    });
+  } catch (error) {
+    console.error("Private Storage URL signing failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to open the private file." });
+  }
+}
+
 // server/apiRouter.ts
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
@@ -196053,6 +196161,14 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleCreateWalkin(req, res);
+  }
+  if (domain === "storage" && action === "signed-url" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleGetPrivateStorageUrl(req, res);
   }
   if (domain === "bookings" && action === "add-payment" && req.method === "POST") {
     const authResult = await authenticateStaff(req);

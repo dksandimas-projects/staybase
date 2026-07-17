@@ -178,6 +178,11 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Add to Calendar creates correct event with check-in/out times
 - [x] Double-booking prevented — test by opening two sessions simultaneously
 
+## Audit Remediation (2026-07-17)
+
+- **G-01 (HIGH, fixed):** `/api/bookings/create` now strict-Zod validates the complete request. `guests` is a finite integer from 1–100, unknown fields are rejected, and computed totals have a final `Number.isFinite` guard before the booking write. The already-strict walk-in schema remains unchanged.
+- **G-02 (MED, open):** No maximum stay length or advance-booking window server-side. Anonymous pay-at-hotel `pending` bookings occupy inventory until staff cancel them — long or far-future bookings can deny availability. Fix: cap `numNights` and the booking horizon in the create handlers and mirror in the date picker.
+
 ## References
 
 - Availability locking implementation: `plan/features/AVAILABILITY-LOCKING.md`

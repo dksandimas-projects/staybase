@@ -18,6 +18,7 @@ import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
+import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
@@ -445,6 +446,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
 
     return await handleCreateWalkin(req, res);
+  }
+
+  if (domain === "storage" && action === "signed-url" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleGetPrivateStorageUrl(req, res);
   }
 
   if (domain === "bookings" && action === "add-payment" && req.method === "POST") {

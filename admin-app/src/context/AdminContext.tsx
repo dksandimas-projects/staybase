@@ -47,6 +47,36 @@ const rtcConfiguration: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
+const privateStorageUrlCache = new Map<string, { url: string; refreshAfter: number }>();
+
+async function resolvePrivateStorageUrl(path: string): Promise<string> {
+  const cached = privateStorageUrlCache.get(path);
+  if (cached && cached.refreshAfter > Date.now()) return cached.url;
+
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) return "";
+    const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/storage/signed-url`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({ path })
+    });
+    const result = await response.json();
+    if (!response.ok || !result?.success || typeof result.data?.url !== "string") return "";
+
+    privateStorageUrlCache.set(path, {
+      url: result.data.url,
+      refreshAfter: Date.now() + 50 * 60 * 1000
+    });
+    return result.data.url;
+  } catch {
+    return "";
+  }
+}
+
 interface AdminUser {
   uid: string;
   email: string;
@@ -135,6 +165,7 @@ export interface Booking {
   discountType: string;
   discountPct: number;
   discountIdPhotoUrl: string | null;
+  discountIdPhotoPath?: string | null;
   discountVerified: boolean;
   discountVerifiedBy: string | null;
   discountRejected: boolean;
@@ -151,6 +182,7 @@ export interface Booking {
   // Per BF-45 (booking-flow audit 2026-06-26): canonical
   // "no payment proof" is `null` (not `""`).
   paymentProofUrl: string | null;
+  paymentProofPath?: string | null;
   // Per H2 (hardening batch 2026-06-26): the email magic
   // link carries this token (not the raw email) in the
   // URL. See `shared/types/index.ts`.
@@ -362,6 +394,7 @@ export interface StoreOrder {
   totalAmount: number;
   paymentMethod: "cod" | "add-to-bill" | "gcash";
   paymentProofUrl: string;
+  paymentProofPath?: string;
   status: "placed" | "confirmed" | "out-for-delivery" | "delivered" | "cancelled";
   stockRestoredAt: string | null;
   stockDecrementedAt: string | null;
@@ -1041,11 +1074,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       setBookingsLoading(true);
       return;
     }
+    let active = true;
     setBookingsLoading(true);
     const bookingsRef = collection(db, "bookings");
     const unsubscribe = onSnapshot(
       bookingsRef,
-      (snapshot) => {
+      async (snapshot) => {
         const bookingsData: Booking[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
@@ -1097,6 +1131,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             discountType: data.discountType || "",
             discountPct: data.discountPct || 0,
             discountIdPhotoUrl: data.discountIdPhotoUrl || null,
+            discountIdPhotoPath: data.discountIdPhotoPath || null,
             discountVerified: !!data.discountVerified,
             discountVerifiedBy: data.discountVerifiedBy || null,
             discountRejected: !!data.discountRejected,
@@ -1113,6 +1148,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             // Per BF-45 (booking-flow audit 2026-06-26):
             // canonical "absent" is `null`, not `""`.
             paymentProofUrl: data.paymentProofUrl || null,
+            paymentProofPath: data.paymentProofPath || null,
             // Per H2 (hardening batch 2026-06-26): the
             // server generates this on create. The admin
             // app just hydrates the field for display /
@@ -1136,6 +1172,16 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             breakfastSelections: data.breakfastSelections || {},
           });
         });
+
+        await Promise.all(bookingsData.map(async (booking) => {
+          if (booking.discountIdPhotoPath) {
+            booking.discountIdPhotoUrl = await resolvePrivateStorageUrl(booking.discountIdPhotoPath) || null;
+          }
+          if (booking.paymentProofPath) {
+            booking.paymentProofUrl = await resolvePrivateStorageUrl(booking.paymentProofPath) || null;
+          }
+        }));
+        if (!active) return;
 
         // Natural sort by createdAt descending
         bookingsData.sort((a, b) => {
@@ -1197,7 +1243,10 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       }
     );
 
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [currentUser]);
 
   const [roomBlocks, setRoomBlocks] = useState<RoomBlock[]>([]);
@@ -2820,11 +2869,12 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!currentUser) return;
+    let active = true;
     const storeOrdersQuery = query(collection(db, "storeOrders"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       storeOrdersQuery,
-      (snapshot) => {
-        setStoreOrders(snapshot.docs.map((docSnap) => {
+      async (snapshot) => {
+        const nextOrders = snapshot.docs.map((docSnap) => {
           const data = docSnap.data();
           return {
             id: docSnap.id,
@@ -2837,6 +2887,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             totalAmount: Number(data.totalAmount || 0),
             paymentMethod: data.paymentMethod || "cod",
             paymentProofUrl: data.paymentProofUrl || "",
+            paymentProofPath: data.paymentProofPath || "",
             status: data.status || "placed",
             stockRestoredAt: data.stockRestoredAt ? formatStoreDate(data.stockRestoredAt) : null,
             stockDecrementedAt: data.stockDecrementedAt ? formatStoreDate(data.stockDecrementedAt) : null,
@@ -2848,14 +2899,23 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             notes: data.notes || "",
             createdAt: formatStoreDate(data.createdAt)
           } satisfies StoreOrder;
+        });
+        await Promise.all(nextOrders.map(async (order) => {
+          if (order.paymentProofPath) {
+            order.paymentProofUrl = await resolvePrivateStorageUrl(order.paymentProofPath);
+          }
         }));
+        if (active) setStoreOrders(nextOrders);
       },
       (error) => {
         console.error("Error listening to store orders:", error);
       }
     );
 
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [currentUser]);
 
   const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {

@@ -1,4 +1,5 @@
 # Public App Content Editability Audit
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 > Source: full read-through of every public page, every shared component, and the admin `Settings` page
 > Date: July 1, 2026
 > Scope: every string rendered to a guest in the public app (`guest-app/`) and the public emails — what's already admin-editable, what's only in `hotel.config.ts` (white-label config), and what's still hardcoded

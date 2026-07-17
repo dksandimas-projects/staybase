@@ -8,9 +8,10 @@ describe("BookingPage.tsx — Senior/PWD discount ID upload", () => {
     "utf8"
   );
 
-  it("uses a sanitized filename for the Firebase Storage discount-id path", () => {
-    expect(src).toMatch(/function\s+sanitizeUploadFileName/);
-    expect(src).toMatch(/const\s+safeFileName\s*=\s*sanitizeUploadFileName\(compressed\.file\.name\)/);
+  it("uses a randomized filename for the private Storage discount-id path", () => {
+    expect(src).toMatch(/function\s+createPrivateUploadFileName/);
+    expect(src).toMatch(/crypto\.randomUUID\(\)/);
+    expect(src).toMatch(/const\s+safeFileName\s*=\s*createPrivateUploadFileName\(compressed\.file\.name\)/);
     expect(src).toMatch(/`bookings\/\$\{bookingId\}\/discount-id\/\$\{safeFileName\}`/);
   });
 

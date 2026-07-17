@@ -182,13 +182,19 @@ describe("/api/corporate/convert-inquiry — transaction read/write ordering (BR
         roomNumber: "101",
         type: "standard-double",
         isActive: true,
-        status: "available",
-        maxCapacity: 2,
-        pricePerNight: 2000,
-        corporateRate: 1800
+        status: "available"
       }
     };
-    mockSettings = {};
+    mockSettings = {
+      hotelConfig: {
+        roomTypes: [{
+          value: "standard-double",
+          maxCapacity: 2,
+          pricePerNight: 2000,
+          corporateRate: 1800
+        }]
+      }
+    };
     mockCorporateCodes = {};
     mockCounters = {};
     setCalls = [];
@@ -230,7 +236,7 @@ describe("/api/corporate/convert-inquiry — transaction read/write ordering (BR
     expect(inquiryUpdate.convertedBookingId).toBe("bkconv0000001");
   });
 
-  test("converting an inquiry without an access code succeeds at the room's corporateRate", async () => {
+  test("converting an inquiry without an access code succeeds at the RoomType corporateRate", async () => {
     const req = mockRequest(baseBody);
     const res = mockResponse();
     await handler(req, res);
@@ -242,5 +248,21 @@ describe("/api/corporate/convert-inquiry — transaction read/write ordering (BR
     expect(created.ratePerNight).toBe(1800);
     expect(created.corporateCode).toBe("");
     expect(updateCalls.some((c) => c.path.startsWith("corporateCodes/"))).toBe(false);
+  });
+
+  test("rejects a zero resolved RoomType rate without an explicit override", async () => {
+    mockSettings.hotelConfig.roomTypes[0].pricePerNight = 0;
+    mockSettings.hotelConfig.roomTypes[0].corporateRate = 0;
+
+    const req = mockRequest(baseBody);
+    const res = mockResponse();
+    await handler(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: "A valid room type rate is required before converting this inquiry."
+    });
+    expect(setCalls.some((c) => c.path.startsWith("bookings/"))).toBe(false);
   });
 });

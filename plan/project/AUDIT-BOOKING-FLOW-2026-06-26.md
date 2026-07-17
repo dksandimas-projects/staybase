@@ -1,4 +1,5 @@
 # Booking Flow & Logic Audit — 2026-06-26
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 > Focused re-audit of the guest booking flow, corporate booking flow, and the
 > server handlers behind `/api/bookings/*` + `/api/validate/*` + `/api/rooms/availability`.
 > Read-only. No code changes shipped. Successor to the broader 2026-06-15 E2E audit

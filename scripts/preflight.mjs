@@ -197,8 +197,17 @@ if (existsSync(resolve(repoRoot, versionPath))) {
   }
 }
 
-// 10. No uncommitted changes
-section("10. Working tree");
+// 10. Documentation audit
+section("10. Documentation audit");
+try {
+  execSync("node scripts/docs-audit.mjs", { cwd: repoRoot, stdio: "pipe" });
+  ok("Documentation audit passed (links, context budgets, historical markers)");
+} catch (err) {
+  fail("Documentation audit failed. Run `npm run docs:audit` to see errors.");
+}
+
+// 11. No uncommitted changes
+section("11. Working tree");
 try {
   const status = execSync("git status --porcelain", { cwd: repoRoot, encoding: "utf8" });
   if (status.trim() === "") {

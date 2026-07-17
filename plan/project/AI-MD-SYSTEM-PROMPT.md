@@ -1,4 +1,5 @@
 # AI Prompt — Build an MD Documentation System for a Web App
+> **📄 REUSABLE TEMPLATE — not Spark Inn project context, excluded from active agent context.** Generic prompt for bootstrapping an MD documentation system on a future project. Nothing here is canonical for this repo.
 > Reusable prompt for any new web app project.
 > Copy everything below the line and paste it at the start of a new AI session.
 > **Scale to your project's complexity** — not every section applies to every app. A simple single-surface CRUD app needs maybe 10 files. A multi-app, white-label system with a loyalty/rewards program can need 40+. Use your judgment.

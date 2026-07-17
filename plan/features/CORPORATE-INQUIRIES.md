@@ -79,3 +79,9 @@ The `/corporate` dashboard page manages the corporate inquiry pipeline from init
 - Corporate booking guest flow: `plan/features/CORPORATE-BOOKING.md`
 - Corporate inquiry form (guest side): `plan/features/STATIC-PAGES.md §Corporate Stays`
 - New corporate inquiry email: `plan/features/EMAIL-PDF-STORAGE.md`
+
+## Known Issues (Audit 2026-07-17)
+
+- **C-01 (HIGH, fixed 2026-07-17):** conversion now resolves capacity and fallback rates from `settings/hotelConfig.roomTypes[]` inside the transaction, preserves explicit/code-rate precedence, rejects invalid configuration, and refuses a zero fallback rate without an explicit override.
+- **C-02 (MED, open):** the convert path's blocked-room window check parses the free-text `preferredDates` string instead of the requested check-in/out (shadowed variables → NaN comparisons → block never detected), and it never checks the `roomBlocks` collection. A blocked room can be converted into a confirmed booking inside its block window. `corporate-inquiries.ts:171-182`
+- **C-03 (MED, open):** `preferredDates` schema drift — the guest inquiry form submits a free-text string, but the admin app types/renders it as `{ from, to }`, so the pipeline table, drawer, and convert-modal prefill show blank dates for every guest-submitted inquiry. Align on one shape (struct preferred) with a read-time fallback.

@@ -1,4 +1,5 @@
 # Booking Flow (Regular + Corporate) & Intercom Audit — 2026-07-06
+> **📁 HISTORICAL AUDIT — non-canonical, do not load during normal implementation tasks.** Findings were triaged into `plan/project/ROADMAP.md`; anything still open is tracked there, everything closed is recorded in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`. Canonical specs may have evolved since this audit ran.
 > Focused wiring audit of the public booking flow, the corporate booking flow,
 > and the guest/admin intercom feature (chat, quick requests, WebRTC voice call,
 > store-order messages). Read-only at audit time. Successor to
