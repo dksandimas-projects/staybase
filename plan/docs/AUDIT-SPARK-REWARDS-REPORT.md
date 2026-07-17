@@ -10,7 +10,7 @@
 | Section | Status | Highest severity |
 |---|---|---|
 | 1. Auth & registration | ✅ Audited | LOW |
-| 2. Points economy | ⏳ Pending | — |
+| 2. Points economy | ✅ Audited | MEDIUM |
 | 3. Early check-in (Phase 12) | ⏳ Pending | — |
 | 4. Admin member management | ⏳ Pending | — |
 | 5. Edge cases & RA 10173 | ⏳ Pending | — |
@@ -50,10 +50,32 @@ No CRITICAL or HIGH findings. Registration correctly generates `memberNumber` se
 
 ---
 
+### Section 2 — Points Economy
+
+No CRITICAL or HIGH findings. All five points-mutation paths were traced end-to-end (component → API/context → Firestore transaction). Every path that changes `rewardsPoints` in the shipped code writes a matching `pointsHistory` entry inside the same transaction, so balance and history stay reconciled. Earning is correctly computed from net `totalPrice` (room/breakfast) and excludes incidentals + store, credits only on folio settlement, and awards exactly once via deterministic history IDs.
+
+**MED-1 · Manual points adjustment is a client-side write, forcing rules to permit out-of-band `rewardsPoints` changes**
+- `admin-app/src/context/AdminContext.tsx:2113-2142` (client `runTransaction`) + `firebase/firestore.rules:141-147` (`members` update `allow ... if isStaff()`, no field restriction).
+- Issue: manual adjustment is the *only* points mutation still performed with the client Firestore SDK (earn/redeem/undo/set-active all run server-side via API routes). Because a client transaction must be allowed by rules, the `members` update rule grants any `isStaff()` caller (front-desk **or** admin) the ability to write `rewardsPoints` directly. Firestore rules cannot require that a `rewardsPoints` write be coupled with a `pointsHistory` subcollection write, so the "balance always equals sum(history)" invariant is enforced **only in app code**, not at the security-rule boundary. A direct client write (browser console, a future/buggy code path, or a rogue staff credential) could set `rewardsPoints` with no history entry → balance diverges from history. Mitigating factors: it requires an authenticated staff credential, and because `pointsHistory` is append-only (`allow update, delete: if false`), any such divergence is *detectable* by a reconciliation check (balance > sum(history)). Severity MED (insider / defense-in-depth integrity gap, not an active app-path divergence).
+- Fix: move manual adjustment to a server API route (mirror `redeem-points` / `undo-redemption` / `set-active`), then tighten the `members` update rule so staff clients cannot write `rewardsPoints` (and other financial fields) directly — server/Admin SDK only. Then all balance mutations are provably history-coupled.
+- Effort: 1–2 h · Confidence: HIGH.
+
+**LOW-4 · Divergent, dead earning formula in `shared/utils/points.ts`**
+- `shared/utils/points.ts:8-14` (`calculateEarnedPoints`) vs `guest-app/server/handlers/bookings.ts:57-64` (`calculateCheckoutPoints`, the authoritative live path).
+- Issue: the shared `calculateEarnedPoints` per-spend formula `Math.floor(totalPrice/100) * pointsPerHundred` differs from the live checkout formula `Math.floor((totalPrice/100) * pointsPerHundred)`. Example: ₱150 at 10 pts/₱100 → shared helper yields 10, live path yields 15. The shared helper is currently unused at runtime (referenced only by `shared/__tests__/points.test.ts`), so there is no active mismatch — but it is a trap: wiring it into a guest-facing "you'll earn X" estimate would under-report vs actual credit. Separately, the My Rewards copy "Earn N points per ₱100 spent" (`guest-app/src/pages/RewardsPage.tsx:250`) understates the actual proportional (fractional-₱100) crediting.
+- Fix: delete `calculateEarnedPoints` or make it delegate to a single shared formula that `calculateCheckoutPoints` also uses; align the earning copy with proportional crediting.
+- Effort: <30 min · Confidence: HIGH.
+
+**Reconciliation spot-checks (all balance = sum(history)):**
+- earn(+N) → redeem(−R) → manual(+M) → undo(+R): balance `N−R+M+R = N+M`; history sum `N−R+M+R = N+M`. ✓
+- checkout with unpaid balance → `pendingLoyaltyPoints=N`, no credit, no history → later payment settles folio → earn(+N) via deterministic `earn-{bookingId}`. ✓ (no double-credit: checkout `awardNow` and settlement are mutually exclusive on `loyaltyAwardStatus`, and share the same deterministic history ID)
+- double-redeem attempt: second call blocked by `pointsRedeemed > 0` guard re-read inside the transaction. ✓
+
 ## Quick Wins (<30 min)
 
 - LOW-1: add Privacy/Terms disclosure under the Rewards landing one-click enroll button.
 - LOW-2: set `browserLocalPersistence` explicitly in guest-app firebase config.
+- LOW-4: delete/consolidate the divergent `calculateEarnedPoints` shared helper.
 
 ---
 
@@ -72,3 +94,4 @@ No CRITICAL or HIGH findings. Registration correctly generates `memberNumber` se
 ## Docs Updated
 
 - Section 1: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, created). No CRITICAL/HIGH findings → no `SPARK-REWARDS.md §Known Issues`, `GOTCHAS.md`, or `ROADMAP.md` additions required for this section.
+- Section 2: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). `plan/docs/GOTCHAS.md` — appended a "never do" rule under §Security & PII capturing the MED-1 balance-integrity boundary (client-side `rewardsPoints` writes). No CRITICAL/HIGH → no `SPARK-REWARDS.md §Known Issues` or `ROADMAP.md` additions required.
