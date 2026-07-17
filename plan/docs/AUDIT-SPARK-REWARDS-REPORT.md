@@ -13,9 +13,11 @@
 | 2. Points economy | ✅ Audited | MEDIUM |
 | 3. Early check-in (Phase 12) | ✅ Audited | HIGH (HIGH-1 also affects §1 surfaces) |
 | 4. Admin member management | ✅ Audited | LOW |
-| 5. Edge cases & RA 10173 | ⏳ Pending | — |
+| 5. Edge cases & RA 10173 | ✅ Audited | MEDIUM |
 
-**Feature go/no-go:** _Deferred until all 5 sections complete._
+**Overall highest severity: HIGH (HIGH-1).** Totals: 1 HIGH · 3 MEDIUM · 7 LOW.
+
+**Feature go/no-go — CONDITIONAL GO.** Spark Rewards is architecturally sound: the points economy keeps balance and history reconciled through server-side transactions with exactly-once crediting, enrollment/`memberNumber` are correctly server-generated, the Phase 12 workflow is built to spec, admin management is clean, and RA 10173 erasure deletes the member doc, anonymizes linked bookings, revokes the Auth user, and purges points history. **One blocker before (or immediately, if already live): HIGH-1** — the email-based booking match trusts an unverified `email` token claim, which lets an attacker read and cancel a stranger's anonymous bookings. It is exploitable in production today; fix it first. The three MEDIUMs (client-side points write forcing permissive rules; unbuilt different-email linking; no functional divergence but a rules-layer integrity gap) are strongly recommended pre-scale but not launch blockers. All LOWs are polish/doc-accuracy.
 
 ---
 
@@ -118,6 +120,28 @@ No CRITICAL, HIGH, or MEDIUM findings. All four audited concerns check out. One 
 - Search filters by name, email, and member number case-insensitively (`MembersPage.tsx:194-197`). Tier filter is deferred to Phase 2 per spec (tiers not yet defined).
 - Full-backup member export is admin-only (`ReportsPage.tsx:1135`) and carries correct member fields; it excludes `pointsHistory` (current balance only), which is acceptable for a member roster export.
 
+### Section 5 — Edge Cases & RA 10173 Compliance
+
+RA 10173 erasure is implemented correctly and completely; the anonymous-booking-then-register linkage and disabled-account redirect work; and the PII-in-logs sweep across the member/points/early-checkin paths came back clean. Two findings: one unbuilt-but-marked-done edge case (MED) and one placeholder-domain inconsistency (LOW).
+
+**MED-3 · "Different email" reconciliation is unimplemented despite being marked done in the spec**
+- `SPARK-REWARDS.md:232-233` (both marked `[x]`) vs code: no guest self-service linking prompt anywhere in `guest-app/src`, and no manual booking→member link action in the admin member drawer (`admin-app/src/pages/MembersPage.tsx` exposes only points adjustment + suspend/activate; `AdminContext.tsx` has no link mutation).
+- Issue: when a guest's account email (e.g. Google) differs from the email on their earlier **anonymous** booking, `linkBookingsByEmail` (which matches only on the token email) won't link it, and neither documented reconciliation path exists — the spec's guest prompt ("We found bookings under a different email…") nor the front-desk "manual link from Member detail drawer." Both are checked off in the spec but neither is built. Workaround: the guest can still find the booking via `/my-booking` (ref + email), so this is a convenience/linkage gap, not data loss. The misleading `[x]` markers are themselves a doc-accuracy problem.
+- Fix: build one of the two paths (front-desk manual link is the smaller surface), or correct the spec markers to "Deferred" and note the booking-lookup workaround.
+- Effort: 2–4 h (build) / <15 min (spec correction) · Confidence: HIGH.
+
+**LOW-7 · Erasure placeholder email not covered by the send-skip guard**
+- `guest-app/server/handlers/members.ts:650` writes `guestEmail: "erased@invalid"` on anonymized bookings; `guest-app/server/handlers/email.ts:391` skips sending only when the address ends with `@example.invalid`.
+- Issue: the two placeholder domains differ, so a stray email trigger against an erased booking would attempt delivery to `erased@invalid` (bounces at Resend, caught by try/catch) instead of being cleanly skipped. Low impact — erased bookings are historical and shouldn't trigger guest emails — but the guard doesn't defend the erasure placeholder.
+- Fix: make the send-skip guard also match `@invalid` / the erasure placeholder, or standardize erased bookings on `@example.invalid`.
+- Effort: <15 min · Confidence: HIGH.
+
+**Verified correct (Section 5):**
+- RA 10173 erasure (`handleEraseMemberAccount`, `members.ts:584-731`) does **all three** required actions plus more: (1) deletes `members/{uid}` (`:690`), (2) anonymizes every `memberId == uid` booking — scrubbing `memberId`/`guestName`/`guestEmail`/`guestPhone` after writing a PII-free audit record to `bookings/audit/records/{id}` (`:625-657`), (3) revokes the Firebase Auth user (`adminAuth.deleteUser`, `:696`, treating `user-not-found` as success), and additionally purges the `pointsHistory` subcollection (`:676-686`). Caller can only erase **themselves** — the erased uid is the token uid, never body-supplied.
+- Anonymous-booking-then-register linkage: `linkBookingsByEmail` links `guestEmail == member.email` bookings on registration (`members.ts:52-91`) — verified in Section 1.
+- Disabled-account redirect: `AccountLayout` sends `isActive === false` members to `/contact?member=disabled`; `ContactPage.tsx:110` shows "Your account has been disabled. Please contact us…" gated on that param.
+- PII-in-logs sweep: no `console.*` in the member/points/early-checkin paths (server or client) interpolates guest name/email/phone; all log a static message + an error object. The one `to`-logging line (`email.ts:392`) fires only for `@example.invalid` placeholder addresses, never real recipients.
+
 ## Quick Wins (<30 min)
 
 - LOW-1: add Privacy/Terms disclosure under the Rewards landing one-click enroll button.
@@ -125,6 +149,8 @@ No CRITICAL, HIGH, or MEDIUM findings. All four audited concerns check out. One 
 - LOW-4: delete/consolidate the divergent `calculateEarnedPoints` shared helper.
 - LOW-5: render early check-in status on the My Stays page.
 - LOW-6: reword the member-export spec line from "CSV" to "XLSX full backup."
+- LOW-7: make the email send-skip guard also cover the `erased@invalid` placeholder.
+- MED-3 (spec-correction variant): mark the two "different email" spec lines as Deferred with the booking-lookup workaround (the build variant is not a quick win).
 
 ---
 
@@ -146,3 +172,4 @@ No CRITICAL, HIGH, or MEDIUM findings. All four audited concerns check out. One 
 - Section 2: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). `plan/docs/GOTCHAS.md` — appended a "never do" rule under §Security & PII capturing the MED-1 balance-integrity boundary (client-side `rewardsPoints` writes). No CRITICAL/HIGH → no `SPARK-REWARDS.md §Known Issues` or `ROADMAP.md` additions required.
 - Section 3: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). HIGH-1 → added `plan/features/SPARK-REWARDS.md §Known Issues (Audit 2026-07-18)`, a "never do" rule in `plan/docs/GOTCHAS.md §Auth & Security` (verify `email_verified` before email-based booking matches), and a HIGH item under a new dated section in `plan/project/ROADMAP.md`.
 - Section 4: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated). No CRITICAL/HIGH → no `SPARK-REWARDS.md §Known Issues`, `GOTCHAS.md`, or `ROADMAP.md` additions required (LOW-6 is a spec-wording nit only).
+- Section 5: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md` (this file, updated — exec summary + final go/no-go). `plan/features/SPARK-REWARDS.md §Known Issues (Audit 2026-07-18)` — added MED-3 (unbuilt different-email linking) and LOW-7 (erasure placeholder). No CRITICAL/HIGH in this section → no `GOTCHAS.md` or `ROADMAP.md` additions required.
