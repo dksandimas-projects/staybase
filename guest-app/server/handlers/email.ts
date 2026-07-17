@@ -1,8 +1,11 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
+import { Timestamp } from "firebase-admin/firestore";
+import { jsPDF } from "jspdf";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
+import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5 server-side
 // files. The shared implementation lives in
@@ -46,6 +49,126 @@ function escapeHtml(value: unknown) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// G-03 (E2E audit 2026-07-17): server-side receipt PDF generator
+// for the booking-confirmed email attachment. Uses jsPDF with
+// built-in fonts. Does NOT expose private payment-proof or ID URLs.
+// Reuses the same formatting and pricing semantics as the admin's
+// printBookingReceiptPDF but is server-side authoritative from
+// persisted booking data.
+function generateReceiptPdf(booking: any): Buffer {
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const left = 20;
+  let top = 20;
+  const pageWidth = 190;
+  const right = left + pageWidth;
+
+  function line(y: number) {
+    doc.setDrawColor(200);
+    doc.line(left, y, right, y);
+  }
+
+  function text(label: string, value: string, y: number) {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text(label, left, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(value, right, y, { align: "right" });
+  }
+
+  // Header
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text(config.legalName || config.brandName, left, top);
+  top += 7;
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(`${config.address.street}, ${config.address.city}, ${config.address.region}`, left, top);
+  top += 5;
+  doc.text(`Tel: ${config.frontDeskPhone} | Email: ${config.supportEmail}`, left, top);
+  top += 8;
+  line(top);
+  top += 6;
+
+  // Title
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text("Booking Receipt", left, top);
+  top += 8;
+
+  // Booking details
+  const fmtDate = (v: any) => {
+    if (!v) return "—";
+    const d = toDate(v);
+    return d ? new Intl.DateTimeFormat(config.locale, { month: "short", day: "numeric", year: "numeric", timeZone: config.timezone }).format(d) : "—";
+  };
+  const fmtMoney = (v: unknown) => {
+    const amt = Number(v || 0);
+    return new Intl.NumberFormat(config.locale, { style: "currency", currency: config.currency, maximumFractionDigits: 0 }).format(amt);
+  };
+
+  text("Booking Ref:", String(booking.bookingRef || "—"), top); top += 6;
+  text("Guest:", String(booking.guestName || "—"), top); top += 6;
+  text("Room:", `${booking.roomNumber || "—"} (${booking.roomType || ""})`, top); top += 6;
+  text("Check-in:", fmtDate(booking.checkIn), top); top += 6;
+  text("Check-out:", fmtDate(booking.checkOut), top); top += 6;
+  text("Nights:", String(booking.numNights || 0), top); top += 6;
+  text("Guests:", String(booking.numGuests || 1), top); top += 6;
+  if (booking.source) { text("Source:", String(booking.source), top); top += 6; }
+
+  top += 2;
+  line(top);
+  top += 6;
+
+  // Rate breakdown
+  if (booking.rateBreakdown) {
+    const bd = booking.rateBreakdown;
+    if (Array.isArray(bd.roomLines)) {
+      bd.roomLines.forEach((line: any) => {
+        text(line.label || "Room rate", `${line.nights || 0} night(s) x ${fmtMoney(line.nightlyRate)} = ${fmtMoney(line.subtotal)}`, top);
+        top += 5;
+      });
+    }
+    if (Array.isArray(bd.addOns)) {
+      bd.addOns.forEach((line: any) => {
+        text(line.label || "Add-on", fmtMoney(line.amount), top);
+        top += 5;
+      });
+    }
+    if (Array.isArray(bd.deductions)) {
+      bd.deductions.forEach((line: any) => {
+        text(line.label || "Discount", `-${fmtMoney(line.amount)}`, top);
+        top += 5;
+      });
+    }
+  }
+
+  top += 2;
+  line(top);
+  top += 6;
+
+  // Total
+  doc.setFont("helvetica", "bold");
+  text("Total Amount Due:", fmtMoney(booking.totalPrice), top);
+  top += 8;
+
+  // Payment info
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Payment Method: ${booking.paymentMethod || "—"}`, left, top); top += 5;
+  doc.text(`Status: ${booking.status || "—"}`, left, top); top += 8;
+
+  // Footer
+  line(top);
+  top += 5;
+  doc.setFontSize(8);
+  doc.setTextColor(128);
+  doc.text(`Generated on ${new Date().toLocaleString(config.locale, { timeZone: config.timezone })}`, left, top);
+  top += 4;
+  doc.text(`Thank you for choosing ${config.brandName}.`, left, top);
+
+  return Buffer.from(doc.output("arraybuffer"));
 }
 
 function siteUrl(path = "") {
@@ -264,7 +387,7 @@ function emailLayout(options: {
 </html>`;
 }
 
-async function sendEmail(to: string, subject: string, html: string) {
+async function sendEmail(to: string, subject: string, html: string, attachments?: Array<{ filename: string; content: Buffer }>) {
   if (typeof to === "string" && to.trim().toLowerCase().endsWith("@example.invalid")) {
     console.log(`Skipping email send to placeholder address: ${to}`);
     return;
@@ -274,7 +397,8 @@ async function sendEmail(to: string, subject: string, html: string) {
     to,
     subject,
     html,
-    replyTo: config.supportEmail
+    replyTo: config.supportEmail,
+    attachments
   });
 }
 
@@ -1012,7 +1136,7 @@ async function getTomorrowConfirmedBookings() {
 }
 
 export async function sendBookingTrigger(action: EmailAction, booking: any) {
-  const templates: Record<string, { subject: string; html: string }> = {
+  const templates: Record<string, { subject: string; html: string; attachments?: Array<{ filename: string; content: Buffer }> }> = {
     "booking-submitted": {
       subject: `[${config.brandName}] Booking request received: ${booking.bookingRef}`,
       html: bookingSubmittedEmail(booking)
@@ -1023,7 +1147,15 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     },
     "booking-confirmed": {
       subject: `[${config.brandName}] Booking confirmed: ${booking.bookingRef}`,
-      html: bookingConfirmedEmail(booking)
+      html: bookingConfirmedEmail(booking),
+      // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
+      // by Decision #82. Generated server-side from persisted
+      // booking/folio data. Does not expose private payment-proof
+      // or ID URLs.
+      attachments: [{
+        filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+        content: generateReceiptPdf(booking)
+      }]
     },
     "checkin-reminder": {
       subject: `[${config.brandName}] Check-in reminder: ${booking.bookingRef}`,
@@ -1052,7 +1184,7 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     throw new Error("Unsupported booking email trigger.");
   }
 
-  await sendEmail(booking.guestEmail, template.subject, template.html);
+  await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
 }
 
 export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse, action: EmailAction) {

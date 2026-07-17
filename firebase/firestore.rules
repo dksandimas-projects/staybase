@@ -108,9 +108,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // FD-02 (E2E audit 2026-07-17): signed-in users may update only
+    // legitimate self-service profile fields. The `role`, `isActive`,
+    // and staff-audit fields are reserved for admin/server writes.
+    // Admin SDK staff provisioning and valid Spark Rewards profile
+    // editing (fullName, phone, photoUrl) are preserved.
     match /guests/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
-      allow create, update: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "fullName",
+            "displayName",
+            "phone",
+            "photoUrl",
+            "address",
+            "dateOfBirth",
+            "emergencyContact",
+            "preferences",
+            "updatedAt"
+          ])
+        );
       allow delete: if isAdmin();
     }
 
@@ -214,9 +235,13 @@ service cloud.firestore {
       allow read, create, update: if true;
       allow delete: if isStaff();
 
+      // G-04 (E2E audit 2026-07-17): guest messages are routed through
+      // the rate-limited API endpoint. Only staff can create messages
+      // directly (replies). Guest reads and staff full CRUD are preserved.
       match /messages/{messageId} {
         allow read: if true;
-        allow create: if request.resource.data.keys().hasOnly([
+        allow create: if isStaff()
+          && request.resource.data.keys().hasOnly([
             "text",
             "sender",
             "guestName",

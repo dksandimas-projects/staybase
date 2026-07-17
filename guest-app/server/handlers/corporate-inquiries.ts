@@ -5,13 +5,22 @@ import { sendCorporateInquiryTrigger, sendBookingTrigger, sendCorporateInquiryCo
 import { toDateOrNull, getManilaDateInfo, generateLookupToken, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
+// C-03 (E2E audit 2026-07-17): canonical structured date shape.
+// preferredDates is now a { from, to } object submitted by the guest
+// form. A union fallback preserves support for legacy string records
+// that were stored before this change.
+const InquiryPreferredDatesSchema = z.object({
+  from: z.string().trim().min(1).max(40),
+  to: z.string().trim().min(1).max(40)
+});
+
 const inquirySchema = z.object({
   companyName: z.string().trim().min(1).max(120),
   contactPerson: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(160),
   phone: z.string().trim().min(6).max(40),
   numRooms: z.coerce.number().int().min(1).max(500),
-  preferredDates: z.string().trim().min(1).max(160),
+  preferredDates: z.union([InquiryPreferredDatesSchema, z.string().trim().min(1).max(160)]),
   specialRequirements: z.string().trim().max(2000).optional().default("")
 }).strict();
 
@@ -188,17 +197,34 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       if (!Number.isFinite(typeMaxCapacity) || typeMaxCapacity < 1) {
         throw new Error("Room type capacity is not configured.");
       }
+      // C-02 (E2E audit 2026-07-17): the block-window check must use
+      // the submitted checkIn/checkOut dates (not the inquiry's free-text
+      // preferredDates). Also check for active roomBlocks conflicts
+      // matching the same semantics as handleCreateBooking.
       if (roomData.status === "blocked") {
         const blockedFrom = toDateOrNull(roomData.blockedFrom);
         const blockedTo = toDateOrNull(roomData.blockedTo);
-        const checkInDate = new Date(`${inquiryData.preferredDates.split(" to ")[0] || inquiryData.preferredDates}T00:00:00Z`);
-        const checkOutDate = new Date(`${inquiryData.preferredDates.split(" to ")[1] || inquiryData.preferredDates}T00:00:00Z`);
         const windowActive = blockedFrom && blockedTo
           ? checkInDate < blockedTo && checkOutDate > blockedFrom
           : true;
         if (windowActive) {
           throw new Error("Room is blocked for the selected dates.");
         }
+      }
+      // Per-room active roomBlocks conflict check (same sematics as
+      // handleCreateBooking and handleCreateWalkin).
+      const blocksQuery = adminDb.collection("roomBlocks")
+        .where("roomId", "==", roomId)
+        .where("status", "==", "active");
+      const blocksSnapshot = await transaction.get(blocksQuery);
+      const hasBlockConflict = blocksSnapshot.docs.some((doc) => {
+        const blockData = doc.data();
+        const blockStart = toDateOrNull(blockData.startDate);
+        const blockEnd = toDateOrNull(blockData.endDate);
+        return Boolean(blockStart && blockEnd && blockStart < checkOutDate && blockEnd > checkInDate);
+      });
+      if (hasBlockConflict) {
+        throw new Error("Room is blocked for the selected dates.");
       }
       if (guests > typeMaxCapacity) {
         throw new Error(`Guest count exceeds room capacity of ${typeMaxCapacity}.`);

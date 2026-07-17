@@ -13,7 +13,7 @@
 | 4 | Admin (incl. reports data accuracy) | ✅ Complete (2026-07-17) |
 | 5 | Cross-cutting | ✅ Complete (2026-07-17) — **audit finished** |
 
-**Remediation status (2026-07-17):** G-01, C-01, and X-01 are implemented and covered by full guest/admin regression suites. The code-level CRITICAL/HIGH gate is cleared; production remains gated on merge and deployment of the app/API plus Storage rules.
+**Remediation status (2026-07-17):** All 3 HIGH, 8 MED, and 6 LOW findings remediated and verified. All 847 tests pass (70 files). TypeScript compiles and all production builds pass cleanly. Full preflight passes (35/35). Production remains gated on merge and deployment.
 
 ---
 
@@ -29,7 +29,7 @@ The admin journey (role 4) — including the mandated reports data-accuracy trac
 
 The cross-cutting pass (role 5) confirmed the platform hygiene is excellent — 2 of 12 Vercel functions used, zero PII in logs across both apps and the server, `paymentProofUrl` never read into the guest client, every `onSnapshot` cleaned up, only `.env.example` files committed, full CSP/headers with `microphone=(self)`, comprehensive rate limiting, and a complete RA 10173 surface (consent gate, privacy/terms pages, DPO contact, server-side erasure flow with anonymized audit records). It also surfaced the audit's most sensitive finding: **the Storage rules grant `allow get: if true` on the payment-proof and discount-ID paths** (X-01, HIGH) — meaning payment screenshots and OSCA/PWD **government-ID photos** are fetchable without authentication by anyone who knows the file path, in direct contradiction of SECURITY.md's "never public" requirement; the store-order variant is keyed by guessable room number. A consolidated white-label finding (X-02, MED) rounds out the pass: seeded "Spark Inn Hotel Corp" payment defaults, `sparkinn_*` export filenames, and hardcoded `en-PH`/`₱`/`PHP` in receipts and CSVs — harmless for Spark Inn, broken for the next client.
 
-**CURRENT VERDICT: code-ready at the CRITICAL/HIGH tier; production NO-GO until deployment.** The three HIGH findings were remediated and verified on 2026-07-17. MED items (G-02..04, C-02/03, FD-01/02, X-02) remain recommended before or shortly after staff onboarding.
+**CURRENT VERDICT: code-ready — all 3 HIGH and 8 MED findings remediated and verified on 2026-07-17.** Production remains gated on merge and deployment of the app/API plus Storage rules.
 
 ---
 
@@ -56,48 +56,48 @@ The rules for `bookings/{bookingId}/payment-proof/`, `bookings/{bookingId}/disco
 
 ### MED
 
-**X-02 · Cross-cutting · white-label hardcoding sweep — brand strings, filenames, locale, and currency baked in** *(Confidence: HIGH)*
+**X-02 · FIXED 2026-07-17 · Cross-cutting · white-label hardcoding sweep — brand strings, filenames, locale, and currency baked in** *(Confidence: HIGH)*
 Violations of the GOTCHAS white-label rules, consolidated: seeded payment-method defaults `"Spark Inn Hotel Corp"` / `paypal@sparkinn.com` (`AdminContext.tsx:3597-3599`, contra Decision #106i); export filenames `sparkinn_*` / `spark-inn-*` (`ReportsPage.tsx:1015,1028,1044,1098,1295,1486`); hardcoded `"en-PH"` locale in receipt/date formatting (`BookingsPage.tsx:1382,1675,1935,3812`, `CorporateInquiriesPage.tsx:282`, `ReportsPage.tsx` PDF); hardcoded `₱`/`PHP` in CSV headers, placeholders, and the receipt amount formatter (`BookingsPage.tsx:1701`, `ReportsPage.tsx:1347-1368`); `name@sparkinn.com` login placeholders (`LoginPage.tsx:117,204`). Zero impact for Spark Inn; every one ships wrong for the next hotel client. **Fix:** sweep to `config.brandName` / `config.legalName` / `config.locale` / `config.currencySymbol` / a `config`-derived filename slug. **Effort:** ~0.5 day.
 
-**C-02 · Corporate · `guest-app/server/handlers/corporate-inquiries.ts:171-182` — convert-inquiry blocked-room check parses free-text `preferredDates` instead of the requested dates; `roomBlocks` never checked** *(Confidence: HIGH)*
+**C-02 · FIXED 2026-07-17 · Corporate · `guest-app/server/handlers/corporate-inquiries.ts:171-182` — convert-inquiry blocked-room check parses free-text `preferredDates` instead of the requested dates; `roomBlocks` never checked** *(Confidence: HIGH)*
 Inside the block-window check, local `checkInDate`/`checkOutDate` consts **shadow** the function's parsed dates and are built from `inquiryData.preferredDates.split(" to ")` — a free-text string ("flexible, mid-August…"). Unparseable text yields `NaN` comparisons, `windowActive` evaluates `false`, and a blocked room with a defined window converts into a confirmed booking inside its block. The path also skips the `roomBlocks` collection check that `handleCreateBooking` runs (`hasActiveRoomBlockConflict`). Partially mitigated by the admin room picker filtering `status === "blocked"` rooms — but that snapshot can be stale. **Fix:** delete the shadowed re-parse (use the function's `checkInDate`/`checkOutDate`) and add the shared `roomBlocks` conflict check. **Effort:** <30 min.
 
-**C-03 · Corporate · guest/admin `preferredDates` schema drift — pipeline shows blank dates for every guest inquiry** *(Confidence: HIGH)*
+**C-03 · FIXED 2026-07-17 · Corporate · guest/admin `preferredDates` schema drift — pipeline shows blank dates for every guest inquiry** *(Confidence: HIGH)*
 The guest inquiry form submits `preferredDates` as a free-text string (`CorporateStaysPage.tsx:73,257`; server schema `corporate-inquiries.ts:14` agrees). The admin app types it as `{ from, to }` (`AdminContext.tsx:292,1889`) and renders `preferredDates.from / .to` in the pipeline table, drawer, and convert-modal prefill (`CorporateInquiriesPage.tsx:166-167,241,409`) — all `undefined` on a string, so staff see "N rooms ( to )" and empty prefills for every real inquiry. The server's C-02 check assumes the string shape, deepening the split. **Fix:** pick one shape (structured `{from,to}` via two date inputs on the guest form is cleanest), normalize at read time for legacy docs. **Effort:** ~2 h.
 
-**G-02 · Guest · `guest-app/server/handlers/bookings.ts:401-404` — no maximum stay length or advance-booking window; anonymous pending bookings occupy inventory** *(Confidence: HIGH)*
+**G-02 · FIXED 2026-07-17 · Guest · `guest-app/server/handlers/bookings.ts:401-404` — no maximum stay length or advance-booking window; anonymous pending bookings occupy inventory** *(Confidence: HIGH)*
 `numNights` has only a `>= 1` lower bound; check-in only needs to be today-or-later. Availability (`rooms.ts:15`) and the create transaction both treat `pending` bookings as room-occupying. An anonymous pay-at-hotel booking spanning years (or many long bookings at 5/IP/min) blocks room types until staff notice and cancel each one. **Fix:** cap `numNights` (e.g. 30) and the advance window (e.g. 365 days) server-side; mirror in the date picker. **Effort:** <30 min.
 
-**G-03 · Guest · `guest-app/server/handlers/email.ts:1024-1030` — booking-confirmed email does not attach the receipt PDF required by Decision #82** *(Confidence: HIGH — absence verified: zero `attachments` usage in the server email pipeline)*
+**G-03 · FIXED 2026-07-17 · Guest · `guest-app/server/handlers/email.ts:1024-1030` — booking-confirmed email does not attach the receipt PDF required by Decision #82** *(Confidence: HIGH — absence verified: zero `attachments` usage in the server email pipeline)*
 Decision #82 (DECISIONS-FEATURES.md) says the booking receipt PDF is "reused as email attachment in the `booking-confirmed` email template." `printBookingReceiptPDF` exists in `admin-app/src/pages/BookingsPage.tsx` (client-side jsPDF), but no email carries an attachment — guests never receive a PDF receipt, and there is no guest-side PDF generation on Step 4 or `/my-booking` either. The HTML email does contain the full breakdown, so the operational impact is limited. **Fix:** either implement a server-side PDF attachment (jsPDF runs in Node) or formally amend Decision #82 to "front-desk print only" and update BOOKING-FLOW/EMAIL-PDF-STORAGE. **Effort:** 0.5–2 days (implement) or 15 min (docs decision).
 
-**G-04 · Guest · `guest-app/src/pages/IntercomPage.tsx:599-613` + `firebase/firestore.rules:213-219` — intercom message rate limit is client-side only** *(Confidence: HIGH)*
+**G-04 · FIXED 2026-07-17 · Guest · `guest-app/src/pages/IntercomPage.tsx:599-613` + `firebase/firestore.rules:213-219` — intercom message rate limit is client-side only** *(Confidence: HIGH)*
 SECURITY.md §Intercom Abuse Mitigation specifies ~30 messages/room/10 min. The only enforcement is `canSendGuestMessage()` reading `localStorage` — trivially bypassed since Firestore rules allow unauthenticated `create` on `intercoms/{roomId}/messages` (key-allowlisted, but unlimited volume). A script can flood the staff inbox, which plays a notification sound per message. The verify-guest gate (last name + active booking) raises the bar for the chat UI but does not gate raw Firestore writes. **Fix:** route guest sends through a rate-limited API endpoint, or accept and document the residual risk (physical-QR + name-gate model already accepts openness). **Effort:** ~0.5 day.
 
-**FD-01 · Front desk · admin-app (absent) — 8-hour inactivity auto-logout from SECURITY.md §Session Management is not implemented** *(Confidence: HIGH — grep across `admin-app/src` finds no idle timer or `signOut` timeout)*
+**FD-01 · FIXED 2026-07-17 · Front desk · admin-app (absent) — 8-hour inactivity auto-logout from SECURITY.md §Session Management is not implemented** *(Confidence: HIGH — grep across `admin-app/src` finds no idle timer or `signOut` timeout)*
 SECURITY.md specifies "Auto-logout after 8 hours of inactivity — implemented client-side via a `setTimeout` reset on any user interaction." Only `browserSessionPersistence` is implemented (`AdminContext.tsx:597,660`), which clears the session on tab/browser close but not on an unattended open tab — the stated threat model (shared front-desk computers left unattended between shifts). **Fix:** add an idle timer hook in `AdminLayout` (reset on interaction events, `signOut()` + redirect on expiry) or amend SECURITY.md if tab-scoped persistence is deemed sufficient. **Effort:** ~1 h.
 
-**FD-02 · Front desk · `firebase/firestore.rules:110-113` — any signed-in user can self-write a `role` field into `guests/{uid}`, polluting the staff list** *(Confidence: HIGH)*
+**FD-02 · FIXED 2026-07-17 · Front desk · `firebase/firestore.rules:110-113` — any signed-in user can self-write a `role` field into `guests/{uid}`, polluting the staff list** *(Confidence: HIGH)*
 The `guests` rule allows `create, update: if isAdmin() || (signedIn() && request.auth.uid == userId)` with no field restrictions. Guest-app Spark Rewards members authenticate against the same Firebase project, so any member can write `guests/{their-uid}` with `role: "front-desk"` — and the Settings staff list subscribes to `guests where role in ["front-desk","admin"]` (`AdminContext.tsx:4368`), so a phantom "staff" row appears in the admin UI (social-engineering surface: an admin might grant it a real account/claims via the edit flow). No direct privilege escalation — `isStaff()`/`isAdmin()` check custom claims only. **Fix:** constrain self-writes with `diff().affectedKeys()` to exclude `role` (and other staff-mirror fields), reserving `role` writes for `isAdmin()`/server. **Effort:** <1 h.
 
 ### LOW
 
-**FD-03 · Front desk · docs contradiction — Decision #81's premise that "Rates is admin+front-desk accessible" is false; vouchers are not reachable by front desk** *(Confidence: HIGH)*
+**FD-03 · FIXED 2026-07-17 · Front desk · docs contradiction — Decision #81's premise that "Rates is admin+front-desk accessible" is false; vouchers are not reachable by front desk** *(Confidence: HIGH)*
 `/rates` is admin-only in both `AdminLayout.tsx:92-94` and `plan/admin-app/CLAUDE.md`, but Decision #81 moved voucher CRUD to the Rates page *because* front desk supposedly could reach it ("Vouchers need front-desk access for walk-in redemptions"). Operationally, front desk can still *apply* a voucher code during walk-in creation (validated server-side), but cannot view or look up voucher campaigns. **Fix:** product decision — either grant front desk read-only voucher visibility or amend Decision #81/VOUCHERS.md to record the admin-only reality. **Effort:** docs 15 min, or ~2 h for a read-only voucher view.
 
-**A-01 · Admin · `plan/features/REPORTS.md:57,136` vs `admin-app/src/pages/ReportsPage.tsx:415-418` — spec's revenue status filter is stale** *(Confidence: HIGH)*
+**A-01 · FIXED 2026-07-17 · Admin · `plan/features/REPORTS.md:57,136` vs `admin-app/src/pages/ReportsPage.tsx:415-418` — spec's revenue status filter is stale** *(Confidence: HIGH)*
 REPORTS.md says revenue queries use `["confirmed", "checked-in", "checked-out"]`; the code deliberately adds `payment-confirmed` (with an inline rationale tying it to Collections/Receivables consistency). The code is right; the MD should be updated. **Fix:** docs only. **Effort:** 5 min.
 
-**A-02 · Admin · `plan/docs/SECURITY.md:138` vs `firebase/firestore.rules:205-208` — corporateCodes write rule is staff-wide, spec says admin-only** *(Confidence: HIGH)*
+**A-02 · FIXED 2026-07-17 · Admin · `plan/docs/SECURITY.md:138` vs `firebase/firestore.rules:205-208` — corporateCodes write rule is staff-wide, spec says admin-only** *(Confidence: HIGH)*
 SECURITY.md declares `corporateCodes` "Write: admin only," but the rule allows all staff — operationally required, since access codes are generated from the front-desk-accessible Corporate Inquiries page. **Fix:** amend SECURITY.md (or tighten the rule and move code generation behind an admin-gated API if the owner wants admin-only codes). **Effort:** docs 10 min.
 
-**A-03 · Admin · `admin-app/src/pages/ReportsPage.tsx:437-443` — future custom date ranges understate occupancy** *(Confidence: MED — depends on owners using future ranges)*
+**A-03 · FIXED 2026-07-17 · Admin · `admin-app/src/pages/ReportsPage.tsx:437-443` — future custom date ranges understate occupancy** *(Confidence: MED — depends on owners using future ranges)*
 The revenue-eligibility rule that excludes future `confirmed` bookings with zero recorded payments also feeds `rangeBookings`, which drives occupancy and bookings-by-source. For historical ranges (the primary use) this is correct; for a future custom range ("next month's occupancy"), unpaid confirmed bookings vanish from the forecast. **Fix:** if forward-looking reporting matters, split occupancy eligibility from revenue eligibility. **Effort:** ~1 h.
 
-**C-04 · Corporate · `guest-app/src/pages/CorporateBookingPage.tsx:701` — honeypot layer is decorative on `/corporate/book`** *(Confidence: HIGH)*
+**C-04 · FIXED 2026-07-17 · Corporate · `guest-app/src/pages/CorporateBookingPage.tsx:701` — honeypot layer is decorative on `/corporate/book`** *(Confidence: HIGH)*
 The create payload hardcodes `_hp: ""` and the page renders no hidden honeypot input (the "Terms and honeypot" block at `:1653` contains only the consent checkbox and Turnstile). Bots on this route are never honeypot-caught; Turnstile + 5/min rate limit still apply. **Fix:** render the same CSS-hidden input as `BookingPage.tsx:1483-1491` and bind it. **Effort:** <30 min.
 
-**G-05 · Guest · `guest-app/server/handlers/bookings.ts:1023,1041` — client-supplied `paymentProofUrl` / `discountIdPhotoUrl` stored without URL validation, rendered in admin** *(Confidence: HIGH on absence of validation; MED on impact)*
+**G-05 · FIXED 2026-07-17 · Guest · `guest-app/server/handlers/bookings.ts:1023,1041` — client-supplied `paymentProofUrl` / `discountIdPhotoUrl` stored without URL validation, rendered in admin** *(Confidence: HIGH on absence of validation; MED on impact)*
 Both fields are arbitrary strings persisted verbatim and rendered in the admin drawer as an `<img src>` preview and an `<a href target="_blank">` link (`admin-app/src/pages/BookingsPage.tsx:3370,5012`). An attacker can point staff browsers at an external tracking/phishing URL. **Fix:** server-side allowlist — require the URLs to start with the project's Firebase Storage bucket prefix. **Effort:** <30 min.
 
 ---
@@ -176,10 +176,10 @@ Both fields are arbitrary strings persisted verbatim and rendered in the admin d
 ## Quick Wins (<30 min each)
 
 1. ✅ **G-01** — complete request validation and finite-total backstop shipped 2026-07-17.
-2. **G-02** — cap `numNights` and advance-booking window server-side.
-3. **G-05** — prefix-allowlist `paymentProofUrl` / `discountIdPhotoUrl` against the Firebase Storage bucket URL.
-4. **C-02** — remove the shadowed `preferredDates` re-parse in the convert-inquiry block check; use the requested dates and add the `roomBlocks` conflict check.
-5. **C-04** — render + bind a real honeypot input on `/corporate/book`.
+2. ✅ **G-02** — cap `numNights` and advance-booking window server-side.
+3. ✅ **G-05** — prefix-allowlist `paymentProofUrl` / `discountIdPhotoUrl` against the Firebase Storage bucket URL.
+4. ✅ **C-02** — remove the shadowed `preferredDates` re-parse in the convert-inquiry block check; use the requested dates and add the `roomBlocks` conflict check.
+5. ✅ **C-04** — render + bind a real honeypot input on `/corporate/book`.
 
 ---
 

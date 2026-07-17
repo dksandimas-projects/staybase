@@ -103,11 +103,11 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(funcBody).toMatch(/drawAmountRow/);
     });
 
-    it("formats PDF currency with a Unicode-safe PHP prefix", () => {
+    it("formats PDF currency with config.currencySymbol and config.locale", () => {
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const getBookingPaymentsTotal", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/`PHP \$\{Math\.round\(value \|\| 0\)\.toLocaleString\("en-PH"\)\}`/);
+      expect(funcBody).toMatch(/`\$\{config\.currencySymbol\}\$\{Math\.round\(value \|\| 0\)\.toLocaleString\(config\.locale\)\}`/);
       expect(funcBody).not.toMatch(/formatPrice\(value\)/);
     });
 

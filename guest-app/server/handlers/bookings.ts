@@ -15,7 +15,9 @@ import {
   generateLookupToken,
   DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getLockedManualNightlyRate,
-  WalkinBookingSchema
+  WalkinBookingSchema,
+  MAX_STAY_NIGHTS,
+  MAX_ADVANCE_DAYS
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import { z } from "zod";
@@ -272,6 +274,17 @@ const guestDetailsSchema = z.object({
 // stay a finite positive integer so it cannot create negative breakfast
 // lines or NaN totals. Router-consumed bot fields remain part of the
 // strict wire contract even though business logic does not persist them.
+
+const storageBucketUrl = process.env.FIREBASE_STORAGE_BUCKET
+  ? `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/`
+  : null;
+
+const storageUrlRefiner = (val: string | null) => {
+  if (val === null) return true;
+  if (!storageBucketUrl) return true;
+  return val.startsWith(storageBucketUrl);
+};
+
 const createBookingSchema = z.object({
   bookingId: z.string().trim().regex(PREALLOCATED_BOOKING_ID_REGEX),
   roomType: z.string().trim().min(1).max(120),
@@ -281,11 +294,15 @@ const createBookingSchema = z.object({
   hasBreakfast: z.boolean(),
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
-  discountIdPhotoUrl: z.string().url().max(2048).nullable(),
+  discountIdPhotoUrl: z.string().url().max(2048).nullable().refine(storageUrlRefiner, {
+    message: "discount ID photo URL must point to the project's Firebase Storage bucket"
+  }),
   discountIdPhotoPath: z.string().trim().max(512).nullable().optional().default(null),
   voucherCode: z.string().trim().max(80).optional().default(""),
   paymentMethod: z.string().trim().min(1).max(80),
-  paymentProofUrl: z.string().url().max(2048).nullable().optional().default(null),
+  paymentProofUrl: z.string().url().max(2048).nullable().optional().default(null).refine(storageUrlRefiner, {
+    message: "payment proof URL must point to the project's Firebase Storage bucket"
+  }),
   paymentProofPath: z.string().trim().max(512).nullable().optional().default(null),
   paymentReferenceNumber: z.string().trim().max(160).nullable().optional().default(null),
   corporateCode: z.string().trim().max(120).optional().default(""),
@@ -384,6 +401,25 @@ export async function handleCreateBooking(req: any, res: any) {
   const numNights = Math.max(Math.round((endMs - startMs) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // G-02 (E2E audit 2026-07-17): enforce maximum stay length and
+  // advance-booking window server-side before any Firestore work.
+  // Permits same-day bookings (checkIn === manilaToday). Walk-ins
+  // are exempt from the advance window.
+  if (numNights > MAX_STAY_NIGHTS) {
+    return res.status(400).json({
+      success: false,
+      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten your stay.`
+    });
+  }
+
+  const advanceDays = Math.round((checkInDate.getTime() - currentManilaDate.getTime()) / 86400000);
+  if (advanceDays > MAX_ADVANCE_DAYS) {
+    return res.status(400).json({
+      success: false,
+      error: `Bookings can be made at most ${MAX_ADVANCE_DAYS} days in advance. Please choose a closer check-in date.`
+    });
   }
 
   // ETR-03: validate test token before entering the transaction
@@ -1281,6 +1317,16 @@ export async function handleCreateWalkin(req: any, res: any) {
   const numNights = Math.max(Math.round((endMs - startMs) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // G-02 (E2E audit 2026-07-17): enforce maximum stay length for
+  // walk-ins. Walk-ins are exempt from the advance-booking window
+  // since staff may legitimately backfill past stays.
+  if (numNights > MAX_STAY_NIGHTS) {
+    return res.status(400).json({
+      success: false,
+      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
+    });
   }
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();

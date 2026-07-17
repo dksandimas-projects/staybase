@@ -114,7 +114,7 @@ export function LoginPage() {
                   <input
                     type="email"
                     required
-                    placeholder="name@sparkinn.com"
+                    placeholder={`name@${config.domain}`}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 pl-10 pr-3 text-sm font-medium text-gray-950 outline-none transition focus:border-primary focus:bg-white focus:ring-2 focus:ring-primary-light"
@@ -201,7 +201,7 @@ export function LoginPage() {
                     <input
                       type="email"
                       required
-                      placeholder="name@sparkinn.com"
+                      placeholder={`name@${config.domain}`}
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="min-h-[44px] w-full rounded-lg border border-gray-255 bg-gray-50/50 py-2 pl-10 pr-3 text-sm font-medium text-gray-990 outline-none transition focus:border-primary focus:bg-white"

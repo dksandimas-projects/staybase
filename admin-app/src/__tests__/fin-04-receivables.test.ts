@@ -26,7 +26,7 @@ describe("FIN-04 receivables", () => {
   });
 
   it("provides searchable CSV and XLSX exports", () => {
-    expect(reports).toMatch(/sparkinn_receivables_/);
+    expect(reports).toMatch(/config\.hotelId\}_receivables_/);
     expect(reports).toMatch(/"Receivables"\)/);
     expect(reports).toMatch(/Receivables & Aging/);
   });

@@ -446,6 +446,31 @@ export function ReportsPage() {
     });
   }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey, payments]);
 
+  // ── Occupancy-eligible bookings (same as rangeBookings but includes future unpaid confirmed bookings) ──
+  // Future confirmed bookings with no payments recorded are excluded from revenue (correct)
+  // but counted for occupancy and acquisition metrics since the room is still reserved.
+  const occupancyBookings = useMemo(() => {
+    return revenueBookings.filter(b => {
+      const checkInKey = reportDateKey(b.checkIn);
+      const checkOutKey = reportDateKey(b.checkOut);
+      if (!checkInKey || !checkOutKey) return false;
+
+      // 1. Must overlap with the selected range
+      const overlaps = checkInKey <= periodEndKey && checkOutKey > periodStartKey;
+      if (!overlaps) return false;
+
+      // 2. Exclude past confirmed bookings (entirely in the past and never checked in / no-show)
+      if (b.status === "confirmed" && checkOutKey <= hotelTodayKey) {
+        return false;
+      }
+
+      // NOTE: rule #3 (exclude future unpaid confirmed) intentionally omitted —
+      // occupancy should count all future bookings regardless of payment status.
+
+      return true;
+    });
+  }, [revenueBookings, periodStartKey, periodEndKey, hotelTodayKey]);
+
   const rangeStoreOrders = useMemo(
     () => storeOrders.filter(o => isWithinSelectedRange(o.status === "delivered" ? (o.deliveredAt || o.createdAt) : o.createdAt)),
     [storeOrders, periodStart, periodEnd]
@@ -858,13 +883,13 @@ export function ReportsPage() {
     const sources = ["online", "walk-in", "corporate", "phone", "facebook"];
     const counts: Record<string, number> = {};
     sources.forEach(s => { counts[s] = 0; });
-    rangeBookings.forEach(b => {
+    occupancyBookings.forEach(b => {
       if (counts[b.source] !== undefined) counts[b.source] += 1;
     });
     return sources
       .map((s, i) => ({ name: labelMap[s], count: counts[s], color: chartColors[i % chartColors.length] }))
       .filter(s => s.count > 0);
-  }, [rangeBookings, chartColors]);
+  }, [occupancyBookings, chartColors]);
 
   // ── Occupancy by room type (Performance) ──
   const roomTypeOccupancy = useMemo(() => {
@@ -874,14 +899,14 @@ export function ReportsPage() {
       const possibleNights = totalRoomsOfType * days;
 
       // Sum overlapping nights for bookings in this room type
-      const occupiedNights = rangeBookings
+      const occupiedNights = occupancyBookings
         .filter(b => b.roomType === rt.value)
         .reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
 
       const ratio = possibleNights > 0 ? Math.round((occupiedNights / possibleNights) * 100) : 0;
       return { name: rt.label, occupied: occupiedNights, total: possibleNights, occupancyRate: ratio };
     });
-  }, [roomTypes, rooms, rangeBookings, periodStart, periodEnd]);
+  }, [roomTypes, rooms, occupancyBookings, periodStart, periodEnd]);
 
   // ── Store: top-selling items ──
   const topStoreItems = useMemo(() => {
@@ -1012,7 +1037,7 @@ export function ReportsPage() {
     const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
     triggerDownload(
       new Blob([csv], { type: "text/csv;charset=utf-8;" }),
-      `sparkinn_collections_${periodStartKey}_to_${periodEndKey}.csv`
+      `${config.hotelId}_collections_${periodStartKey}_to_${periodEndKey}.csv`
     );
   };
 
@@ -1025,7 +1050,7 @@ export function ReportsPage() {
       row.billed, row.collected, row.outstanding, row.uncollectedAddToBill
     ]);
     const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
-    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `sparkinn_receivables_${new Date().toISOString().slice(0, 10)}.csv`);
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `${config.hotelId}_receivables_${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
   // ── CSV Export (Performance-style ledger) ──
@@ -1041,7 +1066,7 @@ export function ReportsPage() {
       csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${b.paymentReferenceNumber || ""}"\n`;
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    triggerDownload(blob, `sparkinn_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
+    triggerDownload(blob, `${config.hotelId}_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
   };
 
   const handlePrintReport = () => {
@@ -1095,7 +1120,7 @@ export function ReportsPage() {
         heightLeft -= pageHeight;
       }
 
-      pdf.save(`sparkinn_${activeTab}_report_${periodStartKey}_to_${periodEndKey}.pdf`);
+      pdf.save(`${config.hotelId}_${activeTab}_report_${periodStartKey}_to_${periodEndKey}.pdf`);
       toast.success("PDF downloaded", "Your report PDF has been downloaded successfully.");
     } catch (err) {
       console.error(err);
@@ -1292,7 +1317,7 @@ export function ReportsPage() {
 
       const wb_out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
       const blob = new Blob([wb_out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      triggerDownload(blob, `spark-inn-full-backup-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      triggerDownload(blob, `${config.hotelId}-full-backup-${new Date().toISOString().slice(0, 10)}.xlsx`);
       toast.success("Backup downloaded", "Full hotel backup export is ready.");
       setFullBackupConfirmOpen(false);
     } catch (error) {
@@ -1344,7 +1369,7 @@ export function ReportsPage() {
       ["Total Store Orders (delivered)", deliveredStoreOrders.length],
       ["Total Transactions", totalTransactions],
       [],
-      ["Discounts & Adjustments", "Value (₱)"],
+      ["Discounts & Adjustments", `Value (${config.currencySymbol})`],
       ["Gross Bookings (Room + Breakfast)", discountsSummary.grossRoomAndBreakfast],
       ["Senior Citizen & PWD Deductions", discountsSummary.seniorPwdDiscounts],
       ["Promo Voucher Deductions", discountsSummary.voucherDiscounts],
@@ -1356,16 +1381,17 @@ export function ReportsPage() {
       ["Total Outstanding Points", loyaltyLiability.totalPoints],
       ["Points Redemption Liability", loyaltyLiability.liability],
       [],
-      ["Payment Method", "Count", "Total (₱)"],
+      ["Payment Method", "Count", `Total (${config.currencySymbol})`],
       ...combinedPaymentMethods.map(m => [m.name, m.count, m.total])
     ];
 
+    const currSymbol = config.currencySymbol;
     const bookingsHeaders = [
       "Booking Ref", "Guest Name", "Room Number", "Check-In", "Check-Out", "Nights",
       "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
-      "Discount Type", "Discount %", "Senior/PWD Discount (₱)", "Voucher Code", "Voucher Discount (₱)",
-      "Member Discount (₱)", "Points Redeemed Value (₱)", "Gross Subtotal (₱)", "Net Total Price (₱)",
-      "Total Collected (₱)", "Outstanding Balance (₱)", "Payment Method", "Payment Reference Number", "Source", "Status"
+      "Discount Type", "Discount %", `Senior/PWD Discount (${currSymbol})`, "Voucher Code", `Voucher Discount (${currSymbol})`,
+      `Member Discount (${currSymbol})`, `Points Redeemed Value (${currSymbol})`, `Gross Subtotal (${currSymbol})`, `Net Total Price (${currSymbol})`,
+      `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference Number", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
@@ -1483,16 +1509,16 @@ export function ReportsPage() {
       "Paid By": invoice.paidBy || ""
     }))), "Corporate Invoices");
 
-    XLSX.writeFile(wb, `spark-inn-sales-${periodStartKey}.xlsx`);
+    XLSX.writeFile(wb, `${config.hotelId}-sales-${periodStartKey}.xlsx`);
   };
 
-  const totalBookingsInRange = rangeBookings.length;
+  const totalBookingsInRange = occupancyBookings.length;
   const avgNights = totalBookingsInRange > 0
-    ? Math.round((rangeBookings.reduce((sum, b) => sum + b.numNights, 0) / totalBookingsInRange) * 10) / 10
+    ? Math.round((occupancyBookings.reduce((sum, b) => sum + b.numNights, 0) / totalBookingsInRange) * 10) / 10
     : 0;
 
   // Per W3.5: Avg. Occupancy + Busiest Room Type (replaces Avg. Length of Stay).
-  const totalRoomNights = rangeBookings.reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
+  const totalRoomNights = occupancyBookings.reduce((sum, b) => sum + getOverlapNights(b.checkIn, b.checkOut, periodStart, periodEnd), 0);
   const daysInRange = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / 86_400_000));
   const totalActiveRooms = rooms.filter(r => r.isActive).length;
   const possibleRoomNights = totalActiveRooms * daysInRange;
@@ -1620,7 +1646,7 @@ export function ReportsPage() {
   }, [roomTypes, rangeBookings, periodStart, periodEnd]);
 
   const typeCounts = new Map<string, number>();
-  rangeBookings.forEach((b: any) => {
+  occupancyBookings.forEach((b: any) => {
     if (!b.roomType) return;
     typeCounts.set(b.roomType, (typeCounts.get(b.roomType) || 0) + 1);
   });

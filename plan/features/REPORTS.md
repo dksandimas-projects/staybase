@@ -54,7 +54,7 @@ Occupancy and booking patterns. Not revenue-focused.
 - [x] Export PDF button — performance report (charts + stat cards) via jsPDF
 
 ### Data & Logic Checklist
-- [x] Query `bookings` where `status` is in `["confirmed", "checked-in", "checked-out"]` for selected date range
+- [x] Query `bookings` where `status` is in `["payment-confirmed", "confirmed", "checked-in", "checked-out"]` for selected date range
 - [x] Occupancy rate: (occupied room-nights / total available room-nights) × 100 per month
 - [x] Total available room-nights: total active room count × days in month — query room count from Firestore, never hardcode
 - [x] Bookings by source: count grouped by `source` field
@@ -133,7 +133,7 @@ Consolidated revenue across all payment streams: room bookings, breakfast add-on
 - [x] **Export XLSX** button — multi-sheet Excel file (see §Sales XLSX Export below)
 
 ### Data & Logic Checklist
-- [x] Bookings query: `status` in `["confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
+- [x] Bookings query: `status` in `["payment-confirmed", "confirmed", "checked-in", "checked-out"]`, `checkIn` within date range
 - [x] Room and breakfast revenue are disjoint shares of booking `totalPrice`: split the net booking total proportionally using locked gross room and breakfast amounts so their sum equals booking revenue by construction
 - [x] Breakfast gross basis remains `breakfastRate × numGuests × numNights` for bookings with `hasBreakfast: true`; legacy bookings without a usable room-rate basis remain entirely in Room Revenue rather than guessing a breakfast allocation
 - [x] Store revenue: query `storeOrders` where `status == "delivered"` and `createdAt` within date range, sum `totalAmount`

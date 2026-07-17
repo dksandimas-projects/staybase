@@ -282,6 +282,16 @@ export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
 // Enforced in the admin Payment Methods tab's file input.
 export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 
+// Maximum stay length in nights and maximum advance booking
+// window in days for public online bookings. Enforced server-side
+// before Firestore work. Walk-ins are exempt from the advance
+// window (staff may backfill past stays) but should enforce
+// stay-length limits.
+// These are documented business assumptions — review with the
+// hotel owner before changing.
+export const MAX_STAY_NIGHTS = 30;
+export const MAX_ADVANCE_DAYS = 365;
+
 // localStorage cache key + TTL for the public site content
 // (`usePublicSiteContent`). Returning visitors get an instant
 // render from the cache while Firestore validates in the

@@ -70,7 +70,11 @@ export function CorporateStaysPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [roomsCount, setRoomsCount] = useState("1");
-  const [preferredDates, setPreferredDates] = useState("");
+  // C-03 (E2E audit 2026-07-17): preferDates switched from free-text
+  // string to structured { from, to } date inputs. The old single
+  // string field is preserved server-side for legacy compatibility.
+  const [preferredDateFrom, setPreferredDateFrom] = useState("");
+  const [preferredDateTo, setPreferredDateTo] = useState("");
   const [specialRequirements, setSpecialRequirements] = useState("");
   
   // Honeypot state
@@ -229,8 +233,12 @@ export function CorporateStaysPage() {
     }
 
     // Validation
-    if (!companyName.trim() || !contactPerson.trim() || !email.trim() || !phone.trim() || !preferredDates.trim()) {
+    if (!companyName.trim() || !contactPerson.trim() || !email.trim() || !phone.trim() || !preferredDateFrom.trim() || !preferredDateTo.trim()) {
       setFormError("Please fill out all required fields.");
+      return;
+    }
+    if (preferredDateTo <= preferredDateFrom) {
+      setFormError("Preferred check-out date must be after check-in date.");
       return;
     }
 
@@ -254,7 +262,7 @@ export function CorporateStaysPage() {
           email,
           phone,
           numRooms: Number(roomsCount),
-          preferredDates,
+          preferredDates: { from: preferredDateFrom, to: preferredDateTo },
           specialRequirements,
           _hp: websiteUrl,
           turnstileToken
@@ -273,7 +281,8 @@ export function CorporateStaysPage() {
       setEmail("");
       setPhone("");
       setRoomsCount("1");
-      setPreferredDates("");
+      setPreferredDateFrom("");
+      setPreferredDateTo("");
       setSpecialRequirements("");
       setWebsiteUrl("");
       setTurnstileToken("");
@@ -740,21 +749,35 @@ export function CorporateStaysPage() {
                     </select>
                   </label>
 
-                  {/* Preferred Dates */}
-                  <label className="grid gap-2 text-sm font-medium text-gray-700">
-                    <span className="flex items-center gap-1.5">
-                      <Calendar size={16} className="text-gray-400" />
-                      Preferred Dates / Month <span className="text-red-500">*</span>
-                    </span>
-                    <input
-                      type="text"
-                      className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
-                      placeholder="e.g. October 2026 or Oct 12-16"
-                      value={preferredDates}
-                      onChange={(e) => setPreferredDates(e.target.value)}
-                      required
-                    />
-                  </label>
+                  {/* C-03 (E2E audit 2026-07-17): structured date inputs */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="grid gap-2 text-sm font-medium text-gray-700">
+                      <span className="flex items-center gap-1.5">
+                        <Calendar size={16} className="text-gray-400" />
+                        Preferred Check-In <span className="text-red-500">*</span>
+                      </span>
+                      <input
+                        type="date"
+                        className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                        value={preferredDateFrom}
+                        onChange={(e) => setPreferredDateFrom(e.target.value)}
+                        required
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-medium text-gray-700">
+                      <span className="flex items-center gap-1.5">
+                        <Calendar size={16} className="text-gray-400" />
+                        Preferred Check-Out <span className="text-red-500">*</span>
+                      </span>
+                      <input
+                        type="date"
+                        className="min-h-11 rounded-lg border border-gray-200 px-3.5 text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light"
+                        value={preferredDateTo}
+                        onChange={(e) => setPreferredDateTo(e.target.value)}
+                        required
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 {/* Special Requirements */}

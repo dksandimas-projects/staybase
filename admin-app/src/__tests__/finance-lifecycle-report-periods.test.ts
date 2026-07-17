@@ -27,7 +27,7 @@ describe("FL-15 hotel-timezone report windows", () => {
 
   it("wires membership and export labels to hotel date keys", () => {
     expect(reports).toMatch(/getTimeZoneDayRange\(periodStartKey, periodEndKey, config\.timezone\)/);
-    expect(reports).toMatch(/sparkinn_collections_\$\{periodStartKey\}_to_\$\{periodEndKey\}/);
+    expect(reports).toMatch(/config\.hotelId\}_collections_\$\{periodStartKey\}_to_\$\{periodEndKey\}/);
     expect(reports).not.toMatch(/periodStart\.toISOString\(\)\.slice\(0, 10\)/);
   });
 });

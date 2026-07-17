@@ -13,7 +13,7 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
-import { handleVerifyIntercomGuest } from "./handlers/intercom";
+import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
 import { handlePublishSeo } from "./handlers/seo";
@@ -1053,6 +1053,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleVerifyIntercomGuest(req, res);
+  }
+
+  // G-04 (E2E audit 2026-07-17): guest intercom messages routed
+  // through the API instead of direct Firestore writes. Rate-limited
+  // at 30/room/10min (enforced in the handler with an IP/room key).
+  if (domain === "intercom" && action === "send-message" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-send:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many message requests. Please try again in a minute." });
+    }
+    return await handleSendGuestMessage(req, res);
   }
 
   if (domain === "email" && action === "preview" && req.method === "POST") {
