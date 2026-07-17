@@ -1648,3 +1648,9 @@ Full-journey audit across all 5 roles (guest, corporate, front desk, admin, cros
 ### Admin journey incl. reports accuracy (role 4 of 5 — audited 2026-07-17)
 
 - No CRITICAL/HIGH findings. Reports data accuracy verified: occupancy, revenue, and bookings-by-source compute from the same live AdminContext bookings snapshot as Bookings Management; cancelled/pending excluded, no-shows excluded from revenue but shown as retained cash (FL-14), voucher/senior/member discounts reflected via net totalPrice, corporate flat-rate counted at contract rate, timezone-correct overlap proration (FL-15), dynamic room counts. Three LOW docs-drift items (A-01 stale REPORTS.md status list, A-02 SECURITY.md corporateCodes write claim, A-03 future-range occupancy nuance) tracked in `plan/docs/AUDIT-E2E-REPORT.md`.
+
+### Cross-cutting (role 5 of 5 — audited 2026-07-17, audit complete)
+
+- [ ] **X-01 (HIGH)** — Remove `allow get: if true` from `firebase/storage.rules` on `bookings/{id}/payment-proof/`, `bookings/{id}/discount-id/`, and `store-orders/{roomNumber}/payment-proof/` — payment screenshots and OSCA/PWD government-ID photos are currently fetchable without authentication by path (store-order path keyed by guessable room number). Use local blob previews client-side, randomized upload filenames, and Admin-SDK-minted download URLs. `firebase/storage.rules:27-37,98-102`
+
+**Audit verdict:** NO-GO until G-01, C-01, X-01 land (~1 dev-day combined); GO afterward. MEDs (incl. X-02 white-label hardcoding sweep — mandatory before the second white-label client) tracked in `plan/docs/AUDIT-E2E-REPORT.md`.

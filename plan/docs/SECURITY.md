@@ -351,6 +351,12 @@ See `plan/features/STATIC-PAGES.md §Terms of Service` for UI implementation.
 
 ---
 
+## Known Issues (Audit 2026-07-17)
+
+- **X-01 (HIGH, open):** `firebase/storage.rules` pairs the intended `allow read: if isStaff()` with `allow get: if true` on `bookings/{id}/payment-proof/`, `bookings/{id}/discount-id/`, and `store-orders/{roomNumber}/payment-proof/` — granular allows are OR'd, so any unauthenticated caller who knows a file path can fetch payment screenshots and OSCA/PWD government-ID photos, contradicting the "never public" requirement above. The store-order path is keyed by guessable room number; booking paths use the original upload filename. Fix: drop the public `get`, use local blob previews client-side, randomize upload filenames, and resolve download URLs server-side via the Admin SDK. See `plan/docs/AUDIT-E2E-REPORT.md`.
+
+---
+
 ## References
 
 - Firestore rules: `firebase/firestore.rules`
