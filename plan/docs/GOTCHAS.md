@@ -13,6 +13,7 @@ Things agents must never do. Check this file before implementing any feature.
 - **Never expose Firebase Admin SDK credentials client-side** — Admin SDK lives in `api/` only.
 - **Always configure `cors.json` for Firebase Storage** before any file upload feature goes live — uploads will silently fail otherwise.
 - **Firestore security rules block unexpected reads** — test rules in the Firebase emulator before deploying. A rule that looks correct in isolation may block legitimate reads.
+- **Never deploy `firebase/firestore.rules` or `firebase/storage.rules` to a live project ahead of the app build that depends on them** — rules and client ship together, or rules ship second. Tightened rules against an older deployed client silently break guest flows with permission-denied errors (INC-01, 2026-07-17: staff-only Storage reads broke the old app's post-upload `getDownloadURL`, blocking online-payment bookings, and staff-only message creates killed guest intercom). Before any rules deploy, confirm the live app build already contains the matching client changes.
 
 ---
 
