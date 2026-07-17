@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 17, 2026 (E2E audit section updated — all 17 findings merged to `dev`; remaining gate is the cutover deploy incl. Storage rules.)
+> Last updated: July 17, 2026 (**INC-01 opened — active production incident**: July-17 security rules deployed against the July-14 app; online-payment bookings and guest intercom broken. See §Production Incident.)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -32,7 +32,8 @@
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
-| E2E User Journey Audit (July 17) | 🔄 3 HIGH fixes implemented and verified | Merge + deploy app/API and Storage rules before clearing the production launch gate; MED/LOW remain in the audit report |
+| E2E User Journey Audit (July 17) | ✅ All 17 findings fixed + merged to `dev` | Reach production via INC-01 resolution / cutover deploy |
+| **INC-01 — Production rules/app skew (July 17)** | 🔴 **ACTIVE INCIDENT** | Online-payment bookings + guest intercom broken on the live site (§Production Incident below) |
 
 ---
 
@@ -194,11 +195,37 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ---
 
+## 🔴 INC-01 — Production Incident: rules/app version skew *(opened 2026-07-17, ACTIVE)*
+
+> **Root cause:** the E2E-audit security rules (repo `firebase/firestore.rules` + `firebase/storage.rules`, fixed 2026-07-17) were deployed to the live Firebase project `spark-inn-stg-7a7ad` (serving `sparkinnbohol.com`), but the live app is still the 2026-07-14 build — `main` is ~133 commits behind `dev` and does not contain the matching client changes. The new rules assume the new app.
+> **Evidence (verified 2026-07-17):** deployed rules fetched via Firebase MCP match the fixed repo versions; `git show main:...IntercomPage.tsx` still sends guest messages via client `addDoc`; `git show main:...BookingPage.tsx:716,746` still calls `getDownloadURL()` after proof/ID upload.
+
+**Broken guest-facing flows on the live site:**
+
+- ⬜ **INC-01a — Online-payment bookings blocked.** X-01's rules removed public read from `bookings/{id}/payment-proof/` and `discount-id/`, but the deployed app calls `getDownloadURL()` right after `uploadBytes()` → permission-denied → guest sees a permanent "Receipt upload failed. Please check your connection and try again." and cannot pass Step 3. Affects every GCash/bank booking and every Senior/PWD ID upload. Only Pay-at-Hotel bookings without a discount ID still complete.
+- ⬜ **INC-01b — Guest intercom dead.** G-04's rule restricts `intercoms/{room}/messages` creation to staff (guests are meant to use the new rate-limited `POST /api/intercom/send-message`), but the deployed app still writes messages client-side via `addDoc` → every guest chat message and quick request fails with permission-denied.
+
+**Not affected / silver lining:** X-01 itself (publicly fetchable OSCA/PWD government-ID photos and payment screenshots) is **closed in production** — the deployed rules are correct; it's the app that's behind. Staff-side admin flows and Pay-at-Hotel bookings still work.
+
+**Resolution options (decide + execute ASAP):**
+
+1. **Recommended — emergency `dev → main` merge + production deploy.** `dev` contains the exact client changes the rules expect (path-based uploads without `getDownloadURL`, API-routed intercom sends) and is fully green (847 tests, typecheck, builds, preflight 35/35). Jumps the FLR-05 / client-approval milestone gate — an active outage justifies it, but the owner/DK must make that call explicitly.
+2. **Not recommended — partial rules rollback** (restore public `get` on the two Storage paths + guest message create). Restores service in minutes but re-opens X-01: government-ID photos become publicly fetchable again.
+3. **Fallback — cherry-pick hotfix** of the fix commits onto `main`. Smallest production delta, but drags the committed API bundle and wasn't tested as an isolated unit.
+
+**Close-out checklist:**
+- ⬜ Decide the resolution path (owner/DK)
+- ⬜ Deploy the fix; verify a live GCash test booking passes Step 3 with proof upload, and a guest intercom message + quick request deliver to the admin inbox
+- ⬜ Confirm no stuck bookings/guests during the breakage window (check Resend logs / booking creation rate since 2026-07-17 rules deploy)
+- ⬜ Record the prevention rule: **never deploy `firebase/*.rules` to a live project ahead of the app build that matches them** — rules and client ship together, or rules ship second (add to `plan/docs/GOTCHAS.md §Firebase` at close-out)
+
+---
+
 ## E2E User Journey Audit (2026-07-17) — all findings remediated
 
 ✅ All 17 findings are fixed **and merged to `dev`**: the 3 HIGHs (`aae6808` — G-01 full-body Zod validation, C-01 RoomType-sourced conversion pricing, X-01 Storage-rule public-read removal), the 8 MEDs (`cfe6581`), and the 6 LOWs (`9b9c85e`). All 847 tests, typecheck, builds, and preflight pass. Report: `plan/docs/AUDIT-E2E-REPORT.md`.
 
-⬜ **Remaining gate:** the fixes reach production only when `dev → main` merges and the app/API **plus `firebase/storage.rules`** deploy at cutover (PC-06 covers this) — verify the deployed Storage rules match the repo before go-live. X-02's white-label sweep landed for Spark Inn; re-verify it before onboarding a second white-label client.
+⬜ **Remaining gate:** the app-side fixes reach production via the INC-01 resolution (see above — the rules half already deployed, which is what opened the incident). X-02's white-label sweep landed for Spark Inn; re-verify it before onboarding a second white-label client.
 
 ---
 
