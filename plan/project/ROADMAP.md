@@ -1644,3 +1644,7 @@ Full-journey audit across all 5 roles (guest, corporate, front desk, admin, cros
 ### Front desk journey (role 3 of 5 — audited 2026-07-17)
 
 - No CRITICAL/HIGH findings. Two MEDs (FD-01 missing 8h inactivity auto-logout per SECURITY.md; FD-02 `guests/{uid}` rule allows self-written `role` fields → phantom staff rows in Settings) and one LOW docs contradiction (FD-03, Decision #81 vs admin-only Rates page) are tracked in `plan/docs/AUDIT-E2E-REPORT.md`.
+
+### Admin journey incl. reports accuracy (role 4 of 5 — audited 2026-07-17)
+
+- No CRITICAL/HIGH findings. Reports data accuracy verified: occupancy, revenue, and bookings-by-source compute from the same live AdminContext bookings snapshot as Bookings Management; cancelled/pending excluded, no-shows excluded from revenue but shown as retained cash (FL-14), voucher/senior/member discounts reflected via net totalPrice, corporate flat-rate counted at contract rate, timezone-correct overlap proration (FL-15), dynamic room counts. Three LOW docs-drift items (A-01 stale REPORTS.md status list, A-02 SECURITY.md corporateCodes write claim, A-03 future-range occupancy nuance) tracked in `plan/docs/AUDIT-E2E-REPORT.md`.
