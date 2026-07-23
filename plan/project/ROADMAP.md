@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 23, 2026 (added House Rules email and editable Terms & Conditions tasks)
+> Last updated: July 23, 2026 (added guest-store search and category browsing)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -156,11 +156,15 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Legal Content Enhancements (LCE)
 
-- ⬜ **LCE-01 — Editable Terms & Conditions** — add an admin-only **Settings → Legal Content** editor backed by `settings/websiteContent.termsBody`; `/terms` uses it immediately and falls back to deploy-time content when blank. Store the visible last-updated/version with new booking consent so the accepted revision remains identifiable. Test save, render, fallback, sanitization, and consent versioning. Supersedes the former Phase 11.8 `termsBody` item.
+- ⬜ **LCE-01 — Editable Terms & Conditions** — add an admin-only Legal Content editor; `/terms` uses saved content with deploy-time fallback. Version new booking consent and test save, render, fallback, sanitization, and versioning. Supersedes the former Phase 11.8 item.
 
 ### Email Content Enhancements (ECE)
 
-- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse `settings/websiteContent.houseRules`; do not add another setting. Render a titled, readable section after the stay summary, omit it when blank, and show current rules in email preview. Test rendering, empty state, and HTML escaping. The email communicates rules but is not formal acceptance.
+- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse the existing setting, omit the section when blank, include it in preview, and test rendering/escaping. The email communicates rules but is not formal acceptance.
+
+### Guest Store Discovery (GSD)
+
+- ⬜ **GSD-01 — Search and category browsing** — add combined catalog search and category filters to Spark Essentials per `plan/features/STORE-GUEST.md §Catalog Discovery`.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > Shipped 2026-07-16 (BDUX-01..08 + BDUX-05a..05n complete — full contract in archive). Remaining manual/visual QA:

@@ -507,6 +507,7 @@ Subcollection for ICE candidate exchange (both sides write here).
 | Field | Type | Notes |
 |---|---|---|
 | `name` | string | e.g. "Toothbrush", "Bottled Water" |
+| `category` | string | `"drinks"` \| `"snacks"` \| `"toiletries"` \| `"rentals"` \| `"other"` |
 | `description` | string | Optional short description |
 | `price` | number | Price in local currency |
 | `stock` | number \| null | `null` = unlimited, `0` = out of stock, `n` = n remaining |
