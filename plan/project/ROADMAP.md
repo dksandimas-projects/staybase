@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 17, 2026 (INC-01 **resolved** — `dev → main` merged via PR #118 and deployed to production; live verification pending. All 17 E2E fixes are now in production.)
+> Last updated: July 23, 2026 (added required check-in purpose-of-stay task; default `Leisure`)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -150,6 +150,10 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
 - ⏸ Automated test suite
 - ⏸ Additional hotel client deployments (white-label)
+
+### Guest Check-in Registration (GCR)
+
+- ⬜ **GCR-01 — Required purpose of stay** — implement Decision #121 across the guest-registration form, persisted booking data, check-in readiness gate, registration PDF, and focused regression tests. The initial value is `Leisure`, and staff can select another supported purpose before saving.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > Shipped 2026-07-16 (BDUX-01..08 + BDUX-05a..05n complete — full contract in archive). Remaining manual/visual QA:
