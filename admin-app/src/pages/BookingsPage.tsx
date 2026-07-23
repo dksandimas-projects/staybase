@@ -149,7 +149,7 @@ function estimateNewTotalPrice(
 import config from "@config";
 import { jsPDF } from "jspdf";
 import { addDoc, collection, doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { getBlob, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { auth } from "../firebase/auth";
 
@@ -209,6 +209,38 @@ function getJsPdfImageFormat(dataUrl: string, blobType = "") {
   if (mimeType.includes("png")) return "PNG";
   if (mimeType.includes("webp")) return "WEBP";
   return "JPEG";
+}
+
+async function normalizePdfImageToJpeg(blob: Blob) {
+  const sourceDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read image."));
+    reader.readAsDataURL(blob);
+  });
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Unable to decode image."));
+    image.src = sourceDataUrl;
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const context = canvas.getContext("2d");
+  if (!context || canvas.width === 0 || canvas.height === 0) {
+    throw new Error("Unable to prepare image for PDF.");
+  }
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0);
+
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.9),
+    width: canvas.width,
+    height: canvas.height
+  };
 }
 
 async function imageUrlToDataUrl(url: string) {
@@ -1504,27 +1536,13 @@ export function BookingsPage() {
 
     if (b.guestIdPhotoUrl) {
       try {
-        const response = await fetch(b.guestIdPhotoUrl);
-        if (!response.ok) {
-          throw new Error(`Guest ID download failed with status ${response.status}.`);
-        }
-        const blob = await response.blob();
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(blob);
-        });
-
-        const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = reject;
-          img.src = base64;
-        });
+        const guestIdRef = storageRef(storage, b.guestIdPhotoUrl);
+        const blob = await getBlob(guestIdRef);
+        const pdfImage = await normalizePdfImageToJpeg(blob);
 
         const maxW = idBoxW - 2;
         const maxH = idBoxH - 2;
-        const imgRatio = img.width / img.height;
+        const imgRatio = pdfImage.width / pdfImage.height;
         let drawW = maxW;
         let drawH = drawW / imgRatio;
         if (drawH > maxH) {
@@ -1537,7 +1555,7 @@ export function BookingsPage() {
         const drawX = idX + (idBoxW - drawW) / 2;
         const drawY = idBoxY + (idBoxH - drawH) / 2;
         pdf.rect(idX, idBoxY, idBoxW, idBoxH);
-        pdf.addImage(base64, getJsPdfImageFormat(base64, blob.type), drawX, drawY, drawW, drawH);
+        pdf.addImage(pdfImage.dataUrl, "JPEG", drawX, drawY, drawW, drawH);
       } catch {
         throw new Error(
           "The uploaded guest ID could not be added to the registration PDF. Please re-upload the ID and try again."

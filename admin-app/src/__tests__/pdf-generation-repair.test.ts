@@ -22,11 +22,13 @@ describe("PDF generation repair", () => {
     expect(bookingsPage).toMatch(/Popup blocked, so the PDF was downloaded instead/);
   });
 
-  it("detects uploaded ID image format before embedding in registration PDFs", () => {
-    expect(bookingsPage).toMatch(/function getJsPdfImageFormat/);
-    expect(bookingsPage).toMatch(/blob\.type/);
-    expect(bookingsPage).toMatch(/pdf\.addImage\(base64, getJsPdfImageFormat\(base64, blob\.type\)/);
-    expect(bookingsPage).not.toMatch(/pdf\.addImage\(base64, "JPEG"/);
+  it("downloads uploaded guest IDs with staff authentication and normalizes them for jsPDF", () => {
+    expect(bookingsPage).toMatch(/import \{[^}]*getBlob[^}]*\} from "firebase\/storage"/);
+    expect(bookingsPage).toMatch(/const guestIdRef = storageRef\(storage, b\.guestIdPhotoUrl\)/);
+    expect(bookingsPage).toMatch(/const blob = await getBlob\(guestIdRef\)/);
+    expect(bookingsPage).toMatch(/normalizePdfImageToJpeg\(blob\)/);
+    expect(bookingsPage).toMatch(/canvas\.toDataURL\("image\/jpeg", 0\.9\)/);
+    expect(bookingsPage).toMatch(/pdf\.addImage\(pdfImage\.dataUrl, "JPEG"/);
   });
 
   it("requires an uploaded guest ID to be embedded before the registration PDF succeeds", () => {
@@ -34,7 +36,7 @@ describe("PDF generation repair", () => {
     const registrationEnd = bookingsPage.indexOf("const printBookingReceiptPDF", registrationStart);
     const registrationBody = bookingsPage.slice(registrationStart, registrationEnd);
 
-    expect(registrationBody).toMatch(/if \(!response\.ok\)/);
+    expect(registrationBody).toMatch(/await getBlob\(guestIdRef\)/);
     expect(registrationBody).toContain("The uploaded guest ID could not be added to the registration PDF");
     expect(registrationBody).toMatch(/const drawX = idX \+ \(idBoxW - drawW\) \/ 2/);
     expect(registrationBody).toMatch(/const drawY = idBoxY \+ \(idBoxH - drawH\) \/ 2/);
