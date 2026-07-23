@@ -148,7 +148,7 @@ function estimateNewTotalPrice(
 }
 import config from "@config";
 import { jsPDF } from "jspdf";
-import { addDoc, collection, doc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, onSnapshot, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { getBlob, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { auth } from "../firebase/auth";
@@ -599,6 +599,34 @@ export function BookingsPage() {
     setSelectedBooking(match);
     setIsDrawerOpen(true);
   }, [searchParams, bookings]);
+
+  // Per fix/bookings-drawer-stale-state: the booking drawer
+  // holds a local copy of one row in `selectedBooking`. The
+  // `bookings` array is the live source of truth (admin context
+  // owns the onSnapshot listener and converts Firestore docs into
+  // `Booking` objects with the right field types), but the local
+  // copy is never re-synced. That means a status-changing action
+  // like Verify & Record Payment (which transitions the booking
+  // to `payment-confirmed` server-side and writes a payments
+  // ledger entry) would update `bookings` on the next onSnapshot
+  // tick — yet the drawer would still show the pre-action copy,
+  // so the "Verify & Record Payment" / "Review proof in Folio"
+  // buttons would keep rendering as if nothing happened.
+  //
+  // The dashboard doesn't hit this because its "pending payments"
+  // list renders directly from `bookings`. The BookingsPage
+  // drawer does not — it has a single `selectedBooking` state
+  // that needs to be re-synced. Whenever `bookings` updates, look
+  // up the matching row and adopt the live version. The early
+  // bail when the id is missing or no match is found keeps the
+  // effect safe (a deleted booking, a pre-load state, etc.).
+  useEffect(() => {
+    if (!selectedBooking?.id) return;
+    const fresh = bookings.find((b) => b.id === selectedBooking.id);
+    if (fresh && fresh !== selectedBooking) {
+      setSelectedBooking(fresh);
+    }
+  }, [bookings, selectedBooking?.id]);
 
   // Store Order Drawer States
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
