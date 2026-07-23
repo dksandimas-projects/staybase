@@ -240,9 +240,20 @@ export function BookingLookupPage() {
       setSearchError("The security check hasn't finished yet. Please wait a moment and try again.");
       return;
     }
+    // Per feat/relax-booking-lookup: either the ref OR the
+    // email is enough — guests often forget which email they
+    // booked under, or vice versa. The server-side schema
+    // enforces the same rule, but the client-side check
+    // keeps the empty-submit out of the request log.
+    const trimmedRef = refInput.trim();
+    const trimmedEmail = emailInput.trim();
+    if (!trimmedRef && !trimmedEmail) {
+      setSearchError("Please enter your booking reference or the email you used to book.");
+      return;
+    }
     setSearchError("");
     setHasSearched(true);
-    await performLookup(refInput, emailInput || undefined);
+    await performLookup(trimmedRef, trimmedEmail || undefined);
   };
 
   const handleResetSearch = () => {
@@ -423,7 +434,7 @@ export function BookingLookupPage() {
               <Search className="mx-auto h-12 w-12 text-primary" />
               <h1 className="mt-4 font-heading text-3xl text-gray-950">Find your booking</h1>
               <p className="mt-2 text-sm text-gray-600">
-                Enter your booking reference number and email to check your stay status.
+                Enter your booking reference <span className="font-semibold">or</span> the email you used to book.
               </p>
             </div>
 
@@ -435,11 +446,16 @@ export function BookingLookupPage() {
                   placeholder="e.g. SI-20260612-042"
                   value={refInput}
                   onChange={(e) => setRefInput(e.target.value)}
-                  required
                   disabled={isSearching}
                   className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
+
+              <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                <div className="h-px flex-1 bg-gray-200" />
+                <span>or</span>
+                <div className="h-px flex-1 bg-gray-200" />
+              </div>
 
               <label className="grid gap-2 text-sm font-medium text-gray-700">
                 Email Address
@@ -448,7 +464,6 @@ export function BookingLookupPage() {
                   placeholder="maria@example.com"
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  required
                   disabled={isSearching}
                   className="min-h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60"
                 />

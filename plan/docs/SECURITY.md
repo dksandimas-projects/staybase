@@ -207,9 +207,12 @@ Full rules in `firebase/storage.rules`. Intent:
 - Use Vercel Edge middleware or a simple in-memory rate limiter for Phase 1
 
 ### Booking Lookup Security
-- `/my-booking` requires BOTH booking ref AND guest email to return data
-- Never confirm or deny a booking ref exists without a matching email
-- Prevents enumeration attacks on booking references
+- `/my-booking` accepts ANY ONE of: booking ref, guest email, or per-booking lookup token. A truly empty body is rejected with 400.
+- The endpoint is gated by Cloudflare Turnstile (per-attempt cost), a 10-req/min per-IP rate limit, and a 3-failure 1-hour backoff bucket. These are the load-bearing defenses against enumeration, not the second-factor.
+- Refs are globally unique (`{prefix}-YYYYMMDD-NNN`, ~1000 keys per day) so an attacker would need to clear Turnstile + the rate limit per attempt, capping a single IP at ~72 attempts/day on a clean budget.
+- Email-alone lookups return the most recent booking under that email. The error message ("Booking not found.") is identical whether the email doesn't exist or has no bookings, so the endpoint is not an email-existence oracle. Shared/aliased emails do not enumerate other guests' stays — the response shape is the same single-booking payload as the ref+email path.
+- Token-alone and ref+token paths use the 32-char hex `lookupToken` (per H2, generated server-side at booking time). The token is never returned in lookup responses and is single-purpose for booking access.
+- Cancel remains stricter: `ref + (email OR token)` is still required server-side, so a destructive action always needs a second factor. See `plan/features/BOOKING-LOOKUP.md §Data & Logic Checklist`.
 
 ---
 
