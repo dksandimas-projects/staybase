@@ -6,6 +6,7 @@ import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -669,6 +670,15 @@ export function BookingsPage() {
     remainingBalance: number;
   }>(null);
   const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
+  // Per CWB-04 / decision #122 (2026-07-23): when the post-verify
+  // success modal renders the partial-payment variant, the
+  // "Confirm with Balance" CTA opens this form. The form is also
+  // reachable from the drawer's More actions menu for any
+  // `payment-uploaded` row. `null` while the form is closed.
+  const [confirmWithBalanceContext, setConfirmWithBalanceContext] = useState<null | {
+    booking: Booking;
+    currentBalance: number;
+  }>(null);
   const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
@@ -1442,6 +1452,23 @@ export function BookingsPage() {
       setConfirmingBookingFromSuccess(false);
       setVerifySuccess(null);
     }
+  };
+
+  // Per CWB-04 / decision #122 (2026-07-23): the post-verify
+  // partial-payment variant's "Confirm with Balance" CTA opens
+  // the confirm-with-balance form. We carry the just-computed
+  // `remainingBalance` from the success modal so the form can
+  // preview the right number even before the onSnapshot
+  // listener catches up. The form is the source of truth for
+  // the actual transition; it calls `confirmBookingWithBalance`
+  // and the snapshot listener refreshes the drawer.
+  const openConfirmWithBalanceFromSuccess = () => {
+    if (!verifySuccess) return;
+    setConfirmWithBalanceContext({
+      booking: verifySuccess.booking,
+      currentBalance: Math.max(0, verifySuccess.remainingBalance)
+    });
+    setVerifySuccess(null);
   };
 
   const handleCancelOrder = async (reason: string) => {
@@ -3318,6 +3345,41 @@ export function BookingsPage() {
               className="lg:sticky lg:top-20 lg:float-right lg:w-[calc(33.333%-1rem)]"
             >
             <div className="space-y-4 rounded-card border border-gray-200 bg-white p-4 shadow-sm">
+              {/* Per CWB-04 / decision #122 (2026-07-23): a
+                  visible Balance-owed panel for any booking
+                  that was confirmed with money still owed.
+                  Renders while `confirmedWithBalance != null`
+                  AND a current balance remains. Auto-hides at
+                  ₱0. The "Settle on check-in" copy tells the
+                  staff (and the live drawer itself) that the
+                  guest will pay the rest at the front desk —
+                  not via the Record Payment flow. */}
+              {selectedBooking.confirmedWithBalance != null &&
+                (selectedBookingFolio?.balance ?? 0) > 0 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-bold uppercase tracking-wider">Balance owed</p>
+                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[9px] font-bold text-amber-900">
+                      Settle on check-in
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-amber-700">Original</p>
+                      <p className="font-heading text-sm font-bold text-amber-950">{formatPrice(selectedBooking.confirmedWithBalance)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-widest text-amber-700">Now</p>
+                      <p className="font-heading text-sm font-bold text-amber-950">{formatPrice(selectedBookingFolio?.balance ?? 0)}</p>
+                    </div>
+                  </div>
+                  {selectedBooking.confirmedWithBalanceReason && (
+                    <p className="mt-2 border-t border-amber-200 pt-2 text-amber-800">
+                      <span className="font-semibold">Reason:</span> {selectedBooking.confirmedWithBalanceReason}
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <h2 className="text-sm font-bold text-gray-950">Folio summary</h2>
                 <p className="mt-1 text-[11px] text-gray-500">Current charges and collections for this stay.</p>
@@ -4138,6 +4200,29 @@ export function BookingsPage() {
 
             {/* Secondary and destructive booking actions */}
             <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} className="border-t border-gray-150 pt-4">
+              {/* Per CWB-04 / decision #122 (2026-07-23):
+                  secondary entry point for the confirm-with-
+                  balance flow. Visible whenever the booking is
+                  in `payment-uploaded` and a balance remains
+                  (the same case the verify success modal's
+                  partial variant covers). The form's threshold
+                  banner handles the role-gated submit. */}
+              {selectedBooking.status === "payment-uploaded" && (selectedBookingFolio?.balance ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmWithBalanceContext({
+                      booking: selectedBooking,
+                      currentBalance: Math.max(0, selectedBookingFolio?.balance ?? 0)
+                    });
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 text-xs font-bold text-primary transition hover:bg-primary/10"
+                >
+                  <ShieldCheck size={15} className="text-primary" aria-hidden="true" />
+                  Confirm with Balance
+                </button>
+              )}
+
               {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showMoveForm && (
                 <button
                   type="button"
@@ -4935,7 +5020,24 @@ export function BookingsPage() {
         remainingBalance={verifySuccess?.remainingBalance}
         onConfirmBooking={handleConfirmBookingFromSuccess}
         confirmingBooking={confirmingBookingFromSuccess}
+        onConfirmWithBalance={openConfirmWithBalanceFromSuccess}
       />
+
+      {/* Per CWB-04 / decision #122 (2026-07-23): opens from
+          the post-verify success modal (partial variant) OR
+          from the drawer's More actions menu. The form owns
+          the threshold banner + the role-gated submit
+          button; on success the snapshot listener refreshes
+          the drawer automatically. */}
+      {confirmWithBalanceContext && (
+        <ConfirmWithBalanceForm
+          open={confirmWithBalanceContext !== null}
+          onClose={() => setConfirmWithBalanceContext(null)}
+          booking={confirmWithBalanceContext.booking}
+          currentBalance={confirmWithBalanceContext.currentBalance}
+          onConfirmed={() => setConfirmWithBalanceContext(null)}
+        />
+      )}
 
       {/* BDUX-05: Discount / Voucher modal */}
       <Modal

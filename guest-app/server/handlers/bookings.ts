@@ -1,7 +1,7 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
 import { hashToken } from "./test-runs";
 import { Timestamp } from "firebase-admin/firestore";
-import { sendBookingTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
+import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger } from "./email";
 import { writeNotification } from "../lib/notifications";
 import {
   calculateSeasonalAwareRoomBreakdown,
@@ -2876,6 +2876,208 @@ export async function handleConfirmBooking(req: any, res: any) {
       });
     }
     console.error("Confirm booking handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+
+// Per CWB-01 / decision #122 (2026-07-23): staff can confirm
+// a `payment-uploaded` booking with a positive balance when
+// the rest will be collected at check-in. Reuses the same
+// `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000)
+// as the unpaid-checkout flow — `front-desk` may approve up
+// to the threshold, above it requires an authenticated
+// `admin` claim. Threshold check is inside the transaction
+// so a race between two staff doesn't bypass the gate.
+//
+// Atomically stamps four new fields + flips `status` to
+// `confirmed` + writes `paymentConfirmedAt` + `handledBy`,
+// then fires the new `booking-confirmed-with-balance` email
+// + a `booking` notification for the bell.
+//
+// Reason validation mirrors `unpaidCheckoutReason` (≤500
+// chars, required) for consistency. Reason is stored on the
+// booking (audit trail) AND included in the guest email
+// (operational clarity).
+const CONFIRM_WITH_BALANCE_REASON_MAX_LENGTH = 500;
+export async function handleConfirmBookingWithBalance(req: any, res: any) {
+  const { bookingId, reason } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, CONFIRM_WITH_BALANCE_REASON_MAX_LENGTH) : "";
+  if (!safeReason) {
+    return res.status(400).json({
+      success: false,
+      error: "A reason is required when confirming a booking with a balance owed."
+    });
+  }
+
+  const confirmedBy = req.staff?.uid || "staff";
+  const staffRole = req.staff?.role || "front-desk";
+
+  // Pre-read hotelConfig outside the transaction so the 403
+  // message can include the configured threshold. The
+  // transaction re-reads it for the authoritative gate.
+  const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
+  const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
+  const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5000;
+
+  let bookingData: any = null;
+  let balance = 0;
+  let needsAdminApproval = false;
+  let balanceThreshold = unpaidCheckoutThreshold;
+
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const data = bookingDoc.data()!;
+      bookingData = data;
+
+      // CWB-01: only `payment-uploaded` bookings are eligible.
+      // A `payment-confirmed` booking has no balance and should
+      // go through the standard confirm flow. A `pending`
+      // booking has not yet provided proof — staff should
+      // verify the payment first.
+      if (data.status !== "payment-uploaded") {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+
+      // Re-read hotelConfig inside the transaction so the
+      // threshold gate uses the most recent value. (Same
+      // pattern as `handleCheckoutBooking`.)
+      const txHotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const txHotelConfig = txHotelConfigDoc.exists ? txHotelConfigDoc.data()! : {};
+      const txThreshold = Number(txHotelConfig.unpaidCheckoutApprovalThreshold) || 5000;
+      balanceThreshold = txThreshold;
+
+      // Compute the charge-inclusive balance inside the
+      // transaction so we read the same ledger state we
+      // stamp. Mirrors the checkout transaction's helpers.
+      const paymentsRef = bookingRef.collection("payments");
+      const chargesRef = bookingRef.collection("charges");
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+      const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
+        transaction.get(paymentsRef),
+        transaction.get(chargesRef),
+        transaction.get(storeOrdersQuery)
+      ]);
+      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+      const folioTotal = Number(data.totalPrice || 0) + incidentalTotal + addToBillTotal;
+      const computedBalance = Math.max(folioTotal - collectedTotal, 0);
+      balance = computedBalance;
+
+      // CWB-01: threshold gate — front-desk is capped at the
+      // threshold; above it requires `admin`. The reason is
+      // not zero-balance exempt: a `payment-uploaded` booking
+      // can have a 0 balance if the verified payment exactly
+      // covered the folio (e.g. a quick GCash equal to the
+      // total). In that case the threshold is irrelevant —
+      // staff should use the regular `/api/bookings/confirm`
+      // endpoint instead. We don't 400 on zero balance here
+      // because the server is authoritative; the booking was
+      // `payment-uploaded` so the verify-and-record flow
+      // recorded an offline payment but the booking never
+      // transitioned to `payment-confirmed` (e.g. the client
+      // retry never landed). If balance is 0 we still write
+      // the fields so the audit trail reflects the explicit
+      // confirm-with-balance action.
+      if (computedBalance > txThreshold && staffRole !== "admin") {
+        needsAdminApproval = true;
+        throw new Error(`THRESHOLD_EXCEEDED:${txThreshold}:${computedBalance}`);
+      }
+
+      const now = new Date();
+      transaction.update(bookingRef, {
+        status: "confirmed",
+        // Stamps the original balance at confirm time —
+        // never rewritten as the guest settles onsite. The
+        // drawer's balance-owed indicator auto-hides when
+        // the current balance reaches 0.
+        confirmedWithBalance: computedBalance,
+        confirmedWithBalanceReason: safeReason,
+        confirmedWithBalanceAt: now,
+        confirmedWithBalanceBy: confirmedBy,
+        // Also stamp the standard confirm fields so the
+        // existing `confirmed` email / notification /
+        // receipt paths light up uniformly.
+        confirmedAt: now,
+        paymentConfirmedAt: now,
+        handledBy: confirmedBy,
+        updatedAt: now
+      });
+    });
+
+    // Fire the dedicated trigger — it carries the original
+    // balance + reason, not just the booking document. Best
+    // effort: a failure here does not roll back the
+    // transaction (Firestore transactions are not reversible
+    // from the client) but is logged + surfaced to the staff
+    // via the 200 response so they can manually resend.
+    try {
+      await sendBookingConfirmedWithBalanceTrigger(
+        { ...bookingData, status: "confirmed" },
+        balance,
+        safeReason
+      );
+    } catch (emailErr) {
+      console.error("Failed to send confirm-with-balance email:", emailErr);
+    }
+
+    // Per Phase 12 — Notification Center (decision #120).
+    try {
+      await writeNotification({
+        type: "booking",
+        title: `Booking confirmed (balance due) — ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: bookingData.roomNumber || null,
+        bookingRef: bookingData.bookingRef || null
+      });
+    } catch (notifErr) {
+      console.error("Failed to write confirm-with-balance notification:", notifErr);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "confirmed",
+        balance,
+        confirmedWithBalanceReason: safeReason,
+        threshold: balanceThreshold
+      }
+    });
+  } catch (error: any) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be confirmed with balance because its status is ${error.message.split(":")[1]}. Use the standard confirm flow instead.`
+      });
+    }
+    if (error?.message?.startsWith("THRESHOLD_EXCEEDED:")) {
+      const parts = error.message.split(":");
+      const threshold = Number(parts[1] || balanceThreshold);
+      const errorBalance = Number(parts[2] || balance);
+      return res.status(403).json({
+        success: false,
+        error: "Front Desk cannot confirm this booking.",
+        thresholdExceeded: true,
+        threshold,
+        balance: errorBalance,
+        message: `The outstanding balance (₱${errorBalance.toFixed(2)}) exceeds the Front Desk approval limit (₱${threshold.toFixed(2)}). An administrator must authorize this confirmation.`
+      });
+    }
+    console.error("Confirm with balance handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }

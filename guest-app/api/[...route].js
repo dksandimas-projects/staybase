@@ -228524,6 +228524,24 @@ function bookingConfirmedEmail(booking) {
     ctaUrl: lookupUrl(booking)
   });
 }
+function bookingConfirmedWithBalanceEmail(booking, balance, reason) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const reasonBlock = safeReason ? `<p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;"><strong>Reason from our team:</strong> ${escapeHtml(safeReason)}</p>` : "";
+  return emailLayout({
+    preheader: `Booking ${booking.bookingRef} is confirmed. \u20B1${safeBalance.toLocaleString("en-PH")} to settle at check-in.`,
+    eyebrow: "Booking confirmed \u2014 balance due",
+    title: "Your room is ready on our calendar",
+    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(hotel_config_default.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
+    body: `
+      ${callout("warm", "Balance to settle at check-in", `A balance of <strong>${escapeHtml(formatMoney(safeBalance))}</strong> remains and will be collected when you arrive.${reasonBlock}`)}
+      ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
+      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking)
+  });
+}
 function bookingRescheduledEmail(booking) {
   return emailLayout({
     preheader: `Your reservation ${booking.bookingRef} has been updated.`,
@@ -229116,6 +229134,17 @@ async function sendBookingTrigger(action, booking) {
   }
   await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
 }
+async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const subject = `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef} (\u20B1${safeBalance.toLocaleString("en-PH")} due at check-in)`;
+  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
+  const attachments = [{
+    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+    content: generateReceiptPdf(booking)
+  }];
+  await sendEmail(booking.guestEmail, subject, html, attachments);
+}
 async function handleEmailTrigger(req, res, action) {
   const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
   if (req.method !== "POST" && !isCronReminderRequest) {
@@ -229307,6 +229336,13 @@ async function handleEmailPreview(req, res) {
         break;
       case "booking-confirmed":
         html = bookingConfirmedEmail(mockBooking);
+        break;
+      case "booking-confirmed-with-balance":
+        html = bookingConfirmedWithBalanceEmail(
+          { ...mockBooking, roomNumber: "" },
+          2750,
+          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
+        );
         break;
       case "checkin-reminder":
         html = checkinReminderEmail(mockBooking);
@@ -232502,6 +232538,139 @@ async function handleConfirmBooking(req, res) {
       });
     }
     console.error("Confirm booking handler error:", error);
+    return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
+  }
+}
+var CONFIRM_WITH_BALANCE_REASON_MAX_LENGTH = 500;
+async function handleConfirmBookingWithBalance(req, res) {
+  const { bookingId, reason } = req.body || {};
+  if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
+    return res.status(400).json({ success: false, error: "Booking ID is required." });
+  }
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, CONFIRM_WITH_BALANCE_REASON_MAX_LENGTH) : "";
+  if (!safeReason) {
+    return res.status(400).json({
+      success: false,
+      error: "A reason is required when confirming a booking with a balance owed."
+    });
+  }
+  const confirmedBy = req.staff?.uid || "staff";
+  const staffRole = req.staff?.role || "front-desk";
+  const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
+  const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
+  const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
+  let bookingData2 = null;
+  let balance = 0;
+  let needsAdminApproval = false;
+  let balanceThreshold = unpaidCheckoutThreshold;
+  try {
+    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const data = bookingDoc.data();
+      bookingData2 = data;
+      if (data.status !== "payment-uploaded") {
+        throw new Error(`INVALID_STATUS:${data.status}`);
+      }
+      const txHotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const txHotelConfig = txHotelConfigDoc.exists ? txHotelConfigDoc.data() : {};
+      const txThreshold = Number(txHotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
+      balanceThreshold = txThreshold;
+      const paymentsRef = bookingRef.collection("payments");
+      const chargesRef = bookingRef.collection("charges");
+      const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
+      const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
+        transaction.get(paymentsRef),
+        transaction.get(chargesRef),
+        transaction.get(storeOrdersQuery)
+      ]);
+      const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
+      const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
+      const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+      const folioTotal = Number(data.totalPrice || 0) + incidentalTotal + addToBillTotal;
+      const computedBalance = Math.max(folioTotal - collectedTotal, 0);
+      balance = computedBalance;
+      if (computedBalance > txThreshold && staffRole !== "admin") {
+        needsAdminApproval = true;
+        throw new Error(`THRESHOLD_EXCEEDED:${txThreshold}:${computedBalance}`);
+      }
+      const now = /* @__PURE__ */ new Date();
+      transaction.update(bookingRef, {
+        status: "confirmed",
+        // Stamps the original balance at confirm time —
+        // never rewritten as the guest settles onsite. The
+        // drawer's balance-owed indicator auto-hides when
+        // the current balance reaches 0.
+        confirmedWithBalance: computedBalance,
+        confirmedWithBalanceReason: safeReason,
+        confirmedWithBalanceAt: now,
+        confirmedWithBalanceBy: confirmedBy,
+        // Also stamp the standard confirm fields so the
+        // existing `confirmed` email / notification /
+        // receipt paths light up uniformly.
+        confirmedAt: now,
+        paymentConfirmedAt: now,
+        handledBy: confirmedBy,
+        updatedAt: now
+      });
+    });
+    try {
+      await sendBookingConfirmedWithBalanceTrigger(
+        { ...bookingData2, status: "confirmed" },
+        balance,
+        safeReason
+      );
+    } catch (emailErr) {
+      console.error("Failed to send confirm-with-balance email:", emailErr);
+    }
+    try {
+      await writeNotification({
+        type: "booking",
+        title: `Booking confirmed (balance due) \u2014 ${bookingData2.bookingRef || bookingId} (Room ${bookingData2.roomNumber || ""})`.trim(),
+        entityType: "booking",
+        entityId: bookingId,
+        roomNumber: bookingData2.roomNumber || null,
+        bookingRef: bookingData2.bookingRef || null
+      });
+    } catch (notifErr) {
+      console.error("Failed to write confirm-with-balance notification:", notifErr);
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: "confirmed",
+        balance,
+        confirmedWithBalanceReason: safeReason,
+        threshold: balanceThreshold
+      }
+    });
+  } catch (error) {
+    if (error?.message === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (error?.message?.startsWith("INVALID_STATUS:")) {
+      return res.status(400).json({
+        success: false,
+        error: `Booking cannot be confirmed with balance because its status is ${error.message.split(":")[1]}. Use the standard confirm flow instead.`
+      });
+    }
+    if (error?.message?.startsWith("THRESHOLD_EXCEEDED:")) {
+      const parts = error.message.split(":");
+      const threshold = Number(parts[1] || balanceThreshold);
+      const errorBalance = Number(parts[2] || balance);
+      return res.status(403).json({
+        success: false,
+        error: "Front Desk cannot confirm this booking.",
+        thresholdExceeded: true,
+        threshold,
+        balance: errorBalance,
+        message: `The outstanding balance (\u20B1${errorBalance.toFixed(2)}) exceeds the Front Desk approval limit (\u20B1${threshold.toFixed(2)}). An administrator must authorize this confirmation.`
+      });
+    }
+    console.error("Confirm with balance handler error:", error);
     return res.status(500).json({ success: false, error: error.message || "An unexpected error occurred." });
   }
 }
@@ -235881,6 +236050,12 @@ async function handleGetPrivateStorageUrl(req, res) {
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
   "booking-confirmed",
+  // Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
+  // is a server-triggered email fired from
+  // `handleConfirmBookingWithBalance` after the transaction
+  // commits. Listed here so the email preview endpoint can
+  // render it; never reachable as a public POST.
+  "booking-confirmed-with-balance",
   "discount-rejected",
   "corporate-inquiry",
   // Per W4.4 / decision #104: the 8 new templates are
@@ -236285,6 +236460,17 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleConfirmBooking(req, res);
+  }
+  if (domain === "bookings" && action === "confirm-with-balance" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm-with-balance:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many confirm-with-balance requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleConfirmBookingWithBalance(req, res);
   }
   if (domain === "bookings" && action === "early-checkin-resolve" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-early-checkin-resolve:${ip}`, 30, 6e4)) {

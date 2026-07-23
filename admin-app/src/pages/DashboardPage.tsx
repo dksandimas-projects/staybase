@@ -7,6 +7,7 @@ import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { useToast } from "../components/Toast";
 import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -103,6 +104,16 @@ export function DashboardPage() {
     remainingBalance: number;
   }>(null);
   const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
+  // Per CWB-04 / decision 122 (2026-07-23): opened by the
+  // post-verify partial-payment success modal's "Confirm
+  // with Balance" CTA. Carries the booking + the
+  // just-computed remaining balance so the form previews
+  // the right number even before the onSnapshot listener
+  // catches up.
+  const [confirmWithBalanceContext, setConfirmWithBalanceContext] = useState<null | {
+    booking: Booking;
+    currentBalance: number;
+  }>(null);
 
   // Friendly method label lookup — same convention the
   // BookingsPage uses for the onsite payment ledger.
@@ -399,6 +410,21 @@ export function DashboardPage() {
       setVerifySuccess(null);
       setVerifyTarget(null);
     }
+  };
+
+  // Per CWB-04 / decision 122 (2026-07-23): the post-verify
+  // partial-payment variant's "Confirm with Balance" CTA
+  // opens the confirm-with-balance form. We carry the
+  // just-computed `remainingBalance` from the success modal
+  // so the form previews the right number.
+  const openConfirmWithBalanceFromSuccess = () => {
+    if (!verifySuccess) return;
+    setConfirmWithBalanceContext({
+      booking: verifySuccess.booking,
+      currentBalance: Math.max(0, verifySuccess.remainingBalance)
+    });
+    setVerifySuccess(null);
+    setVerifyTarget(null);
   };
 
   const submitVerification = async () => {
@@ -1317,7 +1343,25 @@ export function DashboardPage() {
           setVerifyTarget(null);
           openBooking(targetId);
         }}
+        onConfirmWithBalance={openConfirmWithBalanceFromSuccess}
       />
+
+      {/* Per CWB-04 / decision 122 (2026-07-23): opened by
+          the post-verify success modal's partial-payment
+          "Confirm with Balance" CTA. The form owns the
+          threshold banner + the role-gated submit. On
+          success the snapshot listener refreshes the
+          dashboard's pending-payments list so the booking
+          drops off. */}
+      {confirmWithBalanceContext && (
+        <ConfirmWithBalanceForm
+          open={confirmWithBalanceContext !== null}
+          onClose={() => setConfirmWithBalanceContext(null)}
+          booking={confirmWithBalanceContext.booking}
+          currentBalance={confirmWithBalanceContext.currentBalance}
+          onConfirmed={() => setConfirmWithBalanceContext(null)}
+        />
+      )}
       <Modal
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}
