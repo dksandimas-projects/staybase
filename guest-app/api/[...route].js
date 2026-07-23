@@ -230613,17 +230613,32 @@ async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, chec
     return Boolean(start && end && rangesOverlap(start, end, checkInDate, checkOutDate));
   });
 }
-var lookupSchema = external_exports.object({
-  bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format.").optional(),
-  guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
-  token: external_exports.string().trim().max(64).regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.").optional(),
-  turnstileToken: external_exports.string().max(2e3).optional()
-}).refine(
-  (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
-  "Provide a booking reference, email, or lookup token."
-).refine(
-  (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
-  "Provide either an email or a lookup token (not both)."
+var lookupSchema = external_exports.preprocess(
+  (body) => {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const obj = { ...body };
+      for (const key of ["bookingRef", "guestEmail", "token", "turnstileToken"]) {
+        const v6 = obj[key];
+        if (typeof v6 === "string" && v6.trim() === "") {
+          delete obj[key];
+        }
+      }
+      return obj;
+    }
+    return body;
+  },
+  external_exports.object({
+    bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format.").optional(),
+    guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
+    token: external_exports.string().trim().max(64).regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.").optional(),
+    turnstileToken: external_exports.string().max(2e3).optional()
+  }).refine(
+    (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
+    "Provide a booking reference, email, or lookup token."
+  ).refine(
+    (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
+    "Provide either an email or a lookup token (not both)."
+  )
 );
 var guestCancelSchema = external_exports.object({
   bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
