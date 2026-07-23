@@ -6,6 +6,8 @@ import { useAdmin, type Booking } from "../context/AdminContext";
 import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
+import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import { useToast } from "../components/Toast";
 import { BedDouble, Building2, CalendarDays, Check, RefreshCw, AlertTriangle, ShieldCheck, CreditCard, Eye, EyeOff, LogIn, LogOut, Clock, ArrowRight, MessageSquare, ExternalLink, Utensils, PhilippinePeso, XCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
@@ -76,6 +78,7 @@ export function DashboardPage() {
 
   // Per PRC-13: keep every hook above the dashboard loading return so
   // the first loaded render uses the same hook order as the skeleton.
+  const toast = useToast();
   const [verifyTarget, setVerifyTarget] = useState<Booking | null>(null);
   const verifySubmissionIdRef = useRef<string | null>(null);
   const [verifyAmount, setVerifyAmount] = useState("");
@@ -84,6 +87,32 @@ export function DashboardPage() {
   const [verifyNote, setVerifyNote] = useState("");
   const [verifyPending, setVerifyPending] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Per feat/payment-success-modal: after a successful
+  // verify, surface a closing-the-loop modal that nudges
+  // the front desk to confirm the booking now that the
+  // payment is recorded. The dashboard surface uses
+  // "View booking" as the secondary CTA (navigates to
+  // the bookings page for follow-up work) instead of
+  // "Later" (the drawer surface).
+  const [verifySuccess, setVerifySuccess] = useState<null | {
+    booking: Booking;
+    amount: number;
+    method: string;
+    methodLabel: string;
+    isFullPayment: boolean;
+    remainingBalance: number;
+  }>(null);
+  const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
+
+  // Friendly method label lookup — same convention the
+  // BookingsPage uses for the onsite payment ledger.
+  const verifyMethodLabels: Record<string, string> = {
+    gcash: "GCash",
+    maya: "Maya",
+    bank: "Bank Transfer",
+    paypal: "PayPal",
+    cash: "Cash"
+  };
 
   const REJECTION_REASON_PRESETS: Array<{ label: string; value: string }> = [
     {
@@ -352,6 +381,26 @@ export function DashboardPage() {
     setVerifyPending(false);
   };
 
+  // Per feat/payment-success-modal: the success modal's
+  // "Confirm Booking" CTA runs the `payment-confirmed` →
+  // `confirmed` transition. The onSnapshot listener keeps
+  // the dashboard's pending-payments list in sync, so the
+  // confirmed booking drops off the list on the next tick.
+  const handleConfirmBookingFromSuccess = async () => {
+    if (!verifySuccess) return;
+    setConfirmingBookingFromSuccess(true);
+    try {
+      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+    } catch (err: any) {
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmingBookingFromSuccess(false);
+      setVerifySuccess(null);
+      setVerifyTarget(null);
+    }
+  };
+
   const submitVerification = async () => {
     if (!verifyTarget) return;
     const paymentId = verifySubmissionIdRef.current
@@ -377,7 +426,36 @@ export function DashboardPage() {
       setVerifyError(result.error || "Failed to verify payment.");
       return;
     }
-    cancelVerifyForm();
+
+    // Per feat/payment-success-modal: close the loop with
+    // a confirmation modal. The server transitions to
+    // `payment-confirmed` iff the cumulative onsite total
+    // reaches `totalPrice`; we compute that client-side
+    // because the response only returns `{ success: true }`.
+    // The existing onsitePayments snapshot is pre-action
+    // (the onSnapshot listener will catch up on the next
+    // tick), so the math is correct.
+    const existingPaid = verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0;
+    const cumulativeAfter = existingPaid + amount;
+    const isFullPayment = cumulativeAfter >= verifyTarget.totalPrice && verifyTarget.totalPrice > 0;
+    setVerifySuccess({
+      booking: verifyTarget,
+      amount,
+      method: verifyMethod,
+      methodLabel: verifyMethodLabels[verifyMethod] || verifyMethod,
+      isFullPayment,
+      remainingBalance: Math.max(0, verifyTarget.totalPrice - cumulativeAfter)
+    });
+    // Reset the verify-form fields so the next open is
+    // fresh, but keep verifyTarget alive — the success
+    // modal still needs it. The modal's CTAs (Confirm
+    // Booking / View booking / dismiss) clear verifyTarget
+    // when they fire.
+    verifySubmissionIdRef.current = null;
+    setVerifyAmount("");
+    setVerifyMethod("gcash");
+    setVerifyReference("");
+    setVerifyNote("");
   };
 
   return (
@@ -1209,6 +1287,37 @@ export function DashboardPage() {
           </div>
         )}
       </Modal>
+
+      {/* PRC-13 / feat/payment-success-modal: post-verify
+          confirmation. Closes the loop and nudges the front
+          desk toward confirming the booking now that the
+          payment is recorded. The dashboard surface uses
+          "View booking" as the secondary CTA (navigates to
+          the bookings page) instead of "Later" — the staff
+          may want to do follow-up work on the booking. */}
+      <PaymentSuccessModal
+        open={verifySuccess !== null}
+        onClose={() => { if (!confirmingBookingFromSuccess) { setVerifySuccess(null); setVerifyTarget(null); } }}
+        surface="dashboard"
+        bookingRef={verifySuccess?.booking.bookingRef ?? ""}
+        guestName={verifySuccess?.booking.guestName ?? ""}
+        guestEmail={verifySuccess?.booking.guestEmail ?? ""}
+        roomType={verifySuccess?.booking.roomType ?? ""}
+        amount={verifySuccess?.amount ?? 0}
+        method={verifySuccess?.method ?? ""}
+        methodLabel={verifySuccess?.methodLabel}
+        isFullPayment={verifySuccess?.isFullPayment ?? false}
+        remainingBalance={verifySuccess?.remainingBalance}
+        onConfirmBooking={handleConfirmBookingFromSuccess}
+        confirmingBooking={confirmingBookingFromSuccess}
+        onViewBooking={() => {
+          if (!verifySuccess) return;
+          const targetId = verifySuccess.booking.id;
+          setVerifySuccess(null);
+          setVerifyTarget(null);
+          openBooking(targetId);
+        }}
+      />
       <Modal
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}

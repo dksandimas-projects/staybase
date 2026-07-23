@@ -5,6 +5,7 @@ import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
 import { StatusBadge } from "../components/StatusBadge";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -654,6 +655,20 @@ export function BookingsPage() {
   const [verifyNote, setVerifyNote] = useState("");
   const [verifyPending, setVerifyPending] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Per feat/payment-success-modal: after a successful
+  // verify-and-record, surface a closing-the-loop modal that
+  // confirms the payment, notes the email that was sent, and
+  // nudges the front desk toward the natural next step
+  // (Confirm Booking). `null` while the modal is closed.
+  const [verifySuccess, setVerifySuccess] = useState<null | {
+    booking: Booking;
+    amount: number;
+    method: string;
+    methodLabel: string;
+    isFullPayment: boolean;
+    remainingBalance: number;
+  }>(null);
+  const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
   const [isRefunding, setIsRefunding] = useState(false);
   const [guestIdUploadStatus, setGuestIdUploadStatus] = useState("");
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
@@ -1406,6 +1421,27 @@ export function BookingsPage() {
     setSelectedBooking(prev => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
     toast.success("Booking cancelled", reason ? `Reason: ${reason}` : "Guest will be notified by email.");
     setShowBookingCancelForm(false);
+  };
+
+  // Per feat/payment-success-modal: the success modal's
+  // "Confirm Booking" CTA runs the `payment-confirmed` →
+  // `confirmed` transition. The onSnapshot listener will
+  // refresh `selectedBooking` on the next tick (see
+  // fix/bookings-drawer-stale-state), and the modal closes
+  // regardless of outcome so the staff never gets stuck
+  // behind it on a slow network.
+  const handleConfirmBookingFromSuccess = async () => {
+    if (!verifySuccess) return;
+    setConfirmingBookingFromSuccess(true);
+    try {
+      await updateBookingStatus(verifySuccess.booking.id, "confirmed");
+      toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
+    } catch (err: any) {
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmingBookingFromSuccess(false);
+      setVerifySuccess(null);
+    }
   };
 
   const handleCancelOrder = async (reason: string) => {
@@ -4849,6 +4885,28 @@ export function BookingsPage() {
                 if (!result.success) { setVerifyError(result.error || "Failed to verify payment."); return; }
                 verifySubmissionIdRef.current = null;
                 setShowVerifyPaymentModal(false);
+
+                // Per feat/payment-success-modal: close the loop
+                // with a confirmation modal. We compute "is full
+                // payment" client-side from the amount the staff
+                // just submitted plus the existing onsite
+                // payments — the server transitions to
+                // `payment-confirmed` iff the cumulative total
+                // reaches `totalPrice`. The existing
+                // onsitePayments snapshot is pre-action (the
+                // snapshot listener will catch up on the next
+                // tick), so the math here is correct.
+                const existingPaid = selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0;
+                const cumulativeAfter = existingPaid + amount;
+                const isFullPayment = cumulativeAfter >= selectedBooking.totalPrice && selectedBooking.totalPrice > 0;
+                setVerifySuccess({
+                  booking: selectedBooking,
+                  amount,
+                  method: verifyMethod,
+                  methodLabel: onsitePaymentMethodLabels[verifyMethod] || verifyMethod,
+                  isFullPayment,
+                  remainingBalance: Math.max(0, selectedBooking.totalPrice - cumulativeAfter)
+                });
               })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
                 {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}
               </button>
@@ -4856,6 +4914,28 @@ export function BookingsPage() {
           </div>
         )}
       </Modal>
+
+      {/* PRC-13 / feat/payment-success-modal: post-verify confirmation
+          modal. Closes the loop on the verify action and nudges the
+          front desk toward confirming the booking now that the
+          payment is recorded. See the component for the full variant
+          matrix (full vs partial, drawer vs dashboard CTAs). */}
+      <PaymentSuccessModal
+        open={verifySuccess !== null}
+        onClose={() => { if (!confirmingBookingFromSuccess) setVerifySuccess(null); }}
+        surface="drawer"
+        bookingRef={verifySuccess?.booking.bookingRef ?? ""}
+        guestName={verifySuccess?.booking.guestName ?? ""}
+        guestEmail={verifySuccess?.booking.guestEmail ?? ""}
+        roomType={verifySuccess?.booking.roomType ?? ""}
+        amount={verifySuccess?.amount ?? 0}
+        method={verifySuccess?.method ?? ""}
+        methodLabel={verifySuccess?.methodLabel}
+        isFullPayment={verifySuccess?.isFullPayment ?? false}
+        remainingBalance={verifySuccess?.remainingBalance}
+        onConfirmBooking={handleConfirmBookingFromSuccess}
+        confirmingBooking={confirmingBookingFromSuccess}
+      />
 
       {/* BDUX-05: Discount / Voucher modal */}
       <Modal

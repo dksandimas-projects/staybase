@@ -173,6 +173,7 @@ Open considerations (small, not blocking):
 - [x] Record payment after discount rejection — balance to ₱0, "Fully Settled" shown
 - [x] Verify & Record Payment: full and partial verification, idempotent retry, no duplicate email
 - [x] Unpaid checkout: reason required; Front Desk blocked above threshold; post-checkout payment settles the receivable
+- [x] **Post-verify success modal** (`PaymentSuccessModal`, shipped 2026-07-23) — after a successful verify, surface a closing-the-loop modal in the BookingsPage drawer AND the dashboard's pending-payments list. Celebratory variant for full payment (emerald check, "Confirm Booking" primary CTA + "Later" secondary), amber-warning variant for partial payment ("Got it" only, no Confirm CTA — the booking isn't ready until the rest is collected). Modal body shows the amount, method, booking ref, guest, room, the email-sent note, and (for partial) the remaining balance. The "Confirm Booking" CTA wires to `updateBookingStatus(id, "confirmed")` and dismisses the modal — the onSnapshot listener (per `fix/bookings-drawer-stale-state`) refreshes the drawer's `selectedBooking` so the verify buttons disappear immediately. See `feat/payment-success-modal` branch for the implementation.
 - [ ] Full drawer visual QA matrix across statuses/breakpoints — tracked in `plan/project/ROADMAP.md §Phase 12 →Booking Drawer UX Refactor`
 
 ## References
