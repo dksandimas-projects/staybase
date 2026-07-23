@@ -228193,7 +228193,7 @@ function generateReceiptPdf(booking) {
   top += 6;
   text("Guest:", String(booking.guestName || "\u2014"), top);
   top += 6;
-  text("Room:", `${booking.roomNumber || "\u2014"} (${booking.roomType || ""})`, top);
+  text("Room Type:", String(booking.roomName || booking.roomType || "\u2014"), top);
   top += 6;
   text("Check-in:", fmtDate(booking.checkIn), top);
   top += 6;
@@ -228321,14 +228321,11 @@ function rateBreakdownRows(booking) {
   `;
 }
 function bookingRows(booking) {
-  const roomLabel = [
-    booking.roomNumber ? `Room ${booking.roomNumber}` : "",
-    booking.roomName || booking.roomType || ""
-  ].filter(Boolean).join(" - ");
+  const roomLabel = booking.roomName || booking.roomType || "Not set";
   return `
     ${row("Booking reference", booking.bookingRef)}
     ${row("Guest", booking.guestName)}
-    ${row("Room", roomLabel || "Not set")}
+    ${row("Room type", roomLabel)}
     ${row("Check-in", `${formatDate(booking.checkIn)} from ${hotel_config_default.checkInTime || "14:00"}`)}
     ${row("Check-out", `${formatDate(booking.checkOut)} by ${hotel_config_default.checkOutTime || "12:00"}`)}
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
@@ -228875,7 +228872,6 @@ function storeOrderPlacedEmail(order) {
       ${callout("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
       ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Order ref", order.orderRef || "\u2014")}
-        ${row("Room", order.roomNumber ? `Room ${order.roomNumber}` : "\u2014")}
         ${itemsTable}
         <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
         ${totalRow}

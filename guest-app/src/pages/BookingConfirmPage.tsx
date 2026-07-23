@@ -117,9 +117,11 @@ export function BookingConfirmPage() {
 
   function handleAddToCalendar() {
     const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
-    const roomLine = roomNumberParam
-      ? `${roomDisplayLabel} — Room ${roomNumberParam}`
-      : roomDisplayLabel;
+    // Per the refactor/room-number-visibility change: only the
+    // room type is surfaced on the post-booking confirmation
+    // page (and the calendar event it generates). Room
+    // assignment is shown to the guest at check-in instead.
+    const roomLine = roomDisplayLabel;
     const descriptionLines = [
       `Booking reference: ${bookingRef}`,
       `Guests: ${guests}`,
@@ -149,9 +151,9 @@ export function BookingConfirmPage() {
     uid: `${bookingRef}@${config.domain}`,
     title: `Stay at ${config.brandName} (${bookingRef})`,
     description: (() => {
-      const roomLine = roomNumberParam
-        ? `${roomDisplayLabel} — Room ${roomNumberParam}`
-        : roomDisplayLabel;
+      // See handleAddToCalendar above — room number is not
+      // surfaced in the calendar event description either.
+      const roomLine = roomDisplayLabel;
       return `Booking reference: ${bookingRef}\nGuests: ${guests}\nRoom: ${roomLine}\nTotal: ${formatPrice(total)}\nPayment: ${paymentMethodLabel}`;
     })(),
     location: `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`,
@@ -248,9 +250,9 @@ export function BookingConfirmPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Room Type</p>
                 <p className="mt-1 font-semibold text-gray-900">
                   {roomDisplayLabel || "Reserved"}
-                  {roomNumberParam ? (
-                    <span className="ml-2 text-sm font-medium text-primary">Room {roomNumberParam}</span>
-                  ) : null}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Your specific room is assigned at check-in.
                 </p>
               </div>
             </div>

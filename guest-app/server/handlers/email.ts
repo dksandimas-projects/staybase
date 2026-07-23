@@ -110,7 +110,11 @@ function generateReceiptPdf(booking: any): Buffer {
 
   text("Booking Ref:", String(booking.bookingRef || "—"), top); top += 6;
   text("Guest:", String(booking.guestName || "—"), top); top += 6;
-  text("Room:", `${booking.roomNumber || "—"} (${booking.roomType || ""})`, top); top += 6;
+  // Per the refactor/room-number-visibility change: only the
+  // room type is rendered on the PDF receipt. The room number
+  // is intentionally omitted so the document doesn't create a
+  // stale expectation if the room is reassigned before check-in.
+  text("Room Type:", String(booking.roomName || booking.roomType || "—"), top); top += 6;
   text("Check-in:", fmtDate(booking.checkIn), top); top += 6;
   text("Check-out:", fmtDate(booking.checkOut), top); top += 6;
   text("Nights:", String(booking.numNights || 0), top); top += 6;
@@ -261,15 +265,19 @@ function rateBreakdownRows(booking: any) {
 }
 
 function bookingRows(booking: any) {
-  const roomLabel = [
-    booking.roomNumber ? `Room ${booking.roomNumber}` : "",
-    booking.roomName || booking.roomType || ""
-  ].filter(Boolean).join(" - ");
+  // Per the refactor/room-number-visibility change: room
+  // number is intentionally omitted from guest emails so
+  // the assignment shown at booking time doesn't create a
+  // stale expectation if the front desk reshuffles rooms
+  // before check-in. The friendly room name (or type code
+  // as a fallback) is still surfaced so the email reads
+  // "Room: Deluxe Sea View" rather than "Room: —".
+  const roomLabel = booking.roomName || booking.roomType || "Not set";
 
   return `
     ${row("Booking reference", booking.bookingRef)}
     ${row("Guest", booking.guestName)}
-    ${row("Room", roomLabel || "Not set")}
+    ${row("Room type", roomLabel)}
     ${row("Check-in", `${formatDate(booking.checkIn)} from ${config.checkInTime || "14:00"}`)}
     ${row("Check-out", `${formatDate(booking.checkOut)} by ${config.checkOutTime || "12:00"}`)}
     ${row("Nights", `${booking.numNights || 0} night(s)`)}
@@ -909,7 +917,6 @@ function storeOrderPlacedEmail(order: any) {
       ${callout("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
       ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
         ${row("Order ref", order.orderRef || "—")}
-        ${row("Room", order.roomNumber ? `Room ${order.roomNumber}` : "—")}
         ${itemsTable}
         <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
         ${totalRow}

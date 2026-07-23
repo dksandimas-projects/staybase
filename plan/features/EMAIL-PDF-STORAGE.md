@@ -111,7 +111,7 @@ Used in: Bookings Management (print/download), email attachment option.
 - Hotel name + address + contact
 - Document title: "Booking Confirmation Receipt"
 - Booking reference + confirmation date/time
-- Guest name, room type + room number
+- Guest name, room type *(room number intentionally omitted — see `refactor/room-number-visibility` change; the front desk assigns the physical room at check-in, and any pre-check-in number in the receipt would create a stale expectation if the assignment shifts)*
 - Check-in / check-out dates + number of nights
 - Number of guests, rate per night, total amount
 - **Rate breakdown** — if `Booking.rateBreakdown` exists:

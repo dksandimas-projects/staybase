@@ -642,7 +642,21 @@ export function BookingLookupPage() {
                   <div className="space-y-4">
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Room Type</span>
-                      <span className="font-semibold text-gray-900">{activeBooking.roomName || activeBooking.roomType} (Room {activeBooking.roomNumber})</span>
+                      <span className="font-semibold text-gray-900">
+                        {activeBooking.roomName || activeBooking.roomType}
+                        {/* Per the refactor/room-number-visibility change:
+                            the assigned room number is only surfaced once
+                            it's been locked in by the front desk at check-in.
+                            For pending/confirmed stays the assignment can
+                            still shift (room blocks, housekeeping, upgrades),
+                            so we deliberately keep that information away
+                            from the guest until it becomes firm. */}
+                        {activeBooking.roomNumber &&
+                        (activeBooking.status === "checked-in" ||
+                          activeBooking.status === "checked-out") ? (
+                          <span className="text-gray-500"> (Room {activeBooking.roomNumber})</span>
+                        ) : null}
+                      </span>
                     </div>
 
                     <div className="flex justify-between text-sm text-gray-600">
