@@ -89,13 +89,21 @@ describe("Phase 12 — booking drawer information architecture", () => {
   });
 
   it("keeps registration PDF preview available after a completed form is submitted", () => {
-    const completedStateStart = regFormSrc.indexOf("{isComplete && !showEdit ? (");
+    const completedStateStart = regFormSrc.indexOf("{(isComplete || isReadOnly) && !showEdit ? (");
     const editStateStart = regFormSrc.indexOf(") : (", completedStateStart);
     const completedState = regFormSrc.slice(completedStateStart, editStateStart);
 
     expect(completedState).toMatch(/onClick=\{onPrintPdf\}/);
     expect(completedState).toContain("Preview Registration PDF");
     expect(completedState).toContain("Edit registration");
+  });
+
+  it("keeps the registration PDF available read-only after checkout", () => {
+    expect(regFormSrc).toMatch(/status !== "checked-out"/);
+    expect(regFormSrc).toMatch(/const isReadOnly = status === "checked-out"/);
+    expect(regFormSrc).toMatch(/\(isComplete \|\| isReadOnly\) && !showEdit/);
+    expect(regFormSrc).toContain("View / Download Registration PDF");
+    expect(regFormSrc).toMatch(/\{!isReadOnly && \(/);
   });
 
   it("maps status to one sticky primary action", () => {

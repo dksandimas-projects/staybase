@@ -19,7 +19,9 @@ export function BookingRegistrationForm({
   onSubmit,
   onPrintPdf,
 }: BookingRegistrationFormProps) {
-  if (status !== "confirmed" && status !== "checked-in") return null;
+  if (status !== "confirmed" && status !== "checked-in" && status !== "checked-out") return null;
+
+  const isReadOnly = status === "checked-out";
 
   const isComplete =
     reg?.signatureStatus === "signed" &&
@@ -48,7 +50,7 @@ export function BookingRegistrationForm({
         </span>
       </div>
 
-      {isComplete && !showEdit ? (
+      {(isComplete || isReadOnly) && !showEdit ? (
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
             <div>
@@ -95,16 +97,18 @@ export function BookingRegistrationForm({
               className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
             >
               <FileText size={13} />
-              Preview Registration PDF
+              {isReadOnly ? "View / Download Registration PDF" : "Preview Registration PDF"}
             </button>
-            <button
-              type="button"
-              onClick={() => onSetShowEdit(true)}
-              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-            >
-              <Save size={13} />
-              Edit registration
-            </button>
+            {!isReadOnly && (
+              <button
+                type="button"
+                onClick={() => onSetShowEdit(true)}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+              >
+                <Save size={13} />
+                Edit registration
+              </button>
+            )}
           </div>
         </div>
       ) : (
