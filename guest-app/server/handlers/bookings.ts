@@ -182,31 +182,59 @@ async function hasActiveRoomBlockConflict(
 // The handler prioritises the most specific key when
 // multiple are present: `ref + token` > `ref + email` >
 // `ref` > `email` > `token`.
-const lookupSchema = z
-  .object({
-    bookingRef: z
-      .string()
-      .trim()
-      .max(40)
-      .regex(BOOKING_REF_REGEX, "Invalid booking reference format.")
-      .optional(),
-    guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
-    token: z
-      .string()
-      .trim()
-      .max(64)
-      .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
-      .optional(),
-    turnstileToken: z.string().max(2000).optional()
-  })
-  .refine(
-    (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
-    "Provide a booking reference, email, or lookup token."
-  )
-  .refine(
-    (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
-    "Provide either an email or a lookup token (not both)."
-  );
+// Per fix/lookup-empty-string-handling: the client
+// always sends every key in the payload, so an "email
+// alone" submit still carries `bookingRef: ""` (or
+// whitespace) and `token: ""`. `.optional()` only matches
+// `undefined`, not `""`, so the per-field regex / .email()
+// would reject the empty string and return 400 even when
+// the user only filled in a different field. The
+// top-level `z.preprocess` strips empty / whitespace-only
+// strings from the body before validation runs, so the
+// schema always sees clean values. The dispatch's truthy
+// checks below skip the empty fields and route to the
+// right key. This is also defense in depth for any future
+// client that submits the same shape.
+const lookupSchema = z.preprocess(
+  (body) => {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const obj: Record<string, unknown> = { ...body };
+      for (const key of ["bookingRef", "guestEmail", "token", "turnstileToken"] as const) {
+        const v = obj[key];
+        if (typeof v === "string" && v.trim() === "") {
+          delete obj[key];
+        }
+      }
+      return obj;
+    }
+    return body;
+  },
+  z
+    .object({
+      bookingRef: z
+        .string()
+        .trim()
+        .max(40)
+        .regex(BOOKING_REF_REGEX, "Invalid booking reference format.")
+        .optional(),
+      guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
+      token: z
+        .string()
+        .trim()
+        .max(64)
+        .regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.")
+        .optional(),
+      turnstileToken: z.string().max(2000).optional()
+    })
+    .refine(
+      (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
+      "Provide a booking reference, email, or lookup token."
+    )
+    .refine(
+      (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
+      "Provide either an email or a lookup token (not both)."
+    )
+);
 
 const guestCancelSchema = z
   .object({

@@ -628,4 +628,72 @@ describe("/api/bookings/lookup", () => {
       expect(res.status).toHaveBeenCalledWith(400);
     });
   });
+
+  // Per fix/lookup-empty-string-handling: the client
+  // always sends every key in the payload, so an "email
+  // alone" submit still carries `bookingRef: ""` (or
+  // whitespace) and `token: ""`. The schema needs to
+  // treat these as "not provided" so the dispatch falls
+  // through to the right branch.
+  describe("empty-string fields (fix/lookup-empty-string-handling)", () => {
+    test("email alone with bookingRef='' routes to the email path (200)", async () => {
+      // The production client always sends `bookingRef`
+      // even when the user only typed an email, so the
+      // field comes through as "" (not undefined). The
+      // schema must accept that and route to the email
+      // branch.
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "", guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.id).toBe("booking_1");
+    });
+
+    test("ref alone with guestEmail='' routes to the ref path (200)", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", guestEmail: "" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("whitespace-only fields are treated as absent", async () => {
+      // After `.trim()` the value is empty, which the
+      // `.or(z.literal(""))` branch accepts.
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "  ", guestEmail: "  MARIA@EXAMPLE.TEST  " }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("all three keys empty still returns 400 (no key provided)", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "", guestEmail: "", token: "" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+  });
 });

@@ -134,10 +134,20 @@ export function BookingLookupPage() {
     try {
       // Per BI-02 (booking-intercom audit 2026-07-06): real token
       // only — the "mock_token" sentinel is test-env-only server-side.
+      //
+      // Per fix/lookup-empty-string-handling: only include
+      // the keys the user actually filled in. The server
+      // schema is defensive too (`.or(z.literal(""))` on the
+      // ref/email/token fields), but sending only the
+      // meaningful keys keeps the request log + Vercel
+      // function logs cleaner and avoids any future
+      // schema-validation drift.
       const payload: Record<string, string> = {
-        bookingRef,
         turnstileToken
       };
+      if (bookingRef) {
+        payload.bookingRef = bookingRef;
+      }
       if (token) {
         payload.token = token;
         setLookupAuthMode("token");
