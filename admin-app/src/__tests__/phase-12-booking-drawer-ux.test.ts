@@ -88,6 +88,16 @@ describe("Phase 12 — booking drawer information architecture", () => {
     expect(workspaceSrc).toMatch(/Complete these items before checking in the guest/);
   });
 
+  it("keeps registration PDF preview available after a completed form is submitted", () => {
+    const completedStateStart = regFormSrc.indexOf("{isComplete && !showEdit ? (");
+    const editStateStart = regFormSrc.indexOf(") : (", completedStateStart);
+    const completedState = regFormSrc.slice(completedStateStart, editStateStart);
+
+    expect(completedState).toMatch(/onClick=\{onPrintPdf\}/);
+    expect(completedState).toContain("Preview Registration PDF");
+    expect(completedState).toContain("Edit registration");
+  });
+
   it("maps status to one sticky primary action", () => {
     for (const status of ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"]) {
       expect(pageSrc).toContain(`selectedBooking.status === "${status}"`);

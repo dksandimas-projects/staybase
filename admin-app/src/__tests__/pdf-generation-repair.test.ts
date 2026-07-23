@@ -29,6 +29,17 @@ describe("PDF generation repair", () => {
     expect(bookingsPage).not.toMatch(/pdf\.addImage\(base64, "JPEG"/);
   });
 
+  it("requires an uploaded guest ID to be embedded before the registration PDF succeeds", () => {
+    const registrationStart = bookingsPage.indexOf("const printRegistrationPDF");
+    const registrationEnd = bookingsPage.indexOf("const printBookingReceiptPDF", registrationStart);
+    const registrationBody = bookingsPage.slice(registrationStart, registrationEnd);
+
+    expect(registrationBody).toMatch(/if \(!response\.ok\)/);
+    expect(registrationBody).toContain("The uploaded guest ID could not be added to the registration PDF");
+    expect(registrationBody).toMatch(/const drawX = idX \+ \(idBoxW - drawW\) \/ 2/);
+    expect(registrationBody).toMatch(/const drawY = idBoxY \+ \(idBoxH - drawH\) \/ 2/);
+  });
+
   it("uses an ink-friendly light header for registration PDFs", () => {
     expect(bookingsPage).toMatch(/printLight\?:\s*boolean/);
     expect(bookingsPage).toMatch(/options\.printLight\s*\?\s*\[255,\s*255,\s*255\]/);

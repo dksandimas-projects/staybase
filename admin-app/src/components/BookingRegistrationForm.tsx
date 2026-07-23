@@ -88,14 +88,24 @@ export function BookingRegistrationForm({
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => onSetShowEdit(true)}
-            className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
-          >
-            <Save size={13} />
-            Edit registration
-          </button>
+          <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+            <button
+              type="button"
+              onClick={onPrintPdf}
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+            >
+              <FileText size={13} />
+              Preview Registration PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => onSetShowEdit(true)}
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+            >
+              <Save size={13} />
+              Edit registration
+            </button>
+          </div>
         </div>
       ) : (
         <form
@@ -204,14 +214,14 @@ export function BookingRegistrationForm({
             <button
               type="button"
               onClick={onPrintPdf}
-              className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-250 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
             >
               <FileText size={13} />
               Preview Registration PDF
             </button>
             <button
               type="submit"
-              className="inline-flex min-h-[36px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[10px] font-bold text-white hover:bg-primary-dark"
             >
               <Save size={13} />
               Save Registration

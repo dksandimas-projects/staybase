@@ -1505,6 +1505,9 @@ export function BookingsPage() {
     if (b.guestIdPhotoUrl) {
       try {
         const response = await fetch(b.guestIdPhotoUrl);
+        if (!response.ok) {
+          throw new Error(`Guest ID download failed with status ${response.status}.`);
+        }
         const blob = await response.blob();
         const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
@@ -1531,18 +1534,14 @@ export function BookingsPage() {
 
         pdf.setDrawColor(200, 200, 200);
         pdf.setLineWidth(0.3);
+        const drawX = idX + (idBoxW - drawW) / 2;
+        const drawY = idBoxY + (idBoxH - drawH) / 2;
         pdf.rect(idX, idBoxY, idBoxW, idBoxH);
-        pdf.addImage(base64, getJsPdfImageFormat(base64, blob.type), idX + 1, idBoxY + 1, drawW, drawH);
+        pdf.addImage(base64, getJsPdfImageFormat(base64, blob.type), drawX, drawY, drawW, drawH);
       } catch {
-        // Failed to fetch image — show placeholder
-        pdf.setDrawColor(200, 200, 200);
-        pdf.setLineWidth(0.3);
-        pdf.setLineDashPattern([3, 3], 0);
-        pdf.rect(idX, idBoxY, idBoxW, idBoxH);
-        pdf.setLineDashPattern([], 0);
-        pdf.setFontSize(8);
-        pdf.setTextColor(150, 150, 150);
-        pdf.text("Attach ID here", idX + idBoxW / 2, idBoxY + idBoxH / 2 + 1, { align: "center" });
+        throw new Error(
+          "The uploaded guest ID could not be added to the registration PDF. Please re-upload the ID and try again."
+        );
       }
     } else {
       pdf.setDrawColor(200, 200, 200);
