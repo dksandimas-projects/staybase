@@ -165,7 +165,15 @@ function StayCard({ stay }: { stay: StayRecord }) {
           <StatusBadge label={stay.status.replace(/-/g, " ")} status={stay.status} />
         </div>
         <p className="text-sm font-semibold text-gray-900">
-          Room {stay.roomNumber} — {stay.roomType}
+          {/* Per the refactor/room-number-visibility change: only
+              surface the assigned room number once the stay is
+              checked-in or checked-out. For pre-check-in stays the
+              front desk can still reshuffle rooms, so the number
+              is hidden until the assignment is firm. */}
+          {stay.roomNumber &&
+          (stay.status === "checked-in" || stay.status === "checked-out")
+            ? `Room ${stay.roomNumber} — ${stay.roomType}`
+            : stay.roomType}
         </p>
         <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
           <span className="flex items-center gap-1">
