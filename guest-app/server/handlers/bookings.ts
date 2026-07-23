@@ -164,20 +164,32 @@ async function hasActiveRoomBlockConflict(
 // Firestore. These schemas short-circuit malformed input
 // with a 400 before the query runs.
 //
-// Per H2 (hardening batch 2026-06-26): the schemas now
+// Per H2 (hardening batch 2026-06-26): the schemas
 // accept either `guestEmail` (legacy) OR `token` (the new
-// per-booking `lookupToken` random hex). Exactly one of
-// the two is required. The token path is what the email
-// magic link uses — the URL no longer carries the raw
-// `guestEmail`, so PII never lands in browser history or
-// Vercel access logs.
+// per-booking `lookupToken` random hex). The token path is
+// what the email magic link uses — the URL no longer
+// carries the raw `guestEmail`, so PII never lands in
+// browser history or Vercel access logs.
+//
+// Per the feat/relax-booking-lookup change: the lookup
+// schema now accepts any ONE of `bookingRef`, `guestEmail`,
+// or `token` (not all three required). Ref alone enables
+// guests who lost their email; email alone enables guests
+// who lost their ref. The endpoint is still Turnstile-gated
+// and rate-limited (10/min per IP + 3-failure 1-hour
+// backoff), and ref-alone enumeration is bounded by the
+// `{prefix}-YYYYMMDD-NNN` namespace + Turnstile cost.
+// The handler prioritises the most specific key when
+// multiple are present: `ref + token` > `ref + email` >
+// `ref` > `email` > `token`.
 const lookupSchema = z
   .object({
     bookingRef: z
       .string()
       .trim()
       .max(40)
-      .regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+      .regex(BOOKING_REF_REGEX, "Invalid booking reference format.")
+      .optional(),
     guestEmail: z.string().trim().toLowerCase().email().max(160).optional(),
     token: z
       .string()
@@ -188,7 +200,11 @@ const lookupSchema = z
     turnstileToken: z.string().max(2000).optional()
   })
   .refine(
-    (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+    (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
+    "Provide a booking reference, email, or lookup token."
+  )
+  .refine(
+    (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
     "Provide either an email or a lookup token (not both)."
   );
 
@@ -3214,62 +3230,154 @@ export async function handleLookupBooking(req: any, res: any) {
     // does not become an oracle for the booking-ref shape.
     return res.status(400).json({
       success: false,
-      error: "Please provide a valid booking reference and email or lookup token."
+      error: "Please provide a valid booking reference, email, or lookup token."
     });
   }
 
   const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken } = parsed.data;
 
   try {
-    // Per H2 (hardening batch 2026-06-26): the token
-    // path queries by `bookingRef + lookupToken` (an
-    // indexed compound — both fields are part of the
-    // existing composite index), bypassing `guestEmail`
-    // entirely. The email path is unchanged.
-    const compositeFilter = lookupToken
-      ? { field: "lookupToken", value: String(lookupToken).toLowerCase() }
-      : { field: "guestEmail", value: normalizedEmail };
-
-    const snapshot = await adminDb.collection("bookings")
-      .where("bookingRef", "==", trimmedRef)
-      .where(compositeFilter.field, "==", compositeFilter.value)
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
-      // The composite index on (bookingRef, guestEmail)
-      // is the original lookup path. If the email-mode
-      // query returns no rows, retry with a fallback
-      // (limit 5) by bookingRef and re-filter in JS in
-      // case the stored email differs in case / whitespace.
-      // The token-mode query has no equivalent fallback
-      // (tokens are generated server-side and never
-      // re-cased by the user).
-      if (lookupToken) {
-        return res.status(404).json({ success: false, error: "Booking not found." });
-      }
-
-      const fallbackSnapshot = await adminDb.collection("bookings")
+    // Per feat/relax-booking-lookup: dispatch on whichever
+    // key the guest supplied. Priority is most-specific-first
+    // so an attacker can't bypass the token or email check by
+    // adding an extra field:
+    //   ref + token  → token path (H2, the strictest)
+    //   ref + email  → email path (H2 / BF-21, with case-insensitive fallback)
+    //   ref alone    → ref-only path (new)
+    //   email alone  → most-recent-active-by-email (new)
+    //   token alone  → token-only path (new; rare — magic link without a ref)
+    if (trimmedRef && lookupToken) {
+      // H2 magic-link path — query the indexed compound
+      // (bookingRef, lookupToken) directly.
+      const snapshot = await adminDb.collection("bookings")
         .where("bookingRef", "==", trimmedRef)
-        .limit(5)
+        .where("lookupToken", "==", String(lookupToken).toLowerCase())
+        .limit(1)
         .get();
 
-      const matched = fallbackSnapshot.docs.find((doc: any) => {
-        const data = doc.data();
-        return String(data.guestEmail || "").trim().toLowerCase() === normalizedEmail;
-      });
-
-      if (!matched) {
+      if (snapshot.empty) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-
-      const bookingData: any = { id: matched.id, ...matched.data() };
+      const bookingData: any = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
       return await enrichAndRespond(res, bookingData);
     }
 
-    const bookingDoc = snapshot.docs[0];
-    const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
-    return await enrichAndRespond(res, bookingData);
+    if (trimmedRef && normalizedEmail) {
+      // Original BF-21 path — composite (bookingRef, guestEmail)
+      // with a case-insensitive fallback in JS.
+      const snapshot = await adminDb.collection("bookings")
+        .where("bookingRef", "==", trimmedRef)
+        .where("guestEmail", "==", normalizedEmail)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        const fallbackSnapshot = await adminDb.collection("bookings")
+          .where("bookingRef", "==", trimmedRef)
+          .limit(5)
+          .get();
+
+        const matched = fallbackSnapshot.docs.find((doc: any) => {
+          const data = doc.data();
+          return String(data.guestEmail || "").trim().toLowerCase() === normalizedEmail;
+        });
+
+        if (!matched) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+
+        const bookingData: any = { id: matched.id, ...matched.data() };
+        return await enrichAndRespond(res, bookingData);
+      }
+
+      const bookingData: any = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+      return await enrichAndRespond(res, bookingData);
+    }
+
+    if (trimmedRef) {
+      // Ref-alone path. The booking-ref format is
+      // `{prefix}-YYYYMMDD-NNN` (3-digit sequence, ~1000
+      // keys per day) — small enough that the existing
+      // 10/min rate limit + Turnstile + 3-failure 1-hour
+      // backoff are the load-bearing defenses, not the
+      // second factor. Refs are globally unique (date +
+      // daily sequence), so `limit(1)` is exact.
+      const snapshot = await adminDb.collection("bookings")
+        .where("bookingRef", "==", trimmedRef)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const bookingDoc = snapshot.docs[0];
+      const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
+      return await enrichAndRespond(res, bookingData);
+    }
+
+    if (normalizedEmail) {
+      // Email-alone path. Returns the most recent booking
+      // for the email. We sort in memory (the booking-ref
+      // regex guarantees we don't need a `createdAt` index
+      // path, and this avoids a new composite index) and
+      // pick the most recent by `createdAt`. At 14 rooms
+      // an email has at most a handful of bookings; the
+      // in-memory sort over a 50-row cap is fine. For
+      // scale, add a `(guestEmail, createdAt desc)`
+      // composite index in `firestore.indexes.json` and
+      // switch the query to `.orderBy(...).limit(1)`.
+      //
+      // RA 10173 note: this returns one booking only, so
+      // a shared email address does not enumerate other
+      // guests' stays — the response shape is identical
+      // to the ref+email path. The error message
+      // ("Booking not found.") is the same whether the
+      // email doesn't exist or has no bookings, so this
+      // is not an email-existence oracle.
+      const snapshot = await adminDb.collection("bookings")
+        .where("guestEmail", "==", normalizedEmail)
+        .limit(50)
+        .get();
+
+      if (snapshot.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+
+      const sorted = snapshot.docs
+        .map((doc: any) => ({ id: doc.id, data: doc.data() }))
+        .sort((a: any, b: any) => {
+          const aMs = a.data?.createdAt?.toMillis?.() ?? 0;
+          const bMs = b.data?.createdAt?.toMillis?.() ?? 0;
+          return bMs - aMs;
+        });
+
+      const top = sorted[0];
+      const bookingData: any = { id: top.id, ...top.data };
+      return await enrichAndRespond(res, bookingData);
+    }
+
+    if (lookupToken) {
+      // Token-alone path (rare — the magic link normally
+      // carries the ref in the URL). The token is 32-char
+      // hex, globally unique, so `limit(1)` is exact.
+      const snapshot = await adminDb.collection("bookings")
+        .where("lookupToken", "==", String(lookupToken).toLowerCase())
+        .limit(1)
+        .get();
+
+      if (snapshot.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const bookingDoc = snapshot.docs[0];
+      const bookingData: any = { id: bookingDoc.id, ...bookingDoc.data() };
+      return await enrichAndRespond(res, bookingData);
+    }
+
+    // Schema's refine guarantees we never reach here.
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference, email, or lookup token."
+    });
   } catch (error: any) {
     console.error("Booking lookup failed:", error?.message || error);
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });

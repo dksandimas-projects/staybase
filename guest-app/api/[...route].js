@@ -230614,12 +230614,15 @@ async function hasActiveRoomBlockConflict(transaction, roomId, checkInDate, chec
   });
 }
 var lookupSchema = external_exports.object({
-  bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+  bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format.").optional(),
   guestEmail: external_exports.string().trim().toLowerCase().email().max(160).optional(),
   token: external_exports.string().trim().max(64).regex(/^[a-f0-9]{32}$/i, "Invalid lookup token format.").optional(),
   turnstileToken: external_exports.string().max(2e3).optional()
 }).refine(
-  (data) => Boolean(data.guestEmail) !== Boolean(data.token),
+  (data) => Boolean(data.bookingRef) || Boolean(data.guestEmail) || Boolean(data.token),
+  "Provide a booking reference, email, or lookup token."
+).refine(
+  (data) => !(Boolean(data.guestEmail) && Boolean(data.token)),
   "Provide either an email or a lookup token (not both)."
 );
 var guestCancelSchema = external_exports.object({
@@ -232771,31 +232774,72 @@ async function handleLookupBooking(req, res) {
   if (!parsed.success) {
     return res.status(400).json({
       success: false,
-      error: "Please provide a valid booking reference and email or lookup token."
+      error: "Please provide a valid booking reference, email, or lookup token."
     });
   }
   const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken } = parsed.data;
   try {
-    const compositeFilter = lookupToken ? { field: "lookupToken", value: String(lookupToken).toLowerCase() } : { field: "guestEmail", value: normalizedEmail };
-    const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1).get();
-    if (snapshot.empty) {
-      if (lookupToken) {
+    if (trimmedRef && lookupToken) {
+      const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where("lookupToken", "==", String(lookupToken).toLowerCase()).limit(1).get();
+      if (snapshot.empty) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      const fallbackSnapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).limit(5).get();
-      const matched = fallbackSnapshot.docs.find((doc) => {
-        const data = doc.data();
-        return String(data.guestEmail || "").trim().toLowerCase() === normalizedEmail;
-      });
-      if (!matched) {
-        return res.status(404).json({ success: false, error: "Booking not found." });
-      }
-      const bookingData3 = { id: matched.id, ...matched.data() };
-      return await enrichAndRespond(res, bookingData3);
+      const bookingData2 = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+      return await enrichAndRespond(res, bookingData2);
     }
-    const bookingDoc = snapshot.docs[0];
-    const bookingData2 = { id: bookingDoc.id, ...bookingDoc.data() };
-    return await enrichAndRespond(res, bookingData2);
+    if (trimmedRef && normalizedEmail) {
+      const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where("guestEmail", "==", normalizedEmail).limit(1).get();
+      if (snapshot.empty) {
+        const fallbackSnapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).limit(5).get();
+        const matched = fallbackSnapshot.docs.find((doc) => {
+          const data = doc.data();
+          return String(data.guestEmail || "").trim().toLowerCase() === normalizedEmail;
+        });
+        if (!matched) {
+          return res.status(404).json({ success: false, error: "Booking not found." });
+        }
+        const bookingData3 = { id: matched.id, ...matched.data() };
+        return await enrichAndRespond(res, bookingData3);
+      }
+      const bookingData2 = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+      return await enrichAndRespond(res, bookingData2);
+    }
+    if (trimmedRef) {
+      const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).limit(1).get();
+      if (snapshot.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const bookingDoc = snapshot.docs[0];
+      const bookingData2 = { id: bookingDoc.id, ...bookingDoc.data() };
+      return await enrichAndRespond(res, bookingData2);
+    }
+    if (normalizedEmail) {
+      const snapshot = await adminDb.collection("bookings").where("guestEmail", "==", normalizedEmail).limit(50).get();
+      if (snapshot.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const sorted = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b3) => {
+        const aMs = a.data?.createdAt?.toMillis?.() ?? 0;
+        const bMs = b3.data?.createdAt?.toMillis?.() ?? 0;
+        return bMs - aMs;
+      });
+      const top = sorted[0];
+      const bookingData2 = { id: top.id, ...top.data };
+      return await enrichAndRespond(res, bookingData2);
+    }
+    if (lookupToken) {
+      const snapshot = await adminDb.collection("bookings").where("lookupToken", "==", String(lookupToken).toLowerCase()).limit(1).get();
+      if (snapshot.empty) {
+        return res.status(404).json({ success: false, error: "Booking not found." });
+      }
+      const bookingDoc = snapshot.docs[0];
+      const bookingData2 = { id: bookingDoc.id, ...bookingDoc.data() };
+      return await enrichAndRespond(res, bookingData2);
+    }
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference, email, or lookup token."
+    });
   } catch (error) {
     console.error("Booking lookup failed:", error?.message || error);
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });

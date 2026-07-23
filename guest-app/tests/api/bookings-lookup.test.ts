@@ -212,14 +212,21 @@ describe("/api/bookings/lookup", () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
-  test("returns 400 when bookingRef or guestEmail is missing", async () => {
+  test("returns 400 when bookingRef, guestEmail, and token are all missing", async () => {
+    // Per feat/relax-booking-lookup: ref OR email OR token
+    // is enough; only a truly empty body is a 400.
     const res1 = mockResponse();
-    await realHandleLookupBooking({ method: "POST", body: { bookingRef: "SI-1" } }, res1);
+    await realHandleLookupBooking({ method: "POST", body: {} }, res1);
     expect(res1.status).toHaveBeenCalledWith(400);
 
+    // A present-but-invalid value is still a 400.
     const res2 = mockResponse();
-    await realHandleLookupBooking({ method: "POST", body: { guestEmail: "a@b.com" } }, res2);
+    await realHandleLookupBooking({ method: "POST", body: { bookingRef: "SI-1" } }, res2);
     expect(res2.status).toHaveBeenCalledWith(400);
+
+    const res3 = mockResponse();
+    await realHandleLookupBooking({ method: "POST", body: { guestEmail: "notanemail" } }, res3);
+    expect(res3.status).toHaveBeenCalledWith(400);
   });
 
   test("falls back to roomType when the room doc cannot be enriched", async () => {
@@ -355,7 +362,12 @@ describe("/api/bookings/lookup", () => {
       expect(res.status).toHaveBeenCalledWith(404);
     });
 
-    test("returns 400 when neither email nor token is provided", async () => {
+    test("returns 200 on ref alone when the token is absent (new in feat/relax-booking-lookup)", async () => {
+      // Per feat/relax-booking-lookup: ref alone is a valid
+      // lookup. The booking-ref regex still applies, so the
+      // ref must be well-formed, but no second factor is
+      // required.
+      mockBookings["booking_1"] = { ...baseBooking };
       const res = mockResponse();
       await realHandleLookupBooking(
         {
@@ -364,7 +376,9 @@ describe("/api/bookings/lookup", () => {
         },
         res
       );
-      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.bookingRef).toBe("SI-20260615-001");
     });
 
     test("returns 400 when both email and token are provided", async () => {
@@ -423,6 +437,195 @@ describe("/api/bookings/lookup", () => {
       );
       const jsonCall = (res.json as any).mock.calls[0][0];
       expect(jsonCall.data).not.toHaveProperty("lookupToken");
+    });
+  });
+
+  // Per feat/relax-booking-lookup: the endpoint now accepts
+  // any ONE of ref / email / token. The matrix below locks
+  // in the new behaviour so a future refactor doesn't
+  // silently tighten or relax it.
+  describe("ref-only + email-only + token-only (feat/relax-booking-lookup)", () => {
+    test("ref alone returns the matching booking", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.id).toBe("booking_1");
+      expect(jsonCall.data.bookingRef).toBe("SI-20260615-001");
+    });
+
+    test("ref alone returns 404 when no booking matches", async () => {
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20990101-001" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "Booking not found."
+      });
+    });
+
+    test("email alone returns the matching booking", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.id).toBe("booking_1");
+    });
+
+    test("email alone returns the most recent booking when several exist for the same email", async () => {
+      // Same email, three bookings at different times. The
+      // handler picks the most recent by `createdAt` so the
+      // guest lands on the booking they're most likely
+      // looking for (their current or upcoming stay, not
+      // some long-cancelled historical one).
+      const ts = (iso: string) => {
+        const d = new Date(iso);
+        return { toDate: () => d, toMillis: () => d.getTime() };
+      };
+      const earlier = ts("2026-01-10T00:00:00.000Z");
+      const later = ts("2026-06-15T00:00:00.000Z");
+      const latest = ts("2026-09-20T00:00:00.000Z");
+      mockBookings["old_booking"] = {
+        ...baseBooking,
+        id: "old_booking",
+        bookingRef: "SI-20260110-001",
+        createdAt: earlier
+      };
+      mockBookings["mid_booking"] = {
+        ...baseBooking,
+        id: "mid_booking",
+        bookingRef: "SI-20260615-001",
+        createdAt: later
+      };
+      mockBookings["new_booking"] = {
+        ...baseBooking,
+        id: "new_booking",
+        bookingRef: "SI-20260920-001",
+        createdAt: latest
+      };
+
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.id).toBe("new_booking");
+    });
+
+    test("email alone returns 404 with the same generic message when the email has no bookings", async () => {
+      // The error must be indistinguishable from the
+      // ref-not-found case so the endpoint is not an
+      // email-existence oracle.
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { guestEmail: "stranger@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "Booking not found."
+      });
+    });
+
+    test("email alone is case-insensitive (trim + lowercase)", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { guestEmail: "  MARIA@EXAMPLE.TEST  " }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("token alone returns the matching booking", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { token: "000102030405060708090a0b0c0d0e0f" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+      const jsonCall = (res.json as any).mock.calls[0][0];
+      expect(jsonCall.data.id).toBe("booking_1");
+    });
+
+    test("ref + email still works (backward-compat with the BF-21 path)", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", guestEmail: "maria@example.test" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("ref + token still works (backward-compat with the H2 magic-link path)", async () => {
+      mockBookings["booking_1"] = { ...baseBooking };
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: { bookingRef: "SI-20260615-001", token: "000102030405060708090a0b0c0d0e0f" }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("email + token is still rejected (400) — they remain alternative auth modes", async () => {
+      // Per H2: the email and token paths are
+      // alternatives, not complements. A request that
+      // supplies both is ambiguous and rejected up front.
+      const res = mockResponse();
+      await realHandleLookupBooking(
+        {
+          method: "POST",
+          body: {
+            guestEmail: "maria@example.test",
+            token: "000102030405060708090a0b0c0d0e0f"
+          }
+        },
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
     });
   });
 });
