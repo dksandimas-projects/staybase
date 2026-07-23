@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 23, 2026 (added required check-in purpose-of-stay task; default `Leisure`)
+> Last updated: July 23, 2026 (added payment-confirmation email House Rules task)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -154,6 +154,10 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 ### Guest Check-in Registration (GCR)
 
 - ⬜ **GCR-01 — Required purpose of stay** — implement Decision #121 across the guest-registration form, persisted booking data, check-in readiness gate, registration PDF, and focused regression tests. The initial value is `Leisure`, and staff can select another supported purpose before saving.
+
+### Email Content Enhancements (ECE)
+
+- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse the existing admin-managed `settings/websiteContent.houseRules` field; do not create a duplicate setting. Render a clearly titled House Rules section after the payment/stay summary, preserve readable paragraph or line breaks, and omit the section when the field is blank. Update the payment-confirmation email preview to use the current rules and add focused rendering, empty-state, and HTML-escaping regression tests. The email communicates rules for the upcoming stay and does not represent formal guest acceptance.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > Shipped 2026-07-16 (BDUX-01..08 + BDUX-05a..05n complete — full contract in archive). Remaining manual/visual QA:
