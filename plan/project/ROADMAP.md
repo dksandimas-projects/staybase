@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 23, 2026 (added payment-confirmation email House Rules task)
+> Last updated: July 23, 2026 (added House Rules email and editable Terms & Conditions tasks)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -117,7 +117,6 @@ Extends **Settings → Website Content** with new sub-objects for the rest of th
 - [ ] `rewards.howItWorks` — eyebrow + title + 3-step list editor
 - [ ] `rewards.ctaBanner` — heading + body
 - [ ] `bookingConfirm` — headlines, subtext, details card labels, payment method display labels, calendar buttons, Spark Rewards upsell block, empty state
-- [ ] `termsLastUpdated` (string) + `termsBody` (full-text override, mirrors `privacyPolicyBody`)
 - [ ] (Q2) `bookingFlow` — only if the owner answers the audit's Q2 with a yes
 - [ ] (Q4) `rewards.privileges` — only if the owner answers the audit's Q4 with a yes
 
@@ -155,9 +154,13 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 - ⬜ **GCR-01 — Required purpose of stay** — implement Decision #121 across the guest-registration form, persisted booking data, check-in readiness gate, registration PDF, and focused regression tests. The initial value is `Leisure`, and staff can select another supported purpose before saving.
 
+### Legal Content Enhancements (LCE)
+
+- ⬜ **LCE-01 — Editable Terms & Conditions** — add an admin-only **Settings → Legal Content** editor backed by `settings/websiteContent.termsBody`; `/terms` uses it immediately and falls back to deploy-time content when blank. Store the visible last-updated/version with new booking consent so the accepted revision remains identifiable. Test save, render, fallback, sanitization, and consent versioning. Supersedes the former Phase 11.8 `termsBody` item.
+
 ### Email Content Enhancements (ECE)
 
-- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse the existing admin-managed `settings/websiteContent.houseRules` field; do not create a duplicate setting. Render a clearly titled House Rules section after the payment/stay summary, preserve readable paragraph or line breaks, and omit the section when the field is blank. Update the payment-confirmation email preview to use the current rules and add focused rendering, empty-state, and HTML-escaping regression tests. The email communicates rules for the upcoming stay and does not represent formal guest acceptance.
+- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse `settings/websiteContent.houseRules`; do not add another setting. Render a titled, readable section after the stay summary, omit it when blank, and show current rules in email preview. Test rendering, empty state, and HTML escaping. The email communicates rules but is not formal acceptance.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > Shipped 2026-07-16 (BDUX-01..08 + BDUX-05a..05n complete — full contract in archive). Remaining manual/visual QA:
