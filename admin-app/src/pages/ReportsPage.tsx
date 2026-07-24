@@ -1392,7 +1392,7 @@ export function ReportsPage() {
       "Guests", "Room Rate", "Room Subtotal", "Breakfast Included", "Breakfast Rate", "Breakfast Subtotal",
       "Discount Type", "Discount %", `Senior/PWD Discount (${currSymbol})`, "Voucher Code", `Voucher Discount (${currSymbol})`,
       `Member Discount (${currSymbol})`, `Points Redeemed Value (${currSymbol})`, `Gross Subtotal (${currSymbol})`, `Net Total Price (${currSymbol})`,
-      `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference Number", "Source", "Status"
+      `Total Collected (${currSymbol})`, `Outstanding Balance (${currSymbol})`, "Payment Method", "Payment Reference (latest ledger entry)", "Source", "Status"
     ];
     const bookingsRows = filteredBookings.map(b => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
