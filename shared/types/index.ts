@@ -252,6 +252,22 @@ export interface Booking {
   checkedOutFolioTotal?: number;
   checkedOutCollectedTotal?: number;
   earlyCheckoutOriginalCheckOut?: Date | null;
+  // Per CWB (decision #122, 2026-07-23): staff can confirm a
+  // `payment-uploaded` booking with a positive balance when the
+  // outstanding amount will be collected at check-in. The four
+  // fields below are stamped atomically by
+  // `POST /api/bookings/confirm-with-balance`. All are nullable —
+  // existing bookings have all four as `null` (no migration).
+  // The balance-owed indicator renders only when
+  // `confirmedWithBalance != null && getCurrentBalance() > 0`.
+  /** Original charge-inclusive balance at the moment the booking was confirmed with money owed. Never rewritten. */
+  confirmedWithBalance?: number | null;
+  /** Required staff reason (≤500 chars) for confirming with an outstanding balance. */
+  confirmedWithBalanceReason?: string | null;
+  /** Server timestamp set by the confirm-with-balance transaction. */
+  confirmedWithBalanceAt?: Date | null;
+  /** Staff UID who approved the confirm-with-balance transition. */
+  confirmedWithBalanceBy?: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
   breakfastSelections?: Record<string, string>;

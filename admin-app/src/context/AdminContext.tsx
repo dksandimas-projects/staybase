@@ -203,6 +203,20 @@ export interface Booking {
   checkedOutFolioTotal?: number;
   checkedOutCollectedTotal?: number;
   earlyCheckoutOriginalCheckOut?: string | null;
+  // Per CWB (decision #122, 2026-07-23): four fields
+  // stamped by `/api/bookings/confirm-with-balance` when
+  // staff transition a `payment-uploaded` booking to
+  // `confirmed` with a positive balance that will be
+  // collected at check-in. Nullable; existing bookings
+  // have all four as `null` (no migration).
+  /** Original charge-inclusive balance at the moment the booking was confirmed with money owed. Never rewritten. */
+  confirmedWithBalance?: number | null;
+  /** Required staff reason (≤500 chars) for confirming with an outstanding balance. */
+  confirmedWithBalanceReason?: string | null;
+  /** Server timestamp set by the confirm-with-balance transaction. */
+  confirmedWithBalanceAt?: string | null;
+  /** Staff UID who approved the confirm-with-balance transition. */
+  confirmedWithBalanceBy?: string | null;
   unpaidCheckoutReason?: string | null;
   unpaidCheckoutApprovedBy?: string | null;
   hasBreakfast: boolean;
@@ -445,6 +459,15 @@ export interface AdminContextType {
   // notification for the bell.
   verifyAndRecordPayment: (bookingId: string, paymentId: string, amount: number, method: string, transactionReference?: string, note?: string) => Promise<{ success: boolean; error?: string }>;
   rejectPayment: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string }>;
+  // Per CWB (decision #122, 2026-07-23): staff-triggered
+  // transition from `payment-uploaded` to `confirmed` when
+  // a positive balance will be collected at check-in. Server
+  // enforces the same `unpaidCheckoutApprovalThreshold` /
+  // admin gate as the unpaid-checkout flow and returns a
+  // structured 403 with `thresholdExceeded: true` when the
+  // balance is over the limit and the operator is
+  // `front-desk` — the form handles the copy in that case.
+  confirmBookingWithBalance: (bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; thresholdExceeded?: boolean; threshold?: number; balance?: number }>;
   roomBlocks: RoomBlock[];
   createRoomBlock: (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string; blockId?: string }>;
   updateRoomBlock: (input: { blockId: string; startDate: string; endDate: string; reason: string; notes?: string }) => Promise<{ success: boolean; error?: string }>;
@@ -1677,6 +1700,43 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true };
     } catch (err: any) {
       console.error("Error rejecting payment:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per CWB-01 / decision #122 (2026-07-23): staff-triggered
+  // confirm-with-balance transition. Server is the source of
+  // truth for the threshold + role check; on 403 the response
+  // carries `thresholdExceeded: true` so the form can surface
+  // the structured message without re-deriving it.
+  const confirmBookingWithBalance = async (bookingId: string, reason: string): Promise<{ success: boolean; error?: string; thresholdExceeded?: boolean; threshold?: number; balance?: number }> => {
+    const safeReason = String(reason || "").trim().slice(0, 500);
+    if (!safeReason) {
+      return { success: false, error: "A reason is required when confirming a booking with a balance owed." };
+    }
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm-with-balance`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ bookingId, reason: safeReason })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to confirm with balance.",
+          thresholdExceeded: Boolean(data.thresholdExceeded),
+          threshold: typeof data.threshold === "number" ? data.threshold : undefined,
+          balance: typeof data.balance === "number" ? data.balance : undefined
+        };
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error confirming with balance:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -4613,6 +4673,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         resendBookingEmail,
         verifyAndRecordPayment,
         rejectPayment,
+        confirmBookingWithBalance,
         roomBlocks,
         createRoomBlock,
         updateRoomBlock,

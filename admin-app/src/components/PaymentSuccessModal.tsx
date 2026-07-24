@@ -35,6 +35,14 @@ interface PaymentSuccessModalProps {
   // Optional human-readable method label, e.g. "GCash" or
   // "Bank Transfer". Falls back to the raw method key.
   methodLabel?: string;
+  // Per CWB-04 / decision #122 (2026-07-23): primary CTA on
+  // the partial-payment variant. Opens the confirm-with-
+  // balance form so staff can transition the booking to
+  // `confirmed` while recording the outstanding amount for
+  // check-in. The parent owns the form open-state and the
+  // current balance computation.
+  onConfirmWithBalance?: () => void;
+  confirmingWithBalance?: boolean;
 }
 
 // Per feat/payment-success-modal: closes the loop after
@@ -48,9 +56,14 @@ interface PaymentSuccessModalProps {
 //      is only available for a full payment, because a
 //      partial payment leaves the booking in
 //      `payment-uploaded` and confirming it would skip
-//      the balance check entirely. A future "confirm
-//      with balance owed" feature would add a second CTA
-//      here for the partial case.
+//      the balance check entirely. Per
+//      feat/confirm-with-balance (decision #122, 2026-07-23):
+//      the partial variant now ships with a **"Confirm with
+//      Balance"** primary CTA (replaces the prior "Got it"
+//      dismiss) that opens the confirm-with-balance form so
+//      the partial payment can move the booking to
+//      `confirmed` with the outstanding amount recorded for
+//      collection at check-in.
 export function PaymentSuccessModal({
   open,
   onClose,
@@ -67,6 +80,8 @@ export function PaymentSuccessModal({
   onConfirmBooking,
   confirmingBooking,
   onViewBooking,
+  onConfirmWithBalance,
+  confirmingWithBalance,
 }: PaymentSuccessModalProps) {
   return (
     <Modal
@@ -134,8 +149,13 @@ export function PaymentSuccessModal({
           </span>
         </div>
 
-        {/* Partial-payment balance warning — the staff needs to
-            know the booking isn't ready to confirm yet. */}
+        {/* Partial-payment balance warning — the staff can
+            either (a) collect the rest now or (b) confirm with
+            the balance owed, per CWB-04 / decision #122. The
+            "Confirm with Balance" CTA below opens the
+            confirm-with-balance form so the booking can move
+            to `confirmed` with the outstanding amount recorded
+            for collection at check-in. */}
         {!isFullPayment && remainingBalance !== undefined && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             <div className="flex items-baseline justify-between">
@@ -145,8 +165,7 @@ export function PaymentSuccessModal({
               </span>
             </div>
             <p className="mt-1 text-amber-800">
-              Collect the remaining balance before the booking can be
-              confirmed.
+              Confirm with the balance owed (will be collected at check-in), or record another payment first.
             </p>
           </div>
         )}
@@ -167,9 +186,12 @@ export function PaymentSuccessModal({
           )}
 
           {/* Full payment: "Later" + "Confirm Booking" (the natural
-              next status transition). Partial payment: just
-              "Got it" — no confirm CTA because the booking
-              isn't ready. */}
+              next status transition). Partial payment: "Later" +
+              "Confirm with Balance" (opens the confirm-with-
+              balance form per CWB-04 / decision #122). The
+              partial payment isn't zero — staff confirm with a
+              recorded balance rather than waiting for the rest
+              before the booking can move to `confirmed`. */}
           {isFullPayment ? (
             <>
               <button
@@ -197,13 +219,24 @@ export function PaymentSuccessModal({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-h-11 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark"
-            >
-              Got it
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={confirmingWithBalance}
+                className="min-h-11 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+              >
+                Later
+              </button>
+              <button
+                type="button"
+                onClick={onConfirmWithBalance}
+                disabled={confirmingWithBalance || !onConfirmWithBalance}
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Confirm with Balance
+              </button>
+            </>
           )}
         </div>
       </div>

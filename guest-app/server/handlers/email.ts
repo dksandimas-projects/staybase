@@ -19,6 +19,14 @@ type EmailAction =
   | "booking-submitted"
   | "payment-confirmed"
   | "booking-confirmed"
+  // Per CWB-02 / decision #122 (2026-07-23): fired when staff
+  // confirm a `payment-uploaded` booking with a positive balance
+  // via `/api/bookings/confirm-with-balance`. The template
+  // includes the original balance + staff reason so the guest
+  // knows what to settle at check-in. Room type only (never
+  // room number — booking is not yet `checked-in` per the
+  // room-number-visibility rule).
+  | "booking-confirmed-with-balance"
   | "checkin-reminder"
   | "booking-cancelled"
   | "corporate-inquiry"
@@ -502,6 +510,33 @@ function bookingConfirmedEmail(booking: any) {
     title: "Your room is ready on our calendar",
     intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(config.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
     body: `
+      ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
+      ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+    `,
+    ctaLabel: "Review booking details",
+    ctaUrl: lookupUrl(booking)
+  });
+}
+
+// Per CWB-02 / decision #122 (2026-07-23): confirmation email
+// variant sent when staff confirm a `payment-uploaded` booking
+// with a positive balance. Includes the original balance + the
+// staff reason so the guest arrives knowing what to settle at
+// check-in. Room number is intentionally omitted (booking is
+// not yet `checked-in` per the room-number-visibility rule).
+function bookingConfirmedWithBalanceEmail(booking: any, balance: number, reason: string) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const reasonBlock = safeReason
+    ? `<p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;"><strong>Reason from our team:</strong> ${escapeHtml(safeReason)}</p>`
+    : "";
+  return emailLayout({
+    preheader: `Booking ${booking.bookingRef} is confirmed. ₱${safeBalance.toLocaleString("en-PH")} to settle at check-in.`,
+    eyebrow: "Booking confirmed — balance due",
+    title: "Your room is ready on our calendar",
+    intro: `Dear ${escapeHtml(booking.guestName)}, your reservation at <strong>${escapeHtml(config.brandName)}</strong> is now confirmed. We are looking forward to welcoming you.`,
+    body: `
+      ${callout("warm", "Balance to settle at check-in", `A balance of <strong>${escapeHtml(formatMoney(safeBalance))}</strong> remains and will be collected when you arrive.${reasonBlock}`)}
       ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
@@ -1194,6 +1229,34 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
   await sendEmail(booking.guestEmail, template.subject, template.html, template.attachments);
 }
 
+// Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
+// is a dedicated trigger because the email body needs the
+// original balance and staff reason, not just the booking
+// document. Mirrors the dedicated `staffNewBookingEmail` /
+// `staffNewPaymentEmail` pattern. Fired from
+// `handleConfirmBookingWithBalance` after the transaction
+// commits so the booking snapshot reflects the new status
+// (`confirmed`) and the four `confirmedWithBalance*` fields.
+//
+// Room number is intentionally omitted (booking is not yet
+// `checked-in` per the room-number-visibility rule). The
+// template uses the room type the same way
+// `bookingConfirmedEmail` does.
+export async function sendBookingConfirmedWithBalanceTrigger(booking: any, balance: number, reason: string) {
+  const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
+  const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
+  const subject = `[${config.brandName}] Booking confirmed: ${booking.bookingRef} (₱${safeBalance.toLocaleString("en-PH")} due at check-in)`;
+  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
+  // Reuse the same receipt PDF attached to the standard
+  // booking-confirmed email — the folio snapshot at confirm
+  // time is the same.
+  const attachments = [{
+    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+    content: generateReceiptPdf(booking)
+  }];
+  await sendEmail(booking.guestEmail, subject, html, attachments);
+}
+
 export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse, action: EmailAction) {
   const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
 
@@ -1419,6 +1482,18 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         break;
       case "booking-confirmed":
         html = bookingConfirmedEmail(mockBooking);
+        break;
+      case "booking-confirmed-with-balance":
+        // Per CWB-02: preview uses mock balance + reason so
+        // the design / copy is reviewable from the email
+        // preview panel without a real confirm-with-balance
+        // flow. The room number is intentionally omitted
+        // (booking is not yet `checked-in`).
+        html = bookingConfirmedWithBalanceEmail(
+          { ...mockBooking, roomNumber: "" },
+          2750,
+          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
+        );
         break;
       case "checkin-reminder":
         html = checkinReminderEmail(mockBooking);

@@ -20,6 +20,7 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Payment confirmed | `/api/email/payment-confirmed` | Guest | When staff confirms payment |
 | Payment rejected | *(inline booking trigger)* | Guest | When staff rejects an uploaded payment proof |
 | Booking confirmed | `/api/email/booking-confirmed` | Guest | When status set to `confirmed` |
+| Booking confirmed with balance *(CWB-02, decision #122)* | *(inline booking trigger)* | Guest | When staff confirms a `payment-uploaded` booking with a positive balance via `POST /api/bookings/confirm-with-balance`; balance + reason included in the body so the guest knows what to settle at check-in. Room type only (never room number — booking is not yet `checked-in`). |
 | Booking rescheduled | *(inline booking trigger)* | Guest | When staff changes the assigned room or stay dates |
 | Check-in reminder | `/api/email/checkin-reminder` | Guest | 1 day before `checkIn` date |
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |

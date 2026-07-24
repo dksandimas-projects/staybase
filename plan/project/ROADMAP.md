@@ -28,7 +28,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 14/22 | See §Phase 12 below |
+| 12 — Post-Launch | 🔄 15/23 | See §Phase 12 below |
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
@@ -134,16 +134,16 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 ---
 
 ## Phase 11.9 — SEO & Open Graph *(P0 — opened 2026-07-09)*
-> Full spec: `plan/features/SEO-OPENGRAPH.md`. G1–G6 + config + admin noindex all shipped (detail in archive). Q1 (Option A build-time prerender), Q3 (`twitterHandle`), Q4 (`priceRange` = `₱₱`) resolved 2026-07-09.
+> Spec: `plan/features/SEO-OPENGRAPH.md`. G1–G6 + config + admin noindex all shipped (archive). Q1/Q3/Q4 resolved 2026-07-09.
 
 - 🔴 **Q2.** Approve the 1200×630 OG card design (logo + tagline on brand orange) — owner.
-- ⬜ **Verify** — Facebook Sharing Debugger + WhatsApp + Viber render distinct correct cards for ≥3 URLs; X Card Validator; Google Rich Results Test on JSON-LD
-- ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools
+- ⬜ **Verify** — FB Sharing Debugger + WhatsApp + Viber for ≥3 URLs; X Card Validator; Google Rich Results Test.
+- ⬜ **Post-deploy** — submit sitemap to Google Search Console + Bing Webmaster Tools.
 
 ---
 
 ## Phase 12 — Post-Launch (Phase 2, Deferred)
-> Goal: Enhancements after stable v1.0.0. 14 features shipped (email preview, breakfast CRUD, dashboard intercom widget, early check-in workflow, calendar view, seasonal rates, Rate Calendar, discount/voucher repairs, check-in gate, PDF repair, price breakdown, Senior/PWD toggle, post-booking discounts, incidental charges FIN-14, Notification Center, payment rejection) — full records in archive.
+> Goal: Enhancements after stable v1.0.0. 15 features shipped (email preview, breakfast CRUD, dashboard intercom widget, early check-in, calendar, seasonal rates, Rate Calendar, discount/voucher repairs, check-in gate, PDF repair, price breakdown, Senior/PWD toggle, post-booking discounts, FIN-14, Notification Center, payment rejection) — full records in archive.
 
 ### Deferred features
 - ⏸ Online payment gateway (PayMongo — GCash/PayMaya)
@@ -152,41 +152,50 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Guest Check-in Registration (GCR)
 
-- ⬜ **GCR-01 — Required purpose of stay** — implement Decision #121 across the guest-registration form, persisted booking data, check-in readiness gate, registration PDF, and focused regression tests. The initial value is `Leisure`, and staff can select another supported purpose before saving.
+- ⬜ **GCR-01 — Required purpose of stay** — Decision #121 across registration form, persisted booking data, check-in readiness gate, registration PDF, and regression tests. Default `Leisure`; staff can change before saving.
+
+### Confirm with Balance (CWB) — shipping 2026-07-23
+> Decision #122. Spec: `plan/features/BOOKINGS-MANAGEMENT.md §Confirm with Balance (CWB)`. Branch: `feat/confirm-with-balance`. Reuses `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000).
+
+- ⬜ **CWB-01 — Server** — `POST /api/bookings/confirm-with-balance` (staff-auth, 30/min/IP). Atomic txn; validates `payment-uploaded`; reason ≤500 chars; gates `front-desk` vs threshold (above → 403 `admin`); stamps `confirmedWithBalance*` + flips `status: "confirmed"`; fires email + `booking` notification.
+- ⬜ **CWB-02 — Email** — `bookingConfirmedWithBalanceEmail(booking, balance, reason)` with a **"Balance to settle at check-in"** callout. Room type only.
+- ⬜ **CWB-03 — `ConfirmWithBalanceForm`** — Total/Paid/Balance preview, persistent **threshold info banner** at the top (always visible, not a tooltip — staff are guided/reminded by the limit), required reason (500-char counter), submit disabled when `front-desk` + balance > threshold, success toast.
+- ⬜ **CWB-04 — Entry points + indicator** — `PaymentSuccessModal` partial variant shows **"Confirm with Balance"** CTA. Drawer More actions menu gets **"Confirm with Balance"** for `payment-uploaded` rows. Drawer renders a **Balance owed** panel above Folio when `confirmedWithBalance != null` AND current balance > 0; auto-hides at ₱0. Reuses the existing **Balance due** chip.
+- ⬜ **CWB-05 — Tests + docs** — server tests (auth, threshold, role, status, reason, atomicity); typecheck + regression tests; `BACKEND.md`, `BOOKINGS-MANAGEMENT.md`, `DECISIONS-FEATURES.md` #122, this roadmap, `EMAIL-PDF-STORAGE.md` updated.
 
 ### Legal Content Enhancements (LCE)
 
-- ⬜ **LCE-01 — Editable Terms & Conditions** — add an admin-only Legal Content editor; `/terms` uses saved content with deploy-time fallback. Version new booking consent and test save, render, fallback, sanitization, and versioning. Supersedes the former Phase 11.8 item.
+- ⬜ **LCE-01 — Editable Terms & Conditions** — admin-only Legal Content editor; `/terms` uses saved content with deploy-time fallback. Version new booking consent + test save/render/fallback/sanitization/versioning. Supersedes the former Phase 11.8 item.
 
 ### Email Content Enhancements (ECE)
 
-- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse the existing setting, omit the section when blank, include it in preview, and test rendering/escaping. The email communicates rules but is not formal acceptance.
+- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse the existing setting, omit when blank, include in preview.
 
 ### Guest Store Discovery (GSD)
 
-- ⬜ **GSD-01 — Search and category browsing** — add combined catalog search and category filters to Spark Essentials per `plan/features/STORE-GUEST.md §Catalog Discovery`.
+- ⬜ **GSD-01 — Search and category browsing** — combined catalog search + category filters per `plan/features/STORE-GUEST.md §Catalog Discovery`.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
-> Shipped 2026-07-16 (BDUX-01..08 + BDUX-05a..05n complete — full contract in archive). Remaining manual/visual QA:
+> BDUX-01..08 + BDUX-05a..05n shipped 2026-07-16 (contract in archive).
 
-- ⬜ Verify representative bookings in every status and conditional combination: payment proof, breakfast, Senior/PWD, voucher, Rewards, early check-in, onsite payments/refunds, incidentals, store charges, corporate source, checked-out, and cancelled.
-- ⬜ At 1440px, staff can understand guest, stay, payment state, outstanding balance, and next action without scrolling the default Overview.
-- ⬜ At 375px, there is no horizontal page scroll; all features remain reachable; the primary action stays usable above the safe area; modal/sheet focus and close behavior remain accessible.
-- ⬜ The default Folio view contains no expanded voucher, payment, refund, or incidental entry form; each remains reachable through one clearly labeled action.
-- ⬜ Opening and completing any Folio action leaves the user on the Folio tab with the updated Total, Paid, Balance, and ledger state visible.
-- ⬜ Pending payment proof can be reached from the sticky header in one action, while verified proof remains accessible without dominating the default Folio layout.
-- ⬜ No action requires more navigation steps than the current drawer for its common operational path, and the next valid status action remains reachable in one tap/click from any section.
-- ⬜ Run admin typecheck, booking/admin regression tests, and targeted manual visual QA across mobile, tablet, and desktop before marking complete.
+- ⬜ Verify representative bookings across every status + conditional combination.
+- ⬜ At 1440px, staff can understand guest/stay/payment/balance/next action without scrolling the default Overview.
+- ⬜ At 375px, no horizontal scroll; primary action above safe area; modal/sheet focus + close behavior accessible.
+- ⬜ Default Folio has no expanded entry form; each reachable through one labeled action.
+- ⬜ Completing any Folio action leaves the user on Folio with updated Total/Paid/Balance/ledger visible.
+- ⬜ Pending payment proof reachable from sticky header in one action; verified proof accessible without dominating default Folio.
+- ⬜ Next valid status action reachable in one tap from any section.
+- ⬜ Run admin typecheck, booking/admin regression tests, and manual visual QA across mobile/tablet/desktop before marking complete.
 
-*(Controlled Unpaid Checkout (UCO-01..14) and Payment Reference Semantics (PRC-01..19) shipped 2026-07-16 with all acceptance criteria met — contracts in archive.)*
+*(UCO-01..14 and PRC-01..19 shipped 2026-07-16 — contracts in archive.)*
 
 ### Bookings & Store Orders Filtering UX (FSO) — remaining verification
-> Phase 1 shipped 2026-07-16 (FSO-01..18 — full contract in archive). Advanced filter panel Phase 2 pending. Remaining QA:
+> FSO-01..18 shipped 2026-07-16 (contract in archive). Advanced filter Phase 2 pending.
 
-- ⬜ At 375px there is no horizontal page scroll, quick chips remain operable, and the advanced sheet can be completed one-handed above the safe area.
+- ⬜ At 375px: no horizontal scroll, quick chips operable, advanced sheet one-handed above safe area.
 
 ### Environment Test Runs & Controlled Data Reset (ETR)
-> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **Open spec: production→staging refresh (ETR-R01..R10), Restricted Diagnostic Mode (ETR-D01..D10), one-time pre-live production reset (ETR-15..20), and verification (ETR-21 + acceptance criteria).** Full spec + shipped contract + staging-reset execution gate: `plan/features/ENVIRONMENT-TEST-RESET.md`.
+> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **Open spec: ETR-R01..R10, ETR-D01..D10, ETR-15..20, ETR-21.** Full spec: `plan/features/ENVIRONMENT-TEST-RESET.md`.
 
 ### Finance scope boundaries (recorded decisions — do not re-open without owner request)
 - ⏸ Expenses & P&L tracking — out of scope; system is a PMS, not accounting software; exports feed external bookkeeping/BIR
@@ -243,10 +252,10 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ## Spark Rewards Feature Audit (2026-07-18) — open findings
 
-Full report: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`. Sections 1–3 audited; 4–5 pending. CRITICAL/HIGH items only listed here (MED/LOW live in the report).
+Report: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`. Sections 1–3 audited; 4–5 pending. CRITICAL/HIGH only.
 
 **Section 3 — Early Check-In / cross-cutting (§1 registration + stays):**
-- ⬜ **HIGH-1 — Email-based booking match trusts unverified `email` token claims.** `authenticateUser` never surfaces `email_verified`, and `linkBookingsByEmail` (registration), `handleListMemberStays`, and `findBooking` (early check-in) all grant access on `guestEmail == token.email`. An attacker registering email/password with a stranger's (unverified) email can link, read (stays projection leaks `bookingRef` + `lookupToken` → public cancel), and act on that stranger's anonymous bookings. Fix: require `email_verified === true` before any email-based booking match; verify email on email/password signup. See `plan/docs/GOTCHAS.md §Auth & Security` and `plan/features/SPARK-REWARDS.md §Known Issues (Audit 2026-07-18)`.
+- ⬜ **HIGH-1 — Email-based booking match trusts unverified `email` token claims.** `authenticateUser` never surfaces `email_verified`; `linkBookingsByEmail`, `handleListMemberStays`, and `findBooking` all grant access on `guestEmail == token.email`. Attacker can link, read (stays projection leaks `bookingRef` + `lookupToken` → public cancel), and act on stranger bookings. Fix: require `email_verified === true` before any email-based booking match; verify email on email/password signup. See `plan/docs/GOTCHAS.md §Auth & Security` + `plan/features/SPARK-REWARDS.md §Known Issues`.
 
 _No CRITICAL/HIGH from Sections 1–2 (highest was MED-1: manual points adjustment is a client-side write; see report + `GOTCHAS.md §Security & PII`)._
 

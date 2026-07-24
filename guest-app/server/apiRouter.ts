@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleApplyBookingDiscount, handleCancelBooking, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleLookupBooking, handleMarkPaymentConfirmed, handleRejectDiscount, handleRejectPayment, handleRescheduleBooking, handleResolveEarlyCheckin, handleVerifyAndRecordPayment } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleValidateVoucher } from "./handlers/vouchers";
@@ -25,6 +25,12 @@ import config from "../../hotel.config";
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",
   "booking-confirmed",
+  // Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
+  // is a server-triggered email fired from
+  // `handleConfirmBookingWithBalance` after the transaction
+  // commits. Listed here so the email preview endpoint can
+  // render it; never reachable as a public POST.
+  "booking-confirmed-with-balance",
   "discount-rejected",
   "corporate-inquiry",
   // Per W4.4 / decision #104: the 8 new templates are
@@ -589,8 +595,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleConfirmBooking(req, res);
+  }
+
+  // Per CWB-01 / decision #122 (2026-07-23): staff can confirm
+  // a `payment-uploaded` booking with a positive balance when
+  // the rest will be collected at check-in. Rate-limited at
+  // the same 30/min/IP as the standard confirm + checkin +
+  // checkout routes since this is a fast tap-and-confirm
+  // action. Staff-auth required; admin role enforced inside
+  // the handler when balance > threshold.
+  if (domain === "bookings" && action === "confirm-with-balance" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-confirm-with-balance:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many confirm-with-balance requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleConfirmBookingWithBalance(req, res);
   }
 
   if (domain === "bookings" && action === "early-checkin-resolve" && req.method === "POST") {
