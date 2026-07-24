@@ -227809,6 +227809,7 @@ var REQUIRED_REGISTRATION_FIELDS = [
   { key: "address", label: "Residential address" },
   { key: "dateOfBirth", label: "Date of birth" },
   { key: "gender", label: "Gender" },
+  { key: "purposeOfStay", label: "Purpose of stay" },
   { key: "idType", label: "ID type" },
   { key: "idNumber", label: "ID number" },
   { key: "emergencyContact", label: "Emergency contact" }
@@ -227829,6 +227830,9 @@ function getCheckInReadiness(input) {
     if (!hasValue(registration[field.key])) {
       missingItems.push(field.label);
     }
+  }
+  if (typeof registration.purposeOfStay === "string" && registration.purposeOfStay.trim().toLowerCase() === "other" && !hasValue(registration.otherPurpose)) {
+    missingItems.push("Purpose of stay (Other \u2014 reason required)");
   }
   if (registration.signatureStatus !== "signed") {
     missingItems.push("Guest signature marked signed");

@@ -1606,6 +1606,13 @@ export function BookingsPage() {
       ["Nationality", reg?.nationality || "—"],
       ["Date of Birth", reg?.dateOfBirth || "—"],
       ["Gender", reg?.gender || "—"],
+      // Per Decision #121: render Purpose of stay inline; if the staff
+      // picked "Other" the free-text reason (reg.otherPurpose) is
+      // appended to the same line so it stays in the same row.
+      ["Purpose of stay", reg?.purposeOfStay
+        ? `${reg.purposeOfStay}${reg.purposeOfStay.toLowerCase() === "other" && reg?.otherPurpose ? ` — ${reg.otherPurpose}` : ""}`
+        : "—"
+      ],
       ["ID Type", reg?.idType || "—"],
       ["ID Number", reg?.idNumber || "—"],
       ["Address", reg?.address || "—"],
@@ -2212,12 +2219,20 @@ export function BookingsPage() {
   const handleRegistrationSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    // Per Decision #121 (2026-07-23): capture purpose of stay (defaults
+    // to Leisure) and the free-text "other" reason when applicable.
+    // Trimmed + normalized so the readiness gate's lowercase comparison
+    // on "other" works without surprises.
+    const purposeOfStay = String(formData.get("purposeOfStay") || "leisure").trim().toLowerCase();
+    const otherPurpose = String(formData.get("otherPurpose") || "").trim();
     persistSelectedBooking({
       guestRegistration: {
         nationality: String(formData.get("nationality") || "").trim(),
         address: String(formData.get("address") || "").trim(),
         dateOfBirth: String(formData.get("dateOfBirth") || ""),
         gender: String(formData.get("gender") || ""),
+        purposeOfStay,
+        otherPurpose: purposeOfStay === "other" ? otherPurpose : undefined,
         idType: String(formData.get("idType") || ""),
         idNumber: String(formData.get("idNumber") || "").trim(),
         emergencyContact: String(formData.get("emergencyContact") || "").trim(),

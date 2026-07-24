@@ -355,6 +355,9 @@ const completeGuestRegistration = {
   address: "Tagbilaran City",
   dateOfBirth: "1980-01-01",
   gender: "Female",
+  // Per Decision #121 (2026-07-23): purpose of stay defaults to
+  // "Leisure" and is required at physical check-in.
+  purposeOfStay: "leisure",
   idType: "Passport",
   idNumber: "P1234567",
   emergencyContact: "Juan Dela Cruz / 09171234567",

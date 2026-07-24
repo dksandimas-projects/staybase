@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: July 24, 2026 (marked MBZ-01..04 + ECE-01 as shipped; added off-roadmap env-aware URL fix note; tightened the on-merge update rule)
+> Last updated: July 24, 2026 (marked GCR-01 as shipped; GCR-01 ships in the same commit as this roadmap bump per the on-merge rule)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -31,7 +31,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 17/25 | See §Phase 12 below |
+| 12 — Post-Launch | 🔄 18/25 | See §Phase 12 below |
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
@@ -155,7 +155,7 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Guest Check-in Registration (GCR)
 
-- ⬜ **GCR-01 — Required purpose of stay** — Decision #121 across form, booking data, readiness gate, registration PDF, regression tests. Default `Leisure`.
+- ✅ **GCR-01 — Required purpose of stay** — Shipped 2026-07-24 (this commit, `feat/purpose-of-stay` → `dev`). Decision #121 across form, booking data, readiness gate, registration PDF, regression tests. Default `Leisure`; "Other" requires a free-text `otherPurpose` reason (also enforced by the shared readiness gate). See `plan/features/BOOKINGS-MANAGEMENT.md` (Check-in section), `plan/docs/BACKEND.md §bookings` (guestRegistration row), `shared/utils/checkin.ts` (gate), `shared/__tests__/checkin.test.ts` (4 new tests), `admin-app/src/__tests__/purpose-of-stay-registration.test.ts` (6 new tests).
 
 ### Confirm with Balance (CWB) — shipping 2026-07-23
 > Decision #122. Spec: `plan/features/BOOKINGS-MANAGEMENT.md §Confirm with Balance (CWB)`. Branch: `feat/confirm-with-balance`. Reuses `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000).

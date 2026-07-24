@@ -240,6 +240,11 @@ export interface Booking {
     address: string;
     dateOfBirth: string;
     gender: string;
+    // Per Decision #121 (2026-07-23): purpose of stay defaults to
+    // "Leisure" at the front-desk form. Free-text `otherPurpose`
+    // captures the actual reason when the staff picks "Other".
+    purposeOfStay?: string;
+    otherPurpose?: string;
     idType: string;
     idNumber: string;
     emergencyContact: string;
