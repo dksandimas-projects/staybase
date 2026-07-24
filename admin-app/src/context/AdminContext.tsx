@@ -221,10 +221,13 @@ export interface Booking {
   unpaidCheckoutApprovedBy?: string | null;
   hasBreakfast: boolean;
   breakfastRate: number;
-  paymentReferenceNumber?: string | null;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): stamped by the
   // `/api/bookings/reject-payment` handler.
+  // The previous top-level `paymentReferenceNumber` was retired
+  // 2026-07-24; the canonical reference now lives on each
+  // payment ledger entry's `transactionReference` (see
+  // `Booking.onsitePayments[]`).
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: string | null;
   paymentRejectedBy?: string | null;

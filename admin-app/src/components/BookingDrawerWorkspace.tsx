@@ -25,7 +25,6 @@ interface BookingDrawerWorkspaceHeaderProps {
   totalPaid: number;
   balance: number;
   missingCheckInItems: string[];
-  onPaymentReferenceChange: (value: string) => void;
 }
 
 const sections: Array<{
@@ -46,8 +45,7 @@ export function BookingDrawerWorkspaceHeader({
   onSectionChange,
   totalPaid,
   balance,
-  missingCheckInItems,
-  onPaymentReferenceChange
+  missingCheckInItems
 }: BookingDrawerWorkspaceHeaderProps) {
   const needsPaymentReview = booking.status === "payment-uploaded";
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
@@ -120,25 +118,28 @@ export function BookingDrawerWorkspaceHeader({
                 {booking.paymentMethod || "Not specified"}
               </p>
             </div>
-            {booking.paymentReferenceNumber || booking.paymentMethod !== "pay-at-hotel" ? (
-              <label className="flex flex-col gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-                Original booking payment reference
-                <input
-                  type="text"
-                  value={booking.paymentReferenceNumber || ""}
-                  onChange={(event) => onPaymentReferenceChange(event.target.value)}
-                  placeholder="GCash ref or bank trace #"
-                  className="min-h-[44px] rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium normal-case tracking-normal text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-primary"
-                />
-              </label>
-            ) : (
-              <div>
-                <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-                  Original booking payment reference
-                </p>
-                <p className="mt-2 text-xs text-gray-400 italic">Not submitted (pay at hotel)</p>
-              </div>
-            )}
+            {/*
+              Per 2026-07-24 (refactor/unify-payment-reference-fields):
+              the top-level `Booking.paymentReferenceNumber` is gone.
+              The canonical reference now lives on the relevant
+              payment ledger entry's `transactionReference` and is
+              shown in the Folio section. The sticky header keeps
+              the payment-method summary only.
+            */}
+            <div>
+              <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                Reference
+              </p>
+              <p className="mt-2 truncate text-xs text-gray-600">
+                {getLatestPaymentReference(booking) || (
+                  booking.paymentMethod === "pay-at-hotel" ? (
+                    <span className="italic text-gray-400">Pay at hotel — no ref needed</span>
+                  ) : (
+                    <span className="italic text-gray-400">Pending verification</span>
+                  )
+                )}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -325,6 +326,21 @@ export function BookingDrawerActionFooter({ primaryAction, onMoreActions, moreAc
       </button>
     </div>
   );
+}
+
+function getLatestPaymentReference(booking: Booking): string | null {
+  // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+  // the canonical payment reference lives on the most recent
+  // entry in the booking's onsitePayments[] ledger. Returns the
+  // `transactionReference` of the last entry, or `null` when no
+  // payment has been recorded yet (still awaiting verification).
+  const payments = (booking as any).onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
+  if (!Array.isArray(payments) || payments.length === 0) return null;
+  for (let i = payments.length - 1; i >= 0; i -= 1) {
+    const ref = payments[i]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) return String(ref);
+  }
+  return null;
 }
 
 function SummaryMetric({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "danger" | "success" }) {

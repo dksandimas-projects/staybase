@@ -1,5 +1,22 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
+
+// Per 2026-07-24 (refactor/unify-payment-reference-fields):
+// the canonical payment reference for a booking lives on the
+// most recent entry in the booking's onsitePayments[] ledger as
+// `transactionReference`. Returns the last non-empty value, or
+// `null` when no payment has been recorded yet. Replaces the
+// retired top-level `Booking.paymentReferenceNumber` for every
+// export surface.
+function getLatestPaymentReference(booking: any): string | null {
+  const payments = booking?.onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
+  if (!Array.isArray(payments) || payments.length === 0) return null;
+  for (let i = payments.length - 1; i >= 0; i -= 1) {
+    const ref = payments[i]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) return String(ref);
+  }
+  return null;
+}
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -1059,11 +1076,11 @@ export function ReportsPage() {
       toast.error("Invalid range", "Start date cannot be after end date.");
       return;
     }
-    let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Total Price,Status,Source,Payment Method,Payment Reference Number\n";
+    let csvContent = "Booking Reference,Guest Name,Room Number,Check In,Check Out,Nights,Total Price,Status,Source,Payment Method,Payment Reference (latest ledger entry)\n";
     filteredBookings.forEach(b => {
       const checkIn = toDate(b.checkIn);
       const checkOut = toDate(b.checkOut);
-      csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${b.paymentReferenceNumber || ""}"\n`;
+      csvContent += `"${b.bookingRef}","${b.guestName}","${b.roomNumber}",${checkIn ? checkIn.toISOString().slice(0, 10) : ""},${checkOut ? checkOut.toISOString().slice(0, 10) : ""},${b.numNights},${b.totalPrice},"${b.status}","${b.source}","${b.paymentMethod || ""}","${getLatestPaymentReference(b) || ""}"\n`;
     });
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     triggerDownload(blob, `${config.hotelId}_bookings_${periodStartKey}_to_${periodEndKey}.csv`);
@@ -1215,7 +1232,7 @@ export function ReportsPage() {
         .filter((p) => p["Booking Ref"] === b.bookingRef)
         .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
       "Payment Method": b.paymentMethod,
-      "Payment Reference Number": b.paymentReferenceNumber || "",
+      "Payment Reference (latest ledger entry)": getLatestPaymentReference(b) || "",
       Source: b.source,
       Status: b.status,
       "Is Corporate": b.isCorporate ? "Yes" : "No",
@@ -1428,7 +1445,7 @@ export function ReportsPage() {
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
         subtotal, b.totalPrice, collected, outstanding,
         PAYMENT_LABELS[b.paymentMethod] || b.paymentMethod,
-        b.paymentReferenceNumber || "",
+        getLatestPaymentReference(b) || "",
         b.source, b.status
       ];
     });

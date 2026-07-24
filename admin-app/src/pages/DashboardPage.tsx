@@ -16,6 +16,23 @@ import { formatPrice } from "../utils/format";
 import { db } from "../firebase/config";
 
 
+// Per 2026-07-24 (refactor/unify-payment-reference-fields):
+// the canonical payment reference for a booking lives on the
+// most recent entry in the booking's onsitePayments[] ledger as
+// `transactionReference`. Returns the last non-empty value, or
+// `null` when no payment has been recorded yet. Replaces the
+// retired top-level `Booking.paymentReferenceNumber` for every
+// display surface.
+function getLatestPaymentReference(booking: any): string | null {
+  const payments = booking?.onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
+  if (!Array.isArray(payments) || payments.length === 0) return null;
+  for (let i = payments.length - 1; i >= 0; i -= 1) {
+    const ref = payments[i]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) return String(ref);
+  }
+  return null;
+}
+
 export function getDaysOverdue(checkOut: string, todayKey: string) {
   const checkOutTime = Date.UTC(
     Number(checkOut.slice(0, 4)),
@@ -375,7 +392,11 @@ export function DashboardPage() {
     setVerifyTarget(booking);
     setVerifyAmount(String(booking.totalPrice - (booking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)));
     setVerifyMethod(booking.paymentMethod || "gcash");
-    setVerifyReference(booking.paymentReferenceNumber || "");
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // the top-level `Booking.paymentReferenceNumber` was retired;
+    // staff types the ref from the GCash/bank app into the
+    // verify modal directly.
+    setVerifyReference("");
     setVerifyNote("");
     setVerifyError(null);
     setVerifyPending(false);
@@ -598,9 +619,9 @@ export function DashboardPage() {
                     </div>
                     <p className="truncate text-xs text-gray-600">{booking.guestName} · Room {booking.roomNumber || "TBD"}</p>
                     <p className="text-[10px] font-semibold text-gray-400">{booking.checkIn} to {booking.checkOut} · {formatPrice(booking.totalPrice)}</p>
-                    {booking.paymentReferenceNumber && (
+                    {getLatestPaymentReference(booking) && (
                       <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
-                        Ref: {booking.paymentReferenceNumber}
+                        Ref: {getLatestPaymentReference(booking)}
                       </p>
                     )}
                   </div>
@@ -1125,10 +1146,10 @@ export function DashboardPage() {
               The guest will receive an email with the reason and be asked to re-upload a corrected proof.
               The room remains <span className="font-semibold text-gray-900">held</span> — it is not freed.
             </p>
-            {rejectionTarget.paymentReferenceNumber && (
+            {getLatestPaymentReference(rejectionTarget) && (
               <div className="rounded-lg bg-gray-50 px-3 py-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Guest reference number</p>
-                <p className="font-mono text-sm font-bold text-gray-900">{rejectionTarget.paymentReferenceNumber}</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Reference on file</p>
+                <p className="font-mono text-sm font-bold text-gray-900">{getLatestPaymentReference(rejectionTarget)}</p>
               </div>
             )}
             <div>

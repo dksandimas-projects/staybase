@@ -176,7 +176,6 @@ export function CorporateBookingPage() {
   const [proofUpload, setProofUpload] = useState<{ name: string; path: string } | null>(null);
   const [uploadingProof, setUploadingProof] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<string>("gcash");
-  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
   const [paymentProofError, setPaymentProofError] = useState("");
   const [termsConsent, setTermsConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -644,17 +643,18 @@ export function CorporateBookingPage() {
     setIsSubmitting(true);
     setSubmitError("");
 
-    // Validate payment reference number if required
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // guests no longer enter a payment reference number at booking
+    // time, even on the corporate personal-pay path. Staff
+    // populates `transactionReference` on the relevant payment
+    // ledger entry when they confirm the payment.
+
+    // Per BI-05: personal pay submits the method the guest
+    // actually paid with plus the uploaded receipt URL, so the
+    // booking lands as `payment-uploaded` and staff can verify
+    // the transfer. Chargeback stays `pay-at-hotel` (settled
+    // via LOU per decision #99).
     const isPersonalPay = guestDetails.billingArrangement === "personal";
-    if (isPersonalPay) {
-      const pmConfig = corporatePaymentMethods.find((p) => p.method === paymentMethod);
-      const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
-      if (isRefRequired && !paymentReferenceNumber.trim()) {
-        setSubmitError("Please enter your payment reference number.");
-        setIsSubmitting(false);
-        return;
-      }
-    }
 
     try {
       const body = {
@@ -687,7 +687,6 @@ export function CorporateBookingPage() {
         paymentMethod: isPersonalPay ? paymentMethod : "pay-at-hotel",
         paymentProofUrl: null,
         paymentProofPath: isPersonalPay ? proofUpload?.path ?? null : null,
-        paymentReferenceNumber: isPersonalPay && paymentReferenceNumber.trim() ? paymentReferenceNumber.trim() : null,
         // Per W1.3 / decision #79 / audit S1.5: the server
         // derives `isCorporate` from the validated `corporateCode`
         // lookup. The client no longer sets it. The booking body's
@@ -1468,14 +1467,12 @@ export function CorporateBookingPage() {
     // Per BI-05: personal pay requires the uploaded receipt before
     // Confirm unlocks. Per BI-01: Confirm also waits for the
     // Turnstile token — submitting without one is a guaranteed 400.
-    const currentPm = corporatePaymentMethods.find((p) => p.method === paymentMethod);
-    const isRefRequired = currentPm?.requireReferenceNumber !== false;
     const canConfirm =
       termsConsent &&
       Boolean(selectedTypeEntry) &&
       Boolean(reviewTurnstile.token) &&
       !uploadingProof &&
-      (!isPersonalPay || (Boolean(proofUpload) && (!isRefRequired || Boolean(paymentReferenceNumber.trim()))));
+      (!isPersonalPay || Boolean(proofUpload));
 
     return bookingShell(
       <>
@@ -1615,24 +1612,9 @@ export function CorporateBookingPage() {
                     <p className="mt-2 text-xs font-semibold text-red-600">{paymentProofError}</p>
                   )}
 
-                  {/* Reference Number Input */}
-                  {currentPm?.requireReferenceNumber !== false && (
-                    <div className="mt-4">
-                      <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
-                        <span>
-                          Payment Reference Number <span className="text-red-500">*</span>
-                        </span>
-                        <input
-                          type="text"
-                          required
-                          value={paymentReferenceNumber}
-                          onChange={(e) => setPaymentReferenceNumber(e.target.value)}
-                          placeholder="Enter transaction reference or trace number"
-                          className="min-h-11 rounded-lg border border-gray-200 px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light text-sm"
-                        />
-                      </label>
-                    </div>
-                  )}
+                  {/* Reference Number Input — removed 2026-07-24 (refactor/unify-payment-reference-fields).
+                      Staff populates `transactionReference` on the relevant payment ledger entry
+                      when confirming payment. The guest no longer enters a reference at booking time. */}
                 </div>
               ) : (
                 /* Company Charge Back (no LOU upload per W2.11 / decision #99) */

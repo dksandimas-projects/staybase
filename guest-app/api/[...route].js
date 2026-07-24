@@ -227571,7 +227571,6 @@ var WalkinBookingSchema = external_exports.object({
   hasBreakfast: external_exports.boolean(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: external_exports.string().trim().min(1).max(80),
-  paymentReferenceNumber: external_exports.string().trim().max(120).nullable().optional(),
   status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
   totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
   discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
@@ -228632,7 +228631,15 @@ function discountRejectedEmail(booking) {
 }
 function paymentRejectedEmail(booking) {
   const reason = booking.paymentRejectionReason ? `Reason: ${escapeHtml(booking.paymentRejectionReason)}` : "We could not verify the uploaded payment proof against our records.";
-  const hasRef = Boolean(booking.paymentReferenceNumber);
+  const payments = Array.isArray(booking?.onsitePayments) ? booking.onsitePayments : [];
+  let refOnFile = null;
+  for (let i2 = payments.length - 1; i2 >= 0; i2 -= 1) {
+    const ref = payments[i2]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) {
+      refOnFile = String(ref);
+      break;
+    }
+  }
   return emailLayout({
     preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
     eyebrow: "Payment needs your attention",
@@ -228640,7 +228647,7 @@ function paymentRejectedEmail(booking) {
     intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
     body: `
       ${callout("red", "Payment not verified", reason)}
-      ${hasRef ? callout("warm", "Reference we received", `You entered: <strong>${escapeHtml(String(booking.paymentReferenceNumber))}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
+      ${refOnFile ? callout("warm", "Reference on file", `The reference on record is <strong>${escapeHtml(refOnFile)}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
       <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below \u2014 your booking ref <strong>${escapeHtml(booking.bookingRef)}</strong> and email are all you need.</p>
       ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
@@ -229394,7 +229401,12 @@ async function handleEmailPreview(req, res) {
       case "payment-rejected":
         html = paymentRejectedEmail({
           ...mockBooking,
-          paymentReferenceNumber: "1234567890",
+          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+          // the canonical reference lives on the payment ledger,
+          // not on the booking doc. Mock a single onsitePayments
+          // entry so the "Reference on file" callout renders in
+          // the preview.
+          onsitePayments: [{ transactionReference: "1234567890" }],
           paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
         });
         break;
@@ -230770,7 +230782,6 @@ var createBookingSchema = external_exports.object({
     message: "payment proof URL must point to the project's Firebase Storage bucket"
   }),
   paymentProofPath: external_exports.string().trim().max(512).nullable().optional().default(null),
-  paymentReferenceNumber: external_exports.string().trim().max(160).nullable().optional().default(null),
   corporateCode: external_exports.string().trim().max(120).optional().default(""),
   corporateFlatRate: external_exports.boolean().optional().default(false),
   linkedInquiryId: external_exports.string().trim().max(160).nullable().optional().default(null),
@@ -230805,7 +230816,6 @@ async function handleCreateBooking(req, res) {
     paymentMethod,
     paymentProofUrl,
     paymentProofPath,
-    paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
     linkedInquiryId,
@@ -230936,14 +230946,6 @@ async function handleCreateBooking(req, res) {
       const hotelConfig = hotelConfigDoc.data();
       if ((discountType === "senior" || discountType === "pwd") && hotelConfig.seniorPwdOnlineEnabled === false) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
-      }
-      if (paymentMethod !== "pay-at-hotel") {
-        const paymentMethodsArr = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
-        const pmConfig = paymentMethodsArr.find((p) => p && p.method === paymentMethod);
-        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
-        if (isRefRequired && (!paymentReferenceNumber || !String(paymentReferenceNumber).trim())) {
-          throw new Error("Payment reference number is required.");
-        }
       }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
@@ -231249,7 +231251,6 @@ async function handleCreateBooking(req, res) {
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
         paymentProofPath: paymentProofPath || null,
-        paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
@@ -231423,7 +231424,6 @@ async function handleCreateWalkin(req, res) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
-    paymentReferenceNumber,
     status,
     totalPriceOverride,
     discountType: requestedDiscountType,
@@ -231662,7 +231662,6 @@ async function handleCreateWalkin(req, res) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
-        paymentReferenceNumber: paymentReferenceNumber || null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",

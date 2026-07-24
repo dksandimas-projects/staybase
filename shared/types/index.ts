@@ -213,16 +213,18 @@ export interface Booking {
   paymentProofUrl: string | null;
   /** Private Firebase Storage object path; staff resolves a short-lived signed URL. */
   paymentProofPath?: string | null;
-  paymentReferenceNumber?: string | null;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): staff can reject a pending
   // payment proof from the dashboard, bouncing the
   // booking back to `pending` with a required reason.
   // The guest is emailed + sees the reason in the lookup
-  // page. `paymentProofUrl` / `paymentReferenceNumber`
-  // are intentionally **kept** (not cleared) for audit
-  // trail — the re-upload flow is guest-driven via the
-  // existing pending UI.
+  // page. `paymentProofUrl` is intentionally **kept**
+  // (not cleared) for audit trail — the re-upload flow
+  // is guest-driven via the existing pending UI. The
+  // payment reference number (e.g. GCash ref / bank
+  // trace) lives on each entry in the
+  // `bookings/{id}/payments/` ledger as `transactionReference`;
+  // it is no longer carried on the booking itself.
   paymentRejectionReason?: string | null;
   paymentRejectedAt?: Date | null;
   paymentRejectedBy?: string | null;
@@ -309,9 +311,14 @@ export interface PaymentEntry {
   amount: number;
   method: string;
   note: string;
-  /** Distinct from Booking.paymentReferenceNumber — this is the
-   *  tender-specific identifier for this individual ledger entry
-   *  (e.g. GCash ref, bank trace). Not set for cash or legacy notes. */
+  /** Tender-specific identifier for this individual ledger entry
+   *  (e.g. GCash ref, bank trace). This is the canonical payment
+   *  reference for the booking — the previous top-level
+   *  `Booking.paymentReferenceNumber` (guest-entered at booking
+   *  time) was retired in 2026-07-24; the reference is now
+   *  exclusively staff-populated on the relevant payment ledger
+   *  entry (via Record Payment / Verify & Record Payment). Not
+   *  set for cash or legacy entries. */
   transactionReference?: string | null;
   reason: string | null;
   approvedBy: string | null;

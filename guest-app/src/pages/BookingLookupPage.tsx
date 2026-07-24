@@ -37,7 +37,13 @@ interface BookingData {
   status: string;
   hasBreakfast: boolean;
   specialRequests: string;
-  paymentReferenceNumber?: string | null;
+  // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+  // the previous top-level `paymentReferenceNumber` was retired.
+  // The canonical reference (if any) lives on the most recent
+  // entry in the booking's onsitePayments[] ledger as
+  // `transactionReference`. The lookup response no longer
+  // surfaces a reference number to guests; staff read it from
+  // the admin drawer when needed.
   paymentRejectionReason?: string | null;
 }
 
@@ -196,7 +202,6 @@ export function BookingLookupPage() {
         status: data.status,
         hasBreakfast: Boolean(data.hasBreakfast),
         specialRequests: data.specialRequests || "",
-        paymentReferenceNumber: data.paymentReferenceNumber || null,
         paymentRejectionReason: data.paymentRejectionReason || null
       };
       setActiveBooking(normalized);

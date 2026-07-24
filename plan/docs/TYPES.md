@@ -223,6 +223,15 @@ OnsitePayment {
   amount: number          // absolute value capped at 1,000,000
   method: PaymentMethod
   note: string
+  /** Tender-specific identifier for this individual ledger entry
+   *  (GCash ref, bank trace). As of 2026-07-24
+   *  (`refactor/unify-payment-reference-fields`), this is the
+   *  canonical payment reference for a booking — the previous
+   *  top-level `Booking.paymentReferenceNumber` is retired.
+   *  Required only when the method's `requireReferenceNumber`
+   *  config says so; cash and legacy entries omit it. Part of
+   *  the idempotency comparison (amount + method + reference + note). */
+  transactionReference: string | null
   reason: string | null
   approvedBy: string | null
   recordedBy: string   // staff UID

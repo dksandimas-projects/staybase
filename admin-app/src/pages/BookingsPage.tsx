@@ -62,6 +62,23 @@ function toDate(value: any): Date | null {
   return null;
 }
 
+// Per 2026-07-24 (refactor/unify-payment-reference-fields):
+// the canonical payment reference for a booking lives on the
+// most recent entry in the booking's onsitePayments[] ledger as
+// `transactionReference`. Returns the last non-empty value, or
+// `null` when no payment has been recorded yet. Replaces the
+// retired top-level `Booking.paymentReferenceNumber` for every
+// display surface.
+function getLatestPaymentReference(booking: any): string | null {
+  const payments = booking?.onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
+  if (!Array.isArray(payments) || payments.length === 0) return null;
+  for (let i = payments.length - 1; i >= 0; i -= 1) {
+    const ref = payments[i]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) return String(ref);
+  }
+  return null;
+}
+
 function estimateNewTotalPrice(
   booking: Booking,
   targetRoomType: string,
@@ -1129,7 +1146,10 @@ export function BookingsPage() {
         booking.roomNumber.includes(s) ||
         booking.guestEmail.toLowerCase().includes(s) ||
         booking.guestPhone.includes(s) ||
-        (booking.paymentReferenceNumber || "").toLowerCase().includes(s) ||
+        // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+        // the canonical payment reference lives on each entry in
+        // the booking's onsitePayments[] ledger. The previous
+        // top-level `paymentReferenceNumber` is retired.
         (booking.onsitePayments || []).some((p) => (p.transactionReference || "").toLowerCase().includes(s))
       );
       const matchesStatus = bookingStatusFilter === "all" || booking.status === bookingStatusFilter;
@@ -3172,7 +3192,6 @@ export function BookingsPage() {
               totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
-              onPaymentReferenceChange={(value) => persistSelectedBooking({ paymentReferenceNumber: value || null })}
             />
             </div>
 
@@ -3549,7 +3568,7 @@ export function BookingsPage() {
                     <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
                       <div className="space-y-0.5 text-xs">
                         <p className="font-semibold text-gray-800">
-                          {selectedBooking.paymentMethod} · {selectedBooking.paymentReferenceNumber || "No reference"}
+                          {selectedBooking.paymentMethod} · {getLatestPaymentReference(selectedBooking) || "No reference"}
                         </p>
                         <p className="text-[10px] text-gray-400">
                           {selectedBooking.status === "payment-confirmed" ? "Verified" : selectedBooking.paymentRejectionReason ? `Rejected: ${selectedBooking.paymentRejectionReason}` : "Pending"}
@@ -3578,15 +3597,15 @@ export function BookingsPage() {
                           <p className="font-semibold text-gray-900">
                             Method: {selectedBooking.paymentMethod || "Not specified"}
                           </p>
-                          {selectedBooking.paymentReferenceNumber && (
+                          {getLatestPaymentReference(selectedBooking) && (
                             <p className="font-semibold text-gray-900">
-                              Ref: {selectedBooking.paymentReferenceNumber}
+                              Ref: {getLatestPaymentReference(selectedBooking)}
                             </p>
                           )}
                           {selectedBooking.status === "payment-uploaded" && (
                             <button
                               type="button"
-                              onClick={() => { verifySubmissionIdRef.current = doc(collection(db, "bookings", selectedBooking.id, "payments")).id; setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(selectedBooking.paymentReferenceNumber || ""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
+                              onClick={() => { verifySubmissionIdRef.current = doc(collection(db, "bookings", selectedBooking.id, "payments")).id; setShowVerifyPaymentModal(true); setVerifyAmount(String(selectedBooking.totalPrice - (selectedBooking.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0))); setVerifyMethod(selectedBooking.paymentMethod || "gcash"); setVerifyReference(""); setVerifyNote(""); setVerifyError(null); setVerifyPending(false); }}
                               className="inline-flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 text-[10px] font-bold text-white transition hover:bg-green-700"
                             >
                               <ShieldCheck size={13} />

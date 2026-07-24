@@ -352,7 +352,6 @@ const createBookingSchema = z.object({
     message: "payment proof URL must point to the project's Firebase Storage bucket"
   }),
   paymentProofPath: z.string().trim().max(512).nullable().optional().default(null),
-  paymentReferenceNumber: z.string().trim().max(160).nullable().optional().default(null),
   corporateCode: z.string().trim().max(120).optional().default(""),
   corporateFlatRate: z.boolean().optional().default(false),
   linkedInquiryId: z.string().trim().max(160).nullable().optional().default(null),
@@ -398,7 +397,6 @@ export async function handleCreateBooking(req: any, res: any) {
     paymentMethod,
     paymentProofUrl,
     paymentProofPath,
-    paymentReferenceNumber,
     corporateCode,
     corporateFlatRate,
     linkedInquiryId,
@@ -605,15 +603,12 @@ export async function handleCreateBooking(req: any, res: any) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
 
-      // Validate payment reference number if required
-      if (paymentMethod !== "pay-at-hotel") {
-        const paymentMethodsArr: any[] = Array.isArray(hotelConfig.paymentMethods) ? hotelConfig.paymentMethods : [];
-        const pmConfig = paymentMethodsArr.find((p) => p && p.method === paymentMethod);
-        const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
-        if (isRefRequired && (!paymentReferenceNumber || !String(paymentReferenceNumber).trim())) {
-          throw new Error("Payment reference number is required.");
-        }
-      }
+      // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+      // the guest no longer provides a payment reference number at
+      // booking time. Staff populates `transactionReference` on
+      // the relevant payment ledger entry when they confirm the
+      // payment. The `requireReferenceNumber` flag is now enforced
+      // only on the staff verify/add-payment endpoints below.
 
       const roomTypesArr: any[] = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
       const typeEntry = roomTypesArr.find((entry) => entry && entry.value === roomType);
@@ -1121,7 +1116,6 @@ export async function handleCreateBooking(req: any, res: any) {
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
         paymentProofPath: paymentProofPath || null,
-        paymentReferenceNumber: paymentReferenceNumber || null,
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
@@ -1354,7 +1348,6 @@ export async function handleCreateWalkin(req: any, res: any) {
     hasBreakfast,
     guestDetails,
     paymentMethod,
-    paymentReferenceNumber,
     status,
     totalPriceOverride,
     discountType: requestedDiscountType,
@@ -1658,7 +1651,6 @@ export async function handleCreateWalkin(req: any, res: any) {
         // (not `""`) so the canonical "absent" value is
         // consistent with the online flow.
         paymentProofUrl: null,
-        paymentReferenceNumber: paymentReferenceNumber || null,
         source: "walk-in",
         notes: "Created on-site at Front Desk.",
         handledBy: req.staff.uid || "staff",
@@ -1959,9 +1951,13 @@ export async function handleRejectDiscount(req: any, res: any) {
 // + `paymentRejectedBy` are stamped on the booking, and
 // a `payment-rejected` email goes to the guest so they
 // can re-upload a corrected proof from the existing
-// `pending` UI. Stale `paymentProofUrl` +
-// `paymentReferenceNumber` are **kept** for audit per the
-// implementation plan.
+// `pending` UI. Stale `paymentProofUrl` is **kept** for
+// audit per the implementation plan. The previous
+// `paymentReferenceNumber` field was retired 2026-07-24 —
+// its audit value lives in the screenshot itself, and any
+// reference staff recorded before rejection still lives on
+// the corresponding payment ledger entry's
+// `transactionReference`.
 const MAX_PAYMENT_REJECTION_REASON_LENGTH = 500;
 
 export async function handleRejectPayment(req: any, res: any) {

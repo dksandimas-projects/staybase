@@ -11,7 +11,7 @@ The `/reports` page gives staff visibility into hotel performance and sales over
 ### Export CSV Button (page header, both tabs)
 
 - [x] "Export CSV" button in the page header (`handleExportCSV`), visible regardless of active tab — a simple bookings ledger for the selected date range. Current columns: Booking Reference, Guest Name, Room Number, Check In, Check Out, Nights, Total Price, Status, Source.
-- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and `b.paymentReferenceNumber` (see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`).
+- [x] **Add Payment Method and Reference Number columns** (owner request 2026-07-09) — neither exists on this export today (it doesn't even carry Payment Method currently, unlike the Full Backup and Sales XLSX "Bookings" sheets, which already do). Add both together so Reference Number has the context of which method it belongs to: `..., "Payment Method", "Reference Number"` sourced from `b.paymentMethod` and the **latest `transactionReference`** on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields` — the previous top-level `b.paymentReferenceNumber` is retired; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`).
 
 ### Custom Date Range (owner request 2026-07-09)
 
@@ -318,7 +318,7 @@ Client-requested feature: one-click full data backup to a single multi-sheet Exc
 | Total Collected Onsite | sum of `payments[]` subcollection |
 | Outstanding Balance | `totalPrice − totalCollected` |
 | Payment Method | `paymentMethod` |
-| Reference Number | `paymentReferenceNumber` (owner request 2026-07-09; see `plan/features/BOOKING-FLOW.md` / `plan/features/BOOKINGS-MANAGEMENT.md §Reference Number field`) |
+| Reference Number | Latest `transactionReference` on the booking's `onsitePayments[]` ledger (per 2026-07-24 `refactor/unify-payment-reference-fields`; see `plan/features/BOOKINGS-MANAGEMENT.md §Payment Reference Semantics`) |
 | Source | `source` |
 | Status | `status` |
 | Is Corporate | `isCorporate` |

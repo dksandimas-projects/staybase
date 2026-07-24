@@ -49,7 +49,6 @@ export const WalkinBookingSchema = z.object({
   hasBreakfast: z.boolean(),
   guestDetails: WalkinGuestDetailsSchema,
   paymentMethod: z.string().trim().min(1).max(80),
-  paymentReferenceNumber: z.string().trim().max(120).nullable().optional(),
   status: z.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
   totalPriceOverride: z.coerce.number().finite().min(0).max(1_000_000).optional(),
   discountType: z.enum(["", "senior", "pwd"]).optional().default(""),

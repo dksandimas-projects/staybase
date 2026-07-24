@@ -635,15 +635,28 @@ function discountRejectedEmail(booking: any) {
 // payment proof from the dashboard, the booking is
 // bounced back to `pending` (room stays held) and the
 // guest is emailed with the rejection reason so they
-// can re-upload a corrected proof. Stale
-// `paymentProofUrl` + `paymentReferenceNumber` are kept
-// for audit; the re-upload is guest-driven via the
-// existing pending UI.
+// can re-upload a corrected proof. Stale `paymentProofUrl`
+// is kept for audit; the re-upload is guest-driven via
+// the existing pending UI. Per 2026-07-24
+// (refactor/unify-payment-reference-fields): the previous
+// top-level `paymentReferenceNumber` was retired; any
+// reference on file now lives on the most recent entry in
+// the booking's onsitePayments[] ledger. We surface that
+// here as "Reference on file" so the guest can re-upload
+// with the matching ref if needed.
 function paymentRejectedEmail(booking: any) {
   const reason = booking.paymentRejectionReason
     ? `Reason: ${escapeHtml(booking.paymentRejectionReason)}`
     : "We could not verify the uploaded payment proof against our records.";
-  const hasRef = Boolean(booking.paymentReferenceNumber);
+  const payments = Array.isArray(booking?.onsitePayments) ? booking.onsitePayments : [];
+  let refOnFile: string | null = null;
+  for (let i = payments.length - 1; i >= 0; i -= 1) {
+    const ref = payments[i]?.transactionReference;
+    if (ref && String(ref).trim().length > 0) {
+      refOnFile = String(ref);
+      break;
+    }
+  }
   return emailLayout({
     preheader: `Action needed: your payment proof for booking ${booking.bookingRef} was rejected.`,
     eyebrow: "Payment needs your attention",
@@ -651,7 +664,7 @@ function paymentRejectedEmail(booking: any) {
     intro: `Dear ${escapeHtml(booking.guestName)}, we reviewed the payment proof you uploaded for booking <strong>${escapeHtml(booking.bookingRef)}</strong> but couldn't match it to the booking.`,
     body: `
       ${callout("red", "Payment not verified", reason)}
-      ${hasRef ? callout("warm", "Reference we received", `You entered: <strong>${escapeHtml(String(booking.paymentReferenceNumber))}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
+      ${refOnFile ? callout("warm", "Reference on file", `The reference on record is <strong>${escapeHtml(refOnFile)}</strong>. Please double-check this against your bank/GCash record and re-upload a corrected proof if needed.`) : ""}
       <p style="margin: 0 0 18px; color: #4b5563; font-size: 14px; line-height: 1.7;">Your room is still held for you. To confirm your stay, please upload a corrected payment proof from the booking lookup page using the link below — your booking ref <strong>${escapeHtml(booking.bookingRef)}</strong> and email are all you need.</p>
       ${card("Booking summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
     `,
@@ -1548,7 +1561,12 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
       case "payment-rejected":
         html = paymentRejectedEmail({
           ...mockBooking,
-          paymentReferenceNumber: "1234567890",
+          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+          // the canonical reference lives on the payment ledger,
+          // not on the booking doc. Mock a single onsitePayments
+          // entry so the "Reference on file" callout renders in
+          // the preview.
+          onsitePayments: [{ transactionReference: "1234567890" }],
           paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
         });
         break;

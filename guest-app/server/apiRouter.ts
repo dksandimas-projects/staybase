@@ -532,8 +532,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Capture the booking snapshot before the handler
     // bounces the status to `pending` so the post-response
     // email + notification have the original
-    // `paymentReferenceNumber` + `paymentProofUrl` to
-    // surface to the guest.
+    // `paymentProofUrl` (and any `transactionReference` on
+    // the booking's onsitePayments[] ledger) to surface to
+    // the guest. Per 2026-07-24
+    // (refactor/unify-payment-reference-fields): the previous
+    // top-level `paymentReferenceNumber` is retired.
     const bookingId = String((req.body || {}).bookingId || "").trim();
     let preRejectSnapshot: any = null;
     if (bookingId) {

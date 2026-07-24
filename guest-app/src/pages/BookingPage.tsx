@@ -230,7 +230,6 @@ export function BookingPage() {
   const [paymentProofUpload, setPaymentProofUpload] = useState<{ name: string; path: string; previewUrl: string } | null>(null);
   const [uploadingPaymentProof, setUploadingPaymentProof] = useState(false);
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
-  const [paymentReferenceNumber, setPaymentReferenceNumber] = useState("");
   const [paymentProofError, setPaymentProofError] = useState("");
 
   const [termsConsent, setTermsConsent] = useState(false);
@@ -767,16 +766,13 @@ export function BookingPage() {
     setIsSubmitting(true);
     setSubmitError("");
 
-    // Validate payment reference number if required
-    if (paymentMethod !== "pay-at-hotel") {
-      const pmConfig = hotelConfig.paymentMethods?.find((p: any) => p.method === paymentMethod);
-      const isRefRequired = pmConfig ? pmConfig.requireReferenceNumber !== false : true;
-      if (isRefRequired && !paymentReferenceNumber.trim()) {
-        setSubmitError("Please enter your payment reference number.");
-        setIsSubmitting(false);
-        return;
-      }
-    }
+    // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+    // guests no longer enter a payment reference number at booking
+    // time. Staff populates `transactionReference` on the relevant
+    // payment ledger entry (via Record Payment / Verify & Record
+    // Payment) when they confirm the payment. The
+    // `requireReferenceNumber` flag on each payment method is now
+    // enforced only on the staff verify endpoint.
 
     try {
       const response = await fetch("/api/bookings/create", {
@@ -810,7 +806,6 @@ export function BookingPage() {
           paymentMethod,
           paymentProofUrl: null,
           paymentProofPath: paymentProofUpload?.path ?? null,
-          paymentReferenceNumber: paymentReferenceNumber.trim() || null,
           // Per W1.3 / decision #79 / audit S1.5: the standard
           // online booking flow is never corporate. The server
           // derives `isCorporate` only from a validated
@@ -1468,24 +1463,9 @@ export function BookingPage() {
                 </div>
               )}
 
-            {/* Reference Number Input */}
-            {paymentMethod !== "pay-at-hotel" && currentPaymentMethod?.requireReferenceNumber !== false && (
-              <div className="mt-4">
-                <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
-                  <span>
-                    Payment Reference Number <span className="text-red-500">*</span>
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={paymentReferenceNumber}
-                    onChange={(e) => setPaymentReferenceNumber(e.target.value)}
-                    placeholder="Enter transaction reference or trace number"
-                    className="min-h-11 rounded-lg border border-gray-250 bg-white px-3 text-gray-950 outline-none focus:border-primary focus:ring-2 focus:ring-primary-light text-sm"
-                  />
-                </label>
-              </div>
-            )}
+            {/* Reference Number Input — removed 2026-07-24 (refactor/unify-payment-reference-fields).
+                Staff populates `transactionReference` on the relevant payment ledger entry
+                when confirming payment. The guest no longer enters a reference at booking time. */}
 
             {/* Honeypot field (hidden from user) */}
             <input
