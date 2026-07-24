@@ -152,7 +152,7 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Guest Check-in Registration (GCR)
 
-- ⬜ **GCR-01 — Required purpose of stay** — Decision #121 across registration form, persisted booking data, check-in readiness gate, registration PDF, and regression tests. Default `Leisure`; staff can change before saving.
+- ⬜ **GCR-01 — Required purpose of stay** — Decision #121 across form, booking data, readiness gate, registration PDF, regression tests. Default `Leisure`.
 
 ### Confirm with Balance (CWB) — shipping 2026-07-23
 > Decision #122. Spec: `plan/features/BOOKINGS-MANAGEMENT.md §Confirm with Balance (CWB)`. Branch: `feat/confirm-with-balance`. Reuses `hotelConfig.unpaidCheckoutApprovalThreshold` (default 5,000).
@@ -165,7 +165,7 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Legal Content Enhancements (LCE)
 
-- ⬜ **LCE-01 — Editable Terms & Conditions** — admin-only Legal Content editor; `/terms` uses saved content with deploy-time fallback. Version new booking consent + test save/render/fallback/sanitization/versioning. Supersedes the former Phase 11.8 item.
+- ⬜ **LCE-01 — Editable Terms & Conditions** — admin-only Legal Content editor; `/terms` uses saved content with deploy-time fallback. Version new booking consent + test save/render/fallback/sanitization/versioning.
 
 ### Email Content Enhancements (ECE)
 
@@ -174,6 +174,11 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 ### Guest Store Discovery (GSD)
 
 - ⬜ **GSD-01 — Search and category browsing** — combined catalog search + category filters per `plan/features/STORE-GUEST.md §Catalog Discovery`.
+
+### Multi-Booking Picker (MBP) — proposed 2026-07-24
+> Decision #123. Spec: `plan/features/BOOKING-LOOKUP.md §Multi-Booking Picker`. Privacy-preserving list when email-alone path matches >1 booking.
+
+- ⬜ **MBP-01..04** — Server `kind` discriminator + 2 privacy modes (single-name / multi-name) + cap-10 + picker UI + deep link. See `plan/features/BOOKING-LOOKUP.md §Multi-Booking Picker`.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > BDUX-01..08 + BDUX-05a..05n shipped 2026-07-16 (contract in archive).
@@ -206,13 +211,13 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 ## Finance Lifecycle Recommendations — open items (2026-07-14)
 > Source: `plan/project/AUDIT-FINANCE-LIFECYCLE-2026-07-12.md §Post-remediation recommendations`. FLR-01/02/04 fixed 2026-07-14 (detail in archive).
 
-- ⏸ **FLR-03 — Bound the Reports ledger listeners** *(deferred with trigger)* — `collectionGroup("payments"/"charges")` listeners load the entire ledger history live on every Reports visit; fine at 14 rooms, linear growth forever on Blaze. **Trigger: revisit when the combined ledger passes a few thousand rows (~1 year of operation)** — switch to `recordedAt`-bounded queries; all-time Receivables can fall back to one-shot `getDocs`.
-- 🔄 **FLR-05 — Operational handover items** *(owner-facing, no code)* — handover prepared in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. The historical Daily Close convention is documented without editing locked closes, and the accountant VAT review plus isolated-staging money-path walkthrough now have explicit checklists/evidence records. **Remaining:** accountant confirmation and owner walkthrough/sign-off before the next `dev → main` milestone merge.
+- ⏸ **FLR-03 — Bound Reports ledger listeners** *(deferred with trigger)* — `collectionGroup("payments"/"charges")` loads full ledger history live on every Reports visit; fine at 14 rooms, linear forever on Blaze. **Trigger: revisit at ~1 year of operation** — switch to `recordedAt`-bounded queries; all-time Receivables fall back to one-shot `getDocs`.
+- 🔄 **FLR-05 — Operational handover** *(owner-facing)* — handover in `FINANCE-LIFECYCLE-HANDOVER-2026-07-14.md`. Daily Close convention + accountant VAT review + staging money-path walkthrough have explicit checklists/evidence. **Remaining:** accountant confirmation + owner sign-off before next `dev → main` milestone.
 
 ---
 
 ## Production Environment Split — cutover queue (added 2026-07-14)
-> Source: `plan/project/PROD-CUTOVER-RUNBOOK.md` — demote `spark-inn-stg-7a7ad` to staging, stand up Vercel staging on `dev` at `stg.sparkinnbohol.com` / `stg-admin.sparkinnbohol.com`, cut production over to the clean-slate `spark-inn-prod` project. The runbook holds the step-level checklists, prod client config, and secret-handling rules (service-account key never committed). PC-05's carry-over decision is resolved: clean slate only, staff accounts pre-provisioned — `DECISIONS-FEATURES.md` Decision #119. PC-01..PC-04 done 2026-07-14 (detail in archive).
+> Source: `plan/project/PROD-CUTOVER-RUNBOOK.md` — demote `spark-inn-stg-7a7ad` to staging, stand up Vercel staging on `dev` at `stg.sparkinnbohol.com` / `stg-admin.sparkinnbohol.com`, cut production over to clean-slate `spark-inn-prod`. Runbook holds checklists, prod client config, secret-handling rules. PC-05 carry-over resolved: clean slate only, staff pre-provisioned — Decision #119. PC-01..PC-04 done 2026-07-14 (archive).
 
 - ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
 - ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
@@ -221,8 +226,8 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ## INC-01 — Production Incident: rules/app version skew *(opened 2026-07-17 · resolved 2026-07-17)*
 
-> **Root cause:** the E2E-audit security rules (repo `firebase/firestore.rules` + `firebase/storage.rules`, fixed 2026-07-17) were deployed to the live Firebase project `spark-inn-stg-7a7ad` (serving `sparkinnbohol.com`), but the live app is still the 2026-07-14 build — `main` is ~133 commits behind `dev` and does not contain the matching client changes. The new rules assume the new app.
-> **Evidence (verified 2026-07-17):** deployed rules fetched via Firebase MCP match the fixed repo versions; `git show main:...IntercomPage.tsx` still sends guest messages via client `addDoc`; `git show main:...BookingPage.tsx:716,746` still calls `getDownloadURL()` after proof/ID upload.
+> **Root cause:** E2E-audit security rules (fixed 2026-07-17) were deployed to live `spark-inn-stg-7a7ad` (serving `sparkinnbohol.com`), but the live app is still the 2026-07-14 build — `main` is ~133 commits behind `dev` and lacks the matching client changes. New rules assume the new app.
+> **Evidence (verified 2026-07-17):** deployed rules via Firebase MCP match the fixed repo versions; `git show main:...IntercomPage.tsx` still sends guest messages via client `addDoc`; `git show main:...BookingPage.tsx:716,746` still calls `getDownloadURL()` after proof/ID upload.
 
 **Broken guest-facing flows during the incident window:**
 
@@ -244,9 +249,9 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ## E2E User Journey Audit (2026-07-17) — all findings remediated
 
-✅ All 17 findings are fixed **and merged to `dev`**: the 3 HIGHs (`aae6808` — G-01 full-body Zod validation, C-01 RoomType-sourced conversion pricing, X-01 Storage-rule public-read removal), the 8 MEDs (`cfe6581`), and the 6 LOWs (`9b9c85e`). All 847 tests, typecheck, builds, and preflight pass. Report: `plan/docs/AUDIT-E2E-REPORT.md`.
+✅ All 17 findings are fixed **and merged to `dev`**: 3 HIGHs (`aae6808` — G-01 full-body Zod, C-01 RoomType-sourced conversion pricing, X-01 Storage-rule public-read removal), 8 MEDs (`cfe6581`), 6 LOWs (`9b9c85e`). All 847 tests, typecheck, builds, preflight pass. Report: `plan/docs/AUDIT-E2E-REPORT.md`.
 
-✅ **Gate cleared 2026-07-17:** app + rules are both in production (PR #118 + the earlier rules deploy) — the audit's NO-GO is lifted. Only follow-up: re-verify X-02's white-label sweep before onboarding a second white-label client.
+✅ **Gate cleared 2026-07-17:** app + rules in production (PR #118 + the earlier rules deploy) — audit's NO-GO lifted. Only follow-up: re-verify X-02's white-label sweep before a second white-label client.
 
 ---
 
@@ -263,8 +268,7 @@ _No CRITICAL/HIGH from Sections 1–2 (highest was MED-1: manual points adjustme
 
 ## References
 
-- **Archive (historical, non-canonical):** `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` — full pre-compaction roadmap: Phases 0–9 checklists, Phase 11.5/11.6 batches 1–20, Wave 1–4 decision triage, Phase 11.7 implementation record, PR 1/PR 3 implementation detail, all closed audit-fix lists (FIN, FR, FL, PF, QA, NC, AUD, SA, live bugs)
-- Audit reports: `plan/project/AUDIT-*.md` (historical) · `plan/docs/AUDIT-E2E-REPORT.md` (current, holds open MED/LOW findings)
-- Decisions: `plan/docs/DECISIONS-ARCH.md` + `plan/docs/DECISIONS-FEATURES.md`
-- Goodwill scope tracking: `plan/project/GOODWILL-SCOPE-LOG.md`
-- Cutover: `plan/project/PROD-CUTOVER-RUNBOOK.md` · Deploy: `plan/project/DEPLOY.md`
+- **Archive (historical, non-canonical):** `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` — pre-compaction roadmap: Phases 0–9, 11.5/11.6 batches 1–20, Wave 1–4 decision triage, 11.7 record, PR 1/3 detail, closed audit-fix lists (FIN, FR, FL, PF, QA, NC, AUD, SA, live bugs).
+- Audit reports: `plan/project/AUDIT-*.md` (historical) · `plan/docs/AUDIT-E2E-REPORT.md` (current, open MED/LOW).
+- Decisions: `plan/docs/DECISIONS-ARCH.md` + `plan/docs/DECISIONS-FEATURES.md`.
+- Cutover: `plan/project/PROD-CUTOVER-RUNBOOK.md` · Deploy: `plan/project/DEPLOY.md`.
