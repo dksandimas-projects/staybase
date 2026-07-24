@@ -87,4 +87,47 @@ describe("PDF generation repair", () => {
     expect(reportsPage).toMatch(/Choose Save as PDF in your browser print settings/);
     expect(reportsPage).not.toMatch(/Print \/ Save PDF/);
   });
+
+  // Regression: a HEIC (or other browser-undecodable) ID photo used to
+  // either slip past `compressImageFile`'s fallback and end up in
+  // Storage, or hang `normalizePdfImageToJpeg` indefinitely because
+  // `<img>.onerror` never fires for unknown formats. The combination
+  // left the "Preparing registration PDF..." placeholder tab open
+  // forever. Two guards now enforce correctness.
+  it("rejects unsupported image MIME types at the guest ID upload step before reaching Storage", () => {
+    const allowed = bookingsPage.match(
+      /ALLOWED_GUEST_ID_MIME_TYPES\s*=\s*new Set\(\[([\s\S]*?)\]\)/
+    );
+    expect(allowed, "expected ALLOWED_GUEST_ID_MIME_TYPES guard").not.toBeNull();
+    expect(allowed?.[1]).toMatch(/image\/jpeg/);
+    expect(allowed?.[1]).toMatch(/image\/png/);
+    expect(allowed?.[1]).toMatch(/image\/webp/);
+    expect(allowed?.[1]).not.toMatch(/image\/heic/);
+    expect(allowed?.[1]).not.toMatch(/image\/heif/);
+
+    // Guard fires before compressImageFile so HEIC never reaches Storage.
+    const guardIndex = bookingsPage.indexOf("ALLOWED_GUEST_ID_MIME_TYPES.has(file.type)");
+    const compressionIndex = bookingsPage.indexOf("compressImageFile(file,");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(compressionIndex).toBeGreaterThan(guardIndex);
+
+    // Tightened file input to filter the OS picker too.
+    const guestIdInput = bookingsPage.match(
+      /<input[\s\S]*?type="file"[\s\S]*?accept="[^"]*"[\s\S]*?onChange=\{\(event\) =>\s*\{[\s\S]*?handleGuestIdUpload/
+    );
+    expect(guestIdInput?.[0]).toMatch(/accept="image\/jpeg,image\/png,image\/webp"/);
+  });
+
+  it("bounds the image decode so an undecodable ID cannot hang the registration PDF generator", () => {
+    // The decode Promise must include a timeout-based reject path so
+    // that even if the browser fires neither onload nor onerror, the
+    // outer PDF try/catch can still run and close the placeholder tab.
+    const decodeBlock = bookingsPage.match(
+      /await new Promise<void>\(\(resolve, reject\) =>\s*\{[\s\S]*?image\.src = sourceDataUrl;\s*\}\);/
+    );
+    expect(decodeBlock, "expected to find the image-decode Promise in normalizePdfImageToJpeg").not.toBeNull();
+    expect(decodeBlock?.[0]).toMatch(/setTimeout\(/);
+    expect(decodeBlock?.[0]).toMatch(/clearTimeout\(timer\)/);
+    expect(decodeBlock?.[0]).toMatch(/Image decode timed out/);
+  });
 });

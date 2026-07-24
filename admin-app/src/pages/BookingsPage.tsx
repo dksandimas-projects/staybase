@@ -220,10 +220,28 @@ async function normalizePdfImageToJpeg(blob: Blob) {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read image."));
     reader.readAsDataURL(blob);
   });
+  // Browser image decoders don't reliably fire `onerror` for formats
+  // they don't recognize (HEIC, HEIF, AVIF on older builds, etc.) — in
+  // those cases the `<img>` element just sits there and the Promise
+  // never settles, which hangs the entire registration PDF generator
+  // (the "Preparing registration PDF..." tab is left open forever).
+  // A bounded decode keeps the error path reachable so the caller can
+  // surface a friendly toast and close the placeholder tab.
+  const DECODE_TIMEOUT_MS = 5000;
   const image = new Image();
   await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error("Unable to decode image."));
+    const timer = setTimeout(
+      () => reject(new Error("Image decode timed out — the file may be an unsupported format. Please re-upload as JPEG, PNG, or WebP.")),
+      DECODE_TIMEOUT_MS
+    );
+    image.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("Unable to decode image."));
+    };
     image.src = sourceDataUrl;
   });
 
@@ -2153,8 +2171,28 @@ export function BookingsPage() {
     syncSelectedBooking(updates);
   };
 
+  // The PDF generator only knows how to rasterize JPEG/PNG/WebP into a
+  // jsPDF page; HEIC and other browser-undecodable formats would either
+  // hang the registration PDF generator or get uploaded as-is via the
+  // `compressImageFile` fallback. Reject them at the source so the
+  // booking document never carries a format the downstream PDF builder
+  // can't handle. The picker also filters by `accept` (see the file
+  // input below) but that's a hint — this is the enforcement point.
+  const ALLOWED_GUEST_ID_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+  ]);
+
   const handleGuestIdUpload = async (file: File | undefined) => {
     if (!file || !selectedBooking) return;
+
+    if (!file.type || !ALLOWED_GUEST_ID_MIME_TYPES.has(file.type)) {
+      setGuestIdUploadStatus(
+        `Unsupported image format (${file.type || "unknown"}). Please re-capture or convert to JPEG, PNG, or WebP and try again.`
+      );
+      return;
+    }
 
     try {
       setGuestIdUploadStatus("Compressing guest ID image...");
@@ -3167,7 +3205,7 @@ export function BookingsPage() {
                       </span>
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/webp"
                         className="sr-only"
                         onChange={(event) => {
                           void handleGuestIdUpload(event.currentTarget.files?.[0]);
