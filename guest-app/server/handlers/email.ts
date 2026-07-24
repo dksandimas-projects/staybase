@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import config from "../../../hotel.config";
 import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
+import { getServerBaseUrl, getServerAdminBaseUrl } from "../lib/siteUrl";
 import { toDateOrNull, getManilaDateInfo, generateLookupToken } from "@spark-inn/shared";
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5 server-side
@@ -183,12 +184,17 @@ function generateReceiptPdf(booking: any): Buffer {
   return Buffer.from(doc.output("arraybuffer"));
 }
 
+// Per `plan/docs/ENV-SETUP.md` and the env-aware URL fix (2026-07-24):
+// these resolve to the right environment's apex host so test emails
+// sent from the staging deployment link to staging, and emails from
+// production link to production. See `lib/siteUrl.ts` for the
+// resolution order (SITE_URL override → VERCEL_ENV → `stg.` default).
 function siteUrl(path = "") {
-  return `https://www.${config.domain}${path}`;
+  return `${getServerBaseUrl()}${path}`;
 }
 
 function adminUrl(path = "") {
-  return `https://${config.adminDomain}${path}`;
+  return `${getServerAdminBaseUrl()}${path}`;
 }
 
 // Per H2 (hardening batch 2026-06-26): the public

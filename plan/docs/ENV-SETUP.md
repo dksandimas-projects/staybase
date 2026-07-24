@@ -87,6 +87,22 @@ STAGING_ALLOWLIST_PROJECT_IDS=
 # Only needed for white-label clients whose staging hosts don't follow that
 # convention — Spark Inn staging is covered automatically on Vercel Preview.
 EXTRA_ALLOWED_ORIGINS=
+
+# Base URL for the guest app, used by the server when emitting any link
+# the recipient will click (email CTAs, my-booking magic links, intercom
+# deep links, store-order chat cards, etc.) — see
+# `guest-app/server/lib/siteUrl.ts`. When unset, the resolver uses the
+# environment: VERCEL_ENV=production → https://www.${config.domain};
+# VERCEL_ENV=preview|development or unset → https://stg.${config.domain}.
+# Set this for white-label clients whose staging host doesn't follow the
+# `stg.<domain>` convention. Trailing slashes are stripped. Optional.
+SITE_URL=
+
+# Same as SITE_URL but for the admin app (server-emitted links to the
+# admin dashboard, e.g. staff notification emails). When unset: production
+# → https://${config.adminDomain}; otherwise → https://stg-admin.${config.domain}.
+# Optional.
+ADMIN_SITE_URL=
 ```
 
 ---
@@ -127,6 +143,17 @@ to their matching guest preview URL.
 - `STAGING_ALLOWLIST_PROJECT_IDS` is a server-only destructive-action gate. The
   reset endpoints return 403 unless `FIREBASE_PROJECT_ID` exactly matches one of
   its comma-separated values. Never include the production project ID.
+- **`SITE_URL` / `ADMIN_SITE_URL`** override the env-aware URL resolver in
+  `guest-app/server/lib/siteUrl.ts`. When unset, the resolver uses
+  `VERCEL_ENV` to pick `https://www.${config.domain}` (production) or
+  `https://stg.${config.domain}` (preview / development / local) so every
+  link the server emits (email CTAs, my-booking magic links, intercom deep
+  links, store-order chat cards) points at the same environment the
+  recipient would land on. Set these only for white-label clients whose
+  staging host doesn't follow the `stg.<domain>` convention. The admin-app
+  side has its own env-aware QR URL via `resolveApiBaseUrl` —
+  `admin-app/src/utils/apiBaseUrl.ts` — which uses the browser hostname +
+  `VITE_GUEST_APP_URL`; no `ADMIN_SITE_URL` is read on the client.
 
 ---
 
