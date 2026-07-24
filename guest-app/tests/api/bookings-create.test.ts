@@ -1174,7 +1174,12 @@ describe("/api/bookings/create", () => {
           consent: true
         },
         discountType: "senior",
-        discountIdPhotoUrl: "https://storage.example/discount-id.jpg",
+        // Per X-01 (E2E audit 2026-07-17): guest clients must
+        // never mint a download URL for private bucket uploads.
+        // The server validates the discount against the path
+        // only — the URL is derived server-side for staff via
+        // `/api/storage/signed-url`.
+        discountIdPhotoPath: "bookings/bookingVoucherSenior1/discount-id/test-senior.jpg",
         voucherCode: "save10",
         paymentMethod: "pay-at-hotel",
         turnstileToken: "mock_token"
@@ -1199,6 +1204,45 @@ describe("/api/bookings/create", () => {
           usageCount: 3
         })
       });
+    });
+
+    // Per X-01 (E2E audit 2026-07-17): the discount-ID business rule
+    // is validated against the private-bucket *path* (not a public
+    // URL), because anonymous guest uploads never mint a
+    // download URL. Regression guard: a senior/PWD discount with
+    // no path must still be rejected.
+    test("rejects government discount when no discountIdPhotoPath is provided", async () => {
+      const body = {
+        bookingId: "bookingNoDiscountId",
+        roomType: "standard-double",
+        checkIn: FUTURE_CHECK_IN_1,
+        checkOut: FUTURE_CHECK_OUT_1,
+        guests: 2,
+        hasBreakfast: false,
+        guestDetails: {
+          firstName: "Senior",
+          lastName: "NoId",
+          email: "seniornoid@example.com",
+          phone: "09171234567",
+          consent: true
+        },
+        discountType: "senior",
+        // no discountIdPhotoPath — guest skipped the ID upload
+        paymentMethod: "pay-at-hotel",
+        turnstileToken: "mock_token"
+      };
+
+      const req = mockRequest(body);
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringContaining("Government-mandated discount")
+        })
+      );
     });
   });
 

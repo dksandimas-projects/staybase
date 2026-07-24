@@ -230756,7 +230756,11 @@ var createBookingSchema = external_exports.object({
   hasBreakfast: external_exports.boolean(),
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
-  discountIdPhotoUrl: external_exports.string().url().max(2048).nullable().refine(storageUrlRefiner, {
+  // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
+  // for staff; the guest client only sends the path. Allow the URL
+  // field to be omitted entirely so the client doesn't have to
+  // include a meaningless `null`.
+  discountIdPhotoUrl: external_exports.string().url().max(2048).nullable().optional().default(null).refine(storageUrlRefiner, {
     message: "discount ID photo URL must point to the project's Firebase Storage bucket"
   }),
   discountIdPhotoPath: external_exports.string().trim().max(512).nullable().optional().default(null),
@@ -231095,7 +231099,7 @@ async function handleCreateBooking(req, res) {
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
         discountPct = 20;
-        if (!discountIdPhotoUrl) {
+        if (!discountIdPhotoPath) {
           throw new Error("Government-mandated discount requires verification ID photo.");
         }
       }
