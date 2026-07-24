@@ -224233,6 +224233,16 @@ function rangesOverlap(aStart, aEnd, bStart, bEnd) {
 function dateKeyFromDate(date) {
   return date.toISOString().slice(0, 10);
 }
+function maskEmail(email) {
+  if (!email) return "";
+  const atIndex = email.indexOf("@");
+  if (atIndex <= 0) return "***";
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+  if (!domain) return "***";
+  const first = local.charAt(0) || "";
+  return `${first}***@${domain}`;
+}
 function parseCheckoutTimeToMinutes(timeValue, fallback = hotel_config_default.checkOutTime || "12:00") {
   const raw = String(timeValue || fallback).trim();
   const match = raw.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
@@ -226646,25 +226656,16 @@ async function handleLookupBooking(req, res) {
       }
       const moreExist = sorted.length > 10;
       const entriesSource = moreExist ? sorted.slice(0, 10) : sorted;
-      const names = entriesSource.map(
-        ({ data }) => String(data.guestName || "").trim().toLowerCase()
-      );
-      const allShareName = names.length > 0 && names.every((n2) => n2.length > 0 && n2 === names[0]);
-      const entries = entriesSource.map(({ id, data }) => {
-        const entry = {
-          id,
-          bookingRef: data.bookingRef,
-          checkIn: data.checkIn,
-          checkOut: data.checkOut,
-          numNights: data.numNights,
-          roomType: data.roomType,
-          status: data.status
-        };
-        if (allShareName) {
-          entry.guestName = data.guestName;
-        }
-        return entry;
-      });
+      const entries = entriesSource.map(({ id, data }) => ({
+        id,
+        bookingRef: data.bookingRef,
+        maskedEmail: maskEmail(String(data.guestEmail || "")),
+        checkIn: data.checkIn,
+        checkOut: data.checkOut,
+        numNights: data.numNights,
+        roomType: data.roomType,
+        status: data.status
+      }));
       return res.status(200).json({
         success: true,
         data: {

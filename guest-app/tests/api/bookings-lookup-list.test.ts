@@ -1,10 +1,11 @@
-// Per MBP / decision #123 (2026-07-24) — the privacy-preserving
-// multi-booking picker for `/my-booking`. The existing
-// `bookings-lookup.test.ts` mocks the entire handler
-// (`handleLookupBooking = vi.fn()`) so it doesn't actually
-// test the real behavior. This file imports the real
-// apiRouter and mocks only the firebase-admin module,
-// matching the pattern in `bookings-create.test.ts`.
+// Per MBP / decisions #123 (2026-07-24) + #126 (2026-07-25) —
+// the privacy-preserving multi-booking picker for
+// `/my-booking`. The existing `bookings-lookup.test.ts`
+// mocks the entire handler (`handleLookupBooking = vi.fn()`)
+// so it doesn't actually test the real behavior. This file
+// imports the real apiRouter and mocks only the
+// firebase-admin module, matching the pattern in
+// `bookings-create.test.ts`.
 //
 // Coverage:
 // - `kind: "single"` is the response for ref+token,
@@ -12,12 +13,14 @@
 //   with 1 match (backward-compat default).
 // - `kind: "list"` with `bookings[]` + `moreExist` is the
 //   response for email-alone with 2+ matches.
-// - "Single-name mode" (every match shares the same
-//   trimmed+lowercased `guestName`) attaches `guestName`
-//   on every row.
-// - "Multi-name mode" (mixed names) omits `guestName` on
-//   every row. The picker never tells the client which
-//   mode triggered — the omission is the privacy signal.
+// - The list row shape is uniform regardless of whether
+//   the bookings behind the email share a name or not
+//   (decision #126 — earlier "single-name mode" leaked the
+//   full name to anyone with email access; the new shape
+//   omits `guestName` entirely).
+// - Every row carries a `maskedEmail` echo of the search
+//   key (e.g. `j***@gmail.com`) so the legit user can
+//   confirm "yes, the search keyed on the email I typed".
 // - 11+ matches → `moreExist: true`, 10th row is the last
 //   displayed (11th is the sentinel, never returned).
 // - Sort: `checkIn` desc, `createdAt` desc tiebreaker.
@@ -192,9 +195,12 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.data).not.toHaveProperty("bookings");
   });
 
-  test("email-alone with 2+ matches returns kind: list (single-name mode attaches guestName)", async () => {
+  test("email-alone with 2+ matches returns kind: list with maskedEmail and NO guestName (decision #126)", async () => {
     // Two stays under the same email, same name — clearly the
-    // same person. The list should expose guestName on each row.
+    // same person. Per #126 the picker still does NOT expose
+    // guestName on the wire (earlier "single-name mode"
+    // leaked the full name to anyone with email access).
+    // Every row carries a maskedEmail echo instead.
     mockBookings = [
       {
         id: "b1",
@@ -239,16 +245,23 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     // Sorted by checkIn desc — the September stay first.
     expect(body.data.bookings[0].bookingRef).toBe("SI-20260601-001");
     expect(body.data.bookings[1].bookingRef).toBe("SI-20260415-002");
-    // Single-name mode: guestName attached on every row.
-    expect(body.data.bookings[0].guestName).toBe("Maria Santos");
-    expect(body.data.bookings[1].guestName).toBe("Maria Santos");
+    // Decision #126: guestName is NEVER on the wire, even when
+    // every match is the same person.
+    expect(body.data.bookings[0]).not.toHaveProperty("guestName");
+    expect(body.data.bookings[1]).not.toHaveProperty("guestName");
+    // maskedEmail echo on every row.
+    expect(body.data.bookings[0].maskedEmail).toBe("m***@example.com");
+    expect(body.data.bookings[1].maskedEmail).toBe("m***@example.com");
   });
 
-  test("email-alone with mixed names (multi-name mode) OMITS guestName on every row", async () => {
+  test("email-alone with mixed names (multi-name case) STILL omits guestName (uniform row shape)", async () => {
     // Shared email between two guests (e.g. spouses). The
-    // picker must NOT reveal either name to the other. The
-    // omission is the privacy signal; the client never needs
-    // to know which mode triggered.
+    // picker must NOT reveal either name to the other. Per
+    // #126 the row shape is now uniform: every list
+    // response omits guestName, regardless of whether the
+    // names match. The "single vs multi-name mode" branch
+    // was retired in #126 because even single-name mode was
+    // a name-leak vector.
     mockBookings = [
       {
         id: "b1",
@@ -289,35 +302,55 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.success).toBe(true);
     expect(body.data.kind).toBe("list");
     expect(body.data.bookings).toHaveLength(2);
-    // Multi-name mode: guestName absent on every row.
+    // Multi-name case: guestName absent (same as single-name
+    // case — uniform shape after #126).
     expect(body.data.bookings[0]).not.toHaveProperty("guestName");
     expect(body.data.bookings[1]).not.toHaveProperty("guestName");
+    // maskedEmail echo on every row.
+    expect(body.data.bookings[0].maskedEmail).toBe("f***@example.com");
+    expect(body.data.bookings[1].maskedEmail).toBe("f***@example.com");
   });
 
-  test("mixed-case same-name still resolves to single-name mode (case-insensitive compare)", async () => {
-    // Per spec QA: "Mixed-case guestName (Maria Santos vs
-    // maria santos) → treated as the same person". The
-    // comparison is `.trim().toLowerCase()`.
+  test("maskedEmail uses first char + *** + full domain (RA 10173 surface)", async () => {
+    // The list response query is filtered to
+    // guestEmail === searchInput, so every row shares the
+    // same email. What changes between rows is the name
+    // (sometimes), the dates, the room — but the masked
+    // echo on the wire is uniform. This test pins the
+    // exact format so a future refactor can't accidentally
+    // leak the full local part (the PII we care about).
     mockBookings = [
-      { id: "b1", bookingRef: "REF-001", guestEmail: "u@example.com", guestName: "Maria Santos",
+      { id: "b1", bookingRef: "REF-001", guestEmail: "jane.doe@gmail.com", guestName: "Jane Doe",
         checkIn: ts(new Date("2026-09-10").getTime()), checkOut: ts(new Date("2026-09-13").getTime()),
         numNights: 3, roomType: "std", status: "confirmed",
         createdAt: ts(new Date("2026-06-01").getTime()) },
-      { id: "b2", bookingRef: "REF-002", guestEmail: "u@example.com", guestName: "maria santos  ", // mixed case + trailing space
+      { id: "b2", bookingRef: "REF-002", guestEmail: "jane.doe@gmail.com", guestName: "Jane Doe",
         checkIn: ts(new Date("2026-05-10").getTime()), checkOut: ts(new Date("2026-05-12").getTime()),
         numNights: 2, roomType: "std", status: "checked-out",
         createdAt: ts(new Date("2026-04-15").getTime()) }
     ];
 
-    const req = mockRequest({ guestEmail: "u@example.com", turnstileToken: "mock_token" });
+    const req = mockRequest({ guestEmail: "jane.doe@gmail.com", turnstileToken: "mock_token" });
     const res = mockResponse();
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
     const body = res.json.mock.calls[0][0];
     expect(body.data.kind).toBe("list");
-    expect(body.data.bookings[0].guestName).toBeTruthy();
-    expect(body.data.bookings[1].guestName).toBeTruthy();
+    expect(body.data.bookings).toHaveLength(2);
+    // The exact format is load-bearing — `j***@gmail.com` is
+    // what the guest sees; if this drifts to e.g. `jane@…`
+    // the local part leaks. Pin both rows.
+    expect(body.data.bookings[0].maskedEmail).toBe("j***@gmail.com");
+    expect(body.data.bookings[1].maskedEmail).toBe("j***@gmail.com");
+    // Defensive: no row leaks `guestName` (the original
+    // leak vector that #126 closed).
+    expect(body.data.bookings[0]).not.toHaveProperty("guestName");
+    expect(body.data.bookings[1]).not.toHaveProperty("guestName");
+    // And the full guestEmail is never echoed back (only
+    // the masked form).
+    expect(body.data.bookings[0]).not.toHaveProperty("guestEmail");
+    expect(body.data.bookings[1]).not.toHaveProperty("guestEmail");
   });
 
   test("11+ matches returns moreExist: true with 10 entries (11th is sentinel)", async () => {
@@ -351,6 +384,11 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.data.kind).toBe("list");
     expect(body.data.bookings).toHaveLength(10);
     expect(body.data.moreExist).toBe(true);
+    // Every row in the capped list carries the masked email.
+    body.data.bookings.forEach((row: any) => {
+      expect(row.maskedEmail).toBe("m***@example.com");
+      expect(row).not.toHaveProperty("guestName");
+    });
   });
 
   test("sort: checkIn desc, createdAt desc tiebreaker", async () => {

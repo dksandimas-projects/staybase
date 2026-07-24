@@ -71,6 +71,26 @@ function dateKeyFromDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+// Per decision #126 (2026-07-25): the multi-booking picker
+// surfaces a masked email instead of `guestName` so the
+// list never reveals a name to anyone with email access
+// (spouse, ex-partner, shared family inbox). The first
+// character of the local part + three asterisks + the full
+// domain keeps the row readable for the legit user
+// ("yes, the search keyed on the email I typed") while
+// leaking nothing new — the attacker already typed this
+// email. The picker is the only consumer.
+function maskEmail(email: string): string {
+  if (!email) return "";
+  const atIndex = email.indexOf("@");
+  if (atIndex <= 0) return "***";
+  const local = email.slice(0, atIndex);
+  const domain = email.slice(atIndex + 1);
+  if (!domain) return "***";
+  const first = local.charAt(0) || "";
+  return `${first}***@${domain}`;
+}
+
 function parseCheckoutTimeToMinutes(timeValue: unknown, fallback = config.checkOutTime || "12:00") {
   const raw = String(timeValue || fallback).trim();
   const match = raw.match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
@@ -3566,21 +3586,34 @@ export async function handleLookupBooking(req: any, res: any) {
       // too). Sort is by `checkIn` desc with `createdAt` desc
       // as the tiebreaker — recent stays first.
       //
-      // Privacy contract (RA 10173):
-      // - The list never reveals folio / balance / payment
-      //   method / discount / email existence beyond what the
-      //   guest already entered.
-      // - "Single-name mode" (every match shares the same
-      //   trimmed lowercased `guestName`) returns the name on
-      //   every row. "Multi-name mode" (mixed names — likely a
-      //   shared email) omits `guestName` so neither party's
-      //   name is revealed. The picker never tells the client
-      //   which mode fired; the omission is the privacy signal.
-      // - The "Booking not found." reply is the same whether
-      //   the email has 0, 1, or many matches (1 → single
-      //   path with enriched shape, >1 → list path with
-      //   capped payload), so this is not an email-existence
-      //   oracle.
+      // Privacy contract (RA 10173) — tightened per decision
+      // #126 (2026-07-25): the picker never returns
+      // `guestName` at all, even when every match is for the
+      // same person. The earlier "single-name mode attaches
+      // guestName / multi-name mode omits it" still leaked
+      // the full name to anyone with access to the email —
+      // a spouse, ex-partner, shared family inbox. Now the
+      // picker exposes a uniform row shape regardless of how
+      // many distinct names are behind the email:
+      //   { id, bookingRef, maskedEmail, checkIn, checkOut,
+      //     numNights, roomType, status }
+      //   • `maskedEmail` is `j***@gmail.com` — first char of
+      //     the local part + *** + the full domain. The
+      //     attacker already typed the email, so the leak
+      //     surface is zero; for the legit user it confirms
+      //     "yes, the search keyed on the email I typed".
+      //   • `guestName` is dropped from the wire entirely.
+      //     The legit user has bookingRef + dates + room +
+      //     status to disambiguate, and the single-booking
+      //     card (rendered after they pick) still shows the
+      //     name behind the existing email-as-second-factor
+      //     click.
+      // - The list still never reveals folio / balance /
+      //   payment method / discount / email existence beyond
+      //   what the guest already entered.
+      // - "Booking not found." is still the same reply for 0
+      //   / 1 / many matches, so this is not an email-
+      //   existence oracle.
       //
       // At 14 rooms an email has at most a handful of
       // bookings; the in-memory sort over an 11-row cap is
@@ -3627,36 +3660,23 @@ export async function handleLookupBooking(req: any, res: any) {
       const moreExist = sorted.length > 10;
       const entriesSource = moreExist ? sorted.slice(0, 10) : sorted;
 
-      // Auto-detect single-name vs multi-name. The trimmed
-      // lowercased comparison is the privacy gate: mixed-case
-      // names ("Maria Santos" vs "maria santos") are the same
-      // person for this purpose, so the guest sees the name on
-      // every row. Mixed literal names (spouses sharing an
-      // inbox) suppress the field on every row.
-      const names = entriesSource.map(({ data }: any) =>
-        String(data.guestName || "").trim().toLowerCase()
-      );
-      const allShareName = names.length > 0
-        && names.every((n: string) => n.length > 0 && n === names[0]);
-
-      const entries = entriesSource.map(({ id, data }: any) => {
-        const entry: any = {
-          id,
-          bookingRef: data.bookingRef,
-          checkIn: data.checkIn,
-          checkOut: data.checkOut,
-          numNights: data.numNights,
-          roomType: data.roomType,
-          status: data.status
-        };
-        // Only attach `guestName` in single-name mode. The
-        // omission is the privacy signal; the picker never
-        // surfaces "multi-name mode" to the client.
-        if (allShareName) {
-          entry.guestName = data.guestName;
-        }
-        return entry;
-      });
+      // Per decision #126 (2026-07-25): row shape is uniform
+      // regardless of whether the bookings behind the email
+      // are by the same person, different people, or mixed.
+      // `guestName` is never attached (it would still be a
+      // name-leak for an attacker with email access); only
+      // `maskedEmail` is included so the legit user can
+      // confirm the search keyed on the email they typed.
+      const entries = entriesSource.map(({ id, data }: any) => ({
+        id,
+        bookingRef: data.bookingRef,
+        maskedEmail: maskEmail(String(data.guestEmail || "")),
+        checkIn: data.checkIn,
+        checkOut: data.checkOut,
+        numNights: data.numNights,
+        roomType: data.roomType,
+        status: data.status
+      }));
 
       return res.status(200).json({
         success: true,

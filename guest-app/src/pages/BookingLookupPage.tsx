@@ -47,15 +47,24 @@ interface BookingData {
   paymentRejectionReason?: string | null;
 }
 
-// Per MBP / decision #123 (2026-07-24): the privacy-preserving
-// picker row shape returned by `kind: "list"` responses. The
-// server omits `guestName` in multi-name mode (likely a shared
-// email) and the picker never tells the client which mode
-// triggered — the field's presence is the only signal.
+// Per MBP / decisions #123 (2026-07-24) + #126 (2026-07-25):
+// the privacy-preserving picker row shape returned by
+// `kind: "list"` responses. Tightened in #126 to drop
+// `guestName` entirely — the earlier "single-name mode
+// attaches guestName / multi-name mode omits it" still
+// leaked the full name to anyone with email access (a
+// spouse, ex-partner, shared family inbox). Now the row is
+// uniform regardless of how many distinct names are behind
+// the email; `maskedEmail` is a low-fidelity echo of the
+// search key (e.g. `j***@gmail.com`) so the legit user can
+// confirm "yes, the search keyed on the email I typed".
+// The single-booking card (rendered after the user picks
+// a row) still shows the full name behind the existing
+// ref+email second factor.
 interface PickerEntry {
   id: string;
   bookingRef: string;
-  guestName?: string;
+  maskedEmail: string;
   checkIn: unknown;
   checkOut: unknown;
   numNights: number;
@@ -567,9 +576,9 @@ export function BookingLookupPage() {
                         <p className="font-mono text-sm font-bold text-gray-950">
                           {entry.bookingRef}
                         </p>
-                        {entry.guestName && (
+                        {entry.maskedEmail && (
                           <p className="mt-0.5 truncate text-xs text-gray-600">
-                            {entry.guestName}
+                            {entry.maskedEmail}
                           </p>
                         )}
                         <p className="mt-0.5 text-xs text-gray-600">
