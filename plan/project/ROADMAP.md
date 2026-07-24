@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 23, 2026 (added guest-store search and category browsing)
+> Last updated: July 24, 2026 (proposed HEIC support post-launch)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -28,7 +28,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 15/23 | See §Phase 12 below |
+| 12 — Post-Launch | 🔄 15/24 | See §Phase 12 below |
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
@@ -179,6 +179,19 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 > Decision #123. Spec: `plan/features/BOOKING-LOOKUP.md §Multi-Booking Picker`. Privacy-preserving list when email-alone path matches >1 booking.
 
 - ⬜ **MBP-01..04** — Server `kind` discriminator + 2 privacy modes (single-name / multi-name) + cap-10 + picker UI + deep link. See `plan/features/BOOKING-LOOKUP.md §Multi-Booking Picker`.
+
+### HEIC Support (HSD) — proposed 2026-07-24
+> Rationale: the `fix/guest-id-pdf-stuck` ship (2026-07-24) made the registration PDF safe against undecodable formats (5s decode timeout + strict MIME-type guard) but still rejects HEIC outright. iPhone guests often hand the front desk HEIC photos from the camera roll because iOS defaults to HEIC (Settings → Camera → Formats → "High Efficiency"), so the reject path is a recurring front-desk friction point. Goal: accept HEIC in the guest ID upload and convert it client-side to JPEG before it ever reaches Storage, so the registration PDF path stays clean and the iPhone workflow just works.
+>
+> Recommended approach: client-side WASM conversion via `heic2any` (or maintained fork) lazy-loaded via dynamic `import()`. Rejected: server-side conversion (Vercel Hobby 12-function cap already tight) and Safari-only passthrough (half-supported formats are worse than full-reject — front-desk staff would have to remember "use a Mac").
+>
+> Spec will live under `plan/features/BOOKINGS-MANAGEMENT.md §Guest ID upload` once the library pin is decided. Branch: `feat/heic-support`. Tentative decision #TBD.
+
+- ⬜ **HSD-01 — Library evaluation** — Pin `heic2any` (or a maintained fork if the upstream is stale) and verify it builds + decodes on Vite 6 + Node 20. Measure: WASM init cost, bundle delta (target < 200KB gzipped, paid only when HEIC is detected), Safari/Chrome/Firefox parity. Fallback plan if install breaks or bundle delta is unacceptable: keep the strict-reject behavior shipped in `fix/guest-id-pdf-stuck` (i.e. do not regress on the safety fix).
+- ⬜ **HSD-02 — Lazy conversion in `handleGuestIdUpload`** — In `admin-app/src/pages/BookingsPage.tsx`, before the existing `ALLOWED_GUEST_ID_MIME_TYPES` guard, branch on `file.type === "image/heic" || file.type === "image/heif"`. Dynamic `import("heic2any")` → convert HEIC blob → wrap in a `new File([blob], "id.jpg", { type: "image/jpeg" })` → feed into the existing `compressImageFile` path. Conversion must not block the UI thread (offload via the library's worker mode if available).
+- ⬜ **HSD-03 — Drop HEIC from the rejection list and update upload card copy** — Remove `"image/heic"` and `"image/heif"` from the `ALLOWED_GUEST_ID_MIME_TYPES` allowlist; replace the upload card helper text `"JPG, PNG, or WebP. Image is compressed before upload."` with `"JPG, PNG, WebP, or HEIC (auto-converted to JPEG before upload)."`. Keep the `accept` attribute set to all four types so the OS picker surfaces HEIC files.
+- ⬜ **HSD-04 — Tests + MD sync** — Regression test that mocks the conversion library and asserts the conversion path runs for HEIC input but is skipped for JPEG/PNG/WebP. Verify the gzipped `admin-app` bundle delta in `vite build` output is < 200KB. Update `BOOKINGS-MANAGEMENT.md §Guest ID upload` (drop the format-guard bullet, add an HEIC-accepted bullet) and add a new entry to `DECISIONS-FEATURES.md` for the chosen library + dynamic-import strategy.
+- ⬜ **HSD-05 — Manual QA on real devices** — Real iPhone HEIC photo (Settings → Camera → High Efficiency) → upload → preview registration PDF in **Chrome** (highest priority — Chrome can't decode HEIC natively, so this is the real test). Also verify Firefox + Safari. Confirm WASM init doesn't block the UI for >2s and that the conversion error path (corrupt HEIC, oversized HEIC) still falls through to the existing 5s decode-timeout toast in the PDF generator.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > BDUX-01..08 + BDUX-05a..05n shipped 2026-07-16 (contract in archive).
