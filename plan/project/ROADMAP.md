@@ -31,7 +31,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 18/25 | See §Phase 12 below |
+| 12 — Post-Launch | 🔄 18/26 | See §Phase 12 below |
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
@@ -177,6 +177,13 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 ### Guest Store Discovery (GSD)
 
 - ⬜ **GSD-01 — Search and category browsing** — combined catalog search + category filters per `plan/features/STORE-GUEST.md §Catalog Discovery`.
+
+### Breakfast Served Persistence (BSP) — confirmed defect 2026-07-24
+> **Observed behavior:** Dashboard → Today's Breakfast → **Mark Served** does not remain served after the real-time booking snapshot refreshes. **Confirmed cause:** `toggleBreakfastServed` writes the `breakfastServed` map through `updateBookingStatus`, and Firestore rules permit the field, but the booking snapshot mapper in `AdminContext.tsx` hydrates `breakfastSelections` and omits `breakfastServed`. Dashboard state therefore receives the booking without the saved map and renders the row as unserved again. Do not treat the existing source-presence test as coverage of persistence; it only checks that the relevant names occur in `DashboardPage.tsx`.
+
+- ⬜ **BSP-01 — Restore persisted served state** — hydrate `breakfastServed` from each booking snapshot so the dashboard reflects the saved per-date/per-guest values after refresh and across staff sessions.
+- ⬜ **BSP-02 — Add behavioral regression coverage** — verify an initially unserved row becomes served, remains served after a simulated snapshot refresh, and can be toggled back; cover write failure feedback so staff are not left with a silent false state.
+- ⬜ **BSP-03 — Manual QA** — with two breakfast guests on the same booking, mark only one served; reload the dashboard and verify the individual state plus remaining-count badge, then confirm a second signed-in staff session sees the same result.
 
 ### Multi-Booking Picker (MBP) — proposed 2026-07-24
 > Decision #123. Spec: `plan/features/BOOKING-LOOKUP.md §Multi-Booking Picker`. Privacy-preserving list when email-alone path matches >1 booking.
