@@ -2225,6 +2225,13 @@ export function BookingsPage() {
     // on "other" works without surprises.
     const purposeOfStay = String(formData.get("purposeOfStay") || "leisure").trim().toLowerCase();
     const otherPurpose = String(formData.get("otherPurpose") || "").trim();
+    // Per GCR-01 follow-up (2026-07-24): Firestore's `updateDoc` rejects
+    // `undefined` as a field value, so the `otherPurpose` key must be
+    // OMITTED from the object (not set to `undefined`) when the staff
+    // didn't pick "Other". Spreading the conditional in keeps the
+    // document clean (no null/undefined fields) and matches how
+    // `corporate` is conditionally included in the public
+    // bookings-create payload.
     persistSelectedBooking({
       guestRegistration: {
         nationality: String(formData.get("nationality") || "").trim(),
@@ -2232,7 +2239,7 @@ export function BookingsPage() {
         dateOfBirth: String(formData.get("dateOfBirth") || ""),
         gender: String(formData.get("gender") || ""),
         purposeOfStay,
-        otherPurpose: purposeOfStay === "other" ? otherPurpose : undefined,
+        ...(purposeOfStay === "other" && otherPurpose ? { otherPurpose } : {}),
         idType: String(formData.get("idType") || ""),
         idNumber: String(formData.get("idNumber") || "").trim(),
         emergencyContact: String(formData.get("emergencyContact") || "").trim(),
