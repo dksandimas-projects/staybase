@@ -1512,11 +1512,28 @@ export function BookingsPage() {
     const pdfWindow = window.open("", "_blank");
     pdfWindow?.document.write("<p style=\"font-family: sans-serif; padding: 24px;\">Preparing registration PDF...</p>");
 
+    // Per the 2026-07-24 follow-up to the HEIC decode timeout: the
+    // generator has multiple awaits (brand-logo fetch, Firebase
+    // Storage `getBlob`, FileReader, `canvas.toDataURL`, etc.) and
+    // only the image-decode step is individually bounded. A single
+    // hung await anywhere in the chain leaves the placeholder tab
+    // open forever. This outer timeout guarantees the tab is closed
+    // and a clear error toast is shown no matter where the hang is.
+    const PDF_GENERATION_TIMEOUT_MS = 20_000;
+    let timeoutHandle: number | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = window.setTimeout(
+        () => reject(new Error("Registration PDF generation took too long. The guest ID photo may be too large or the network is slow — try again or re-upload a smaller ID.")),
+        PDF_GENERATION_TIMEOUT_MS
+      );
+    });
+
     try {
-      const pdf = new jsPDF({ unit: "mm", format: "a4" });
-      await registerBrandPdfFonts(pdf);
-      const logoDataUrl = await getPdfBrandLogoDataUrl();
-      setPdfFont(pdf, "Inter");
+      const buildAndOpen = async () => {
+        const pdf = new jsPDF({ unit: "mm", format: "a4" });
+        await registerBrandPdfFonts(pdf);
+        const logoDataUrl = await getPdfBrandLogoDataUrl();
+        setPdfFont(pdf, "Inter");
     const pageW = 210;
     const marginL = 15;
     const marginR = pageW - 15;
@@ -1777,14 +1794,21 @@ export function BookingsPage() {
       brandRgb
     );
 
-      const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
-      toast.success(
-        "Registration PDF ready",
-        result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
-      );
+        const result = openPdfOrDownload(pdf, `${b.bookingRef || "booking"}-registration.pdf`, pdfWindow);
+        toast.success(
+          "Registration PDF ready",
+          result === "opened" ? "Opened in a new tab." : "Popup blocked, so the PDF was downloaded instead."
+        );
+        return result;
+      };
+      await Promise.race([buildAndOpen(), timeoutPromise]);
     } catch (error) {
       pdfWindow?.close();
       toast.error("Registration PDF failed", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      if (timeoutHandle !== undefined) {
+        window.clearTimeout(timeoutHandle);
+      }
     }
   };
 
