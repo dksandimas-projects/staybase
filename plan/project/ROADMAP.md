@@ -183,12 +183,22 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 - ⬜ **MBP-01..04** — Server `kind` discriminator + 2 privacy modes (single-name / multi-name) + cap-10 + picker UI + deep link. See `plan/features/BOOKING-LOOKUP.md §Multi-Booking Picker`.
 
-### HEIC Support (HSD) — proposed 2026-07-24
+### HEIC Support (HSD) — proposed 2026-07-24; library eval shipped 2026-07-24
 > Rationale: the `fix/guest-id-pdf-stuck` ship (2026-07-24) made the registration PDF safe against undecodable formats (5s decode timeout + strict MIME-type guard) but still rejects HEIC outright. iPhone guests often hand the front desk HEIC photos from the camera roll because iOS defaults to HEIC (Settings → Camera → Formats → "High Efficiency"), so the reject path is a recurring front-desk friction point. Goal: accept HEIC in the guest ID upload and convert it client-side to JPEG before it ever reaches Storage, so the registration PDF path stays clean and the iPhone workflow just works.
 >
-> Recommended approach: client-side WASM conversion via `heic2any` (or maintained fork) lazy-loaded via dynamic `import()`. Rejected: server-side conversion (Vercel Hobby 12-function cap already tight) and Safari-only passthrough (half-supported formats are worse than full-reject — front-desk staff would have to remember "use a Mac").
+> Recommended approach: client-side WASM conversion via `heic-to` (LGPL-3.0, the actively maintained successor to `heic2any`, tracks libheif 1.20.2) lazy-loaded via dynamic `import()` only when `file.type === "image/heic" || file.type === "image/heif"`. Rejected: server-side conversion (Vercel Hobby 12-function cap already tight), Safari-only passthrough (half-supported formats are worse than full-reject — front-desk staff would have to remember "use a Mac"), and `heic2any` itself (no longer maintained per issue `alexcorvi/heic2any#63`).
 >
-> Spec will live under `plan/features/BOOKINGS-MANAGEMENT.md §Guest ID upload` once the library pin is decided. Branch: `feat/heic-support`. Tentative decision #TBD.
+> **Library eval (HSD-01) — shipped 2026-07-24.** Three candidates were measured on `npm install --no-save` against the current Vite 6 + Node 20 + React 19 stack (results are gzipped sizes of the lazy-loaded chunk, not the initial admin bundle):
+
+> | Package | License | Status | Gzipped (lazy chunk) | Notes |
+> |---|---|---|---|---|
+> | `heic-to@1.5.2` | LGPL-3.0 | Actively maintained (last publish ~1 month ago); tracks libheif 1.20.2 | **~720 KB** | Recommended. Clean API, JPEG + PNG output, well-documented, IIFE/ESM/Next.js builds included. |
+> | `heic-convert@2.1.0` | ISC | Maintained but wraps stale `heic-decode` | ~700-800 KB (heic-decode + jpeg-js + pngjs) | Slightly smaller (ISC is more permissive than LGPL) but the underlying `heic-decode` is semi-stale (last commit Dec 2023) and the savings are negligible. |
+> | `heic2any@0.0.4` | MIT | **Unmaintained** (issue `alexcorvi/heic2any#63`) | ~720 KB | Dead — the original spec's first choice. MIT license is nice but no security updates. |
+>
+> **Budget reality check.** The original spec target was "<200 KB gzipped, paid only when HEIC is detected." That was optimistic — every WASM-based HEIC decoder ships a ~500-720 KB gzipped libheif WASM blob, and the decode glue adds another 200 KB on top. No realistic HEIC library gets close to 200 KB. **720 KB lazy-loaded is the floor.** Cost is paid only by iPhone guests; cached after first HEIC upload. This is acceptable for the admin app (front desk Wi-Fi, internal users).
+>
+> Decision #125 is the formal pick. Spec will live under `plan/features/BOOKINGS-MANAGEMENT.md §Guest ID upload` once HSD-02 lands. Branch: `feat/heic-support`.
 
 - ⬜ **HSD-01 — Library evaluation** — Pin `heic2any` (or a maintained fork if the upstream is stale) and verify it builds + decodes on Vite 6 + Node 20. Measure: WASM init cost, bundle delta (target < 200KB gzipped, paid only when HEIC is detected), Safari/Chrome/Firefox parity. Fallback plan if install breaks or bundle delta is unacceptable: keep the strict-reject behavior shipped in `fix/guest-id-pdf-stuck` (i.e. do not regress on the safety fix).
 - ⬜ **HSD-02 — Lazy conversion in `handleGuestIdUpload`** — In `admin-app/src/pages/BookingsPage.tsx`, before the existing `ALLOWED_GUEST_ID_MIME_TYPES` guard, branch on `file.type === "image/heic" || file.type === "image/heif"`. Dynamic `import("heic2any")` → convert HEIC blob → wrap in a `new File([blob], "id.jpg", { type: "image/jpeg" })` → feed into the existing `compressImageFile` path. Conversion must not block the UI thread (offload via the library's worker mode if available).
