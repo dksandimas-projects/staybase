@@ -3,6 +3,9 @@
     "origin": [
       "https://www.sparkinnbohol.com",
       "https://admin.sparkinnbohol.com",
+      "https://stg.sparkinnbohol.com",
+      "https://stg-admin.sparkinnbohol.com",
+      "https://*.vercel.app",
       "http://localhost:3000",
       "http://localhost:5173"
     ],
