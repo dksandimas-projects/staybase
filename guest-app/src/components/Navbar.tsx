@@ -188,7 +188,7 @@ export function Navbar({ overHero = false }: NavbarProps) {
                 solid ? "text-gray-700 hover:text-primary" : "text-white hover:text-primary-light"
               )}
             >
-              Join Rewards
+              Rewards
             </Link>
           )}
         </div>
@@ -280,7 +280,7 @@ export function Navbar({ overHero = false }: NavbarProps) {
                 className="rounded-lg px-3 py-3 text-sm font-medium text-gray-700"
                 onClick={() => setIsOpen(false)}
               >
-                Join Rewards
+                Rewards
               </Link>
             )}
           </div>
