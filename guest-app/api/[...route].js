@@ -227502,6 +227502,24 @@ if (!resendApiKey) {
 }
 var resend = new Resend(resendApiKey || "re_mock_key");
 
+// server/lib/siteUrl.ts
+function getServerBaseUrl(env = process.env) {
+  const explicit = env.SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  if (env.VERCEL_ENV === "production") {
+    return `https://www.${hotel_config_default.domain}`;
+  }
+  return `https://stg.${hotel_config_default.domain}`;
+}
+function getServerAdminBaseUrl(env = process.env) {
+  const explicit = env.ADMIN_SITE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  if (env.VERCEL_ENV === "production") {
+    return `https://${hotel_config_default.adminDomain}`;
+  }
+  return `https://stg-admin.${hotel_config_default.domain}`;
+}
+
 // ../shared/constants/index.ts
 var DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
 var MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
@@ -228253,10 +228271,10 @@ function generateReceiptPdf(booking) {
   return Buffer.from(doc.output("arraybuffer"));
 }
 function siteUrl(path = "") {
-  return `https://www.${hotel_config_default.domain}${path}`;
+  return `${getServerBaseUrl()}${path}`;
 }
 function adminUrl(path = "") {
-  return `https://${hotel_config_default.adminDomain}${path}`;
+  return `${getServerAdminBaseUrl()}${path}`;
 }
 function lookupUrl(booking) {
   const ref = encodeURIComponent(booking.bookingRef || "");

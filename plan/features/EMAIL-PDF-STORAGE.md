@@ -14,6 +14,8 @@ Covers three related concerns: Resend email flows via Vercel API routes, jsPDF r
 
 All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com` via Resend.
 
+**All links inside emails (CTAs, my-booking magic links, intercom deep links, store-order chat cards, brand assets) are env-aware** (2026-07-24 fix) — they route through `siteUrl()` / `adminUrl()` in `guest-app/server/handlers/email.ts`, which resolve via `getServerBaseUrl()` / `getServerAdminBaseUrl()` in `guest-app/server/lib/siteUrl.ts`. On `VERCEL_ENV=production` → `https://www.${config.domain}`; on `VERCEL_ENV=preview|development` (the Vercel Preview deploy of `dev`) or unset → `https://stg.${config.domain}`. `SITE_URL` / `ADMIN_SITE_URL` env vars override for white-label clients whose staging host doesn't follow the `stg.` convention. See `plan/docs/ENV-SETUP.md` for the env var reference. SEO canonical URLs and OG image URLs stay hardcoded to production — they must always be the real public URL.
+
 | Trigger | API Route | Recipient | When |
 |---|---|---|---|
 | Booking submitted | `/api/email/booking-submitted` | Guest | Immediately after booking creation |
