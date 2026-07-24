@@ -31,7 +31,15 @@ export function Modal({ title, children, footer, open, onClose, className }: Mod
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={onClose}
-            className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm"
+            // z-[60] (not z-40) so the backdrop always sits above any
+            // nested panel — most importantly the booking drawer's panel
+            // (z-50) when a modal opens on top of the drawer. With z-40
+            // the modal backdrop was below the drawer panel and the right
+            // ~480px of the viewport stayed unfaded. See ROADMAP §MBZ
+            // and plan/admin-app/CLAUDE.md §Z-Index Scale.
+            // /60 (not /50) matches QRManagementPage's pattern and is
+            // obviously a "modal is open" signal at a glance.
+            className="fixed inset-0 z-[60] bg-gray-950/60 backdrop-blur-sm"
             aria-hidden="true"
           />
           {isMobile ? (
