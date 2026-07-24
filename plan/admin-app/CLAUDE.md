@@ -93,6 +93,24 @@ The mobile responsive layout is built on the following hooks + components. **Do 
 
 ---
 
+## Z-Index Scale (overlays)
+
+Per `plan/project/ROADMAP.md §Modal Backdrop Z-Index (MBZ)` and `admin-app/src/__tests__/modal-backdrop-z-index.test.ts` — the layering of any new overlay (modal, drawer, sidebar, toast, popover, sticky bar) must respect this scale so modal-on-drawer / modal-on-modal always shows a visible backdrop across the entire viewport.
+
+| Layer | z-index | Used by | Why |
+|---|---|---|---|
+| Page content | (none / 0) | Bookings, Dashboard, Settings body | Default stacking |
+| Sticky header / bottom tab bar | `z-20` / `z-40` | `AdminLayout` header, `BottomTabBar` | Sticky chrome, above page content |
+| Panel — Modal, Drawer, mobile Sidebar | `z-50` | `<DesktopModalPanel>`, `<DesktopDrawerPanel>`, `Sidebar` mobile aside | The visible surface of the overlay |
+| **Backdrop — Modal, Drawer, mobile Sidebar** | **`z-[60]`** | `Modal.tsx`, `Drawer.tsx`, `Sidebar.tsx` | **Must be ABOVE the panel of any other overlay (most commonly the booking drawer's `z-50` panel) so the fade covers the full viewport. Pre-MBZ this was `z-40`, which left the right ~480px of the viewport unfaded when a modal opened on top of the drawer.** |
+| Toast | `z-[100]` | `Toast.tsx` | Top of the stack — toasts must remain visible above every overlay |
+
+**Rule of thumb:** if you add a new overlay and it has a backdrop, the backdrop must be at `z-[60]` (or above any panel that might sit between it and the rest of the page). The next time someone is tempted to write `z-40` on a backdrop, refer them to the regression test.
+
+Fade strength is also standardized: `bg-gray-950/60 backdrop-blur-sm` for Modal, Drawer, and mobile Sidebar. Matches `QRManagementPage.tsx`. Do not reintroduce `/50` without a reason — `/60` is the agreed "modal is open" signal.
+
+---
+
 ## Firebase Usage (admin-app)
 
 | Collection | Operation | Notes |

@@ -150,7 +150,11 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
               onClick={onClose}
-              className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm"
+              // z-[60] + /60 matches the Modal + Drawer backdrop so all
+              // "modal-class" overlays share the same fade strength and
+              // sit above any nested panel. See ROADMAP §MBZ and
+              // plan/admin-app/CLAUDE.md §Z-Index Scale.
+              className="fixed inset-0 z-[60] bg-gray-950/60 backdrop-blur-sm"
               aria-hidden="true"
             />
             <motion.aside
