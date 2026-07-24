@@ -28,9 +28,14 @@ export function BookingRegistrationForm({
     reg?.nationality &&
     reg?.dateOfBirth &&
     reg?.gender &&
+    // Per Decision #121 (2026-07-23): purpose of stay is required at
+    // physical check-in. The "Other" branch needs the free-text reason
+    // captured too — same gate as the shared readiness check.
+    reg?.purposeOfStay &&
     reg?.idNumber &&
     reg?.address &&
-    reg?.emergencyContact;
+    reg?.emergencyContact &&
+    (reg.purposeOfStay.trim().toLowerCase() !== "other" || !!reg?.otherPurpose?.trim());
 
   return (
     <div className="space-y-3">
@@ -64,6 +69,13 @@ export function BookingRegistrationForm({
             <div>
               <span className="text-gray-400">Gender:</span>{" "}
               <span className="font-medium text-gray-800 capitalize">{reg?.gender}</span>
+            </div>
+            <div>
+              <span className="text-gray-400">Purpose of stay:</span>{" "}
+              <span className="font-medium text-gray-800">
+                {reg?.purposeOfStay || "—"}
+                {reg?.purposeOfStay?.trim().toLowerCase() === "other" && reg?.otherPurpose ? ` — ${reg.otherPurpose}` : ""}
+              </span>
             </div>
             <div>
               <span className="text-gray-400">ID Type:</span>{" "}
@@ -151,6 +163,23 @@ export function BookingRegistrationForm({
               </select>
             </label>
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+              Purpose of stay
+              <select
+                name="purposeOfStay"
+                defaultValue={reg?.purposeOfStay ?? "leisure"}
+                className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+              >
+                {/* Per Decision #121 (2026-07-23): the control opens with
+                    Leisure selected. Staff can pick another supported
+                    purpose before saving. "Other" requires a free-text
+                    reason captured in the next field (otherPurpose) and
+                    enforced by the check-in readiness gate. */}
+                <option value="leisure">Leisure</option>
+                <option value="business">Business</option>
+                <option value="other">Other (specify below)</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
               Valid ID Type
               <select
                 name="idType"
@@ -165,6 +194,19 @@ export function BookingRegistrationForm({
               </select>
             </label>
           </div>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+            {/* Per Decision #121: only required when Purpose = Other.
+                Always rendered (rather than conditionally shown) so
+                the staff can pre-type a reason while the guest is
+                thinking — improves the form flow at the front desk. */}
+            Purpose of stay — other reason
+            <input
+              name="otherPurpose"
+              defaultValue={reg?.otherPurpose ?? ""}
+              placeholder='e.g. "wedding", "medical", "long-stay relocation" — required if Purpose = Other'
+              className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+            />
+          </label>
           <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
             ID Number
             <input

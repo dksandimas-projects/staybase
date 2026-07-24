@@ -156,7 +156,7 @@ Room block create/update/cancel goes through `/api/room-blocks/*` so overlapping
 | `hasBreakfast` | boolean | `true` if breakfast add-on purchased |
 | `breakfastRate` | number | Rate per person per night at booking time (locked) |
 | `guestIdPhotoUrl` | string \| null | Firebase Storage URL of government ID photo uploaded by front desk at check-in |
-| `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, ID type/number, emergency contact, vehicle plate, signature status |
+| `guestRegistration` | object | Physical check-in registry data: nationality, address, DOB, gender, **purpose of stay** (`purposeOfStay` + optional `otherPurpose` when `purposeOfStay === "other"`), ID type/number, emergency contact, vehicle plate, signature status. Per Decision #121, `purposeOfStay` defaults to `leisure` and is required at physical check-in; `otherPurpose` is required when the staff picks `other`. |
 | `breakfastSelections` | map | Canonical silog selection store. Wire format `yyyy-mm-dd-guest-n` → selected silog item name; updated by staff in the admin booking drawer and exported by Reports. |
 | `cancellationReason` | string | |
 | `createdAt` | timestamp | |
