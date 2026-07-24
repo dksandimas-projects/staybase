@@ -1,16 +1,19 @@
 # Spark Inn — Build Roadmap & Checklist
-> Living document — update as work progresses
-> Last updated: July 24, 2026 (added modal-backdrop z-index + HEIC support proposals)
+> Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
+> Last updated: July 24, 2026 (marked MBZ-01..04 + ECE-01 as shipped; added off-roadmap env-aware URL fix note; tightened the on-merge update rule)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
 
 ## How to Use This File
 
-- Check off items as they're completed (`⬜` → `✅`)
-- Update "Last updated" date at the top on each edit
-- Add notes under items if there are blockers or decisions made
-- Commit with `docs: update ROADMAP.md` prefix (no version bump)
+- **Must be updated on every merge to `dev`** (per `plan/docs/CONTRIBUTING.md §When to Update Which MD`). The closing the loop is: when a `feat:` / `fix:` / `refactor:` lands, this file gets a `docs:` PR in the same batch. The roadmap is the project's source of truth for "what's open" — drift between the code and the roadmap makes the next person pick wrong work.
+- Check off items as they're completed (`⬜` → `✅`); for `XX-01..05` style items, mark each sub-item or convert to one `✅ **XX**` line with the shipped commit(s).
+- Update "Last updated" date at the top on each edit.
+- Add a one-line `Shipped YYYY-MM-DD — <commit hash>` note to the section header so future readers can find the implementation.
+- **Off-roadmap fixes/featuers** (a `fix:` that wasn't on the roadmap before it shipped) — add a short note under a `### Recently shipped (off-roadmap)` section near the bottom of Phase 12, with the commit hash, so the roadmap still reflects what's actually in the code. Don't leave the implementation unrecorded.
+- Add notes under items if there are blockers or decisions made.
+- Commit with `docs: update ROADMAP.md` prefix (no version bump).
 - **This file holds current status and open work only.** Completed-phase checklists, shipped audit-fix batches, and closed findings live in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md` (historical, do not load routinely) and in Git history. When a phase or fix batch fully ships, move its detail to the archive and keep a one-line ✅ status here.
 
 ---
@@ -28,7 +31,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 15/25 | See §Phase 12 below |
+| 12 — Post-Launch | 🔄 17/25 | See §Phase 12 below |
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
@@ -169,7 +172,7 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Email Content Enhancements (ECE)
 
-- ⬜ **ECE-01 — House Rules in payment-confirmation email** — reuse the existing setting, omit when blank, include in preview.
+- ✅ **ECE-01 — House Rules in payment-confirmation email** — Shipped 2026-07-24 (`9751ca7`, `feat/email-house-rules` → `dev`). Reuses `settings.websiteContent.houseRules`; `sendBookingTrigger` loads the doc non-transactionally only for the `payment-confirmed` action (other triggers skip the round-trip). Card omitted entirely when blank or whitespace-only; rendered via the existing `escapeHtml` helper to prevent injection. Preview handler accepts `houseRules` in the request body so staff can sanity-check the card before saving. See `plan/features/EMAIL-PDF-STORAGE.md §Email Content Checklist` + `guest-app/tests/api/email-house-rules.test.ts` (10 tests).
 
 ### Guest Store Discovery (GSD)
 
@@ -193,15 +196,15 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 - ⬜ **HSD-04 — Tests + MD sync** — Regression test that mocks the conversion library and asserts the conversion path runs for HEIC input but is skipped for JPEG/PNG/WebP. Verify the gzipped `admin-app` bundle delta in `vite build` output is < 200KB. Update `BOOKINGS-MANAGEMENT.md §Guest ID upload` (drop the format-guard bullet, add an HEIC-accepted bullet) and add a new entry to `DECISIONS-FEATURES.md` for the chosen library + dynamic-import strategy.
 - ⬜ **HSD-05 — Manual QA on real devices** — Real iPhone HEIC photo (Settings → Camera → High Efficiency) → upload → preview registration PDF in **Chrome** (highest priority — Chrome can't decode HEIC natively, so this is the real test). Also verify Firefox + Safari. Confirm WASM init doesn't block the UI for >2s and that the conversion error path (corrupt HEIC, oversized HEIC) still falls through to the existing 5s decode-timeout toast in the PDF generator.
 
-### Modal Backdrop Z-Index (MBZ) — proposed 2026-07-24
-> Discovered while checking the CWB (Confirm with Balance) and PaymentSuccessModal flows on the live dev branch: when a modal opens on top of the booking drawer, the right ~480px of the viewport (where the drawer panel sits) shows **no faded background**. The modal's own backdrop and the drawer's own backdrop are both `z-40`, while both panels are `z-50` — so a panel rendered later in the DOM correctly covers an earlier panel, but a modal backdrop can never cover a drawer panel (lower z-index). The visual symptom is exactly the one reported: "no faded background when the booking drawer or other modal is opened" — most obvious on the verify-payment, confirm-with-balance, record-payment, apply-discount, add-charge, refund, and unpaid-checkout modals, all of which can be opened from inside the booking drawer.
+### Modal Backdrop Z-Index (MBZ) — proposed 2026-07-24 · ✅ shipped 2026-07-24 (`6731aea`, `fix/modal-backdrop-z-index` → `dev`)
+> Discovered while checking the CWB (Confirm with Balance) and PaymentSuccessModal flows on the live dev branch: when a modal opens on top of the booking drawer, the right ~480px of the viewport (where the drawer panel sits) shows **no faded background**. The modal's own backdrop and the drawer's own backdrop were both `z-40`, while both panels were `z-50` — so a panel rendered later in the DOM correctly covered an earlier panel, but a modal backdrop could never cover a drawer panel (lower z-index). Affects the verify-payment, confirm-with-balance, record-payment, apply-discount, add-charge, refund, and unpaid-checkout modals, all of which can be opened from inside the booking drawer.
 >
-> Fix is small (z-index bump + optional opacity bump to match `QRManagementPage`'s `/60` pattern) but worth doing before the next white-label client onboards so the staff UX feels polished. Spec: `plan/features/BOOKINGS-MANAGEMENT.md` + `plan/admin-app/CLAUDE.md` (z-index scale). Branch: `fix/modal-backdrop-z-index`.
+> Fix shipped: backdrop z-index bumped to `z-[60]` and fade to `bg-gray-950/60` in `Modal.tsx`, `Drawer.tsx`, and mobile `Sidebar.tsx`. Panels stay at `z-50`; toasts stay at `z-[100]`. New "Z-Index Scale" section in `plan/admin-app/CLAUDE.md` documents the agreed layer order so the next overlay lands at the right z-index on the first try. 7 regression tests in `admin-app/src/__tests__/modal-backdrop-z-index.test.ts`.
 
-- ⬜ **MBZ-01 — Bump modal + drawer backdrop z-index above the panel** — In `admin-app/src/components/Modal.tsx` and `admin-app/src/components/Drawer.tsx`, change the backdrop `className` from `fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm` → `fixed inset-0 z-[60] bg-gray-950/50 backdrop-blur-sm`. Add a short code comment explaining that the backdrop must sit above any nested panel so modal-on-drawer (and any future modal-on-modal) flow is correct. Both panels stay at `z-50`. Toasts stay at `z-[100]` (already correctly above the modal layer).
-- ⬜ **MBZ-02 — Strengthen the fade to match the rest of the admin** — Bump the backdrop from `bg-gray-950/50` to `bg-gray-950/60` in `Modal.tsx`, `Drawer.tsx`, and the mobile `Sidebar.tsx` (so all three "modal-class" backdrops are uniform). Matches the existing `QRManagementPage.tsx` pattern (`bg-gray-950/60`). `/60` reads as an obvious "modal is open" signal at a glance without going full opaque.
-- ⬜ **MBZ-03 — Regression test + manual QA matrix** — Add a new `admin-app/src/__tests__/modal-backdrop-z-index.test.ts` that asserts the backdrop classes in `Modal.tsx` and `Drawer.tsx` now include `z-[60]` and `bg-gray-950/60` (matches the pattern used by `pdf-generation-repair.test.ts`). Manual QA: open the booking drawer → open "Verify payment" modal → confirm the right ~480px (drawer panel area) is visibly faded. Repeat for Confirm with Balance, Record Onsite Payment, Apply Discount, Add Charge, Record Refund, Unpaid Checkout, and Walk-in Booking. Both `bg-gray-950/60` and the blur should be visible across the entire viewport.
-- ⬜ **MBZ-04 — Doc sync** — Add a short z-index scale note to `plan/admin-app/CLAUDE.md` (e.g. `toast z-[100] > modal/drawer backdrop z-[60] > panel z-50 > sidebar z-50 > page content`) so the next person adding a new overlay knows where to land it. Bump the "Last opened" footer if `BOOKINGS-MANAGEMENT.md` lists any z-index numbers.
+- ✅ **MBZ-01 — Bump modal + drawer backdrop z-index above the panel** — `z-40` → `z-[60]` in `Modal.tsx` + `Drawer.tsx`; code comments explain the stacking context.
+- ✅ **MBZ-02 — Strengthen the fade to match the rest of the admin** — `bg-gray-950/50` → `bg-gray-950/60` in `Modal.tsx` + `Drawer.tsx` + mobile `Sidebar.tsx`; matches `QRManagementPage`'s pattern.
+- ✅ **MBZ-03 — Regression test + manual QA matrix** — `admin-app/src/__tests__/modal-backdrop-z-index.test.ts` (7 tests): pins the new classes, guards against `z-40` / `/50` regression, asserts panel still `z-50` and toast still `z-[100]`.
+- ✅ **MBZ-04 — Doc sync** — New "Z-Index Scale (overlays)" section in `plan/admin-app/CLAUDE.md` documents the agreed layer order + fade strength with a regression-test reference.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > BDUX-01..08 + BDUX-05a..05n shipped 2026-07-16 (contract in archive).
@@ -286,6 +289,15 @@ Report: `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md`. Sections 1–3 audited; 4–5
 - ⬜ **HIGH-1 — Email-based booking match trusts unverified `email` token claims.** `authenticateUser` never surfaces `email_verified`; `linkBookingsByEmail`, `handleListMemberStays`, and `findBooking` all grant access on `guestEmail == token.email`. Attacker can link, read (stays projection leaks `bookingRef` + `lookupToken` → public cancel), and act on stranger bookings. Fix: require `email_verified === true` before any email-based booking match; verify email on email/password signup. See `plan/docs/GOTCHAS.md §Auth & Security` + `plan/features/SPARK-REWARDS.md §Known Issues`.
 
 _No CRITICAL/HIGH from Sections 1–2 (highest was MED-1: manual points adjustment is a client-side write; see report + `GOTCHAS.md §Security & PII`)._
+
+---
+
+## Recently shipped (off-roadmap)
+
+> Quick log of `feat:` / `fix:` commits that weren't on the roadmap when they shipped, so the file still reflects what's actually in the code. Format: `YYYY-MM-DD — short title — commit hash — branch.`
+
+- **2026-07-24 — every email + QR link respects the current environment** — `aef6b26`, `fix/env-aware-emails-and-qr` → `dev`. Before this fix, every link emitted by the server (`siteUrl()` / `adminUrl()` in `email.ts`) was hardcoded to `https://www.<config.domain>`, and the admin QR generator hardcoded `https://<config.domain>/intercom/...`. The fix adds `guest-app/server/lib/siteUrl.ts` with `getServerBaseUrl()` / `getServerAdminBaseUrl()` (VERCEL_ENV-based resolution + `SITE_URL` / `ADMIN_SITE_URL` env-var override for white-label) and routes the admin QR through the existing `getApiBaseUrl()` helper. SEO canonical + OG image URLs stay hardcoded to production by design. 19 new tests (`guest-app/tests/api/site-url.test.ts`, `admin-app/src/__tests__/env-aware-qr-intercom-url.test.ts`). Docs: `plan/docs/ENV-SETUP.md` (new `SITE_URL` / `ADMIN_SITE_URL` env vars), `plan/features/EMAIL-PDF-STORAGE.md` (env-aware email note), `plan/features/QR-MANAGEMENT.md` (new "QR URL env-awareness" section + operational rule that real printable QRs must be generated from the production admin).
+- **2026-07-24 — modal/drawer/sidebar backdrop now sits above any nested panel (MBZ)** — `6731aea`, `fix/modal-backdrop-z-index` → `dev`. (Logged here for the off-roadmap fix pre-MBZ-proposal timeline; the structured MBZ-01..04 entries are now ✅ in §Phase 12.)
 
 ---
 
