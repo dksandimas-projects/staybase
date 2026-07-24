@@ -494,7 +494,21 @@ function bookingSubmittedEmail(booking: any) {
   });
 }
 
-function paymentConfirmedEmail(booking: any) {
+// Per ECE-01 (2026-07-24, plan/project/ROADMAP.md §ECE-01): the
+// payment-confirmed email may include a "House rules" card sourced
+// from `settings.websiteContent.houseRules` so the guest arrives
+// knowing the property's expectations. Omitted entirely when the
+// setting is blank — no empty card, no fallback copy. Loaded by
+// `sendBookingTrigger` from Firestore; the preview handler accepts
+// it from the request body so staff can sanity-check the email.
+function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
+  const trimmedRules = typeof houseRules === "string" ? houseRules.trim() : "";
+  const houseRulesBlock = trimmedRules
+    ? card(
+        "House rules",
+        `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(trimmedRules)}</p>`
+      )
+    : "";
   return emailLayout({
     preheader: `Payment received for booking ${booking.bookingRef}.`,
     eyebrow: "Payment verified",
@@ -503,6 +517,7 @@ function paymentConfirmedEmail(booking: any) {
     body: `
       ${callout("green", "Payment recorded", "Your reservation is one step closer to final confirmation. We will send a separate booking confirmation once the front desk completes the final review.")}
       ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
+      ${houseRulesBlock}
     `,
     ctaLabel: "View booking",
     ctaUrl: lookupUrl(booking)
@@ -1184,6 +1199,24 @@ async function getTomorrowConfirmedBookings() {
 }
 
 export async function sendBookingTrigger(action: EmailAction, booking: any) {
+  // Per ECE-01 (2026-07-24): payment-confirmed email may include a
+  // "House rules" card sourced from `settings.websiteContent.houseRules`.
+  // We only read the doc when the action needs it — every other template
+  // skips the round-trip. The doc is read non-transactionally (settings
+  // updates are infrequent, and a stale rules string on a single email
+  // is harmless — the next email picks up the latest). Omit block on
+  // blank value (no fallback copy).
+  let houseRules: string | null = null;
+  if (action === "payment-confirmed") {
+    try {
+      const doc = await adminDb.collection("settings").doc("websiteContent").get();
+      houseRules = typeof doc.data()?.houseRules === "string" ? doc.data()?.houseRules : null;
+    } catch (error) {
+      console.warn("Failed to load websiteContent.houseRules for payment-confirmed email; continuing without it.", error);
+      houseRules = null;
+    }
+  }
+
   const templates: Record<string, { subject: string; html: string; attachments?: Array<{ filename: string; content: Buffer }> }> = {
     "booking-submitted": {
       subject: `[${config.brandName}] Booking request received: ${booking.bookingRef}`,
@@ -1191,7 +1224,7 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     },
     "payment-confirmed": {
       subject: `[${config.brandName}] Payment confirmed: ${booking.bookingRef}`,
-      html: paymentConfirmedEmail(booking)
+      html: paymentConfirmedEmail(booking, houseRules)
     },
     "booking-confirmed": {
       subject: `[${config.brandName}] Booking confirmed: ${booking.bookingRef}`,
@@ -1397,7 +1430,7 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
 
-  const { template } = req.body || {};
+  const { template, houseRules } = req.body || {};
   if (!template) {
     return res.status(400).json({ success: false, error: "Template parameter is required." });
   }
@@ -1484,7 +1517,9 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         html = bookingSubmittedEmail(mockBooking);
         break;
       case "payment-confirmed":
-        html = paymentConfirmedEmail(mockBooking);
+        // ECE-01: pass houseRules from request body so the staff can
+        // preview exactly what the guest will see.
+        html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed":
         html = bookingConfirmedEmail(mockBooking);
