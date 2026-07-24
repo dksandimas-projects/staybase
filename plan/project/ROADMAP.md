@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — update as work progresses
-> Last updated: July 24, 2026 (proposed HEIC support post-launch)
+> Last updated: July 24, 2026 (added modal-backdrop z-index + HEIC support proposals)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -28,7 +28,7 @@
 | 11.7 — Admin Mobile UX (30 items, v0.90.0) | ✅ Shipped 2026-06-18 | 1 P3 manual QA matrix (§Phase 11.7 below) |
 | 11.8 — Public Content Editability | 🔄 PR 1 + PR 3 shipped | PR 2 deferred post-launch + Q1–Q4 (§Phase 11.8 below) |
 | 11.9 — SEO & Open Graph | 🔄 8/10 | Q2 + verify + post-deploy (§Phase 11.9 below) |
-| 12 — Post-Launch | 🔄 15/24 | See §Phase 12 below |
+| 12 — Post-Launch | 🔄 15/25 | See §Phase 12 below |
 | Plan Audits (June 10: 21 · June 11: 16) · Finance & Reports FIN-01..14 · Reconciliation FR-01..05 · Finance Lifecycle FL-01..20 · Phase 12 Features PF-01..11 · Manual QA QA-01..08 · Live Bugs QA-09..26 · Notification Center NC-01..03 · Post-merge AUD-01..06 · Contract SA-01 | ✅ All closed | 0 — details in archive |
 | Finance Lifecycle Recommendations (FLR, July 14) | 🔄 3/5 | FLR-03 deferred with trigger, FLR-05 open (§below) |
 | Production Environment Split (PC, July 14) | 🔄 4/6 | PC-05, PC-06 (§below) |
@@ -192,6 +192,16 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 - ⬜ **HSD-03 — Drop HEIC from the rejection list and update upload card copy** — Remove `"image/heic"` and `"image/heif"` from the `ALLOWED_GUEST_ID_MIME_TYPES` allowlist; replace the upload card helper text `"JPG, PNG, or WebP. Image is compressed before upload."` with `"JPG, PNG, WebP, or HEIC (auto-converted to JPEG before upload)."`. Keep the `accept` attribute set to all four types so the OS picker surfaces HEIC files.
 - ⬜ **HSD-04 — Tests + MD sync** — Regression test that mocks the conversion library and asserts the conversion path runs for HEIC input but is skipped for JPEG/PNG/WebP. Verify the gzipped `admin-app` bundle delta in `vite build` output is < 200KB. Update `BOOKINGS-MANAGEMENT.md §Guest ID upload` (drop the format-guard bullet, add an HEIC-accepted bullet) and add a new entry to `DECISIONS-FEATURES.md` for the chosen library + dynamic-import strategy.
 - ⬜ **HSD-05 — Manual QA on real devices** — Real iPhone HEIC photo (Settings → Camera → High Efficiency) → upload → preview registration PDF in **Chrome** (highest priority — Chrome can't decode HEIC natively, so this is the real test). Also verify Firefox + Safari. Confirm WASM init doesn't block the UI for >2s and that the conversion error path (corrupt HEIC, oversized HEIC) still falls through to the existing 5s decode-timeout toast in the PDF generator.
+
+### Modal Backdrop Z-Index (MBZ) — proposed 2026-07-24
+> Discovered while checking the CWB (Confirm with Balance) and PaymentSuccessModal flows on the live dev branch: when a modal opens on top of the booking drawer, the right ~480px of the viewport (where the drawer panel sits) shows **no faded background**. The modal's own backdrop and the drawer's own backdrop are both `z-40`, while both panels are `z-50` — so a panel rendered later in the DOM correctly covers an earlier panel, but a modal backdrop can never cover a drawer panel (lower z-index). The visual symptom is exactly the one reported: "no faded background when the booking drawer or other modal is opened" — most obvious on the verify-payment, confirm-with-balance, record-payment, apply-discount, add-charge, refund, and unpaid-checkout modals, all of which can be opened from inside the booking drawer.
+>
+> Fix is small (z-index bump + optional opacity bump to match `QRManagementPage`'s `/60` pattern) but worth doing before the next white-label client onboards so the staff UX feels polished. Spec: `plan/features/BOOKINGS-MANAGEMENT.md` + `plan/admin-app/CLAUDE.md` (z-index scale). Branch: `fix/modal-backdrop-z-index`.
+
+- ⬜ **MBZ-01 — Bump modal + drawer backdrop z-index above the panel** — In `admin-app/src/components/Modal.tsx` and `admin-app/src/components/Drawer.tsx`, change the backdrop `className` from `fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm` → `fixed inset-0 z-[60] bg-gray-950/50 backdrop-blur-sm`. Add a short code comment explaining that the backdrop must sit above any nested panel so modal-on-drawer (and any future modal-on-modal) flow is correct. Both panels stay at `z-50`. Toasts stay at `z-[100]` (already correctly above the modal layer).
+- ⬜ **MBZ-02 — Strengthen the fade to match the rest of the admin** — Bump the backdrop from `bg-gray-950/50` to `bg-gray-950/60` in `Modal.tsx`, `Drawer.tsx`, and the mobile `Sidebar.tsx` (so all three "modal-class" backdrops are uniform). Matches the existing `QRManagementPage.tsx` pattern (`bg-gray-950/60`). `/60` reads as an obvious "modal is open" signal at a glance without going full opaque.
+- ⬜ **MBZ-03 — Regression test + manual QA matrix** — Add a new `admin-app/src/__tests__/modal-backdrop-z-index.test.ts` that asserts the backdrop classes in `Modal.tsx` and `Drawer.tsx` now include `z-[60]` and `bg-gray-950/60` (matches the pattern used by `pdf-generation-repair.test.ts`). Manual QA: open the booking drawer → open "Verify payment" modal → confirm the right ~480px (drawer panel area) is visibly faded. Repeat for Confirm with Balance, Record Onsite Payment, Apply Discount, Add Charge, Record Refund, Unpaid Checkout, and Walk-in Booking. Both `bg-gray-950/60` and the blur should be visible across the entire viewport.
+- ⬜ **MBZ-04 — Doc sync** — Add a short z-index scale note to `plan/admin-app/CLAUDE.md` (e.g. `toast z-[100] > modal/drawer backdrop z-[60] > panel z-50 > sidebar z-50 > page content`) so the next person adding a new overlay knows where to land it. Bump the "Last opened" footer if `BOOKINGS-MANAGEMENT.md` lists any z-index numbers.
 
 ### Booking Drawer UX Refactor (BDUX) — remaining verification
 > BDUX-01..08 + BDUX-05a..05n shipped 2026-07-16 (contract in archive).
