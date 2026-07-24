@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowLeft, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { scaleIn } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 import config from "@config";
@@ -112,6 +112,7 @@ const RESEND_COOLDOWN_MS = 60_000;
 export function BookingLookupPage() {
   const shouldReduceMotion = useReducedMotion();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   // Search state
   const [refInput, setRefInput] = useState("");
@@ -182,6 +183,19 @@ export function BookingLookupPage() {
     setSearchError("");
     setActiveBooking(null);
 
+    // Per fix/mbp-picker-click-turnstile (2026-07-25): track
+    // whether this lookup landed the user on the picker. The
+    // Turnstile token is single-use, so the unconditional
+    // reset in the finally block used to consume it right
+    // after the email-alone lookup returned the list — by the
+    // time the user clicked a row, the token was gone and
+    // the second lookup failed with "Bot verification token
+    // is missing" (the screenshot bug). When the picker is
+    // shown, we keep the token alive so the row click can
+    // reuse it. Reset only when the flow is otherwise done
+    // (single-booking rendered, hard error, or 404).
+    let showedPicker = false;
+
     try {
       // Per BI-02 (booking-intercom audit 2026-07-06): real token
       // only — the "mock_token" sentinel is test-env-only server-side.
@@ -244,6 +258,9 @@ export function BookingLookupPage() {
         // lookup. The picker takes over the result area until
         // the user clicks a row.
         setActiveBooking(null);
+        // Mark so the finally block leaves the Turnstile
+        // token in place — the row click reuses it.
+        showedPicker = true;
         return;
       }
 
@@ -284,11 +301,17 @@ export function BookingLookupPage() {
     } finally {
       // Per BI-02: Turnstile tokens are single-use — siteverify
       // consumed this one whether the lookup succeeded or not.
-      // Reset unconditionally so a follow-up submit (including the
-      // cancel modal, which shares this widget) gets a fresh token.
-      // The previous conditional reset only fired on bot-check
-      // errors, which was masked by the mock_token bypass.
-      resetTurnstile();
+      // Reset so a follow-up submit (including the cancel modal,
+      // which shares this widget) gets a fresh token. The
+      // exception is `kind: "list"` (the picker path): the
+      // user might still click a row, and the row click reuses
+      // the same token. Without this exception the second
+      // lookup fires with `turnstileToken: ""` and the server
+      // rejects it with "Bot verification token is missing"
+      // (the MBP-07 screenshot bug).
+      if (!showedPicker) {
+        resetTurnstile();
+      }
       setIsSearching(false);
     }
   };
@@ -373,6 +396,16 @@ export function BookingLookupPage() {
   // protects every other guest action. A picker click
   // never deep-links straight into a booking without a
   // second factor.
+  //
+  // Per fix/mbp-picker-click-turnstile (2026-07-25): we
+  // navigate to `/my-booking?ref=…&email=…` so the URL
+  // reflects the booking the user is viewing (bookmarkable,
+  // refreshable, shareable, Back button works). The
+  // existing useEffect on `searchParams` handles the
+  // auto-lookup, gated on a fresh Turnstile token. The
+  // previous in-place `performLookup` call worked the same
+  // way (same strict ref+email path, same token reuse per
+  // the picker-reset fix above) but didn't update the URL.
   const handlePickerSelect = async (entry: PickerEntry) => {
     const trimmedRef = String(entry.bookingRef || "").trim();
     const trimmedEmail = emailInput.trim();
@@ -386,7 +419,10 @@ export function BookingLookupPage() {
     setPickerMoreExist(false);
     setSearchError("");
     setHasSearched(true);
-    await performLookup(trimmedRef, trimmedEmail);
+    const params = new URLSearchParams();
+    params.set("ref", trimmedRef);
+    params.set("email", trimmedEmail);
+    navigate(`/my-booking?${params.toString()}`, { replace: true });
   };
 
   const handleResendEmail = async () => {
