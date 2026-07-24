@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Calendar, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -47,6 +47,22 @@ interface BookingData {
   paymentRejectionReason?: string | null;
 }
 
+// Per MBP / decision #123 (2026-07-24): the privacy-preserving
+// picker row shape returned by `kind: "list"` responses. The
+// server omits `guestName` in multi-name mode (likely a shared
+// email) and the picker never tells the client which mode
+// triggered — the field's presence is the only signal.
+interface PickerEntry {
+  id: string;
+  bookingRef: string;
+  guestName?: string;
+  checkIn: unknown;
+  checkOut: unknown;
+  numNights: number;
+  roomType: string;
+  status: string;
+}
+
 function toDateInput(value: unknown): string {
   if (!value) return "";
   if (value instanceof Date) {
@@ -86,6 +102,17 @@ export function BookingLookupPage() {
   const [searchError, setSearchError] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [activeBooking, setActiveBooking] = useState<BookingData | null>(null);
+
+  // Per MBP / decision #123 (2026-07-24): when the email-alone
+  // lookup matches >1 booking, the server returns a privacy-
+  // preserving list. The page renders the picker until the
+  // user clicks a row, at which point we re-query with the
+  // picked `bookingRef` + the originally-typed email through
+  // the strict `ref + email` path. The strict path's
+  // `kind: "single"` response renders the existing single-
+  // booking card unchanged.
+  const [pickerResults, setPickerResults] = useState<PickerEntry[] | null>(null);
+  const [pickerMoreExist, setPickerMoreExist] = useState(false);
 
   // Per H2 (hardening batch 2026-06-26): the auth mode
   // used for the most recent successful lookup. The
@@ -181,6 +208,27 @@ export function BookingLookupPage() {
       }
 
       const data: any = result.data;
+
+      // Per MBP / decision #123 (2026-07-24): the email-alone
+      // path returns `kind: "list"` when the email matches >1
+      // booking. The page renders the picker instead of an
+      // auto-picked "most recent" — repeat guests see all
+      // their stays, shared-email users see a privacy-safe
+      // list with names suppressed. Every other path
+      // (ref+token, ref+email, ref alone, token alone, and
+      // email-alone with 1 match) returns `kind: "single"`
+      // and renders the existing single-booking card.
+      const kind = (data?.kind ?? "single") as "single" | "list";
+      if (kind === "list" && Array.isArray(data?.bookings)) {
+        setPickerResults(data.bookings as PickerEntry[]);
+        setPickerMoreExist(Boolean(data?.moreExist));
+        // Clear any stale single-booking state from a prior
+        // lookup. The picker takes over the result area until
+        // the user clicks a row.
+        setActiveBooking(null);
+        return;
+      }
+
       const normalized: BookingData = {
         id: data.id,
         bookingRef: data.bookingRef,
@@ -204,6 +252,11 @@ export function BookingLookupPage() {
         specialRequests: data.specialRequests || "",
         paymentRejectionReason: data.paymentRejectionReason || null
       };
+      // A successful single-booking response clears the
+      // picker (if any) so the result area reverts to the
+      // single-booking card.
+      setPickerResults(null);
+      setPickerMoreExist(false);
       setActiveBooking(normalized);
     } catch (err) {
       console.error("Booking lookup failed:", err);
@@ -277,6 +330,8 @@ export function BookingLookupPage() {
     setHasSearched(false);
     setSearchError("");
     setActiveBooking(null);
+    setPickerResults(null);
+    setPickerMoreExist(false);
     setResendStatus("idle");
     setResendError("");
     setCancelError("");
@@ -289,6 +344,31 @@ export function BookingLookupPage() {
     setLookupAuthMode(null);
     setActiveLookupToken("");
     lastAutoLookupSignatureRef.current = "";
+  };
+
+  // Per MBP / decision #123 (2026-07-24): when the user picks
+  // a row from the privacy-preserving list, re-query through
+  // the strict `ref + email` path. The strict path returns
+  // `kind: "single"` and the existing single-booking card
+  // takes over. This re-validation is the point: the picker's
+  // "happy path" goes through the same auth check that
+  // protects every other guest action. A picker click
+  // never deep-links straight into a booking without a
+  // second factor.
+  const handlePickerSelect = async (entry: PickerEntry) => {
+    const trimmedRef = String(entry.bookingRef || "").trim();
+    const trimmedEmail = emailInput.trim();
+    if (!trimmedRef || !trimmedEmail) {
+      setSearchError("Please re-enter the email you used to book to open this booking.");
+      return;
+    }
+    setRefInput(trimmedRef);
+    setEmailInput(trimmedEmail);
+    setPickerResults(null);
+    setPickerMoreExist(false);
+    setSearchError("");
+    setHasSearched(true);
+    await performLookup(trimmedRef, trimmedEmail);
   };
 
   const handleResendEmail = async () => {
@@ -438,7 +518,80 @@ export function BookingLookupPage() {
       <Navbar />
 
       <section className="mx-auto max-w-4xl px-4 pt-10 pb-20">
-        {!activeBooking ? (
+        {/* Per MBP / decision #123 (2026-07-24): the picker
+            renders here when the email-alone lookup matched
+            >1 booking. The result area cycles between search
+            form → picker (if >1 match) → single-booking card
+            (after the user picks a row). Each state is
+            exclusive. */}
+        {pickerResults && pickerResults.length > 0 ? (
+          <motion.div
+            variants={scaleIn}
+            initial={shouldReduceMotion ? false : "hidden"}
+            animate="visible"
+            className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8"
+            data-testid="booking-picker"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <ListChecks className="h-8 w-8 text-primary" aria-hidden="true" />
+                <h1 className="mt-2 font-heading text-2xl text-gray-950 sm:text-3xl">
+                  We found stays for this email
+                </h1>
+                <p className="mt-1 text-sm text-gray-600">
+                  Pick the stay you want to view. Each one opens the same secure lookup.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleResetSearch}
+                className="text-xs font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline"
+              >
+                Back to search
+              </button>
+            </div>
+
+            <ul className="mt-6 grid gap-3">
+              {pickerResults.map((entry) => {
+                const checkIn = toDateInput(entry.checkIn);
+                const checkOut = toDateInput(entry.checkOut);
+                return (
+                  <li key={entry.id}>
+                    <button
+                      type="button"
+                      onClick={() => handlePickerSelect(entry)}
+                      disabled={isSearching}
+                      className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-left transition hover:border-primary hover:bg-primary-light/20 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-light disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-bold text-gray-950">
+                          {entry.bookingRef}
+                        </p>
+                        {entry.guestName && (
+                          <p className="mt-0.5 truncate text-xs text-gray-600">
+                            {entry.guestName}
+                          </p>
+                        )}
+                        <p className="mt-0.5 text-xs text-gray-600">
+                          {formatStayDate(checkIn)} → {formatStayDate(checkOut)} · {entry.numNights} night{Number(entry.numNights) === 1 ? "" : "s"} · {entry.roomType}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-600">
+                        {String(entry.status || "").replace(/-/g, " ")}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {pickerMoreExist && (
+              <p className="mt-4 rounded-lg border border-dashed border-gray-250 bg-gray-50 px-3 py-2 text-center text-xs text-gray-600">
+                10 most recent — contact the front desk for older stays.
+              </p>
+            )}
+          </motion.div>
+        ) : !activeBooking ? (
           <motion.div
             variants={scaleIn}
             initial={shouldReduceMotion ? false : "hidden"}

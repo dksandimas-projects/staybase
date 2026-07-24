@@ -3556,27 +3556,43 @@ export async function handleLookupBooking(req: any, res: any) {
     }
 
     if (normalizedEmail) {
-      // Email-alone path. Returns the most recent booking
-      // for the email. We sort in memory (the booking-ref
-      // regex guarantees we don't need a `createdAt` index
-      // path, and this avoids a new composite index) and
-      // pick the most recent by `createdAt`. At 14 rooms
-      // an email has at most a handful of bookings; the
-      // in-memory sort over a 50-row cap is fine. For
-      // scale, add a `(guestEmail, createdAt desc)`
-      // composite index in `firestore.indexes.json` and
-      // switch the query to `.orderBy(...).limit(1)`.
+      // Email-alone path. Per MBP / decision #123 (2026-07-24):
+      // returns a privacy-preserving list when the email
+      // matches more than one booking, capped at 10 displayed
+      // + an 11th sentinel that flips `moreExist: true` (no
+      // second query). The 1-match case keeps the existing
+      // single-booking flow (the same `kind: "single"` shape
+      // every other path returns, just from this entry point
+      // too). Sort is by `checkIn` desc with `createdAt` desc
+      // as the tiebreaker — recent stays first.
       //
-      // RA 10173 note: this returns one booking only, so
-      // a shared email address does not enumerate other
-      // guests' stays — the response shape is identical
-      // to the ref+email path. The error message
-      // ("Booking not found.") is the same whether the
-      // email doesn't exist or has no bookings, so this
-      // is not an email-existence oracle.
+      // Privacy contract (RA 10173):
+      // - The list never reveals folio / balance / payment
+      //   method / discount / email existence beyond what the
+      //   guest already entered.
+      // - "Single-name mode" (every match shares the same
+      //   trimmed lowercased `guestName`) returns the name on
+      //   every row. "Multi-name mode" (mixed names — likely a
+      //   shared email) omits `guestName` so neither party's
+      //   name is revealed. The picker never tells the client
+      //   which mode fired; the omission is the privacy signal.
+      // - The "Booking not found." reply is the same whether
+      //   the email has 0, 1, or many matches (1 → single
+      //   path with enriched shape, >1 → list path with
+      //   capped payload), so this is not an email-existence
+      //   oracle.
+      //
+      // At 14 rooms an email has at most a handful of
+      // bookings; the in-memory sort over an 11-row cap is
+      // fine. For scale, add a `(guestEmail, createdAt desc)`
+      // composite index in `firebase/firestore.indexes.json`
+      // and replace the in-memory sort with
+      // `orderBy("createdAt", "desc").limit(11)` (FLR-03
+      // trigger). The contract is index-compatible.
+      const PICKER_LIMIT = 11; // 10 displayed + 1 "more exist" sentinel
       const snapshot = await adminDb.collection("bookings")
         .where("guestEmail", "==", normalizedEmail)
-        .limit(50)
+        .limit(PICKER_LIMIT)
         .get();
 
       if (snapshot.empty) {
@@ -3586,14 +3602,70 @@ export async function handleLookupBooking(req: any, res: any) {
       const sorted = snapshot.docs
         .map((doc: any) => ({ id: doc.id, data: doc.data() }))
         .sort((a: any, b: any) => {
-          const aMs = a.data?.createdAt?.toMillis?.() ?? 0;
-          const bMs = b.data?.createdAt?.toMillis?.() ?? 0;
-          return bMs - aMs;
+          // Primary: checkIn desc. Secondary: createdAt desc.
+          const aCheckIn = a.data?.checkIn?.toMillis?.() ?? 0;
+          const bCheckIn = b.data?.checkIn?.toMillis?.() ?? 0;
+          if (aCheckIn !== bCheckIn) return bCheckIn - aCheckIn;
+          const aCreated = a.data?.createdAt?.toMillis?.() ?? 0;
+          const bCreated = b.data?.createdAt?.toMillis?.() ?? 0;
+          return bCreated - aCreated;
         });
 
-      const top = sorted[0];
-      const bookingData: any = { id: top.id, ...top.data };
-      return await enrichAndRespond(res, bookingData);
+      // 1 match: existing single-booking flow. Same enriched
+      // shape as every other path, just sourced from the
+      // email alone.
+      if (sorted.length === 1) {
+        const top = sorted[0];
+        const bookingData: any = { id: top.id, ...top.data };
+        return await enrichAndRespond(res, bookingData);
+      }
+
+      // 2+ matches: list response. The 11th row (when present)
+      // is the sentinel — never included in entries; its
+      // presence flips `moreExist: true` so the client can
+      // surface the "contact us for older stays" footer.
+      const moreExist = sorted.length > 10;
+      const entriesSource = moreExist ? sorted.slice(0, 10) : sorted;
+
+      // Auto-detect single-name vs multi-name. The trimmed
+      // lowercased comparison is the privacy gate: mixed-case
+      // names ("Maria Santos" vs "maria santos") are the same
+      // person for this purpose, so the guest sees the name on
+      // every row. Mixed literal names (spouses sharing an
+      // inbox) suppress the field on every row.
+      const names = entriesSource.map(({ data }: any) =>
+        String(data.guestName || "").trim().toLowerCase()
+      );
+      const allShareName = names.length > 0
+        && names.every((n: string) => n.length > 0 && n === names[0]);
+
+      const entries = entriesSource.map(({ id, data }: any) => {
+        const entry: any = {
+          id,
+          bookingRef: data.bookingRef,
+          checkIn: data.checkIn,
+          checkOut: data.checkOut,
+          numNights: data.numNights,
+          roomType: data.roomType,
+          status: data.status
+        };
+        // Only attach `guestName` in single-name mode. The
+        // omission is the privacy signal; the picker never
+        // surfaces "multi-name mode" to the client.
+        if (allShareName) {
+          entry.guestName = data.guestName;
+        }
+        return entry;
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          kind: "list",
+          bookings: entries,
+          moreExist
+        }
+      });
     }
 
     if (lookupToken) {
@@ -3640,6 +3712,12 @@ async function enrichAndRespond(res: any, bookingData: any) {
   return res.status(200).json({
     success: true,
     data: {
+      // Per MBP / decision #123: every single-booking response
+      // carries `kind: "single"` so the page can branch
+      // deterministically. Backward-compatible — older clients
+      // that don't read `kind` still get the same fields they
+      // always did.
+      kind: "single",
       id: bookingData.id,
       bookingRef: bookingData.bookingRef,
       guestName: bookingData.guestName,

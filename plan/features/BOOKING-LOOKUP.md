@@ -10,7 +10,7 @@ The `/my-booking` page lets guests retrieve their booking by entering **either**
 
 ---
 
-## Multi-Booking Picker (MBP, decision #123)
+## Multi-Booking Picker (MBP, decision #123) — shipped 2026-07-24
 
 When a guest enters only their email (no ref, no token) and the email matches more than one booking, the page renders a **privacy-preserving picker** instead of silently showing the most-recent one. Repeat guests (the same person with multiple stays) and shared-email households (e.g. spouses who share an inbox) both benefit — repeat guests see all their stays at a glance, and shared-email users see exactly enough to pick the right booking without leaking anyone's identity.
 

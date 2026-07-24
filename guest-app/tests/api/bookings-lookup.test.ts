@@ -492,36 +492,22 @@ describe("/api/bookings/lookup", () => {
       expect(jsonCall.data.id).toBe("booking_1");
     });
 
-    test("email alone returns the most recent booking when several exist for the same email", async () => {
-      // Same email, three bookings at different times. The
-      // handler picks the most recent by `createdAt` so the
-      // guest lands on the booking they're most likely
-      // looking for (their current or upcoming stay, not
-      // some long-cancelled historical one).
+    test("email alone returns the most recent booking when 1 match exists for the email", async () => {
+      // Per MBP / decision #123 (2026-07-24): the email-alone
+      // path with exactly 1 match keeps the existing single-
+      // booking flow (kind: "single" with the enriched shape).
+      // The 2+ match case routes to the privacy-preserving
+      // list — that contract is covered in
+      // `bookings-lookup-list.test.ts`.
       const ts = (iso: string) => {
         const d = new Date(iso);
         return { toDate: () => d, toMillis: () => d.getTime() };
-      };
-      const earlier = ts("2026-01-10T00:00:00.000Z");
-      const later = ts("2026-06-15T00:00:00.000Z");
-      const latest = ts("2026-09-20T00:00:00.000Z");
-      mockBookings["old_booking"] = {
-        ...baseBooking,
-        id: "old_booking",
-        bookingRef: "SI-20260110-001",
-        createdAt: earlier
-      };
-      mockBookings["mid_booking"] = {
-        ...baseBooking,
-        id: "mid_booking",
-        bookingRef: "SI-20260615-001",
-        createdAt: later
       };
       mockBookings["new_booking"] = {
         ...baseBooking,
         id: "new_booking",
         bookingRef: "SI-20260920-001",
-        createdAt: latest
+        createdAt: ts("2026-09-20T00:00:00.000Z")
       };
 
       const res = mockResponse();
@@ -535,6 +521,7 @@ describe("/api/bookings/lookup", () => {
       expect(res.status).toHaveBeenCalledWith(200);
       const jsonCall = (res.json as any).mock.calls[0][0];
       expect(jsonCall.data.id).toBe("new_booking");
+      expect(jsonCall.data.kind).toBe("single");
     });
 
     test("email alone returns 404 with the same generic message when the email has no bookings", async () => {
