@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin, Booking, OnsitePayment, IncidentalCharge, IncidentalChargeCategory } from "../context/AdminContext";
-import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { calculateSeasonalAwareRoomTotal, compressImageFile, getCheckInReadiness, getLatestPaymentReference, getManilaDateInfo, getLockedManualNightlyRate, type BookingRateBreakdown, type PaymentMethodConfig, calculateSeasonalAwareRoomBreakdown, calculateVoucherDiscount, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
@@ -63,21 +63,9 @@ function toDate(value: any): Date | null {
 }
 
 // Per 2026-07-24 (refactor/unify-payment-reference-fields):
-// the canonical payment reference for a booking lives on the
-// most recent entry in the booking's onsitePayments[] ledger as
-// `transactionReference`. Returns the last non-empty value, or
-// `null` when no payment has been recorded yet. Replaces the
-// retired top-level `Booking.paymentReferenceNumber` for every
-// display surface.
-function getLatestPaymentReference(booking: any): string | null {
-  const payments = booking?.onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
-  if (!Array.isArray(payments) || payments.length === 0) return null;
-  for (let i = payments.length - 1; i >= 0; i -= 1) {
-    const ref = payments[i]?.transactionReference;
-    if (ref && String(ref).trim().length > 0) return String(ref);
-  }
-  return null;
-}
+// `getLatestPaymentReference` is now imported from
+// `@spark-inn/shared` so the bookings table, dashboard, drawer
+// header, and reports exports all read the same helper.
 
 function estimateNewTotalPrice(
   booking: Booking,

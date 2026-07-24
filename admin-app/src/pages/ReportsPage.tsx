@@ -1,22 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-
-// Per 2026-07-24 (refactor/unify-payment-reference-fields):
-// the canonical payment reference for a booking lives on the
-// most recent entry in the booking's onsitePayments[] ledger as
-// `transactionReference`. Returns the last non-empty value, or
-// `null` when no payment has been recorded yet. Replaces the
-// retired top-level `Booking.paymentReferenceNumber` for every
-// export surface.
-function getLatestPaymentReference(booking: any): string | null {
-  const payments = booking?.onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
-  if (!Array.isArray(payments) || payments.length === 0) return null;
-  for (let i = payments.length - 1; i >= 0; i -= 1) {
-    const ref = payments[i]?.transactionReference;
-    if (ref && String(ref).trim().length > 0) return String(ref);
-  }
-  return null;
-}
+import { getLatestPaymentReference } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,

@@ -12,6 +12,7 @@ import {
   XCircle
 } from "lucide-react";
 import type { Booking } from "../context/AdminContext";
+import { getLatestPaymentReference } from "@spark-inn/shared";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import { StatusBadge } from "./StatusBadge";
@@ -326,21 +327,6 @@ export function BookingDrawerActionFooter({ primaryAction, onMoreActions, moreAc
       </button>
     </div>
   );
-}
-
-function getLatestPaymentReference(booking: Booking): string | null {
-  // Per 2026-07-24 (refactor/unify-payment-reference-fields):
-  // the canonical payment reference lives on the most recent
-  // entry in the booking's onsitePayments[] ledger. Returns the
-  // `transactionReference` of the last entry, or `null` when no
-  // payment has been recorded yet (still awaiting verification).
-  const payments = (booking as any).onsitePayments as Array<{ transactionReference?: string | null }> | undefined;
-  if (!Array.isArray(payments) || payments.length === 0) return null;
-  for (let i = payments.length - 1; i >= 0; i -= 1) {
-    const ref = payments[i]?.transactionReference;
-    if (ref && String(ref).trim().length > 0) return String(ref);
-  }
-  return null;
 }
 
 function SummaryMetric({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "danger" | "success" }) {

@@ -14,6 +14,7 @@ export * from "./utils/checkin";
 export * from "./utils/dates";
 export * from "./utils/images";
 export * from "./utils/points";
+export * from "./utils/paymentReference";
 export * from "./utils/pricing";
 export * from "./utils/publicSiteCache";
 export * from "./utils/references";
