@@ -16,8 +16,13 @@ describe("Phase 12 discount controls", () => {
   it("sends walk-in discounts and vouchers to the server", () => {
     expect(bookings).toMatch(/discountType: walkinDiscountType/);
     expect(bookings).toMatch(/voucherCode: walkinVoucherCode\.trim\(\)\.toUpperCase\(\)/);
-    expect(context).toMatch(/discountType: booking\.discountType/);
-    expect(context).toMatch(/voucherCode: booking\.voucherCode/);
+    // Per fix/walkin-split-name (2026-07-25): the parameter
+    // name in addWalkinBooking was renamed `booking` → `input`
+    // to reflect that it's an input (not a stored Booking)
+    // and because the function no longer reads a `guestName`
+    // field. The field-flow contract is unchanged.
+    expect(context).toMatch(/discountType: input\.discountType/);
+    expect(context).toMatch(/voucherCode: input\.voucherCode/);
   });
 
   it("persists the online setting from Rate Management", () => {

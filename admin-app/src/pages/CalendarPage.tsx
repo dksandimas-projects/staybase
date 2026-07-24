@@ -98,7 +98,14 @@ export function CalendarPage() {
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [blockReason, setBlockReason] = useState("Maintenance");
   const [blockNotes, setBlockNotes] = useState("");
-  const [guestName, setGuestName] = useState("");
+  // Per fix/walkin-split-name (2026-07-25): the calendar's
+  // "Create Calendar Booking" modal now mirrors the guest
+  // `/book` page — firstName + lastName are collected
+  // separately. The server combines them into
+  // `Booking.guestName` for storage, matching the new
+  // AdminContext.addWalkinBooking contract.
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [guestCount, setGuestCount] = useState(1);
@@ -206,14 +213,17 @@ export function CalendarPage() {
 
   const handleCreateBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selection || !selectedRoom || !selectedRoomType || !guestName.trim()) return;
+    const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
+    if (!selection || !selectedRoom || !selectedRoomType || !trimmedFirst || !trimmedLast) return;
     const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
     const totalPrice = selectedRoomTotal + (hasBreakfast ? breakfastRate * guestCount * selectedNights : 0);
     const result = await addWalkinBooking({
       roomId: selectedRoom.id,
       roomNumber: selectedRoom.roomNumber,
       roomType: selectedRoom.type,
-      guestName: guestName.trim(),
+      firstName: trimmedFirst,
+      lastName: trimmedLast,
       guestEmail: guestEmail.trim() || `calendar-${Date.now()}@example.invalid`,
       guestPhone: guestPhone.trim() || "n/a",
       numGuests: guestCount,
@@ -259,10 +269,11 @@ export function CalendarPage() {
       toast.error("Booking not created", result.error || "Please try another range.");
       return;
     }
-    toast.success("Booking created", `${guestName.trim()} is booked for Room ${selectedRoom.roomNumber}.`);
+    toast.success("Booking created", `${trimmedFirst} ${trimmedLast} is booked for Room ${selectedRoom.roomNumber}.`);
     setIsBookingModalOpen(false);
     setSelection(null);
-    setGuestName("");
+    setFirstName("");
+    setLastName("");
     setGuestEmail("");
     setGuestPhone("");
     setGuestCount(1);
@@ -444,7 +455,15 @@ export function CalendarPage() {
 
       <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)}>
         <form onSubmit={handleCreateBooking} className="space-y-4 text-xs">
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Guest name<input required value={guestName} onChange={(e) => setGuestName(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          {/* Per fix/walkin-split-name (2026-07-25): the
+              calendar booking modal now mirrors the guest
+              `/book` page. First + last name are collected
+              separately (autoComplete hints are the same
+              standard browser-driven fill flow). */}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-2 font-semibold text-gray-700">First name<input required value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" placeholder="Maria" className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+            <label className="flex flex-col gap-2 font-semibold text-gray-700">Last name<input required value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" placeholder="Santos" className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          </div>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Email<input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Phone<input value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Guests<input type="number" min={1} value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value) || 1)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>

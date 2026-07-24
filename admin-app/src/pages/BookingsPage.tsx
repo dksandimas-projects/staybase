@@ -733,7 +733,13 @@ export function BookingsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Walk-in Form States
-  const [guestName, setGuestName] = useState("");
+  // Per fix/walkin-split-name (2026-07-25): the walk-in modal
+  // now mirrors the guest `/book` page — firstName + lastName
+  // are collected separately (two-column grid below) instead
+  // of being shoehorned into a single `guestName` field. The
+  // server combines them into `Booking.guestName` for storage.
+  const [walkinFirstName, setWalkinFirstName] = useState("");
+  const [walkinLastName, setWalkinLastName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [roomType, setRoomType] = useState<string>(() => roomTypes[0]?.value || "");
@@ -2562,8 +2568,13 @@ export function BookingsPage() {
 
   const handleWalkinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!guestName || !roomNumber) {
-      toast.warning("Missing details", "Please fill in the guest name and select an available room.");
+    const trimmedFirst = walkinFirstName.trim();
+    const trimmedLast = walkinLastName.trim();
+    if (!trimmedFirst || !trimmedLast || !roomNumber) {
+      toast.warning(
+        "Missing details",
+        "Please fill in the guest's first and last name and select an available room."
+      );
       return;
     }
 
@@ -2573,7 +2584,8 @@ export function BookingsPage() {
         roomId: rooms.find(r => r.roomNumber === roomNumber)?.id || "",
         roomNumber,
         roomType,
-        guestName,
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
         reminderSentAt: null,
         guestEmail: guestEmail || `walkin-${Date.now()}@example.invalid`,
         guestPhone: guestPhone || "n/a",
@@ -2626,7 +2638,8 @@ export function BookingsPage() {
       });
 
       if (result.success) {
-        setGuestName("");
+        setWalkinFirstName("");
+        setWalkinLastName("");
         setGuestEmail("");
         setGuestPhone("");
         setRoomNumber("");
@@ -2636,7 +2649,10 @@ export function BookingsPage() {
         setWalkinVoucherCode("");
         setWalkinTestRunId("");
         setIsModalOpen(false);
-        toast.success("Walk-in booking created", `Room ${roomNumber} for ${guestName}`);
+        toast.success(
+          "Walk-in booking created",
+          `Room ${roomNumber} for ${trimmedFirst} ${trimmedLast}`
+        );
       } else {
         toast.error("Failed to create walk-in booking", result.error);
       }
@@ -4655,17 +4671,48 @@ export function BookingsPage() {
       >
         <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
           <span className="sr-only">Confirm Reservation</span>
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Guest Full Name
-            <input
-              type="text"
-              required
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              placeholder="Maria Santos"
-              className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
-            />
-          </label>
+          {/* Per fix/walkin-split-name (2026-07-25): walk-in
+              now mirrors the guest `/book` page and collects
+              first + last name separately. We use a flex
+              (not a grid) wrapper so the Phase 11.7 "single
+              column on mobile" rule stays intact — the two
+              fields stack on phones (where two short text
+              inputs side-by-side would be cramped) and sit
+              side-by-side on sm+ (640px+, where the front-
+              desk tablet/desktop lives). The autoComplete
+              hints let the browser's address-book fill drive
+              the input on each form independently. Both
+              fields are required — the server-side
+              WalkinGuestDetailsSchema already enforces this,
+              and the form-level guard in handleWalkinSubmit
+              surfaces a friendlier error before the round
+              trip. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+            <label className="flex flex-1 flex-col gap-2 text-xs font-semibold text-gray-700">
+              Guest First Name
+              <input
+                type="text"
+                required
+                value={walkinFirstName}
+                onChange={(e) => setWalkinFirstName(e.target.value)}
+                placeholder="Maria"
+                autoComplete="given-name"
+                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
+              />
+            </label>
+            <label className="flex flex-1 flex-col gap-2 text-xs font-semibold text-gray-700">
+              Guest Last Name
+              <input
+                type="text"
+                required
+                value={walkinLastName}
+                onChange={(e) => setWalkinLastName(e.target.value)}
+                placeholder="Santos"
+                autoComplete="family-name"
+                className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-gray-50/50 py-2 px-3 text-xs outline-none focus:bg-white"
+              />
+            </label>
+          </div>
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Guest Phone

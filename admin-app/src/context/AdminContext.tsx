@@ -458,7 +458,14 @@ export interface AdminContextType {
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
-  addWalkinBooking: (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
+  // Per fix/walkin-split-name (2026-07-25): the walk-in modal
+  // mirrors the guest `/book` page and collects `firstName` +
+  // `lastName` as separate fields. The server combines them
+  // into `Booking.guestName` for storage (matches the guest
+  // page's wire shape). No more split-on-space kludge on the
+  // client — single-name guests, compound names, and
+  // non-Western name orders all round-trip cleanly.
+  addWalkinBooking: (input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & { firstName: string; lastName: string; totalPriceOverride?: number }) => Promise<{ success: boolean; error?: string }>;
   resendBookingEmail: (bookingId: string, action: string) => Promise<{ success: boolean; error?: string }>;
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15). Bounces a `payment-uploaded`
@@ -1583,10 +1590,26 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
-  const addWalkinBooking = async (booking: Omit<Booking, "id" | "bookingRef" | "createdAt"> & { totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
+  const addWalkinBooking = async (input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & { firstName: string; lastName: string; totalPriceOverride?: number }): Promise<{ success: boolean; error?: string }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const bookingId = doc(collection(db, "bookings")).id;
+
+      // Per fix/walkin-split-name (2026-07-25): the walk-in
+      // modal now collects `firstName` + `lastName` separately
+      // (matching the guest `/book` page). The previous
+      // on-the-wire name-split (a single combined string split
+      // on the first space) silently produced a generic
+      // placeholder for single-name guests, mangled compound
+      // names, and reversed "Last, First" inputs. The server
+      // combines firstName + lastName into `Booking.guestName`
+      // for storage; both fields are sent over the wire
+      // as-collected.
+      const trimmedFirst = String(input.firstName || "").trim();
+      const trimmedLast = String(input.lastName || "").trim();
+      if (!trimmedFirst || !trimmedLast) {
+        return { success: false, error: "First name and last name are required." };
+      }
 
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/create-walkin`, {
         method: "POST",
@@ -1596,24 +1619,24 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         },
         body: JSON.stringify({
           bookingId,
-          roomId: booking.roomId,
-          checkIn: booking.checkIn,
-          checkOut: booking.checkOut,
-          guests: booking.numGuests,
-          hasBreakfast: booking.hasBreakfast,
+          roomId: input.roomId,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          guests: input.numGuests,
+          hasBreakfast: input.hasBreakfast,
           guestDetails: {
-            firstName: booking.guestName.split(" ")[0] || "Guest",
-            lastName: booking.guestName.split(" ").slice(1).join(" ") || "Walkin",
-            email: booking.guestEmail,
-            phone: booking.guestPhone,
-            requests: booking.specialRequests
+            firstName: trimmedFirst,
+            lastName: trimmedLast,
+            email: input.guestEmail,
+            phone: input.guestPhone,
+            requests: input.specialRequests
           },
-          paymentMethod: booking.paymentMethod,
-          status: booking.status,
-          totalPriceOverride: booking.totalPriceOverride,
-          discountType: booking.discountType,
-          voucherCode: booking.voucherCode,
-          testRunId: (booking as any).testRunId || null
+          paymentMethod: input.paymentMethod,
+          status: input.status,
+          totalPriceOverride: input.totalPriceOverride,
+          discountType: input.discountType,
+          voucherCode: input.voucherCode,
+          testRunId: (input as any).testRunId || null
         })
       });
       const data = await res.json();
