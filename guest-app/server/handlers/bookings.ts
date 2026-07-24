@@ -338,7 +338,11 @@ const createBookingSchema = z.object({
   hasBreakfast: z.boolean(),
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
-  discountIdPhotoUrl: z.string().url().max(2048).nullable().refine(storageUrlRefiner, {
+  // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
+  // for staff; the guest client only sends the path. Allow the URL
+  // field to be omitted entirely so the client doesn't have to
+  // include a meaningless `null`.
+  discountIdPhotoUrl: z.string().url().max(2048).nullable().optional().default(null).refine(storageUrlRefiner, {
     message: "discount ID photo URL must point to the project's Firebase Storage bucket"
   }),
   discountIdPhotoPath: z.string().trim().max(512).nullable().optional().default(null),
@@ -871,11 +875,21 @@ export async function handleCreateBooking(req: any, res: any) {
       const subtotal = roomTotal + breakfastTotal;
 
       // 7a. Government Discount Validation
+      // Per X-01 (E2E audit 2026-07-17): anonymous guest uploads must
+      // never mint `getDownloadURL` — that would re-open public reads
+      // on the private `bookings/{bookingId}/discount-id/` bucket.
+      // The client sends only the randomized object path; the
+      // URL is derived server-side from the path for staff
+      // (`/api/storage/signed-url`, staff-only). The path itself
+      // is sufficient evidence the ID was uploaded: it's already
+      // matched against the strict `isExpectedBookingUploadPath`
+      // regex above (prefix + 120-bit `bookingId` + randomized
+      // filename), and `createBookingSchema` rejects non-bucket
+      // URLs.
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
         discountPct = 20;
-        // Verify discount ID is provided client-side
-        if (!discountIdPhotoUrl) {
+        if (!discountIdPhotoPath) {
           throw new Error("Government-mandated discount requires verification ID photo.");
         }
       }
