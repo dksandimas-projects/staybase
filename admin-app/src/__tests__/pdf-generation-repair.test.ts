@@ -129,20 +129,37 @@ describe("PDF generation repair", () => {
     expect(allowed?.[1]).toMatch(/image\/jpeg/);
     expect(allowed?.[1]).toMatch(/image\/png/);
     expect(allowed?.[1]).toMatch(/image\/webp/);
+    // Per HSD-02 (2026-07-24): HEIC/HEIF are no longer in the
+    // post-conversion allowlist because the HEIC branch above
+    // converts them to JPEG before this guard runs. The
+    // rejection now fires on truly unsupported formats (AVIF,
+    // TIFF, BMP, etc.) — the HEIC workflow is served by the
+    // dynamic-imported heic-to converter, not by a "this is
+    // HEIC, give up" reject.
     expect(allowed?.[1]).not.toMatch(/image\/heic/);
     expect(allowed?.[1]).not.toMatch(/image\/heif/);
 
-    // Guard fires before compressImageFile so HEIC never reaches Storage.
+    // The HEIC branch must fire before the allowlist + compress
+    // path so a HEIC blob is converted to JPEG before either of
+    // those checks see it. Order: HEIC_INPUT_MIME_TYPES check
+    // -> allowlist + compress + upload. (Per HSD-02; the
+    // previous contract had allowlist -> compress with no HEIC
+    // branch.)
+    const heicBranchIndex = bookingsPage.indexOf("HEIC_INPUT_MIME_TYPES.has(file.type)");
     const guardIndex = bookingsPage.indexOf("ALLOWED_GUEST_ID_MIME_TYPES.has(file.type)");
-    const compressionIndex = bookingsPage.indexOf("compressImageFile(file,");
+    const compressionIndex = bookingsPage.indexOf("compressImageFile(processedFile,");
+    expect(heicBranchIndex).toBeGreaterThan(-1);
     expect(guardIndex).toBeGreaterThan(-1);
     expect(compressionIndex).toBeGreaterThan(guardIndex);
+    expect(heicBranchIndex).toBeLessThan(guardIndex);
 
-    // Tightened file input to filter the OS picker too.
+    // Tightened file input to filter the OS picker. Per HSD-03
+    // (2026-07-24): HEIC + HEIF are added so iOS Safari's file
+    // picker surfaces HEIC photos in the "Recents" list.
     const guestIdInput = bookingsPage.match(
       /<input[\s\S]*?type="file"[\s\S]*?accept="[^"]*"[\s\S]*?onChange=\{\(event\) =>\s*\{[\s\S]*?handleGuestIdUpload/
     );
-    expect(guestIdInput?.[0]).toMatch(/accept="image\/jpeg,image\/png,image\/webp"/);
+    expect(guestIdInput?.[0]).toMatch(/accept="image\/jpeg,image\/png,image\/webp,image\/heic,image\/heif"/);
   });
 
   it("bounds the image decode so an undecodable ID cannot hang the registration PDF generator", () => {

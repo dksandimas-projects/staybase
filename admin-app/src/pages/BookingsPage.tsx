@@ -2211,12 +2211,22 @@ export function BookingsPage() {
   };
 
   // The PDF generator only knows how to rasterize JPEG/PNG/WebP into a
-  // jsPDF page; HEIC and other browser-undecodable formats would either
-  // hang the registration PDF generator or get uploaded as-is via the
-  // `compressImageFile` fallback. Reject them at the source so the
-  // booking document never carries a format the downstream PDF builder
-  // can't handle. The picker also filters by `accept` (see the file
-  // input below) but that's a hint — this is the enforcement point.
+  // jsPDF page. Two paths land there:
+  //   1. JPEG/PNG/WebP - pass through `compressImageFile` directly.
+  //   2. HEIC/HEIF    - the registration PDF can't decode HEIC and the
+  //                     iPhone "High Efficiency" default hits the
+  //                     previous strict-reject path far too often to
+  //                     leave it. Convert client-side to JPEG via
+  //                     `heic-to` (LGPL-3.0, decision #125) before
+  //                     the compression step. The lib is loaded via
+  //                     dynamic `import()` only on HEIC detection so
+  //                     non-iPhone uploads never pay the ~720 KB
+  //                     gzipped chunk.
+  //
+  // Anything else (AVIF, TIFF, BMP, etc.) is still rejected — the
+  // allowlist is the final enforcement point, the picker `accept`
+  // attribute is just a hint.
+  const HEIC_INPUT_MIME_TYPES = new Set(["image/heic", "image/heif"]);
   const ALLOWED_GUEST_ID_MIME_TYPES = new Set([
     "image/jpeg",
     "image/png",
@@ -2226,7 +2236,32 @@ export function BookingsPage() {
   const handleGuestIdUpload = async (file: File | undefined) => {
     if (!file || !selectedBooking) return;
 
-    if (!file.type || !ALLOWED_GUEST_ID_MIME_TYPES.has(file.type)) {
+    // HEIC path: dynamic-import the WASM decoder, convert to JPEG,
+    // then fall through to the standard compress+upload path with
+    // the resulting `File`. The library uses Web Workers internally
+    // (per its README) so the conversion does not block the UI thread.
+    let processedFile: File = file;
+    if (HEIC_INPUT_MIME_TYPES.has(file.type)) {
+      try {
+        setGuestIdUploadStatus("Converting HEIC to JPEG (first time only, ~720 KB download)...");
+        const { heicTo } = await import("heic-to");
+        const converted = await heicTo({ blob: file, type: "image/jpeg", quality: 0.92 });
+        // Drop the original .heic / .heif extension; the convert
+        // output is now a JPEG blob. Filename is intentionally
+        // simple so downstream `safeName` normalization doesn't have
+        // to deal with the new extension.
+        const originalName = file.name || "guest-id";
+        const baseName = originalName.replace(/\.(heic|heif)$/i, "");
+        processedFile = new File([converted], `${baseName || "guest-id"}.jpg`, { type: "image/jpeg" });
+      } catch (error) {
+        setGuestIdUploadStatus(
+          error instanceof Error
+            ? `Could not convert HEIC image (${error.message}). Please re-capture or convert to JPEG manually.`
+            : "Could not convert HEIC image. Please re-capture or convert to JPEG manually."
+        );
+        return;
+      }
+    } else if (!file.type || !ALLOWED_GUEST_ID_MIME_TYPES.has(file.type)) {
       setGuestIdUploadStatus(
         `Unsupported image format (${file.type || "unknown"}). Please re-capture or convert to JPEG, PNG, or WebP and try again.`
       );
@@ -2235,7 +2270,7 @@ export function BookingsPage() {
 
     try {
       setGuestIdUploadStatus("Compressing guest ID image...");
-      const image = await compressImageFile(file, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
+      const image = await compressImageFile(processedFile, { maxWidth: 1400, maxHeight: 1400, quality: 0.84 });
       setGuestIdUploadStatus("Uploading guest ID to secure storage...");
       const safeName = image.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileRef = storageRef(storage, `bookings/${selectedBooking.id}/guest-id/${Date.now()}-${safeName}`);
@@ -3254,11 +3289,11 @@ export function BookingsPage() {
                     <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-gray-250 bg-gray-50 px-4 py-4 text-center transition hover:border-primary hover:bg-primary-light/30">
                       <span className="text-xs font-bold text-gray-800">Attach Guest ID Photo</span>
                       <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
-                        JPG, PNG, or WebP. Image is compressed before upload.
+                        JPG, PNG, or WebP. HEIC from iPhone cameras is auto-converted to JPEG before upload.
                       </span>
                       <input
                         type="file"
-                        accept="image/jpeg,image/png,image/webp"
+                        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                         className="sr-only"
                         onChange={(event) => {
                           void handleGuestIdUpload(event.currentTarget.files?.[0]);
