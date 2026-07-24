@@ -47,6 +47,7 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | New feature file added | `plan/docs/FILE-STRUCTURE.md` + `CLAUDE.md` TOC |
 | New MD file created | `CLAUDE.md` TOC + this file's ownership table |
 | Major feature/phase completed | `plan/project/context/spark-inn-MASTER-CONTEXT.md` |
+| **A `feat:` / `fix:` / `refactor:` commit lands on `dev`** (roadmap item shipped, OR an off-roadmap fix/feature ships) | `plan/project/ROADMAP.md` — mark the item ✅ with a one-line shipped note + commit hash, or add a "Recently shipped (off-roadmap)" entry. **The roadmap is the source of truth for "what's open" — drift between the code and the roadmap makes the next person pick wrong work. Required on every merge to `dev`.** |
 
 ---
 
