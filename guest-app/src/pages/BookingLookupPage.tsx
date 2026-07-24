@@ -19,7 +19,16 @@ import { useTurnstileToken } from "../hooks/useTurnstileToken";
 interface BookingData {
   id: string;
   bookingRef: string;
-  guestName: string;
+  // Per decision #128 (2026-07-25): the email-alone entry
+  // point on the public /my-booking page no longer reflects
+  // the guest name back to the caller. The strict paths
+  // (ref+email, ref+token, ref alone, token alone) still
+  // include it because they each demonstrate possession of a
+  // non-email secret. The field is optional on the client
+  // shape; the page branches on its presence to hide the
+  // "Lead Guest" section (mirroring the picker's field-
+  // absence signal from decision #126).
+  guestName?: string;
   guestEmail: string;
   guestPhone: string;
   roomId: string;
@@ -759,14 +768,27 @@ export function BookingLookupPage() {
                       </div>
                     </div>
 
-                    <div className="flex gap-3">
-                      <User className="mt-0.5 h-5 w-5 text-primary shrink-0" />
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500 uppercase">Lead Guest</p>
-                        <p className="mt-1 font-semibold text-gray-900">{activeBooking.guestName}</p>
-                        <p className="text-xs text-gray-500">{activeBooking.guestEmail}</p>
+                    {/* Per decision #128 (2026-07-25): the
+                        email-alone 1-match path omits guestName
+                        from the response (no second factor), so
+                        this section hides entirely for that
+                        case. The user can still see their booking
+                        via ref + dates + room + status + email,
+                        and the email itself is reflected back via
+                        the "Email sent to" status line above. The
+                        strict paths (ref+email, ref+token, ref
+                        alone, token alone) still include
+                        guestName and render the full section. */}
+                    {activeBooking.guestName && (
+                      <div className="flex gap-3">
+                        <User className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase">Lead Guest</p>
+                          <p className="mt-1 font-semibold text-gray-900">{activeBooking.guestName}</p>
+                          <p className="text-xs text-gray-500">{activeBooking.guestEmail}</p>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   {activeBooking.specialRequests && (

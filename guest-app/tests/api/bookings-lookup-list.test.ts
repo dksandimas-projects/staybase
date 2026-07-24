@@ -1,5 +1,6 @@
-// Per MBP / decisions #123 (2026-07-24) + #126 (2026-07-25) —
-// the privacy-preserving multi-booking picker for
+// Per MBP / decisions #123 (2026-07-24) + #126 (2026-07-25) +
+// #128 (2026-07-25) — the privacy-preserving multi-booking
+// picker + single-booking card name-suppression for
 // `/my-booking`. The existing `bookings-lookup.test.ts`
 // mocks the entire handler (`handleLookupBooking = vi.fn()`)
 // so it doesn't actually test the real behavior. This file
@@ -21,6 +22,11 @@
 // - Every row carries a `maskedEmail` echo of the search
 //   key (e.g. `j***@gmail.com`) so the legit user can
 //   confirm "yes, the search keyed on the email I typed".
+// - The email-alone 1-match single-booking response
+//   omits `guestName` (decision #128 — no second factor
+//   on the email-alone path; the name is reflected back
+//   only after the caller demonstrates possession of a
+//   non-email secret via the strict paths).
 // - 11+ matches → `moreExist: true`, 10th row is the last
 //   displayed (11th is the sentinel, never returned).
 // - Sort: `checkIn` desc, `createdAt` desc tiebreaker.
@@ -158,12 +164,17 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     vi.clearAllMocks();
   });
 
-  test("email-alone with 1 match returns kind: single (existing single-booking flow)", async () => {
+  test("email-alone with 1 match returns kind: single with NO guestName (decision #128)", async () => {
+    // Per decision #128 (2026-07-25): the email-alone 1-match
+    // path has no second factor, so the single-booking
+    // response omits `guestName`. The strict paths still
+    // include the name — they're separately pinned by the
+    // "ref+email path returns kind: single" test below.
     mockBookings = [{
       id: "b1",
       bookingRef: "SI-20260601-001",
       guestEmail: "maria@example.com",
-      guestName: "Maria Santos",
+      guestName: "Maria Santos", // stored on the doc, but NOT reflected back here
       guestPhone: "09170000000",
       roomId: "r1",
       roomType: "standard-double",
@@ -189,8 +200,11 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.success).toBe(true);
     expect(body.data.kind).toBe("single");
     expect(body.data.bookingRef).toBe("SI-20260601-001");
-    // The single-booking enriched shape is preserved (backward-compat).
-    expect(body.data.guestName).toBe("Maria Santos");
+    // The single-booking enriched shape is preserved (backward-compat)
+    // EXCEPT for the email-alone no-second-factor case, which
+    // omits guestName. The page branches on its presence to
+    // hide the "Lead Guest" section.
+    expect(body.data).not.toHaveProperty("guestName");
     expect(body.data.guestEmail).toBe("maria@example.com");
     expect(body.data).not.toHaveProperty("bookings");
   });
@@ -416,14 +430,20 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.data.bookings[1].bookingRef).toBe("OLD-001");
   });
 
-  test("ref+email path returns kind: single (picker is unreachable from strict paths)", async () => {
+  test("ref+email path returns kind: single WITH guestName (strict path has a second factor)", async () => {
     // Ref must match BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/.
+    // The strict path demonstrates possession of a non-email
+    // secret (the booking ref is in the confirmation email and
+    // is required as a second factor), so per decision #128
+    // the name IS reflected back in the single-booking
+    // response. This is the inverse of the email-alone 1-match
+    // case above.
     mockBookings = [
-      { id: "b1", bookingRef: "SI-20260601-001", guestEmail: "u@example.com", guestName: "Maria",
+      { id: "b1", bookingRef: "SI-20260601-001", guestEmail: "u@example.com", guestName: "Maria Santos",
         checkIn: ts(new Date("2026-09-10").getTime()), checkOut: ts(new Date("2026-09-13").getTime()),
         numNights: 3, roomType: "std", status: "confirmed",
         createdAt: ts(new Date("2026-06-01").getTime()) },
-      { id: "b2", bookingRef: "SI-20260415-002", guestEmail: "u@example.com", guestName: "Maria",
+      { id: "b2", bookingRef: "SI-20260415-002", guestEmail: "u@example.com", guestName: "Maria Santos",
         checkIn: ts(new Date("2026-05-10").getTime()), checkOut: ts(new Date("2026-05-12").getTime()),
         numNights: 2, roomType: "std", status: "checked-out",
         createdAt: ts(new Date("2026-04-15").getTime()) }
@@ -443,6 +463,10 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     const body = res.json.mock.calls[0][0];
     expect(body.data.kind).toBe("single");
     expect(body.data.bookingRef).toBe("SI-20260601-001");
+    // Decision #128: the strict path's second factor (the ref)
+    // means the name IS reflected back. The page renders the
+    // "Lead Guest" section as before.
+    expect(body.data.guestName).toBe("Maria Santos");
     expect(body.data).not.toHaveProperty("bookings");
   });
 

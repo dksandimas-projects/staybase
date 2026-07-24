@@ -226652,7 +226652,7 @@ async function handleLookupBooking(req, res) {
       if (sorted.length === 1) {
         const top = sorted[0];
         const bookingData2 = { id: top.id, ...top.data };
-        return await enrichAndRespond(res, bookingData2);
+        return await enrichAndRespond(res, bookingData2, { omitGuestName: true });
       }
       const moreExist = sorted.length > 10;
       const entriesSource = moreExist ? sorted.slice(0, 10) : sorted;
@@ -226693,7 +226693,7 @@ async function handleLookupBooking(req, res) {
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
   }
 }
-async function enrichAndRespond(res, bookingData2) {
+async function enrichAndRespond(res, bookingData2, options = {}) {
   let roomData = null;
   if (bookingData2.roomId) {
     try {
@@ -226705,36 +226705,39 @@ async function enrichAndRespond(res, bookingData2) {
       console.error("Failed to enrich booking with room data:", roomErr);
     }
   }
+  const data = {
+    // Per MBP / decision #123: every single-booking response
+    // carries `kind: "single"` so the page can branch
+    // deterministically. Backward-compatible — older clients
+    // that don't read `kind` still get the same fields they
+    // always did.
+    kind: "single",
+    id: bookingData2.id,
+    bookingRef: bookingData2.bookingRef,
+    guestEmail: bookingData2.guestEmail,
+    guestPhone: bookingData2.guestPhone,
+    roomId: bookingData2.roomId,
+    roomNumber: bookingData2.roomNumber,
+    roomName: roomData?.name || bookingData2.roomType || "",
+    roomType: bookingData2.roomType,
+    checkIn: bookingData2.checkIn,
+    checkOut: bookingData2.checkOut,
+    numNights: bookingData2.numNights,
+    numGuests: bookingData2.numGuests,
+    ratePerNight: bookingData2.ratePerNight,
+    totalPrice: bookingData2.totalPrice,
+    rateBreakdown: bookingData2.rateBreakdown || null,
+    paymentMethod: bookingData2.paymentMethod,
+    status: bookingData2.status,
+    hasBreakfast: bookingData2.hasBreakfast,
+    specialRequests: bookingData2.specialRequests || ""
+  };
+  if (!options.omitGuestName) {
+    data.guestName = bookingData2.guestName;
+  }
   return res.status(200).json({
     success: true,
-    data: {
-      // Per MBP / decision #123: every single-booking response
-      // carries `kind: "single"` so the page can branch
-      // deterministically. Backward-compatible — older clients
-      // that don't read `kind` still get the same fields they
-      // always did.
-      kind: "single",
-      id: bookingData2.id,
-      bookingRef: bookingData2.bookingRef,
-      guestName: bookingData2.guestName,
-      guestEmail: bookingData2.guestEmail,
-      guestPhone: bookingData2.guestPhone,
-      roomId: bookingData2.roomId,
-      roomNumber: bookingData2.roomNumber,
-      roomName: roomData?.name || bookingData2.roomType || "",
-      roomType: bookingData2.roomType,
-      checkIn: bookingData2.checkIn,
-      checkOut: bookingData2.checkOut,
-      numNights: bookingData2.numNights,
-      numGuests: bookingData2.numGuests,
-      ratePerNight: bookingData2.ratePerNight,
-      totalPrice: bookingData2.totalPrice,
-      rateBreakdown: bookingData2.rateBreakdown || null,
-      paymentMethod: bookingData2.paymentMethod,
-      status: bookingData2.status,
-      hasBreakfast: bookingData2.hasBreakfast,
-      specialRequests: bookingData2.specialRequests || ""
-    }
+    data
   });
 }
 var resolveEarlyCheckinSchema = external_exports.object({

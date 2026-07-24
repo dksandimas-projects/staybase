@@ -10,7 +10,7 @@ The `/my-booking` page lets guests retrieve their booking by entering **either**
 
 ---
 
-## Multi-Booking Picker (MBP, decision #123) — shipped 2026-07-24; **tightened 2026-07-25 (decision #126)**
+## Multi-Booking Picker (MBP, decision #123) — shipped 2026-07-24; **tightened 2026-07-25 (decision #126) + 2026-07-25 (decision #128)**
 
 When a guest enters only their email (no ref, no token) and the email matches more than one booking, the page renders a **privacy-preserving picker** instead of silently showing the most-recent one. Repeat guests (the same person with multiple stays) and shared-email households (e.g. spouses who share an inbox) both benefit — repeat guests see all their stays at a glance, and shared-email users see exactly enough to pick the right booking without leaking anyone's identity.
 
@@ -36,6 +36,7 @@ On 2026-07-25 we closed a remaining leak: **even single-name mode revealed the f
 `POST /api/bookings/lookup` adds a `kind` field to the response payload so the page can branch deterministically:
 
 - `kind: "single"` + the existing booking fields (including `guestName`, `guestEmail`, `roomNumber`, etc.) — the **strict** paths (`ref + token`, `ref + email`, `ref alone`, `token alone`) and the email-alone path when only 1 booking matches. Identical to the current response shape except for the added `kind` field at the top level. Backward-compatible: the page reads `data.kind ?? "single"` so any older client still works.
+  - **Per decision #128 (2026-07-25)**: the email-alone 1-match sub-case drops `guestName` from the response. The strict paths still include the name because they each demonstrate possession of a non-email secret (the booking ref is in the confirmation email; the lookup token is in the magic-link email). The single-booking card on the page branches on `data.guestName` to hide the "Lead Guest" section for the email-alone case (mirroring the picker's field-absence signal from decision #126).
 - `kind: "list"` + `bookings: Array<{ id, bookingRef, maskedEmail, checkIn, checkOut, numNights, roomType, status }>` — the **email-alone** path when >1 booking matches. `guestName` is **never** present (decision #126). `maskedEmail` is always present.
 
 The strict `ref + (email | token)` paths are **unchanged** and always return `kind: "single"`. The picker is only reachable through the email-alone path. The `ref + email` strict path also acts as the page's "deep link" — once a guest picks a row from the picker, the page re-queries with the selected ref + the email they originally typed, and that query flows through the strict path with no PII widening.
@@ -52,7 +53,7 @@ The email-alone path's existing privacy contract (one booking, not a list) was d
 
 - **Cap at 10** (recent): even a single long-time guest has a finite surface; an attacker with their email cannot read 50+ years of stays.
 - **No folio / balance / payment method** in the picker payload — only the same fields the guest already entered (email) plus the public booking summary (ref + dates + room type + status + masked email echo). No new PII is disclosed.
-- **No `guestName` at all** (decision #126, supersedes the earlier "no `guestName` in multi-name mode" line) — even single-name mode would still confirm "yes, this email maps to Maria Santos" to an attacker with email access. Dropping the field entirely closes that vector.
+- **No `guestName` anywhere on the public `/my-booking` page** (decisions #126 + #128). The picker omits it on every row regardless of single-name vs multi-name mode. The single-booking card reached via email-alone (the 1-match case) also omits it because there's no second factor — the user typed only an email. The strict paths (ref + email, ref + token, ref alone, token alone) still include the name because they each demonstrate possession of a non-email secret.
 - **Click → strict `ref + email` lookup** — the page never deep-links straight into a booking without re-running the auth check. The picker's "happy path" is the same auth path that protects every other guest action.
 - **No email-existence oracle** — the same "Booking not found." / "No bookings with this email" reply (whichever copy the page uses) is returned whether the email has 0 matches, 1 match, or many. The page's "10 most recent — contact us for older stays" footer only shows when the picker actually renders, so it doesn't leak counts.
 

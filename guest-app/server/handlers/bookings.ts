@@ -3646,11 +3646,16 @@ export async function handleLookupBooking(req: any, res: any) {
 
       // 1 match: existing single-booking flow. Same enriched
       // shape as every other path, just sourced from the
-      // email alone.
+      // email alone. Per decision #128 (2026-07-25), the
+      // email-alone entry point has no second factor — so
+      // we omit `guestName` from the response. The strict
+      // paths (ref+email, ref+token, ref alone, token alone)
+      // still include the name because they each demonstrate
+      // possession of a non-email secret.
       if (sorted.length === 1) {
         const top = sorted[0];
         const bookingData: any = { id: top.id, ...top.data };
-        return await enrichAndRespond(res, bookingData);
+        return await enrichAndRespond(res, bookingData, { omitGuestName: true });
       }
 
       // 2+ matches: list response. The 11th row (when present)
@@ -3716,7 +3721,11 @@ export async function handleLookupBooking(req: any, res: any) {
   }
 }
 
-async function enrichAndRespond(res: any, bookingData: any) {
+async function enrichAndRespond(
+  res: any,
+  bookingData: any,
+  options: { omitGuestName?: boolean } = {}
+) {
   let roomData: any = null;
   if (bookingData.roomId) {
     try {
@@ -3729,36 +3738,53 @@ async function enrichAndRespond(res: any, bookingData: any) {
     }
   }
 
+  // Per decision #128 (2026-07-25): the public /my-booking
+  // page must not reflect the guest name back to anyone who
+  // arrives via email-alone (no second factor). The
+  // `omitGuestName` option drops `guestName` from the
+  // single-booking response shape when the only auth
+  // credential was the email. The strict paths (ref+email,
+  // ref+token, ref alone, token alone) still include the
+  // name because those are gated by a second factor the
+  // caller has demonstrated possession of. Backward-compat:
+  // older clients that always read `data.guestName` will
+  // see `undefined` in the email-alone case (the page now
+  // branches on its presence to hide the "Lead Guest"
+  // section, mirroring the picker's field-absence signal).
+  const data: any = {
+    // Per MBP / decision #123: every single-booking response
+    // carries `kind: "single"` so the page can branch
+    // deterministically. Backward-compatible — older clients
+    // that don't read `kind` still get the same fields they
+    // always did.
+    kind: "single",
+    id: bookingData.id,
+    bookingRef: bookingData.bookingRef,
+    guestEmail: bookingData.guestEmail,
+    guestPhone: bookingData.guestPhone,
+    roomId: bookingData.roomId,
+    roomNumber: bookingData.roomNumber,
+    roomName: roomData?.name || bookingData.roomType || "",
+    roomType: bookingData.roomType,
+    checkIn: bookingData.checkIn,
+    checkOut: bookingData.checkOut,
+    numNights: bookingData.numNights,
+    numGuests: bookingData.numGuests,
+    ratePerNight: bookingData.ratePerNight,
+    totalPrice: bookingData.totalPrice,
+    rateBreakdown: bookingData.rateBreakdown || null,
+    paymentMethod: bookingData.paymentMethod,
+    status: bookingData.status,
+    hasBreakfast: bookingData.hasBreakfast,
+    specialRequests: bookingData.specialRequests || ""
+  };
+  if (!options.omitGuestName) {
+    data.guestName = bookingData.guestName;
+  }
+
   return res.status(200).json({
     success: true,
-    data: {
-      // Per MBP / decision #123: every single-booking response
-      // carries `kind: "single"` so the page can branch
-      // deterministically. Backward-compatible — older clients
-      // that don't read `kind` still get the same fields they
-      // always did.
-      kind: "single",
-      id: bookingData.id,
-      bookingRef: bookingData.bookingRef,
-      guestName: bookingData.guestName,
-      guestEmail: bookingData.guestEmail,
-      guestPhone: bookingData.guestPhone,
-      roomId: bookingData.roomId,
-      roomNumber: bookingData.roomNumber,
-      roomName: roomData?.name || bookingData.roomType || "",
-      roomType: bookingData.roomType,
-      checkIn: bookingData.checkIn,
-      checkOut: bookingData.checkOut,
-      numNights: bookingData.numNights,
-      numGuests: bookingData.numGuests,
-      ratePerNight: bookingData.ratePerNight,
-      totalPrice: bookingData.totalPrice,
-      rateBreakdown: bookingData.rateBreakdown || null,
-      paymentMethod: bookingData.paymentMethod,
-      status: bookingData.status,
-      hasBreakfast: bookingData.hasBreakfast,
-      specialRequests: bookingData.specialRequests || ""
-    }
+    data
   });
 }
 

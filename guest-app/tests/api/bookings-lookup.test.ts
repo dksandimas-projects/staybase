@@ -493,11 +493,13 @@ describe("/api/bookings/lookup", () => {
     });
 
     test("email alone returns the most recent booking when 1 match exists for the email", async () => {
-      // Per MBP / decision #123 (2026-07-24): the email-alone
-      // path with exactly 1 match keeps the existing single-
-      // booking flow (kind: "single" with the enriched shape).
-      // The 2+ match case routes to the privacy-preserving
-      // list — that contract is covered in
+      // Per MBP / decisions #123 (2026-07-24) + #128
+      // (2026-07-25): the email-alone 1-match path returns
+      // `kind: "single"` with the enriched shape EXCEPT
+      // `guestName` is omitted (no second factor on the
+      // email-alone path). The strict paths still include
+      // the name. The 2+ match case routes to the privacy-
+      // preserving list — that contract is covered in
       // `bookings-lookup-list.test.ts`.
       const ts = (iso: string) => {
         const d = new Date(iso);
@@ -522,6 +524,9 @@ describe("/api/bookings/lookup", () => {
       const jsonCall = (res.json as any).mock.calls[0][0];
       expect(jsonCall.data.id).toBe("new_booking");
       expect(jsonCall.data.kind).toBe("single");
+      // Decision #128: email-alone 1-match omits guestName
+      // because there's no second factor.
+      expect(jsonCall.data).not.toHaveProperty("guestName");
     });
 
     test("email alone returns 404 with the same generic message when the email has no bookings", async () => {
