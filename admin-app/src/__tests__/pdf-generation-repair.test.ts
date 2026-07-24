@@ -82,6 +82,33 @@ describe("PDF generation repair", () => {
     expect(bookingsPage).toMatch(/Receipt PDF failed/);
   });
 
+  it("bounds the registration PDF generator with an outer timeout so a hung await closes the placeholder tab", () => {
+    // The HEIC/format fix bounds the IMAGE-decode step (5s), but the
+    // PDF generator has other awaits (brand-logo fetch, Firebase
+    // Storage `getBlob`, FileReader, `canvas.toDataURL`, ...) that
+    // are NOT individually bounded. A single hung await anywhere in
+    // the chain leaves the "Preparing registration PDF..." placeholder
+    // tab open forever because the outer try/catch only fires on
+    // rejection. The 2026-07-24 follow-up races the whole body
+    // against a 20s timeout so the tab is always closed and a clear
+    // error toast is shown no matter where the hang is.
+    const registrationStart = bookingsPage.indexOf("const printRegistrationPDF");
+    const registrationEnd = bookingsPage.indexOf("const printBookingReceiptPDF", registrationStart);
+    const registrationBody = bookingsPage.slice(registrationStart, registrationEnd);
+
+    // The body must be wrapped in an IIFE raced against a timeout
+    expect(registrationBody).toMatch(/const buildAndOpen = async \(\) =>/);
+    expect(registrationBody).toMatch(/Promise\.race\(\[buildAndOpen\(\), timeoutPromise\]\)/);
+    // The timeout promise must reject with a clear, actionable message
+    expect(registrationBody).toMatch(/Registration PDF generation took too long/);
+    // The timer must be cleared in a finally so a fast successful run
+    // doesn't leave a dangling setTimeout
+    expect(registrationBody).toMatch(/window\.clearTimeout\(timeoutHandle\)/);
+    // The catch must still close the placeholder tab
+    expect(registrationBody).toMatch(/pdfWindow\?\.close\(\)/);
+    expect(registrationBody).toMatch(/Registration PDF failed/);
+  });
+
   it("labels reports as browser print and explains Save as PDF through the print dialog", () => {
     expect(reportsPage).toMatch(/Print/);
     expect(reportsPage).toMatch(/Choose Save as PDF in your browser print settings/);
