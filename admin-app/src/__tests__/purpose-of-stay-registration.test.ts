@@ -49,8 +49,35 @@ describe("GCR-01 — Purpose of stay in the admin guest registration form", () =
     expect(submitFn, "expected to find handleRegistrationSubmit").not.toBeNull();
     expect(submitFn?.[0]).toMatch(/formData\.get\("purposeOfStay"\)/);
     expect(submitFn?.[0]).toMatch(/formData\.get\("otherPurpose"\)/);
-    // Only persists otherPurpose when purposeOfStay === "other"
-    expect(submitFn?.[0]).toMatch(/purposeOfStay === "other" \? otherPurpose : undefined/);
+  });
+
+  it("BookingsPage handleRegistrationSubmit never sends otherPurpose: undefined to Firestore", () => {
+    // Regression guard for the GCR-01 follow-up (2026-07-24):
+    // `updateDoc` rejects `undefined` field values, so the
+    // `otherPurpose` key must be OMITTED (not set to undefined) when
+    // the staff picked something other than "Other". The previous
+    // shape `purposeOfStay === "other" ? otherPurpose : undefined`
+    // made every save click throw "Unsupported field value: undefined"
+    // in production. The fix spreads a conditional object in only
+    // when the staff picked "Other" AND entered a reason.
+    const submitFn = page.match(/const handleRegistrationSubmit = \(event[\s\S]*?\n\s*\};/);
+    expect(submitFn, "expected to find handleRegistrationSubmit").not.toBeNull();
+    const body = submitFn?.[0] ?? "";
+    // The old broken pattern must NOT be present anywhere in the function
+    expect(body, "old `: undefined` otherPurpose pattern must be gone").not.toMatch(
+      /purposeOfStay === "other" \? otherPurpose : undefined/
+    );
+    expect(body, "old `: undefined` otherPurpose pattern must be gone (any variant)").not.toMatch(
+      /otherPurpose:\s*purposeOfStay === "other" \? otherPurpose : undefined/
+    );
+    expect(body, "any otherPurpose assignment to `undefined` must be gone").not.toMatch(
+      /otherPurpose:\s*[^,\n]+:\s*undefined/
+    );
+    // The new shape must spread a conditional object only when the
+    // staff picked "Other" — so the key is omitted entirely otherwise.
+    expect(body, "otherPurpose must be conditionally spread, not assigned").toMatch(
+      /\.\.\.\(purposeOfStay === "other"[^)]*\? \{ otherPurpose \}[^)]*:\s*\{\}\)/
+    );
   });
 
   it("BookingsPage registration PDF includes Purpose of stay in the reg fields list", () => {
