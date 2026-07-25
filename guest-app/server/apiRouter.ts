@@ -11,6 +11,7 @@ import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./h
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
@@ -1033,6 +1034,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       fromEmail: process.env.RESEND_FROM_EMAIL || config.supportEmail,
       adminEmail: process.env.RESEND_ADMIN_EMAIL || config.supportEmail
     });
+  }
+
+  // Per LCE-01 (decision #137, 2026-07-25): admin-only endpoint
+  // that overwrites `settings/websiteContent.termsBody` and
+  // auto-bumps the patch version. Mirrors the existing
+  // `set-active` route's role gate + rate limit posture; the
+  // admin-only role is the gate (front-desk 403). No new
+  // Vercel function — this reuses the existing catch-all
+  // pattern per `plan/docs/VERCEL-FUNCTION-LIMIT.md`.
+  if (domain === "admin" && action === "update-terms" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-update-terms:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many terms updates. Please wait a minute and try again." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can update terms." });
+    }
+    (req as any).staff = authResult;
+    return await handleUpdateTerms(req, res);
   }
 
   if (domain === "admin" && action === "publish-seo" && req.method === "POST") {

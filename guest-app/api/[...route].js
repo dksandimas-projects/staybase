@@ -221113,6 +221113,8 @@ var MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 var MAX_STAY_NIGHTS = 30;
 var MAX_ADVANCE_DAYS = 365;
 var PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
+var DEFAULT_TERMS_VERSION = "1.0.0";
+var TERMS_BODY_MAX_LENGTH = 5e4;
 
 // ../shared/schemas/booking.ts
 var BookingDatesSchema = external_exports.object({
@@ -224516,6 +224518,9 @@ async function handleCreateBooking(req, res) {
     }
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+      const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
+      const websiteContentDoc = await transaction.get(websiteContentRef);
+      const termsConsentVersion = websiteContentDoc.exists && typeof websiteContentDoc.data()?.termsVersion === "string" ? String(websiteContentDoc.data().termsVersion) : DEFAULT_TERMS_VERSION;
       const existingBooking = await transaction.get(bookingDocRef);
       if (existingBooking.exists) {
         const existing = existingBooking.data() || {};
@@ -224865,6 +224870,16 @@ async function handleCreateBooking(req, res) {
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
+        // Per LCE-01 (decision #137, 2026-07-25): stamp the
+        // Terms of Service version that was live at
+        // booking-create time. The admin's
+        // /api/admin/update-terms endpoint auto-bumps the
+        // version on save (1.0.0 → 1.0.1), so this field
+        // captures the exact version the guest consented
+        // to. Bookings created before LCE-01 don't carry
+        // the field at all — the per-booking copy on
+        // /my-booking renders the fallback gracefully.
+        termsConsentVersion,
         cancellationReason: "",
         // Per W2.14 / decision #102: linkedInquiryId is set when a booking
         // is created from a converted corporate inquiry. The body field
@@ -228591,6 +228606,77 @@ async function handleEraseMemberAccount(req, res) {
   }
 }
 
+// server/handlers/legal.ts
+var updateTermsSchema = external_exports.object({
+  termsBody: external_exports.string().trim().min(1).max(TERMS_BODY_MAX_LENGTH)
+}).strict();
+async function handleUpdateTerms(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = req.staff || {};
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can update terms." });
+  }
+  const parsed = updateTermsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: `Terms body is required and must be 1-${TERMS_BODY_MAX_LENGTH.toLocaleString()} characters.`
+    });
+  }
+  const { termsBody } = parsed.data;
+  const now = /* @__PURE__ */ new Date();
+  const lastUpdated = now.toISOString().slice(0, 10);
+  let responseData = {};
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
+      const websiteContentDoc = await transaction.get(websiteContentRef);
+      const existingVersion = websiteContentDoc.exists && typeof websiteContentDoc.data()?.termsVersion === "string" ? websiteContentDoc.data().termsVersion : DEFAULT_TERMS_VERSION;
+      const nextVersion = bumpPatchVersion(existingVersion);
+      transaction.set(
+        websiteContentRef,
+        {
+          termsBody,
+          termsVersion: nextVersion,
+          termsLastUpdated: lastUpdated,
+          termsUpdatedBy: staff.uid,
+          termsUpdatedAt: now.toISOString()
+        },
+        { merge: true }
+      );
+      responseData = {
+        termsBody,
+        termsVersion: nextVersion,
+        termsLastUpdated: lastUpdated
+      };
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    console.error("Update terms failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "We could not save the terms. Please try again."
+    });
+  }
+}
+function bumpPatchVersion(current) {
+  const defaultBumped = bumpPatchVersionFromString(DEFAULT_TERMS_VERSION);
+  if (typeof current !== "string" || current.length === 0) return defaultBumped;
+  const result = bumpPatchVersionFromString(current);
+  return result || defaultBumped;
+}
+function bumpPatchVersionFromString(version6) {
+  const match = version6.match(/^(\d+)\.(\d+)\.(\d+)(.*)$/);
+  if (!match) return "";
+  const [, major2, minor, patch, suffix] = match;
+  return `${major2}.${minor}.${Number(patch) + 1}${suffix}`;
+}
+
 // server/handlers/admin.ts
 var staffRoleSchema = external_exports.enum(["front-desk", "admin"]);
 var createStaffSchema = external_exports.object({
@@ -230509,6 +230595,20 @@ async function handler(req, res) {
       fromEmail: process.env.RESEND_FROM_EMAIL || hotel_config_default.supportEmail,
       adminEmail: process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail
     });
+  }
+  if (domain === "admin" && action === "update-terms" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-update-terms:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many terms updates. Please wait a minute and try again." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can update terms." });
+    }
+    req.staff = authResult;
+    return await handleUpdateTerms(req, res);
   }
   if (domain === "admin" && action === "publish-seo" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-publish-seo:${ip}`, 5, 6e4)) {

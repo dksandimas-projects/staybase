@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: July 25, 2026 (marked Spark Rewards audit LOW-1..2 + LOW-4..7 as shipped and LOW-3 as Deferred; LOWs ship in the same commit as this roadmap bump per the on-merge rule)
+> Last updated: July 25, 2026 (marked LCE-01 Editable Terms & Conditions as shipped; LCE-01 ships in the same commit as this roadmap bump per the on-merge rule)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -168,7 +168,7 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 
 ### Legal Content Enhancements (LCE)
 
-- ⬜ **LCE-01 — Editable Terms & Conditions** — admin-only Legal Content editor; `/terms` uses saved content with deploy-time fallback. Version new booking consent + test save/render/fallback/sanitization/versioning.
+- ✅ **LCE-01 — Editable Terms & Conditions** — **Shipped 2026-07-25** (decision #137, branch `fix/terms-editable-content`). The public `/terms` page is now admin-editable from **Settings → Legal Content** (a new Terms of Service body textarea with a 50 KB cap, plain text only — preserves paragraph + list structure via `whitespace-pre-line` on the public page). New server endpoint `POST /api/admin/update-terms` (`handleUpdateTerms` in `guest-app/server/handlers/legal.ts`) — admin-only, Zod-validated, 10/min/IP, reads the current `termsVersion` inside a transaction, auto-bumps the patch level (`1.0.0 → 1.0.1`, preserves major + minor + pre-release suffix), writes `{ termsBody, termsVersion, termsLastUpdated, termsUpdatedBy, termsUpdatedAt }` to `settings/websiteContent` via `setDoc(..., { merge: true })` so the rest of the `websiteContent` keys are preserved. Falls back to `DEFAULT_TERMS_VERSION = "1.0.0"` (new shared constant) when the website has never saved terms. **Booking consent version capture** — `handleCreateBooking` reads `settings/websiteContent.termsVersion` inside the same `runTransaction` that creates the booking and stamps the value on the new booking doc as `termsConsentVersion`. Two concurrent admin saves land in different transactions, so a booking created at time T is stamped with whichever version was live at T. Bookings created before LCE-01 don't carry the field at all; the per-booking copy on `/my-booking` renders the fallback gracefully. **Tests** — 10 server tests in `guest-app/tests/api/admin-update-terms.test.ts` + 20 source-text pins in `shared/__tests__/lce-01-batch.test.ts` + an updated W3.11 test (`batch-19-wave3-batch2.test.ts`) pinning the new fallback contract. 1582/1582 green (modulo the pre-existing emulator + workspace failures on dev). No schema change (one new optional field on `bookings/{id}`), no Firestore rules change, no client surface change beyond the new editor + a re-routed version display; no migration.
 
 ### Email Content Enhancements (ECE)
 

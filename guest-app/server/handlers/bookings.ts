@@ -20,6 +20,7 @@ import {
   MAX_ADVANCE_DAYS
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
+import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
@@ -585,6 +586,29 @@ export async function handleCreateBooking(req: any, res: any) {
     // Run Firestore Transaction
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
+
+      // Per LCE-01 (decision #137, 2026-07-25): stamp the
+      // current Terms of Service version on every booking
+      // doc so the audit trail has a reliable consent
+      // version. We read the version from
+      // `settings/websiteContent.termsVersion` inside the
+      // same transaction that creates the booking — a
+      // concurrent admin save would land in a different
+      // transaction and stamp the booking with whichever
+      // version was live at the moment this booking's
+      // transaction committed. If the field is missing
+      // (e.g. a never-saved hotel that ships with the
+      // hardcoded fallback), we use `DEFAULT_TERMS_VERSION`
+      // (1.0.0) — the page header still falls back to the
+      // hardcoded body, and the booking's consent version
+      // is "1.0.0 (fallback)" so the audit is honest.
+      const websiteContentRef = adminDb.collection("settings").doc("websiteContent");
+      const websiteContentDoc = await transaction.get(websiteContentRef);
+      const termsConsentVersion =
+        websiteContentDoc.exists && typeof websiteContentDoc.data()?.termsVersion === "string"
+          ? String(websiteContentDoc.data()!.termsVersion)
+          : DEFAULT_TERMS_VERSION;
+
       const existingBooking = await transaction.get(bookingDocRef);
       if (existingBooking.exists) {
         const existing = existingBooking.data() || {};
@@ -1151,6 +1175,16 @@ export async function handleCreateBooking(req: any, res: any) {
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
+        // Per LCE-01 (decision #137, 2026-07-25): stamp the
+        // Terms of Service version that was live at
+        // booking-create time. The admin's
+        // /api/admin/update-terms endpoint auto-bumps the
+        // version on save (1.0.0 → 1.0.1), so this field
+        // captures the exact version the guest consented
+        // to. Bookings created before LCE-01 don't carry
+        // the field at all — the per-booking copy on
+        // /my-booking renders the fallback gracefully.
+        termsConsentVersion,
         cancellationReason: "",
         // Per W2.14 / decision #102: linkedInquiryId is set when a booking
         // is created from a converted corporate inquiry. The body field

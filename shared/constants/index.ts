@@ -319,3 +319,27 @@ export const PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // visitors but makes admin edits reflect on a parallel guest tab
 // in real time.
 export const PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
+
+// Per LCE-01 (decision #137, 2026-07-25): the Terms of Service
+// body is admin-editable from Settings → Legal Content and the
+// version is stamped on every booking's `consentVersion` field
+// for the audit trail. The initial version is `1.0.0` — the
+// server auto-bumps the patch level on each save (e.g. 1.0.0
+// → 1.0.1). The `v1.0.0` value is also the safe fallback when
+// `settings/websiteContent.termsVersion` is missing (e.g. a
+// legacy booking created before LCE-01 shipped). Bookings
+// created before LCE-01 don't carry a `consentVersion` field
+// at all — the per-booking copy on `/my-booking` renders the
+// fallback gracefully (no upgrade migration required).
+export const DEFAULT_TERMS_VERSION = "1.0.0";
+
+// Maximum allowed body length for admin-editable terms. A
+// terms document at the size of the current hardcoded 11-
+// section fallback is ~3.5 KB; we set the cap at 50 KB so the
+// admin has room for a much longer policy (e.g. multi-page
+// legalese) without a server round-trip per character. The
+// server validates the cap and rejects larger payloads with
+// 400; the admin editor's textarea also enforces it client-
+// side so the user sees a clear "exceeds the 50 KB limit"
+// before submission.
+export const TERMS_BODY_MAX_LENGTH = 50_000;
