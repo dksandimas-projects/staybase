@@ -1,28 +1,18 @@
 import { describe, expect, test } from "vitest";
-import { calculateEarnedPoints, calculatePointsRedemptionValue, validatePointsRedemption } from "../utils/points";
+import { calculatePointsRedemptionValue, validatePointsRedemption } from "../utils/points";
+
+// Per Spark Rewards audit 2026-07-18 LOW-4: `calculateEarnedPoints`
+// was deleted from `../utils/points` because it diverged from
+// the live checkout-time formula in
+// `guest-app/server/handlers/bookings.ts → calculateCheckoutPoints`
+// (proportional crediting vs per-₱100-block). The shared helper
+// had no production call site, so the divergence was a trap
+// rather than an active bug. Tests that exercised the divergent
+// helper are removed; the canonical formula lives in
+// `calculateCheckoutPoints` and is covered by the booking-flow
+// integration tests.
 
 describe("points utilities", () => {
-  const config = {
-    earningMode: "per-spend" as const,
-    pointsPerBooking: 50,
-    pointsPerHundred: 5,
-    pointsRedemptionRate: 10 // 100 points = 10 php
-  };
-
-  test("calculates earned points per spend", () => {
-    // 5 points per 100 spend. Spend: 1050
-    // floor(1050/100) * 5 = 10 * 5 = 50
-    expect(calculateEarnedPoints(1050, config)).toBe(50);
-  });
-
-  test("calculates earned points per booking", () => {
-    const perBookingConfig = {
-      ...config,
-      earningMode: "per-booking" as const
-    };
-    expect(calculateEarnedPoints(1050, perBookingConfig)).toBe(50);
-  });
-
   test("calculates points redemption value", () => {
     // 500 points at 10 rate (10 php per 100 points) = 50 php
     expect(calculatePointsRedemptionValue(500, 10)).toBe(50);

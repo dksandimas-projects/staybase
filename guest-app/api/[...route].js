@@ -222036,7 +222036,8 @@ function emailLayout(options) {
 </html>`;
 }
 async function sendEmail(to3, subject, html, attachments) {
-  if (typeof to3 === "string" && to3.trim().toLowerCase().endsWith("@example.invalid")) {
+  const trimmed = typeof to3 === "string" ? to3.trim().toLowerCase() : "";
+  if (trimmed.endsWith("@example.invalid") || trimmed.endsWith("@invalid")) {
     console.log(`Skipping email send to placeholder address: ${to3}`);
     return;
   }

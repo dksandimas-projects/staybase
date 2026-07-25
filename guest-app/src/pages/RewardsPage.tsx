@@ -246,9 +246,17 @@ export function RewardsPage() {
   const pointsBalance = memberProfile?.rewardsPoints || 0;
   const pointsEnabled = rewardsConfig.pointsEnabled !== false;
   const memberDiscountEnabled = rewardsConfig.memberDiscountEnabled !== false && rewardsConfig.memberDiscountPct > 0;
+  // Per Spark Rewards audit 2026-07-18 LOW-4: align the copy
+  // with the live checkout-time formula. The previous copy
+  // ("Earn N points per ₱100 spent") understated the actual
+  // crediting, which is proportional
+  // (`Math.floor((totalPrice/100) * pointsPerHundred)` per
+  // `calculateCheckoutPoints` in `bookings.ts`). E.g. at 10
+  // pts/₱100, a ₱150 stay earns 15 pts, not 10. The copy now
+  // shows the per-₱100 rate and notes proportional crediting.
   const earningCopy = rewardsConfig.earningMode === "per-booking"
     ? `Earn ${rewardsConfig.pointsPerBooking.toLocaleString()} points per completed stay.`
-    : `Earn ${rewardsConfig.pointsPerHundred.toLocaleString()} points per ${formatPrice(100)} spent.`;
+    : `Earn ${rewardsConfig.pointsPerHundred.toLocaleString()} points per ${formatPrice(100)} spent (proportional — partial ₱100 still earn fractional points).`;
 
   return (
     <AccountLayout activeTab="rewards" title="My Rewards" subtitle={`Track your ${config.rewardsName} points and member perks.`}>
