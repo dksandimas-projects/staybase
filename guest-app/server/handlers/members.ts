@@ -31,6 +31,28 @@ const eraseAccountSchema = z.object({
   confirmation: z.literal("erase-my-account")
 }).strict();
 
+// Per Spark Rewards audit 2026-07-18 MED-1: manual points
+// adjustment must be server-side (Admin SDK) so the
+// `rewardsPoints` + `pointsHistory` write happens inside one
+// transaction the client cannot bypass. With the audit fix, the
+// Firestore `members/{uid}` rule no longer permits staff clients
+// to write `rewardsPoints` directly — the only path is this
+// endpoint, which couples the balance and the history entry in
+// the same `runTransaction` commit.
+//
+// The `type` field is fixed to "manual" on the server — clients
+// cannot inject "earn" / "redeem" history rows through this path.
+// Caller is admin-only (audit privilege). The reason is required
+// (matches the existing UI guard at MembersPage.tsx).
+const manualAdjustPointsSchema = z.object({
+  memberId: z.string().trim().min(1).max(160),
+  amount: z.coerce.number().int(),
+  reason: z.string().trim().min(1).max(500)
+}).strict().refine((data) => data.amount !== 0, {
+  message: "Amount must be a non-zero integer.",
+  path: ["amount"]
+});
+
 const STAY_STATUSES = [
   "pending",
   "payment-uploaded",
@@ -607,6 +629,107 @@ export async function handleSetMemberActive(req: any, res: any) {
       success: false,
       error: "Unable to update member account status. Please try again."
     });
+  }
+}
+
+// Per Spark Rewards audit 2026-07-18 MED-1: manual points
+// adjustment is the only points-mutation path still on the
+// client SDK. Moving it server-side makes the
+// "rewardsPoints == sum(pointsHistory)" invariant provable at
+// the rules boundary — once the Firestore `members/{uid}` rule
+// drops `rewardsPoints` from the staff update allowlist, this
+// endpoint is the only way a staff caller can change a
+// member's balance, and the transaction couples the balance
+// write with the history write in one commit.
+//
+// Caller is admin-only (mirrors the existing client-side
+// `MembersPage.tsx` UI guard which already restricts manual
+// adjustment to admins). Front-desk callers get a 403; the
+// audit recommends admin-only so the privilege to "create
+// money" stays with the hotel owner.
+//
+// The `type: "manual"` history row is fixed server-side so
+// clients cannot inject an "earn" / "redeem" history entry
+// through this path — the field's invariant is preserved.
+export async function handleManualAdjustPoints(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
+  }
+
+  const parsed = manualAdjustPointsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid member ID, a non-zero points amount, and a reason (max 500 characters)."
+    });
+  }
+
+  const { memberId, amount, reason } = parsed.data;
+  const trimmedReason = reason.trim();
+
+  try {
+    let responseData: any = {};
+
+    await adminDb.runTransaction(async (transaction: any) => {
+      const memberRef = adminDb.collection("members").doc(memberId);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member account was not found.");
+      }
+
+      const currentBalance = Number(memberDoc.data()?.rewardsPoints || 0);
+      const nextBalance = currentBalance + amount;
+      if (nextBalance < 0) {
+        // Defense-in-depth: the schema doesn't allow amount >= 0 to
+        // result in a negative balance check, but the cap is
+        // enforced here in case a future schema change widens the
+        // input. Matches the existing client-side guard.
+        throw new Error("Points adjustment cannot reduce the member balance below zero.");
+      }
+
+      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+
+      transaction.update(memberRef, {
+        rewardsPoints: nextBalance,
+        updatedAt: new Date()
+      });
+      transaction.set(historyRef, {
+        type: "manual",
+        points: amount,
+        description: `Manual adjust: ${trimmedReason}`,
+        reason: trimmedReason,
+        bookingId: null,
+        by: staff.uid,
+        at: new Date()
+      });
+
+      responseData = {
+        memberId,
+        rewardsPoints: nextBalance,
+        pointsAdjusted: amount,
+        historyId: historyRef.id
+      };
+    });
+
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error: any) {
+    const message = error?.message || "We could not adjust points for this member.";
+    // Per audit: surface the "balance cannot go negative" guard as
+    // a 400 (client error), not a 500. The "not found" guard is
+    // also a 400 — the client is asking about a non-existent
+    // member, not a server failure.
+    const status = message.includes("not found") || message.includes("below zero")
+      ? 400
+      : 500;
+    return res.status(status).json({ success: false, error: message });
   }
 }
 

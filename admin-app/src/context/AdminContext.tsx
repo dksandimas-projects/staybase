@@ -2209,43 +2209,34 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     if (!reason.trim()) {
       return { success: false, error: "A reason is required for points adjustments." };
     }
-
+    // Per Spark Rewards audit 2026-07-18 MED-1: manual points
+    // adjustment now lives server-side (Admin SDK). The server
+    // `runTransaction` couples the `rewardsPoints` write with a
+    // `pointsHistory` entry in a single commit, and the Firestore
+    // rule drops `rewardsPoints` from the staff update allowlist
+    // so the only way to mutate a member's balance is through the
+    // /api/members/* endpoint set. The `type` parameter is kept
+    // on the client for backward-compat with the existing UI but
+    // the server hardcodes `type: "manual"` (no client can inject
+    // an "earn" / "redeem" row through this path).
     try {
-      const memberRef = doc(db, "members", memberId);
-      const historyRef = doc(collection(db, "members", memberId, "pointsHistory"));
-
-      await runTransaction(db, async (transaction) => {
-        const memberDoc = await transaction.get(memberRef);
-        if (!memberDoc.exists()) {
-          throw new Error("Member account was not found.");
-        }
-
-        const currentBalance = Number(memberDoc.data().rewardsPoints || 0);
-        const nextBalance = currentBalance + amount;
-        if (nextBalance < 0) {
-          throw new Error("Points adjustment cannot reduce the member balance below zero.");
-        }
-
-        transaction.update(memberRef, {
-          rewardsPoints: nextBalance,
-          updatedAt: serverTimestamp()
-        });
-        transaction.set(historyRef, {
-          type,
-          points: amount,
-          description: type === "manual" ? `Manual adjust: ${reason.trim()}` : `Staff ${type} adjustment`,
-          reason: reason.trim(),
-          bookingId: null,
-          by: currentUser.uid,
-          at: serverTimestamp()
-        });
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/manual-adjust`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ memberId, amount, reason })
       });
-
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        return { success: false, error: data?.error || "Failed to adjust member points." };
+      }
       return { success: true };
     } catch (err: any) {
-      console.error("Error updating member points:", err);
-      const message = err?.message || "Failed to update member points.";
-      return { success: false, error: message };
+      console.error("Error adjusting member points:", err);
+      return { success: false, error: err?.message || "Failed to adjust member points." };
     }
   };
 

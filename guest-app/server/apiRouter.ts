@@ -10,7 +10,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleListMemberStays, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
@@ -983,6 +983,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleSetMemberActive(req, res);
+  }
+
+  // Per Spark Rewards audit 2026-07-18 MED-1: manual points
+  // adjustment now lives server-side (Admin SDK) so the
+  // `rewardsPoints` + `pointsHistory` write is in one transaction
+  // and the Firestore rule can drop `rewardsPoints` from the
+  // staff update allowlist. The handler enforces admin-only and
+  // returns 403 for front-desk (mirrors the client UI guard at
+  // MembersPage.tsx). Rate-limited to 10/min/IP — the same
+  // budget as `set-active`.
+  if (domain === "members" && action === "manual-adjust" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-manual-adjust:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many points adjustment requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
+    }
+    (req as any).staff = authResult;
+    return await handleManualAdjustPoints(req, res);
   }
 
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
