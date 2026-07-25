@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: July 25, 2026 (marked Spark Rewards audit MED-1 as shipped; MED-1 ships in the same commit as this roadmap bump per the on-merge rule)
+> Last updated: July 25, 2026 (marked Spark Rewards audit MED-3 spec-correction variant as shipped; MED-3 ships in the same commit as this roadmap bump per the on-merge rule)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
