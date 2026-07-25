@@ -114,8 +114,15 @@ describe("Phase 11.6 Batch 19 — Wave 3 batch 2 (chrome + wording)", () => {
       expect(hotelConfigSrc).toMatch(/termsLastUpdated:\s*["']/);
     });
 
-    it("TermsPage renders config.termsLastUpdated (not a hard-coded date)", () => {
-      expect(termsPageSrc).toMatch(/Last Updated:\s*\{config\.termsLastUpdated\}/);
+    it("TermsPage falls back to config.termsLastUpdated when no custom value is set (not a hard-coded date)", () => {
+      // Per LCE-01 (decision #137, 2026-07-25): the page now
+      // uses a `lastUpdated` variable that prefers the
+      // Firestore value (customLastUpdated) and falls back
+      // to config.termsLastUpdated when the admin hasn't
+      // set one. The contract is unchanged: no hard-coded
+      // date string in the page source.
+      expect(termsPageSrc).toMatch(/const lastUpdated = customLastUpdated \|\| config\.termsLastUpdated/);
+      expect(termsPageSrc).toMatch(/Last Updated:\s*\{lastUpdated\}/);
       expect(termsPageSrc).not.toMatch(/Last Updated:\s*June 13, 2026/);
     });
   });

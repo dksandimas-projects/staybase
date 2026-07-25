@@ -1505,6 +1505,18 @@ export function SettingsPage() {
   const [privacyPolicyBody, setPrivacyPolicyBody] = useState(websiteContent.privacyPolicyBody || "");
   const [cancellationPolicy, setCancellationPolicy] = useState(websiteContent.cancellationPolicy || "");
   const [houseRules, setHouseRules] = useState(websiteContent.houseRules || "");
+  // Per LCE-01 (decision #137, 2026-07-25): the Terms of
+  // Service body + version + last-updated are now admin-
+  // editable. The version is server-bumped on every save
+  // (1.0.0 → 1.0.1) — the local `termsVersion` state is a
+  // display mirror of the persisted value, populated from
+  // the Firestore snapshot. The `termsLastUpdated` is set
+  // by the server (the audit trail of when this version
+  // went live).
+  const [termsBody, setTermsBody] = useState(websiteContent.termsBody || "");
+  const [termsVersion, setTermsVersion] = useState(websiteContent.termsVersion || "");
+  const [termsLastUpdated, setTermsLastUpdated] = useState(websiteContent.termsLastUpdated || config.termsLastUpdated || "");
+  const [termsSavedAt, setTermsSavedAt] = useState<{ version: string; lastUpdated: string } | null>(null);
   const [privacyPolicyLastUpdated, setPrivacyPolicyLastUpdated] = useState(
     websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || ""
   );
@@ -1539,6 +1551,12 @@ export function SettingsPage() {
     setPrivacyPolicyBody(websiteContent.privacyPolicyBody || "");
     setCancellationPolicy(websiteContent.cancellationPolicy || "");
     setHouseRules(websiteContent.houseRules || "");
+    // Per LCE-01: hydrate the terms fields when the websiteContent
+    // snapshot arrives (the useEffect fires on every snapshot
+    // because the Firestore `onSnapshot` is the source of truth).
+    setTermsBody(websiteContent.termsBody || "");
+    setTermsVersion(websiteContent.termsVersion || "");
+    setTermsLastUpdated(websiteContent.termsLastUpdated || config.termsLastUpdated || "");
     setPrivacyPolicyLastUpdated(websiteContent.privacyPolicyLastUpdated || config.privacyPolicyLastUpdated || "");
     setPointsEnabled(rewardsConfig.pointsEnabled !== false);
     setEarningMode(rewardsConfig.earningMode === "per-booking" ? "per-booking" : "per-spend");
@@ -2064,6 +2082,42 @@ export function SettingsPage() {
     if (saved) {
       setPrivacyPolicyLastUpdated(new Date().toISOString().slice(0, 10));
     }
+  };
+
+  // Per LCE-01 (decision #137, 2026-07-25): the Terms of
+  // Service is editable from a dedicated save path because
+  // the server auto-bumps the patch version (1.0.0 → 1.0.1)
+  // and stamps `termsLastUpdated` atomically with the new
+  // body. The generic `updateSettings("websiteContent", ...)`
+  // path would not bump the version — the dedicated endpoint
+  // is the only write path that produces a fresh consent
+  // version for the booking audit trail. Front-desk callers
+  // get a 403 from the server.
+  const handleSaveTerms = async () => {
+    const token = await auth.currentUser?.getIdToken(true);
+    const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/update-terms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": token ? `Bearer ${token}` : ""
+      },
+      body: JSON.stringify({ termsBody })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) {
+      toast.error("Could not save terms", data?.error || "Please try again.");
+      return;
+    }
+    // The server returns the new version + last-updated;
+    // mirror them in local state so the user sees the
+    // post-save values without a Firestore round-trip.
+    setTermsVersion(data.data.termsVersion);
+    setTermsLastUpdated(data.data.termsLastUpdated);
+    setTermsSavedAt({
+      version: data.data.termsVersion,
+      lastUpdated: data.data.termsLastUpdated
+    });
+    toast.success(`Terms saved (version ${data.data.termsVersion})`);
   };
 
   const handleCreateStaffSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -5071,6 +5125,55 @@ export function SettingsPage() {
               </div>
 
               <form onSubmit={(e) => { e.preventDefault(); void handleSaveLegal(); }} className="space-y-6">
+                {/* Per LCE-01 (decision #137, 2026-07-25): the
+                    Terms of Service body is admin-editable.
+                    Placed ABOVE Privacy Policy because it's the
+                    first document the guest encounters during
+                    booking consent (Step 2's "I agree to the
+                    Terms" link) — surface the highest-touch
+                    legal doc first. The version is auto-bumped
+                    on every save (1.0.0 → 1.0.1) by the
+                    dedicated POST /api/admin/update-terms
+                    endpoint, so each save produces a fresh
+                    consent version for the booking audit
+                    trail. */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Terms of Service</h4>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                      {termsVersion && <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono font-semibold text-primary">v{termsVersion}</span>}
+                      {termsLastUpdated && <span>Last updated: {termsLastUpdated}</span>}
+                    </div>
+                  </div>
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Terms of Service Body
+                    <textarea
+                      value={termsBody}
+                      onChange={(e) => setTermsBody(e.target.value)}
+                      rows={16}
+                      maxLength={50000}
+                      placeholder="Enter the full Terms of Service text. This is displayed on the guest-facing /terms page. If left blank, the page falls back to the deploy-configured content. Saving bumps the version (1.0.0 → 1.0.1) and is captured on every new booking's consentVersion field for the audit trail."
+                      className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
+                    />
+                  </label>
+                  <p className="text-[10px] text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>Displayed at <code>/terms</code>.</span>
+                    <span>Plain text only — preserves paragraph + list structure via <code>whitespace-pre-line</code> on the public page.</span>
+                    <span>{termsBody.length.toLocaleString()} / 50,000 characters.</span>
+                    <span>Versioning: each save auto-bumps the patch level (the major + minor are preserved).</span>
+                  </p>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveTerms()}
+                      disabled={!termsBody.trim() || termsBody.trim().length > 50000}
+                      className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save Terms (bumps version)
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Privacy Policy</h4>
