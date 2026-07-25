@@ -193,6 +193,12 @@ Booking {
     signatureStatus: "pending" | "signed"
   }
   breakfastSelections?: Record<string, string> // key format: yyyy-mm-dd-guest-n → silog item name
+  // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25): per-date/per-guest
+  // served flag written by the dashboard's "Mark Served" toggle. Same key
+  // format as `breakfastSelections`. Hydrated by the admin client's snapshot
+  // mapper so the state survives real-time refresh and is visible across
+  // staff sessions. Absent on legacy bookings → mapper defaults to `{}`.
+  breakfastServed?: Record<string, boolean>
   handledBy: string
   cancellationReason: string
   // Per BF-37 (booking-flow audit 2026-06-26) and W4.4 /

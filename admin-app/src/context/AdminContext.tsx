@@ -1214,6 +1214,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: data.breakfastSelections || {},
+            // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25):
+            // hydrate `breakfastServed` from the snapshot so the dashboard's
+            // "Mark Served" toggle survives real-time refresh and is visible
+            // to other signed-in staff sessions. Previously the mapper only
+            // hydrated `breakfastSelections`; the served map was written
+            // successfully to Firestore (and the security rule allows it)
+            // but read back as `undefined`, so the dashboard re-rendered the
+            // row as unserved after every snapshot update.
+            breakfastServed: data.breakfastServed || {},
           });
         });
 
