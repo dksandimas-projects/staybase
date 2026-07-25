@@ -227925,6 +227925,14 @@ var setMemberActiveSchema = external_exports.object({
 var eraseAccountSchema = external_exports.object({
   confirmation: external_exports.literal("erase-my-account")
 }).strict();
+var manualAdjustPointsSchema = external_exports.object({
+  memberId: external_exports.string().trim().min(1).max(160),
+  amount: external_exports.coerce.number().int(),
+  reason: external_exports.string().trim().min(1).max(500)
+}).strict().refine((data) => data.amount !== 0, {
+  message: "Amount must be a non-zero integer.",
+  path: ["amount"]
+});
 var STAY_STATUSES = [
   "pending",
   "payment-uploaded",
@@ -228404,6 +228412,67 @@ async function handleSetMemberActive(req, res) {
       success: false,
       error: "Unable to update member account status. Please try again."
     });
+  }
+}
+async function handleManualAdjustPoints(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff2(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
+  }
+  const parsed = manualAdjustPointsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid member ID, a non-zero points amount, and a reason (max 500 characters)."
+    });
+  }
+  const { memberId, amount, reason } = parsed.data;
+  const trimmedReason = reason.trim();
+  try {
+    let responseData = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const memberRef = adminDb.collection("members").doc(memberId);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member account was not found.");
+      }
+      const currentBalance = Number(memberDoc.data()?.rewardsPoints || 0);
+      const nextBalance = currentBalance + amount;
+      if (nextBalance < 0) {
+        throw new Error("Points adjustment cannot reduce the member balance below zero.");
+      }
+      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+      transaction.update(memberRef, {
+        rewardsPoints: nextBalance,
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+      transaction.set(historyRef, {
+        type: "manual",
+        points: amount,
+        description: `Manual adjust: ${trimmedReason}`,
+        reason: trimmedReason,
+        bookingId: null,
+        by: staff.uid,
+        at: /* @__PURE__ */ new Date()
+      });
+      responseData = {
+        memberId,
+        rewardsPoints: nextBalance,
+        pointsAdjusted: amount,
+        historyId: historyRef.id
+      };
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    const message = error?.message || "We could not adjust points for this member.";
+    const status = message.includes("not found") || message.includes("below zero") ? 400 : 500;
+    return res.status(status).json({ success: false, error: message });
   }
 }
 async function handleEraseMemberAccount(req, res) {
@@ -230403,6 +230472,20 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleSetMemberActive(req, res);
+  }
+  if (domain === "members" && action === "manual-adjust" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-manual-adjust:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many points adjustment requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
+    }
+    req.staff = authResult;
+    return await handleManualAdjustPoints(req, res);
   }
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 6e4)) {

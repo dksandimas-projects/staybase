@@ -137,7 +137,29 @@ service cloud.firestore {
     match /members/{userId} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
       allow create: if false;
+      // Per Spark Rewards audit 2026-07-18 MED-1: the staff-side
+      // update is restricted to a field allowlist that does NOT
+      // include `rewardsPoints` (or other financial fields). All
+      // balance mutations are server-side via the Admin SDK now:
+      //   - /api/members/redeem-points (staff)
+      //   - /api/members/undo-redemption (admin)
+      //   - /api/members/manual-adjust (admin, MED-1 fix)
+      //   - checkout-time earn via the existing API routes
+      // The `rewardsPoints` field is no longer writable from any
+      // client. The member self-update branch (fullName, phone,
+      // photoUrl) is unchanged.
       allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly([
+            "isActive",
+            "isMember",
+            "tier",
+            "memberSince",
+            "memberNumber",
+            "notes",
+            "handledBy",
+            "updatedAt"
+          ])
         || (
           signedIn()
           && request.auth.uid == userId
@@ -147,6 +169,15 @@ service cloud.firestore {
       allow delete: if isAdmin() || (signedIn() && request.auth.uid == userId);
 
       match /pointsHistory/{entryId} {
+        // Per MED-1: history writes happen inside the server
+        // transaction (Admin SDK bypasses rules), so the staff
+        // `allow create` is no longer needed. We still permit
+        // `isStaff()` here as a defense-in-depth fallback — if a
+        // future migration ever needs to backfill from the
+        // client, the path exists — but the only live writer in
+        // the codebase is the server. The integrity invariant
+        // (balance == sum(history)) is enforced at the
+        // server-transaction boundary, not here.
         allow read: if isStaff() || (signedIn() && request.auth.uid == userId);
         allow create: if isStaff();
         allow update, delete: if false;
