@@ -43,15 +43,15 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Cancel order button — shown only when status is `"placed"`
 - [x] Order sends a styled badge message in the intercom chat thread (visually distinct — like quick requests)
 
-### Catalog Discovery *(GSD-01 — planned)*
+### Catalog Discovery *(GSD-01 — shipped 2026-07-25, decision #138)*
 
-- [ ] Search field below the store introduction filters active items by name and description; matching is trimmed and case-insensitive
-- [ ] Category chips start with **All** and then show represented categories using the existing labels: Drinks, Snacks, Toiletries, Rentals, and Other
-- [ ] Search and category filters compose with AND semantics; show the filtered result count and a one-action clear/reset control
-- [ ] Category chips scroll horizontally on narrow screens, retain a minimum 44px touch target, and expose selected state accessibly
-- [ ] Filtering never changes or clears cart contents; filter state remains stable while the mounted intercom page switches between Shop, Chat, cart, and checkout views
-- [ ] Available matches sort alphabetically before out-of-stock matches
-- [ ] No-match state says that no items match the current filters and offers **Clear filters**; it is distinct from the unavailable/empty-store state
+- [x] Search field below the store introduction filters active items by name and description; matching is trimmed and case-insensitive
+- [x] Category chips start with **All** and then show represented categories using the existing labels: Drinks, Snacks, Toiletries, Rentals, and Other
+- [x] Search and category filters compose with AND semantics; show the filtered result count and a one-action clear/reset control
+- [x] Category chips scroll horizontally on narrow screens, retain a minimum 44px touch target, and expose selected state accessibly
+- [x] Filtering never changes or clears cart contents; filter state remains stable while the mounted intercom page switches between Shop, Chat, cart, and checkout views
+- [x] Available matches sort alphabetically before out-of-stock matches
+- [x] No-match state says that no items match the current filters and offers **Clear filters**; it is distinct from the unavailable/empty-store state
 
 ## Data & Logic Checklist
 
@@ -65,9 +65,9 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Cancel order: API route sets status to `"cancelled"` — only allowed when `status === "placed"` and room/order ref match
 - [x] Order status refresh: API route returns guest-safe `status` only when room/order ref match; intercom tracker polls while order is active
 - [x] Payment methods for store fetched from `getEffectiveStorePaymentMethods(hotelConfig.paymentMethods)` — see `shared/utils/storePaymentMethods.ts` and `plan/features/SETTINGS.md §11 Store → §Store Payment Methods`. The helper filters by the per-method `showInStore` flag (per #111) — methods where the admin has explicitly set `showInStore: false` are excluded from the store checkout. Pre-#111 methods are treated as `showInStore: true` (permissive read), and `pay-at-hotel` is excluded.
-- [ ] GSD-01 guest item mapping retains `category`; legacy/missing values fall back to `other`
-- [ ] GSD-01 filtering is client-side and memoized over the existing real-time item snapshot; typing and category changes issue no additional Firestore reads
-- [ ] GSD-01 focused tests cover name/description search, case and whitespace normalization, category selection, combined filters, sorting, reset, no-match state, cart preservation, and mobile overflow
+- [x] GSD-01 guest item mapping retains `category`; legacy/missing values fall back to `other`
+- [x] GSD-01 filtering is client-side and memoized over the existing real-time item snapshot; typing and category changes issue no additional Firestore reads
+- [x] GSD-01 focused tests cover name/description search, case and whitespace normalization, category selection, combined filters, sorting, reset, no-match state, cart preservation, and mobile overflow
 
 ## Edge Cases & States
 
