@@ -133,8 +133,11 @@ describe("/api/bookings/lookup", () => {
     expect(jsonCall.data).toMatchObject({
       id: "booking_1",
       bookingRef: "SI-20260615-001",
-      guestName: "Maria Santos",
-      guestEmail: "maria@example.test",
+      // Per #131 (2026-07-25): the single-booking response
+      // never reflects the guest name back on this public
+      // page, even on the strict (ref+email) path. The
+      // card uses `maskedEmail` for the echo.
+      maskedEmail: "m***@example.test",
       roomId: "room_101",
       roomNumber: "101",
       roomName: "Standard Double",
@@ -494,12 +497,14 @@ describe("/api/bookings/lookup", () => {
 
     test("email alone returns the most recent booking when 1 match exists for the email", async () => {
       // Per MBP / decisions #123 (2026-07-24) + #128
-      // (2026-07-25): the email-alone 1-match path returns
-      // `kind: "single"` with the enriched shape EXCEPT
-      // `guestName` is omitted (no second factor on the
-      // email-alone path). The strict paths still include
-      // the name. The 2+ match case routes to the privacy-
-      // preserving list — that contract is covered in
+      // (2026-07-25) + #131 (2026-07-25): the email-alone
+      // 1-match path returns `kind: "single"` with the
+      // enriched shape EXCEPT `guestName` AND `guestEmail`
+      // are omitted (no second factor on the email-alone
+      // path; #131 extends the no-name rule to all paths
+      // and adds maskedEmail to the wire). The 2+ match
+      // case routes to the privacy-preserving list — that
+      // contract is covered in
       // `bookings-lookup-list.test.ts`.
       const ts = (iso: string) => {
         const d = new Date(iso);
@@ -524,9 +529,12 @@ describe("/api/bookings/lookup", () => {
       const jsonCall = (res.json as any).mock.calls[0][0];
       expect(jsonCall.data.id).toBe("new_booking");
       expect(jsonCall.data.kind).toBe("single");
-      // Decision #128: email-alone 1-match omits guestName
-      // because there's no second factor.
+      // Decision #131: no name, no full email on the wire
+      // even for the email-alone 1-match path. The card
+      // uses `maskedEmail` for the echo.
       expect(jsonCall.data).not.toHaveProperty("guestName");
+      expect(jsonCall.data).not.toHaveProperty("guestEmail");
+      expect(jsonCall.data.maskedEmail).toBe("m***@example.test");
     });
 
     test("email alone returns 404 with the same generic message when the email has no bookings", async () => {

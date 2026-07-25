@@ -164,12 +164,16 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     vi.clearAllMocks();
   });
 
-  test("email-alone with 1 match returns kind: single with NO guestName (decision #128)", async () => {
-    // Per decision #128 (2026-07-25): the email-alone 1-match
-    // path has no second factor, so the single-booking
-    // response omits `guestName`. The strict paths still
-    // include the name — they're separately pinned by the
-    // "ref+email path returns kind: single" test below.
+  test("email-alone with 1 match returns kind: single with NO guestName + maskedEmail (decision #131)", async () => {
+    // Per decisions #128 + #131 (2026-07-25): the single-
+    // booking response omits `guestName` AND `guestEmail`
+    // (no second factor). The card shows `maskedEmail` as a
+    // low-fidelity echo of the search key. The strict paths
+    // (ref+email, ref+token, ref alone, token alone) used to
+    // include the name (#128), but #131 extends the same
+    // rule to all paths — the name is never reflected back
+    // on this public page. The booking doc still stores
+    // `guestName` for staff-gated readers.
     mockBookings = [{
       id: "b1",
       bookingRef: "SI-20260601-001",
@@ -200,12 +204,15 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.success).toBe(true);
     expect(body.data.kind).toBe("single");
     expect(body.data.bookingRef).toBe("SI-20260601-001");
-    // The single-booking enriched shape is preserved (backward-compat)
-    // EXCEPT for the email-alone no-second-factor case, which
-    // omits guestName. The page branches on its presence to
-    // hide the "Lead Guest" section.
+    // Per #131: the single-booking response never reflects
+    // the guest name back on this public page. The page
+    // no longer has a "Lead Guest" section to gate.
     expect(body.data).not.toHaveProperty("guestName");
-    expect(body.data.guestEmail).toBe("maria@example.com");
+    // The full email is also gone from the wire — the card
+    // uses `maskedEmail` for the echo. Cancel + resend use
+    // the user's typed value (local state).
+    expect(body.data).not.toHaveProperty("guestEmail");
+    expect(body.data.maskedEmail).toBe("m***@example.com");
     expect(body.data).not.toHaveProperty("bookings");
   });
 
@@ -430,14 +437,16 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     expect(body.data.bookings[1].bookingRef).toBe("OLD-001");
   });
 
-  test("ref+email path returns kind: single WITH guestName (strict path has a second factor)", async () => {
+  test("ref+email path returns kind: single with maskedEmail + NO guestName (decision #131 extends #128)", async () => {
     // Ref must match BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/.
-    // The strict path demonstrates possession of a non-email
-    // secret (the booking ref is in the confirmation email and
-    // is required as a second factor), so per decision #128
-    // the name IS reflected back in the single-booking
-    // response. This is the inverse of the email-alone 1-match
-    // case above.
+    // Per #131 (2026-07-25): the strict path's second factor
+    // no longer grants the name reveal. The single-booking
+    // response omits `guestName` and `guestEmail` on ALL
+    // paths; the card uses `maskedEmail` for the echo. This
+    // is the inverse of the previous #128 behavior, which
+    // kept the name on the strict paths. The booking doc
+    // still stores `guestName`; the public lookup just
+    // stops reflecting it back.
     mockBookings = [
       { id: "b1", bookingRef: "SI-20260601-001", guestEmail: "u@example.com", guestName: "Maria Santos",
         checkIn: ts(new Date("2026-09-10").getTime()), checkOut: ts(new Date("2026-09-13").getTime()),
@@ -463,10 +472,12 @@ describe("/api/bookings/lookup — MBP list response (decision #123)", () => {
     const body = res.json.mock.calls[0][0];
     expect(body.data.kind).toBe("single");
     expect(body.data.bookingRef).toBe("SI-20260601-001");
-    // Decision #128: the strict path's second factor (the ref)
-    // means the name IS reflected back. The page renders the
-    // "Lead Guest" section as before.
-    expect(body.data.guestName).toBe("Maria Santos");
+    // Decision #131: no name, no full email on the wire
+    // even for the strict paths. The card shows
+    // `maskedEmail` as the echo.
+    expect(body.data).not.toHaveProperty("guestName");
+    expect(body.data).not.toHaveProperty("guestEmail");
+    expect(body.data.maskedEmail).toBe("u***@example.com");
     expect(body.data).not.toHaveProperty("bookings");
   });
 

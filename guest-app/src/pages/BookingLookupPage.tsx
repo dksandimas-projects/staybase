@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, User, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -19,17 +19,25 @@ import { useTurnstileToken } from "../hooks/useTurnstileToken";
 interface BookingData {
   id: string;
   bookingRef: string;
-  // Per decision #128 (2026-07-25): the email-alone entry
-  // point on the public /my-booking page no longer reflects
-  // the guest name back to the caller. The strict paths
-  // (ref+email, ref+token, ref alone, token alone) still
-  // include it because they each demonstrate possession of a
-  // non-email secret. The field is optional on the client
-  // shape; the page branches on its presence to hide the
-  // "Lead Guest" section (mirroring the picker's field-
-  // absence signal from decision #126).
-  guestName?: string;
-  guestEmail: string;
+  // Per decisions #126 (2026-07-25) + #128 (2026-07-25) +
+  // #131 (2026-07-25): the public /my-booking page never
+  // reflects the guest name back to the caller. The picker
+  // (#126) and the email-alone 1-match single card (#128)
+  // already dropped it; #131 extends the same rule to the
+  // strict paths (ref+email, ref+token, ref alone, token
+  // alone). The `guestName` field is gone from the wire
+  // entirely; the booking doc still stores it for staff-
+  // gated readers (drawer, table, PDF, email).
+  // The card uses `maskedEmail` (first char of local +
+  // *** + full domain) as a low-fidelity echo of the
+  // search key — the attacker already typed the email so
+  // there's no new leak, and the legit user gets a small
+  // "yes, the search keyed on the email I typed"
+  // confirmation. The full email is NOT on the card; the
+  // cancel + resend flows use the value the user typed
+  // into the form (kept in local `emailInput` state), which
+  // the server already validated via the lookup.
+  maskedEmail: string;
   guestPhone: string;
   roomId: string;
   roomName: string;
@@ -267,8 +275,12 @@ export function BookingLookupPage() {
       const normalized: BookingData = {
         id: data.id,
         bookingRef: data.bookingRef,
-        guestName: data.guestName,
-        guestEmail: data.guestEmail,
+        // Per #131: `guestName` is gone from the wire;
+        // `guestEmail` is gone too — the card uses
+        // `maskedEmail` for the echo. Cancel + resend use
+        // `emailInput` (the user's typed value, already
+        // validated by the lookup).
+        maskedEmail: data.maskedEmail || "",
         guestPhone: data.guestPhone || "",
         roomId: data.roomId || "",
         roomName: data.roomName || data.roomType || "",
@@ -448,7 +460,11 @@ export function BookingLookupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookingRef: activeBooking.bookingRef,
-          guestEmail: activeBooking.guestEmail
+          // Per #131: the lookup response no longer carries
+          // the full email. Cancel + resend use the value
+          // the user typed into the form (already validated
+          // by the lookup that returned the booking).
+          guestEmail: emailInput.trim()
         })
       });
 
@@ -507,7 +523,15 @@ export function BookingLookupPage() {
       if (lookupAuthMode === "token" && activeLookupToken) {
         cancelPayload.token = activeLookupToken;
       } else {
-        cancelPayload.guestEmail = activeBooking.guestEmail;
+        // Per #131: the lookup response no longer carries
+        // the full email. Cancel uses the value the user
+        // typed into the form (already validated by the
+        // lookup that returned the booking). The deep-link
+        // /my-booking?ref=…&email=… path also sets
+        // `emailInput` from the URL, so this is consistent
+        // across the picker-strict path and the direct
+        // ref+email form path.
+        cancelPayload.guestEmail = emailInput.trim();
       }
       const response = await fetch("/api/bookings/cancel", {
         method: "POST",
@@ -766,7 +790,13 @@ export function BookingLookupPage() {
                     </GhostButton>
                     {resendStatus === "sent" && (
                       <span className="text-[10px] font-semibold text-green-600">
-                        Email sent to {activeBooking.guestEmail}.
+                        {/* Per #131: the card no longer shows
+                            the full email (the lookup response
+                            only carries `maskedEmail`). The
+                            resend success indicator just
+                            confirms the email was dispatched
+                            without echoing the address. */}
+                        Confirmation email sent.
                       </span>
                     )}
                     {(resendStatus === "rate-limited" || resendStatus === "error") && resendError && (
@@ -823,24 +853,27 @@ export function BookingLookupPage() {
                       </div>
                     </div>
 
-                    {/* Per decision #128 (2026-07-25): the
-                        email-alone 1-match path omits guestName
-                        from the response (no second factor), so
-                        this section hides entirely for that
-                        case. The user can still see their booking
-                        via ref + dates + room + status + email,
-                        and the email itself is reflected back via
-                        the "Email sent to" status line above. The
-                        strict paths (ref+email, ref+token, ref
-                        alone, token alone) still include
-                        guestName and render the full section. */}
-                    {activeBooking.guestName && (
+                    {/* Per decisions #126 + #128 + #131: the
+                        public /my-booking card never reflects
+                        the guest name back to the caller.
+                        Instead, the "Lead Guest" section now
+                        shows the masked email (e.g.
+                        "j***@gmail.com") as a low-fidelity
+                        echo of the search key — the attacker
+                        already typed the email so there's no
+                        new leak, and the legit user gets a
+                        small "yes, the search keyed on the
+                        email I typed" confirmation. The full
+                        email is not on the card; the cancel +
+                        resend flows use the value the user
+                        typed into the form (kept in local
+                        `emailInput` state). */}
+                    {activeBooking.maskedEmail && (
                       <div className="flex gap-3">
-                        <User className="mt-0.5 h-5 w-5 text-primary shrink-0" />
+                        <Mail className="mt-0.5 h-5 w-5 text-primary shrink-0" />
                         <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase">Lead Guest</p>
-                          <p className="mt-1 font-semibold text-gray-900">{activeBooking.guestName}</p>
-                          <p className="text-xs text-gray-500">{activeBooking.guestEmail}</p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase">Booked under</p>
+                          <p className="mt-1 font-mono text-sm font-semibold text-gray-900">{activeBooking.maskedEmail}</p>
                         </div>
                       </div>
                     )}

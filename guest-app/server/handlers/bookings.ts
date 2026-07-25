@@ -71,15 +71,14 @@ function dateKeyFromDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-// Per decision #126 (2026-07-25): the multi-booking picker
-// surfaces a masked email instead of `guestName` so the
-// list never reveals a name to anyone with email access
-// (spouse, ex-partner, shared family inbox). The first
-// character of the local part + three asterisks + the full
-// domain keeps the row readable for the legit user
-// ("yes, the search keyed on the email I typed") while
-// leaking nothing new — the attacker already typed this
-// email. The picker is the only consumer.
+// Per decisions #126 (2026-07-25) + #131 (2026-07-25): the
+// multi-booking picker AND the single-booking card both
+// surface a masked email instead of the full one. The
+// first character of the local part + three asterisks +
+// the full domain keeps the row / card readable for the
+// legit user ("yes, the search keyed on the email I
+// typed") while leaking nothing new — the attacker
+// already typed this email.
 function maskEmail(email: string): string {
   if (!email) return "";
   const atIndex = email.indexOf("@");
@@ -3646,16 +3645,17 @@ export async function handleLookupBooking(req: any, res: any) {
 
       // 1 match: existing single-booking flow. Same enriched
       // shape as every other path, just sourced from the
-      // email alone. Per decision #128 (2026-07-25), the
-      // email-alone entry point has no second factor — so
-      // we omit `guestName` from the response. The strict
-      // paths (ref+email, ref+token, ref alone, token alone)
-      // still include the name because they each demonstrate
-      // possession of a non-email secret.
+      // email alone. Per decisions #128 + #131 (2026-07-25),
+      // the single-booking response never reflects the guest
+      // name back to the caller (the email-alone path has no
+      // second factor, and #131 extends the same rule to the
+      // strict paths). The `enrichAndRespond` helper now
+      // drops `guestName` and adds `maskedEmail` for all
+      // callers — no per-path option needed.
       if (sorted.length === 1) {
         const top = sorted[0];
         const bookingData: any = { id: top.id, ...top.data };
-        return await enrichAndRespond(res, bookingData, { omitGuestName: true });
+        return await enrichAndRespond(res, bookingData);
       }
 
       // 2+ matches: list response. The 11th row (when present)
@@ -3721,11 +3721,7 @@ export async function handleLookupBooking(req: any, res: any) {
   }
 }
 
-async function enrichAndRespond(
-  res: any,
-  bookingData: any,
-  options: { omitGuestName?: boolean } = {}
-) {
+async function enrichAndRespond(res: any, bookingData: any) {
   let roomData: any = null;
   if (bookingData.roomId) {
     try {
@@ -3738,53 +3734,54 @@ async function enrichAndRespond(
     }
   }
 
-  // Per decision #128 (2026-07-25): the public /my-booking
-  // page must not reflect the guest name back to anyone who
-  // arrives via email-alone (no second factor). The
-  // `omitGuestName` option drops `guestName` from the
-  // single-booking response shape when the only auth
-  // credential was the email. The strict paths (ref+email,
-  // ref+token, ref alone, token alone) still include the
-  // name because those are gated by a second factor the
-  // caller has demonstrated possession of. Backward-compat:
-  // older clients that always read `data.guestName` will
-  // see `undefined` in the email-alone case (the page now
-  // branches on its presence to hide the "Lead Guest"
-  // section, mirroring the picker's field-absence signal).
-  const data: any = {
-    // Per MBP / decision #123: every single-booking response
-    // carries `kind: "single"` so the page can branch
-    // deterministically. Backward-compatible — older clients
-    // that don't read `kind` still get the same fields they
-    // always did.
-    kind: "single",
-    id: bookingData.id,
-    bookingRef: bookingData.bookingRef,
-    guestEmail: bookingData.guestEmail,
-    guestPhone: bookingData.guestPhone,
-    roomId: bookingData.roomId,
-    roomNumber: bookingData.roomNumber,
-    roomName: roomData?.name || bookingData.roomType || "",
-    roomType: bookingData.roomType,
-    checkIn: bookingData.checkIn,
-    checkOut: bookingData.checkOut,
-    numNights: bookingData.numNights,
-    numGuests: bookingData.numGuests,
-    ratePerNight: bookingData.ratePerNight,
-    totalPrice: bookingData.totalPrice,
-    rateBreakdown: bookingData.rateBreakdown || null,
-    paymentMethod: bookingData.paymentMethod,
-    status: bookingData.status,
-    hasBreakfast: bookingData.hasBreakfast,
-    specialRequests: bookingData.specialRequests || ""
-  };
-  if (!options.omitGuestName) {
-    data.guestName = bookingData.guestName;
-  }
-
+  // Per decisions #128 (2026-07-25) + #131 (2026-07-25):
+  // the public /my-booking page NEVER reflects the guest
+  // name back to the caller — neither via the email-alone
+  // path nor via the strict paths (ref+email, ref+token,
+  // ref alone, token alone). The picker (decision #126)
+  // already dropped it on the list shape; the single-booking
+  // card drops it on every path now. The booking doc still
+  // stores `guestName` (every staff-gated reader — drawer,
+  // table, PDF, email — still needs it); the public lookup
+  // just stops reflecting it back.
+  //
+  // We also add `maskedEmail` to the response so the card
+  // can show the user a low-fidelity echo of the search key
+  // without re-exposing the full address. Same format as
+  // the picker: first char of local + `***` + full domain.
   return res.status(200).json({
     success: true,
-    data
+    data: {
+      // Per MBP / decision #123: every single-booking
+      // response carries `kind: "single"` so the page can
+      // branch deterministically. Backward-compatible —
+      // older clients that don't read `kind` still get the
+      // same fields they always did.
+      kind: "single",
+      id: bookingData.id,
+      bookingRef: bookingData.bookingRef,
+      // `guestEmail` is dropped from the wire entirely.
+      // The card uses `maskedEmail` for the echo; the
+      // cancellation + resend flows use the value the user
+      // typed into the form (kept in local state).
+      maskedEmail: maskEmail(String(bookingData.guestEmail || "")),
+      guestPhone: bookingData.guestPhone,
+      roomId: bookingData.roomId,
+      roomNumber: bookingData.roomNumber,
+      roomName: roomData?.name || bookingData.roomType || "",
+      roomType: bookingData.roomType,
+      checkIn: bookingData.checkIn,
+      checkOut: bookingData.checkOut,
+      numNights: bookingData.numNights,
+      numGuests: bookingData.numGuests,
+      ratePerNight: bookingData.ratePerNight,
+      totalPrice: bookingData.totalPrice,
+      rateBreakdown: bookingData.rateBreakdown || null,
+      paymentMethod: bookingData.paymentMethod,
+      status: bookingData.status,
+      hasBreakfast: bookingData.hasBreakfast,
+      specialRequests: bookingData.specialRequests || ""
+    }
   });
 }
 
