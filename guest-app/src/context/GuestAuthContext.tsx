@@ -7,6 +7,7 @@ import {
   GoogleAuthProvider,
   signOut as firebaseSignOut,
   sendPasswordResetEmail,
+  sendEmailVerification as firebaseSendEmailVerification,
   updateProfile,
   type User
 } from "firebase/auth";
@@ -39,6 +40,16 @@ interface GuestAuthContextValue {
   registerCurrentMember: () => Promise<void>;
   signOut: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  /**
+   * Per Spark Rewards audit 2026-07-18 HIGH-1: re-sends the
+   * Firebase email-verification email for the currently signed-in
+   * email/password user. The user object is then `reload()`-ed so
+   * `user.emailVerified` reflects the new state. Google sign-in
+   * users never need this — their tokens are always verified.
+   */
+  resendVerification: () => Promise<void>;
+  /** Refreshes the Firebase user (re-reads `emailVerified` from the server). */
+  refreshAuthUser: () => Promise<void>;
   refreshMemberProfile: () => Promise<void>;
 }
 
@@ -160,6 +171,19 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
         displayName: `${firstName.trim()} ${lastName.trim()}`
       });
 
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: send the
+      // verification email right after signup so the
+      // email/password user can be promoted to
+      // `email_verified === true` (the server gate that protects
+      // email-based booking matches). We don't `await` the
+      // Firebase SDK call here — a verify-email failure must not
+      // block member registration. The "Verify your email" banner
+      // on the next page surfaces the unverified state and offers
+      // a Resend button.
+      void firebaseSendEmailVerification(credential.user).catch((err) => {
+        console.error("sendEmailVerification failed (non-blocking):", err);
+      });
+
       const idToken = await credential.user.getIdToken();
       await registerMember(idToken, {
         fullName: `${firstName.trim()} ${lastName.trim()}`.trim(),
@@ -209,6 +233,32 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
     await sendPasswordResetEmail(auth, email);
   };
 
+  // Per Spark Rewards audit 2026-07-18 HIGH-1: re-sends the
+  // verification email + reloads the user so `user.emailVerified`
+  // reflects the latest server state. Throttle guard: Firebase
+  // rate-limits verification sends; the toast surfaces a friendly
+  // "try again in a minute" on the SDK's `too-many-requests` error.
+  const resendVerification = async () => {
+    const current = auth.currentUser;
+    if (!current) {
+      throw new Error("Please sign in before resending the verification email.");
+    }
+    await firebaseSendEmailVerification(current);
+    await current.reload();
+    setUser(auth.currentUser);
+  };
+
+  // Refreshes the Firebase user from the server (re-reads
+  // `emailVerified`, `displayName`, etc.). Call after a page-focus
+  // event so a user who clicked the verification link in another
+  // tab sees the verified state without a manual sign-out.
+  const refreshAuthUser = async () => {
+    const current = auth.currentUser;
+    if (!current) return;
+    await current.reload();
+    setUser(auth.currentUser);
+  };
+
   return (
     <GuestAuthContext.Provider
       value={{
@@ -221,6 +271,8 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
         registerCurrentMember,
         signOut,
         sendPasswordReset,
+        resendVerification,
+        refreshAuthUser,
         refreshMemberProfile
       }}
     >

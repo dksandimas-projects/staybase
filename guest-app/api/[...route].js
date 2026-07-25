@@ -222073,7 +222073,7 @@ async function findBooking(req, options) {
   }
   const booking = { id: snapshot.id, ...snapshot.data() };
   if (options.requireGuestMatch && user.uid) {
-    const emailMatches = user.email && String(booking.guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
+    const emailMatches = user.email_verified === true && user.email && String(booking.guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
     const memberMatches = String(booking.memberId || "") === String(user.uid);
     if (!emailMatches && !memberMatches) {
       return null;
@@ -228017,6 +228017,13 @@ async function handleListMemberStays(req, res) {
   if (!authUser.uid || !authUser.email) {
     return res.status(401).json({ success: false, error: "Sign in to view your stays." });
   }
+  if (authUser.email_verified !== true) {
+    return res.status(403).json({
+      success: false,
+      code: "EMAIL_NOT_VERIFIED",
+      error: "Please verify your email to see your past stays. Check your inbox for the verification link, or resend it from your profile."
+    });
+  }
   try {
     const uid = String(authUser.uid);
     const email = String(authUser.email).trim().toLowerCase();
@@ -228108,13 +228115,23 @@ async function handleRegisterMember(req, res) {
         updatedAt: now
       }, { merge: true });
     });
-    const linkedBookings = await linkBookingsByEmail(email, uid, parsed.data.bookingId || void 0);
+    const emailIsVerified = authUser.email_verified === true;
+    const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed.data.bookingId || void 0) : 0;
     return res.status(200).json({
       success: true,
       data: {
         memberId: uid,
         memberNumber,
-        linkedBookings
+        linkedBookings,
+        // Surfaced to the client so the "verify your email" prompt
+        // appears on the post-signup confirmation. Cleared once the
+        // guest verifies (next register call returns emailVerified: true).
+        emailVerified: emailIsVerified
+      },
+      ...emailIsVerified ? {} : {
+        // Non-blocking warning: registration succeeded, but past
+        // bookings won't link until the guest verifies their email.
+        warning: "Verify your email to link your past bookings."
       }
     });
   } catch (error) {
@@ -229861,6 +229878,11 @@ async function authenticateUser(req) {
       success: true,
       uid: "mock_member_uid",
       email: "member@sparkinn.com",
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: tests assume the
+      // mock user has a verified email so the email-based booking
+      // matchers still work (the gate is enforced at the call site
+      // with the same `email_verified` shape).
+      email_verified: true,
       name: "Mock Member"
     };
   }
@@ -229875,6 +229897,15 @@ async function authenticateUser(req) {
       success: true,
       uid: decodedToken.uid,
       email: decodedToken.email,
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: surface
+      // `email_verified` so the email-based booking matchers
+      // (registration linkage, /api/members/stays, early check-in
+      // request) can gate on it. Without this, an attacker who
+      // signs up with a victim's email could read and cancel the
+      // victim's anonymous bookings (the `lookupToken` leak in
+      // /api/members/stays is the cancel credential). Google
+      // sign-in tokens always carry `email_verified: true`.
+      email_verified: decodedToken.email_verified === true,
       name: decodedToken.name,
       picture: decodedToken.picture
     };
@@ -230523,6 +230554,13 @@ async function handler(req, res) {
         const userAuth = await authenticateUser(req);
         if (!userAuth.success) {
           return res.status(401).json({ success: false, error: "Authentication required." });
+        }
+        if (userAuth.email_verified !== true) {
+          return res.status(403).json({
+            success: false,
+            code: "EMAIL_NOT_VERIFIED",
+            error: "Please verify your email to request early check-in. Check your inbox for the verification link, or resend it from your profile."
+          });
         }
         req.user = userAuth;
       } else {

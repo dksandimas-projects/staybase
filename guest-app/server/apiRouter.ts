@@ -187,12 +187,17 @@ async function authenticateStaff(req: VercelRequest): Promise<{ success: boolean
   }
 }
 
-async function authenticateUser(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; name?: string; picture?: string; error?: string }> {
+async function authenticateUser(req: VercelRequest): Promise<{ success: boolean; uid?: string; email?: string; email_verified?: boolean; name?: string; picture?: string; error?: string }> {
   if (process.env.NODE_ENV === "test") {
     return {
       success: true,
       uid: "mock_member_uid",
       email: "member@sparkinn.com",
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: tests assume the
+      // mock user has a verified email so the email-based booking
+      // matchers still work (the gate is enforced at the call site
+      // with the same `email_verified` shape).
+      email_verified: true,
       name: "Mock Member"
     };
   }
@@ -209,6 +214,15 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
       success: true,
       uid: decodedToken.uid,
       email: decodedToken.email,
+      // Per Spark Rewards audit 2026-07-18 HIGH-1: surface
+      // `email_verified` so the email-based booking matchers
+      // (registration linkage, /api/members/stays, early check-in
+      // request) can gate on it. Without this, an attacker who
+      // signs up with a victim's email could read and cancel the
+      // victim's anonymous bookings (the `lookupToken` leak in
+      // /api/members/stays is the cancel credential). Google
+      // sign-in tokens always carry `email_verified: true`.
+      email_verified: decodedToken.email_verified === true,
       name: decodedToken.name,
       picture: decodedToken.picture
     };
@@ -216,6 +230,29 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
     console.error("Token verification failed:", err);
     return { success: false, error: getTokenVerificationFailureMessage(token) };
   }
+}
+
+// Per Spark Rewards audit 2026-07-18 HIGH-1: every member-scoped
+// booking match that keys off the ID token's `email` claim must
+// first require `email_verified === true`. The `uid`-only match
+// (`booking.memberId == token.uid`) is always safe — the attacker
+// would need their own uid, which they already have. Returns a
+// structured 403 response the client recognizes (`code:
+// "EMAIL_NOT_VERIFIED"`) so it can render a "Verify your email"
+// prompt instead of a generic auth error.
+//
+// `actionLabel` is the human-readable next step rendered in the
+// error copy (e.g. "see your past stays").
+function emailClaimGuardResponse(user: { email?: string; email_verified?: boolean }, actionLabel: string) {
+  if (user.email && user.email_verified === true) return null;
+  return {
+    status: 403,
+    body: {
+      success: false,
+      code: "EMAIL_NOT_VERIFIED",
+      error: `Please verify your email address to ${actionLabel}. Check your inbox for the verification link, or resend it from your profile.`
+    }
+  };
 }
 
 
@@ -1140,6 +1177,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const userAuth = await authenticateUser(req);
         if (!userAuth.success) {
           return res.status(401).json({ success: false, error: "Authentication required." });
+        }
+        // Per Spark Rewards audit 2026-07-18 HIGH-1: gate the
+        // email-claim match in findBooking on `email_verified`. A
+        // staff caller bypasses this gate (their role token is
+        // verified and they don't key off the email claim). The
+        // member-side `emailMatches` branch in findBooking would
+        // otherwise let an unverified email/password signup fire
+        // an early check-in write against a stranger's booking.
+        if (userAuth.email_verified !== true) {
+          return res.status(403).json({
+            success: false,
+            code: "EMAIL_NOT_VERIFIED",
+            error: "Please verify your email to request early check-in. Check your inbox for the verification link, or resend it from your profile."
+          });
         }
         (req as any).user = userAuth;
       } else {

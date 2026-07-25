@@ -4,6 +4,7 @@ import { Calendar, Sparkles, ArrowRight, HelpCircle, Loader2, AlertCircle } from
 import config from "@config";
 import { AccountLayout } from "../components/AccountLayout";
 import { StatusBadge } from "../components/StatusBadge";
+import { EmailVerifyBanner } from "../components/EmailVerifyBanner";
 import { formatPrice } from "../utils/format";
 import { useGuestAuth } from "../context/GuestAuthContext";
 
@@ -83,6 +84,18 @@ export function StaysPage() {
 
   return (
     <AccountLayout activeTab="stays" title="My Stays" subtitle={`Your booking history at ${config.brandName}.`}>
+      {/*
+        Per Spark Rewards audit 2026-07-18 HIGH-1: an
+        unverified email/password user can't see their
+        past-booking list (the server returns 403 on
+        /api/members/stays). The banner explains why and
+        offers a Resend action.
+      */}
+      {user?.emailVerified === false && (
+        <div className="mb-6">
+          <EmailVerifyBanner reason="past-stays" />
+        </div>
+      )}
       {isLoading ? (
         <div className="flex items-center justify-center py-20 text-gray-400">
           <Loader2 size={24} className="animate-spin mr-2" />

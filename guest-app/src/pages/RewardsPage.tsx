@@ -6,6 +6,7 @@ import config from "@config";
 import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
 import { GhostButton } from "../components/GhostButton";
+import { EmailVerifyBanner } from "../components/EmailVerifyBanner";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { formatPrice } from "../utils/format";
 
@@ -283,9 +284,20 @@ export function RewardsPage() {
               <span className="text-xs font-bold text-gray-900">Early Check-In</span>
             </div>
             <p className="text-xs text-gray-500 mb-3">Request early check-in on your next stay — subject to availability.</p>
-            <GhostButton onClick={() => setShowEarlyCheckIn(true)} className="text-[10px]">
-              Request Early Check-In
-            </GhostButton>
+            {/*
+              Per Spark Rewards audit 2026-07-18 HIGH-1: an
+              unverified email/password user can't submit a
+              request (the server returns 403 EMAIL_NOT_VERIFIED).
+              Surface the banner instead of opening the modal so
+              the user gets a clear next step.
+            */}
+            {user?.emailVerified === false ? (
+              <EmailVerifyBanner reason="early-checkin" />
+            ) : (
+              <GhostButton onClick={() => setShowEarlyCheckIn(true)} className="text-[10px]">
+                Request Early Check-In
+              </GhostButton>
+            )}
           </div>
         </div>
 
