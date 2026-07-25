@@ -135,21 +135,44 @@ export function RewardsLandingPage() {
             {/* Authenticated but not a member: one-click enroll via
                 server-side /api/members/register */}
             {showAuthGatedView && (
-              <PrimaryButton
-                type="button"
-                onClick={handleEnroll}
-                className="min-w-[240px] shadow-lg drop-shadow-md"
-                disabled={enrolling}
-              >
-                {enrolling ? (
-                  <span className="flex items-center gap-2">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Enrolling...
-                  </span>
-                ) : (
-                  `Enroll in ${config.rewardsName} (One-Click)`
-                )}
-              </PrimaryButton>
+              <div className="flex flex-col items-center gap-3">
+                <PrimaryButton
+                  type="button"
+                  onClick={handleEnroll}
+                  className="min-w-[240px] shadow-lg drop-shadow-md"
+                  disabled={enrolling}
+                >
+                  {enrolling ? (
+                    <span className="flex items-center gap-2">
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Enrolling...
+                    </span>
+                  ) : (
+                    `Enroll in ${config.rewardsName} (One-Click)`
+                  )}
+                </PrimaryButton>
+                {/*
+                  Per Spark Rewards audit 2026-07-18 LOW-1: the
+                  signup page enforces a consent checkbox; the
+                  ProfilePage surfaces a Privacy Policy link
+                  adjacent to the Join button. The one-click
+                  enroll surface on this landing page had no
+                  adjacent disclosure — same fix as ProfilePage
+                  for the consistency/compliance gap. The text is
+                  a small print caption under the button; the
+                  full policy is reachable via the footer.
+                */}
+                <p className="max-w-md text-[11px] leading-relaxed text-gray-200/90">
+                  By enrolling you agree to the{" "}
+                  <Link to="/privacy" className="font-semibold text-white underline decoration-white/40 hover:decoration-white">
+                    Privacy Policy
+                  </Link>{" "}
+                  and{" "}
+                  <Link to="/terms" className="font-semibold text-white underline decoration-white/40 hover:decoration-white">
+                    Terms of Service
+                  </Link>.
+                </p>
+              </div>
             )}
 
             {isMember && (

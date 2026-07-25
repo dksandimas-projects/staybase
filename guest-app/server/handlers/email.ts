@@ -410,7 +410,19 @@ function emailLayout(options: {
 }
 
 async function sendEmail(to: string, subject: string, html: string, attachments?: Array<{ filename: string; content: Buffer }>) {
-  if (typeof to === "string" && to.trim().toLowerCase().endsWith("@example.invalid")) {
+  // Per Spark Rewards audit 2026-07-18 LOW-7: the send-skip guard
+  // covers BOTH the @example.invalid placeholder (used by the
+  // early "unverified email" test path) and the @invalid
+  // placeholder (used by the RA 10173 erasure path — anonymized
+  // bookings get `guestEmail: "erased@invalid"` from
+  // `handleEraseMemberAccount` in members.ts). Without this
+  // match, a stray email trigger against an erased booking would
+  // attempt delivery to `erased@invalid` and bounce at Resend
+  // instead of being cleanly skipped. The `@example.invalid`
+  // match is preserved for backward compat with any test fixtures
+  // that pre-date the audit.
+  const trimmed = typeof to === "string" ? to.trim().toLowerCase() : "";
+  if (trimmed.endsWith("@example.invalid") || trimmed.endsWith("@invalid")) {
     console.log(`Skipping email send to placeholder address: ${to}`);
     return;
   }

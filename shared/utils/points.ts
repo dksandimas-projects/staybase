@@ -5,13 +5,17 @@ export interface RewardsConfigLike {
   pointsRedemptionRate: number;
 }
 
-export function calculateEarnedPoints(totalPrice: number, config: RewardsConfigLike) {
-  if (config.earningMode === "per-booking") {
-    return Math.max(Math.floor(config.pointsPerBooking), 0);
-  }
-
-  return Math.max(Math.floor(totalPrice / 100) * config.pointsPerHundred, 0);
-}
+// Per Spark Rewards audit 2026-07-18 LOW-4: the previous
+// `calculateEarnedPoints` helper used a per-₱100-block formula
+// `Math.floor(totalPrice/100) * pointsPerHundred` that diverged
+// from the live checkout-time formula in
+// `guest-app/server/handlers/bookings.ts → calculateCheckoutPoints`
+// which uses proportional crediting `Math.floor((totalPrice/100)
+// * pointsPerHundred)`. The shared helper was only referenced
+// by its own test (no production call site), so the divergence
+// was a trap rather than an active bug. Deleted the helper —
+// `calculateCheckoutPoints` is the single source of truth for
+// points earning.
 
 export function calculatePointsRedemptionValue(points: number, pointsRedemptionRate: number) {
   return Math.max((points / 100) * pointsRedemptionRate, 0);
