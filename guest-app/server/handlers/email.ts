@@ -454,7 +454,17 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
 
   const booking = { id: snapshot.id, ...snapshot.data() };
   if (options.requireGuestMatch && user.uid) {
+    // Per Spark Rewards audit 2026-07-18 HIGH-1: the email-claim
+    // match in findBooking must require `email_verified === true`.
+    // The `memberId` match below is always safe (the attacker
+    // would need their own uid, which they already have). This is
+    // a defensive second line — the router-level gate in
+    // `apiRouter.ts` already rejects unverified users for the
+    // early-checkin-request path, but pinning the gate at the call
+    // site defends against any future caller that bypasses the
+    // router-level check.
     const emailMatches =
+      user.email_verified === true &&
       user.email &&
       String((booking as any).guestEmail || "").trim().toLowerCase() === String(user.email).trim().toLowerCase();
     const memberMatches = String((booking as any).memberId || "") === String(user.uid);

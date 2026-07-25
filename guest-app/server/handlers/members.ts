@@ -145,6 +145,23 @@ export async function handleListMemberStays(req: any, res: any) {
     return res.status(401).json({ success: false, error: "Sign in to view your stays." });
   }
 
+  // Per Spark Rewards audit 2026-07-18 HIGH-1: `/api/members/stays`
+  // returns `bookingRef` + `lookupToken` for every match — together
+  // those are the public lookup/cancel credential. If we keyed off
+  // an unverified email, an attacker who registered with a victim's
+  // email could enumerate and cancel the victim's anonymous
+  // bookings. The `uid` (memberId) match is always safe. The email
+  // match is gated on `email_verified` (Google sign-in tokens are
+  // always verified, so this is effectively a gate on the
+  // email/password path).
+  if (authUser.email_verified !== true) {
+    return res.status(403).json({
+      success: false,
+      code: "EMAIL_NOT_VERIFIED",
+      error: "Please verify your email to see your past stays. Check your inbox for the verification link, or resend it from your profile."
+    });
+  }
+
   try {
     const uid = String(authUser.uid);
     const email = String(authUser.email).trim().toLowerCase();
@@ -252,15 +269,36 @@ export async function handleRegisterMember(req: any, res: any) {
       }, { merge: true });
     });
 
-    const linkedBookings = await linkBookingsByEmail(email, uid, parsed.data.bookingId || undefined);
+    // Per Spark Rewards audit 2026-07-18 HIGH-1: an unverified
+    // email/password signup can claim any address. Linking past
+    // bookings by `guestEmail == member.email` would let the
+    // attacker take over a victim's anonymous bookings. Skip the
+    // link when the email isn't verified — the member record is
+    // still created, and the client surfaces a "verify your email"
+    // prompt. Once verified, re-calling `/api/members/register`
+    // re-runs the link (the registration path is idempotent —
+    // `memberNumber` is preserved).
+    const emailIsVerified = authUser.email_verified === true;
+    const linkedBookings = emailIsVerified
+      ? await linkBookingsByEmail(email, uid, parsed.data.bookingId || undefined)
+      : 0;
 
     return res.status(200).json({
       success: true,
       data: {
         memberId: uid,
         memberNumber,
-        linkedBookings
-      }
+        linkedBookings,
+        // Surfaced to the client so the "verify your email" prompt
+        // appears on the post-signup confirmation. Cleared once the
+        // guest verifies (next register call returns emailVerified: true).
+        emailVerified: emailIsVerified
+      },
+      ...(emailIsVerified ? {} : {
+        // Non-blocking warning: registration succeeded, but past
+        // bookings won't link until the guest verifies their email.
+        warning: "Verify your email to link your past bookings."
+      })
     });
   } catch (error) {
     console.error("Member registration failed:", error);
