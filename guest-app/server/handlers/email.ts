@@ -523,14 +523,24 @@ function bookingSubmittedEmail(booking: any) {
 // setting is blank — no empty card, no fallback copy. Loaded by
 // `sendBookingTrigger` from Firestore; the preview handler accepts
 // it from the request body so staff can sanity-check the email.
-function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
+//
+// Per ECE-02 (2026-07-26, decision #139): the same card now also
+// appends to `booking-confirmed` + `checkin-reminder` so the
+// guest sees the rules at every "you're arriving soon" touchpoint
+// (payment → confirmed → day-before reminder), not just at
+// payment. The card block + render is identical across all three
+// templates so the staff-owned copy is single-sourced from
+// `settings.websiteContent.houseRules`.
+function houseRulesCard(houseRules?: string | null): string {
   const trimmedRules = typeof houseRules === "string" ? houseRules.trim() : "";
-  const houseRulesBlock = trimmedRules
-    ? card(
-        "House rules",
-        `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(trimmedRules)}</p>`
-      )
-    : "";
+  if (!trimmedRules) return "";
+  return card(
+    "House rules",
+    `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(trimmedRules)}</p>`
+  );
+}
+
+function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Payment received for booking ${booking.bookingRef}.`,
     eyebrow: "Payment verified",
@@ -539,14 +549,14 @@ function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
     body: `
       ${callout("green", "Payment recorded", "Your reservation is one step closer to final confirmation. We will send a separate booking confirmation once the front desk completes the final review.")}
       ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
-      ${houseRulesBlock}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "View booking",
     ctaUrl: lookupUrl(booking)
   });
 }
 
-function bookingConfirmedEmail(booking: any) {
+function bookingConfirmedEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} is confirmed.`,
     eyebrow: "Booking confirmed",
@@ -555,6 +565,7 @@ function bookingConfirmedEmail(booking: any) {
     body: `
       ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Review booking details",
     ctaUrl: lookupUrl(booking)
@@ -603,7 +614,7 @@ function bookingRescheduledEmail(booking: any) {
   });
 }
 
-function checkinReminderEmail(booking: any) {
+function checkinReminderEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Your ${config.brandName} check-in is coming up.`,
     eyebrow: "Check-in reminder",
@@ -612,6 +623,7 @@ function checkinReminderEmail(booking: any) {
     body: `
       ${callout("warm", "Before you arrive", `Check-in starts at ${escapeHtml(config.checkInTime || "14:00")}. If your arrival time changes, please contact the front desk so we can assist you smoothly.`)}
       ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Open booking lookup",
     ctaUrl: lookupUrl(booking)
@@ -1236,18 +1248,26 @@ async function getTomorrowConfirmedBookings() {
 export async function sendBookingTrigger(action: EmailAction, booking: any) {
   // Per ECE-01 (2026-07-24): payment-confirmed email may include a
   // "House rules" card sourced from `settings.websiteContent.houseRules`.
-  // We only read the doc when the action needs it — every other template
-  // skips the round-trip. The doc is read non-transactionally (settings
-  // updates are infrequent, and a stale rules string on a single email
-  // is harmless — the next email picks up the latest). Omit block on
-  // blank value (no fallback copy).
+  // Per ECE-02 (2026-07-26, decision #139): the same card also
+  // appends to booking-confirmed + checkin-reminder so the guest
+  // sees the rules at every "you're arriving soon" touchpoint.
+  // We only read the doc for the three actions that need it — every
+  // other template skips the round-trip. The doc is read
+  // non-transactionally (settings updates are infrequent, and a stale
+  // rules string on a single email is harmless — the next email picks
+  // up the latest). Omit block on blank value (no fallback copy).
+  const HOUSE_RULES_ACTIONS = new Set<EmailAction>([
+    "payment-confirmed",
+    "booking-confirmed",
+    "checkin-reminder"
+  ]);
   let houseRules: string | null = null;
-  if (action === "payment-confirmed") {
+  if (HOUSE_RULES_ACTIONS.has(action)) {
     try {
       const doc = await adminDb.collection("settings").doc("websiteContent").get();
       houseRules = typeof doc.data()?.houseRules === "string" ? doc.data()?.houseRules : null;
     } catch (error) {
-      console.warn("Failed to load websiteContent.houseRules for payment-confirmed email; continuing without it.", error);
+      console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
       houseRules = null;
     }
   }
@@ -1263,7 +1283,7 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     },
     "booking-confirmed": {
       subject: `[${config.brandName}] Booking confirmed: ${booking.bookingRef}`,
-      html: bookingConfirmedEmail(booking),
+      html: bookingConfirmedEmail(booking, houseRules),
       // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
       // by Decision #82. Generated server-side from persisted
       // booking/folio data. Does not expose private payment-proof
@@ -1275,7 +1295,7 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     },
     "checkin-reminder": {
       subject: `[${config.brandName}] Check-in reminder: ${booking.bookingRef}`,
-      html: checkinReminderEmail(booking)
+      html: checkinReminderEmail(booking, houseRules)
     },
     "booking-cancelled": {
       subject: `[${config.brandName}] Booking cancelled: ${booking.bookingRef}`,
@@ -1557,7 +1577,10 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed":
-        html = bookingConfirmedEmail(mockBooking);
+        // ECE-02: pass houseRules from request body so the staff can
+        // preview exactly what the guest will see (mirrors the
+        // payment-confirmed preview above).
+        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed-with-balance":
         // Per CWB-02: preview uses mock balance + reason so
@@ -1572,7 +1595,10 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         );
         break;
       case "checkin-reminder":
-        html = checkinReminderEmail(mockBooking);
+        // ECE-02: pass houseRules from request body so the staff can
+        // preview exactly what the guest will see (mirrors the
+        // payment-confirmed preview above).
+        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-cancelled":
         html = bookingCancelledEmail(mockBooking);

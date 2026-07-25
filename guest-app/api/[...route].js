@@ -222107,12 +222107,15 @@ function bookingSubmittedEmail(booking) {
     ctaUrl: lookupUrl(booking)
   });
 }
-function paymentConfirmedEmail(booking, houseRules) {
+function houseRulesCard(houseRules) {
   const trimmedRules = typeof houseRules === "string" ? houseRules.trim() : "";
-  const houseRulesBlock = trimmedRules ? card(
+  if (!trimmedRules) return "";
+  return card(
     "House rules",
     `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml(trimmedRules)}</p>`
-  ) : "";
+  );
+}
+function paymentConfirmedEmail(booking, houseRules) {
   return emailLayout({
     preheader: `Payment received for booking ${booking.bookingRef}.`,
     eyebrow: "Payment verified",
@@ -222121,13 +222124,13 @@ function paymentConfirmedEmail(booking, houseRules) {
     body: `
       ${callout("green", "Payment recorded", "Your reservation is one step closer to final confirmation. We will send a separate booking confirmation once the front desk completes the final review.")}
       ${card("Payment and stay summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Payment method", booking.paymentMethod)}</table>`)}
-      ${houseRulesBlock}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "View booking",
     ctaUrl: lookupUrl(booking)
   });
 }
-function bookingConfirmedEmail(booking) {
+function bookingConfirmedEmail(booking, houseRules) {
   return emailLayout({
     preheader: `Booking ${booking.bookingRef} is confirmed.`,
     eyebrow: "Booking confirmed",
@@ -222136,6 +222139,7 @@ function bookingConfirmedEmail(booking) {
     body: `
       ${callout("green", "See you soon", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. Please bring a valid government ID and your booking reference.`)}
       ${card("Confirmed stay", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}</table>`)}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Review booking details",
     ctaUrl: lookupUrl(booking)
@@ -222173,7 +222177,7 @@ function bookingRescheduledEmail(booking) {
     ctaUrl: lookupUrl(booking)
   });
 }
-function checkinReminderEmail(booking) {
+function checkinReminderEmail(booking, houseRules) {
   return emailLayout({
     preheader: `Your ${hotel_config_default.brandName} check-in is coming up.`,
     eyebrow: "Check-in reminder",
@@ -222182,6 +222186,7 @@ function checkinReminderEmail(booking) {
     body: `
       ${callout("warm", "Before you arrive", `Check-in starts at ${escapeHtml(hotel_config_default.checkInTime || "14:00")}. If your arrival time changes, please contact the front desk so we can assist you smoothly.`)}
       ${card("Arrival details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">${bookingRows(booking)}${row("Hotel address", addressLine())}</table>`)}
+      ${houseRulesCard(houseRules)}
     `,
     ctaLabel: "Open booking lookup",
     ctaUrl: lookupUrl(booking)
@@ -222711,13 +222716,18 @@ async function getTomorrowConfirmedBookings() {
   return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 async function sendBookingTrigger(action, booking) {
+  const HOUSE_RULES_ACTIONS = /* @__PURE__ */ new Set([
+    "payment-confirmed",
+    "booking-confirmed",
+    "checkin-reminder"
+  ]);
   let houseRules = null;
-  if (action === "payment-confirmed") {
+  if (HOUSE_RULES_ACTIONS.has(action)) {
     try {
       const doc = await adminDb.collection("settings").doc("websiteContent").get();
       houseRules = typeof doc.data()?.houseRules === "string" ? doc.data()?.houseRules : null;
     } catch (error) {
-      console.warn("Failed to load websiteContent.houseRules for payment-confirmed email; continuing without it.", error);
+      console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
       houseRules = null;
     }
   }
@@ -222732,7 +222742,7 @@ async function sendBookingTrigger(action, booking) {
     },
     "booking-confirmed": {
       subject: `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef}`,
-      html: bookingConfirmedEmail(booking),
+      html: bookingConfirmedEmail(booking, houseRules),
       // G-03 (E2E audit 2026-07-17): attach the receipt PDF required
       // by Decision #82. Generated server-side from persisted
       // booking/folio data. Does not expose private payment-proof
@@ -222744,7 +222754,7 @@ async function sendBookingTrigger(action, booking) {
     },
     "checkin-reminder": {
       subject: `[${hotel_config_default.brandName}] Check-in reminder: ${booking.bookingRef}`,
-      html: checkinReminderEmail(booking)
+      html: checkinReminderEmail(booking, houseRules)
     },
     "booking-cancelled": {
       subject: `[${hotel_config_default.brandName}] Booking cancelled: ${booking.bookingRef}`,
@@ -222970,7 +222980,7 @@ async function handleEmailPreview(req, res) {
         html = paymentConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed":
-        html = bookingConfirmedEmail(mockBooking);
+        html = bookingConfirmedEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-confirmed-with-balance":
         html = bookingConfirmedWithBalanceEmail(
@@ -222980,7 +222990,7 @@ async function handleEmailPreview(req, res) {
         );
         break;
       case "checkin-reminder":
-        html = checkinReminderEmail(mockBooking);
+        html = checkinReminderEmail(mockBooking, typeof houseRules === "string" ? houseRules : null);
         break;
       case "booking-cancelled":
         html = bookingCancelledEmail(mockBooking);

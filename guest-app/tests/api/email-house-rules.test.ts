@@ -211,9 +211,15 @@ describe("email source — regression guards", () => {
     // Signature accepts the optional arg.
     expect(fn?.[0]).toMatch(/function paymentConfirmedEmail\([^)]*houseRules/);
 
-    // Card is conditional on a truthy trimmed value.
-    expect(fn?.[0]).toMatch(/trim\(\)/);
-    expect(fn?.[0]).toMatch(/houseRulesBlock/);
+    // Per ECE-02 (2026-07-26, decision #139): the trim + conditional
+    // + card-build logic now lives in a shared `houseRulesCard`
+    // helper so the same card can be appended to booking-confirmed
+    // and checkin-reminder too. The function body must call the
+    // helper, not inline the conditional.
+    expect(fn?.[0]).toMatch(/houseRulesCard\(houseRules\)/);
+    // The trim/houseRulesBlock pattern is no longer in this
+    // function body — it moved to the shared helper.
+    expect(fn?.[0]).not.toMatch(/houseRulesBlock/);
 
     // No hardcoded fallback copy for the card body — the card must
     // come from the `houseRules` arg, not from a constant string.
