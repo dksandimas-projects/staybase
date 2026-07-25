@@ -572,13 +572,19 @@ export function BookingLookupPage() {
       <Navbar />
 
       <section className="mx-auto max-w-4xl px-4 pt-10 pb-20">
-        {/* Per MBP / decision #123 (2026-07-24): the picker
-            renders here when the email-alone lookup matched
-            >1 booking. The result area cycles between search
-            form → picker (if >1 match) → single-booking card
-            (after the user picks a row). Each state is
-            exclusive. */}
-        {pickerResults && pickerResults.length > 0 ? (
+        {/* Per MBP / decisions #123 (2026-07-24) + #129
+            (2026-07-25): the result area cycles between
+            search form → picker (if >1 match) → single-
+            booking card (after the user picks a row). The
+            form is ALWAYS mounted (`hidden` when not active)
+            so the Turnstile widget persists across picker
+            and card transitions — when the user clicks
+            "Back to search" from the picker or card, the
+            widget's container div is the same DOM node and
+            the token is still valid. The picker and card
+            are conditionally rendered on top of the
+            (hidden) form. */}
+        {pickerResults && pickerResults.length > 0 && (
           <motion.div
             variants={scaleIn}
             initial={shouldReduceMotion ? false : "hidden"}
@@ -645,13 +651,21 @@ export function BookingLookupPage() {
               </p>
             )}
           </motion.div>
-        ) : !activeBooking ? (
-          <motion.div
-            variants={scaleIn}
-            initial={shouldReduceMotion ? false : "hidden"}
-            animate="visible"
-            className="mx-auto max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8"
-          >
+        )}
+
+        {/* Form: always mounted so the Turnstile widget persists
+            across picker/card transitions. The `hidden` class
+            (display: none) suppresses the form when the picker
+            or card is the active view; when the user clicks
+            "Back to search" the form re-appears with the widget
+            already rendered. See #129 for the full rationale. */}
+        <motion.div
+          variants={scaleIn}
+          initial={shouldReduceMotion ? false : "hidden"}
+          animate="visible"
+          aria-hidden={Boolean(pickerResults?.length || activeBooking) || undefined}
+          className={`mx-auto max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8 ${pickerResults?.length || activeBooking ? "hidden" : ""}`}
+        >
             <div className="text-center">
               <Search className="mx-auto h-12 w-12 text-primary" />
               <h1 className="mt-4 font-heading text-3xl text-gray-950">Find your booking</h1>
@@ -710,7 +724,12 @@ export function BookingLookupPage() {
               </PrimaryButton>
             </form>
           </motion.div>
-        ) : (
+
+        {/* Single-booking card: shown after the picker click (or
+            any direct 1-match lookup). Always rendered as a
+            conditional so the form's persistent Turnstile
+            widget doesn't re-render behind it. */}
+        {activeBooking && (
           <div className="space-y-6">
             <button
               onClick={handleResetSearch}
