@@ -1,6 +1,6 @@
 # Spark Inn — Build Roadmap & Checklist
 > Living document — **must be updated on every merge** (see `How to Use This File` + `plan/docs/CONTRIBUTING.md §When to Update Which MD`)
-> Last updated: July 29, 2026 (shipped MED-3 build variant — front-desk manual link from the Member detail drawer via new /api/members/link-booking endpoint + drawer form + 14 server tests + 18 client source-text tests; Spark Rewards audit now fully closed except for the guest self-service prompt half of MED-3)
+> Last updated: July 29, 2026 (shipped ETR-R foundation — R01 (one-way auth) + R04 (identity-replacement sanitization engine) + R10 partial (audit row) via new POST /api/test-runs/staging-refresh-preview endpoint; 16 server tests; ETR-R work now in progress; remaining ETR-R + ETR-D + ETR-15..20 + ETR-21 open)
 > Status key: ✅ Done | 🔄 In Progress | ⬜ Not Started | ⏸ Deferred
 
 ---
@@ -254,7 +254,7 @@ Test: extend `admin-app/src/__tests__/website-content-fields.test.ts` + new `gue
 - ⬜ At 375px: no horizontal scroll, quick chips operable, advanced sheet one-handed above safe area.
 
 ### Environment Test Runs & Controlled Data Reset (ETR)
-> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **Open spec: ETR-R01..R10, ETR-D01..D10, ETR-15..20, ETR-21.** Full spec: `plan/features/ENVIRONMENT-TEST-RESET.md`.
+> Phase 1 core shipped (ETR-01..14, ETR-S01..S15). **In progress: ETR-R (production-to-staging refresh) — foundation landed 2026-07-29 (R01 + R04 + R10 partial — server-side authorization, identity-replacement sanitization engine, audit row). Open: R02 (multiple modes — sanitized-snapshot is the only one in the foundation), R03 (reviewable preservation), R05 (file sanitization), R06 (full relational integrity), R07 (side-effect disable), R08 (post-import scan), R09 (controlled replacement with staging-reset integration — the manual import is the MVP step today).** Also open: ETR-D01..D10, ETR-15..20, ETR-21. Full spec: `plan/features/ENVIRONMENT-TEST-RESET.md`.
 
 ### Finance scope boundaries (recorded decisions — do not re-open without owner request)
 - ⏸ Expenses & P&L tracking — out of scope; system is a PMS, not accounting software; exports feed external bookkeeping/BIR

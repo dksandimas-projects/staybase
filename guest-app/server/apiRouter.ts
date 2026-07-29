@@ -20,7 +20,7 @@ import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
-import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
+import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
 const staffOnlyEmailActions = new Set([
@@ -1402,6 +1402,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleStagingResetExecute(req, res);
+  }
+
+  // ETR-R01 / ETR-R04 / ETR-R10 (foundation) — production-to-
+  // staging refresh preview. Accepts a JSON export of the production
+  // collections and returns the sanitized version + an audit row.
+  // See `handleStagingRefreshPreview` for the full contract.
+  if (domain === "test-runs" && action === "staging-refresh-preview" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`staging-refresh-preview:${ip}`, 3, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many refresh requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
+    }
+    (req as any).staff = authResult;
+    return await handleStagingRefreshPreview(req, res);
   }
 
   // Fallback 404
