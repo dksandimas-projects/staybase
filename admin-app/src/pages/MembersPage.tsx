@@ -4,16 +4,17 @@ import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
-import { Award, User, Mail, Phone, Calendar, Plus, ShieldAlert, AwardIcon, Coins, History } from "lucide-react";
+import { Award, User, Mail, Phone, Calendar, Plus, ShieldAlert, AwardIcon, Coins, History, Link2 } from "lucide-react";
 import config from "@config";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase/config";
 
 export function MembersPage() {
-  const { 
-    members, 
-    updateMemberPoints, 
-    toggleMemberActive 
+  const {
+    members,
+    updateMemberPoints,
+    toggleMemberActive,
+    linkBookingToMember
   } = useAdmin();
   const toast = useToast();
 
@@ -28,6 +29,11 @@ export function MembersPage() {
   const [adjustReason, setAdjustReason] = useState("");
   const [isAdjustingPoints, setIsAdjustingPoints] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+  // Manual booking link form states (Spark Rewards audit MED-3)
+  const [linkBookingRef, setLinkBookingRef] = useState("");
+  const [linkReason, setLinkReason] = useState("");
+  const [isLinkingBooking, setIsLinkingBooking] = useState(false);
 
   useEffect(() => {
     if (!selectedMember) return;
@@ -110,6 +116,46 @@ export function MembersPage() {
       return;
     }
     toast.success(nextActive ? "Member activated" : "Member suspended");
+  };
+
+  // Per Spark Rewards audit 2026-07-18 MED-3 (decision #135):
+  // front-desk manual link of an existing booking to this member.
+  // The booking ID is whatever the staff has from the booking
+  // confirmation or the booking-drawer header — the server resolves
+  // it to a booking ref + emails for the audit row. The reason is
+  // required (1-500 chars after trim) and the audit row carries
+  // it forward.
+  const handleLinkBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMember) return;
+    if (!linkBookingRef.trim() || !linkReason.trim()) return;
+
+    setIsLinkingBooking(true);
+    const result = await linkBookingToMember(
+      selectedMember.id,
+      linkBookingRef.trim(),
+      linkReason.trim()
+    );
+    setIsLinkingBooking(false);
+
+    if (!result.success) {
+      toast.error("Booking link failed", result.error || "Please try again.");
+      return;
+    }
+
+    if (result.alreadyLinked) {
+      toast.info(
+        "Booking already linked",
+        `Booking ${result.bookingRef || linkBookingRef.trim()} is already linked to this member.`
+      );
+    } else {
+      toast.success(
+        "Booking linked",
+        `Booking ${result.bookingRef || linkBookingRef.trim()} is now linked to ${selectedMember.fullName}.`
+      );
+    }
+    setLinkBookingRef("");
+    setLinkReason("");
   };
 
   // DataTable column definitions
@@ -372,6 +418,50 @@ export function MembersPage() {
                 className="min-h-[36px] w-full rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isAdjustingPoints ? "Saving..." : "Log Points Update"}
+              </button>
+            </form>
+
+            {/* Manual booking link form (Spark Rewards audit MED-3) */}
+            <form onSubmit={handleLinkBooking} className="rounded-lg border border-gray-150 p-4 space-y-3 bg-white">
+              <h4 className="text-xs font-bold text-gray-750 flex items-center gap-1">
+                <Link2 size={14} className="text-primary" />
+                Link Existing Booking
+              </h4>
+
+              <p className="text-[10px] text-gray-500 leading-relaxed">
+                Use when a guest's account email (<span className="font-semibold text-gray-700">{selectedMember.email}</span>) differs from the email on an earlier anonymous booking. The booking will then appear in the member's My Stays list. Cancelled and test-run bookings cannot be linked.
+              </p>
+
+              <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
+                Booking ID or Reference
+                <input
+                  type="text"
+                  required
+                  value={linkBookingRef}
+                  onChange={(e) => setLinkBookingRef(e.target.value)}
+                  placeholder="e.g. SPK-2026-0142 or booking doc id"
+                  className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-[10px] font-bold text-gray-500">
+                Audited Reason for Link
+                <input
+                  type="text"
+                  required
+                  value={linkReason}
+                  onChange={(e) => setLinkReason(e.target.value)}
+                  placeholder="e.g. Guest used Google sign-in but booked under work email"
+                  className="min-h-[38px] w-full rounded border border-gray-200 px-2 text-xs"
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={isLinkingBooking || !linkBookingRef.trim() || !linkReason.trim()}
+                className="min-h-[36px] w-full rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isLinkingBooking ? "Linking..." : "Link Booking to Member"}
               </button>
             </form>
 
