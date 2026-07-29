@@ -10,7 +10,7 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
@@ -1008,6 +1008,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
     return await handleManualAdjustPoints(req, res);
+  }
+
+  // Per Spark Rewards audit 2026-07-18 MED-3 (decision #135):
+  // manual link of an existing booking to a member, used when the
+  // member's account email differs from the email on an earlier
+  // anonymous booking. Admin-only (front-desk 403), rate-limited to
+  // 10/min/IP — the same posture as the other staff-mediated
+  // member mutations. The handler refuses cancelled / test-run
+  // bookings and refuses re-linking to a different member
+  // (no unlink from this surface; the booking-drawer memberId edit
+  // is the work-around for that).
+  if (domain === "members" && action === "link-booking" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-link-booking:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many booking-link requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
+    }
+    (req as any).staff = authResult;
+    return await handleLinkBookingToMember(req, res);
   }
 
   if (domain === "members" && action === "delete-account" && req.method === "POST") {

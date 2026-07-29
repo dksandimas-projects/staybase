@@ -518,6 +518,7 @@ export interface AdminContextType {
   members: Member[];
   updateMemberPoints: (memberId: string, amount: number, type: PointsLog["type"], reason: string) => Promise<{ success: boolean; error?: string }>;
   toggleMemberActive: (memberId: string, isActive: boolean) => Promise<{ success: boolean; error?: string }>;
+  linkBookingToMember: (memberUid: string, bookingId: string, reason: string) => Promise<{ success: boolean; error?: string; alreadyLinked?: boolean; bookingRef?: string }>;
 
   // Intercom Inbox
   intercoms: Record<string, IntercomMessage[]>;
@@ -2259,6 +2260,54 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     } catch (err: any) {
       console.error("Error updating member account status:", err);
       return { success: false, error: err?.message || "Failed to update member account status." };
+    }
+  };
+
+  // Per Spark Rewards audit 2026-07-18 MED-3 (decision #135):
+  // front-desk manual link of an existing booking to a member when
+  // the member's account email differs from the email on an earlier
+  // anonymous booking. Admin-only on the server (the rate limit +
+  // role gate are server-enforced; this client just forwards the
+  // ID token). Returns `alreadyLinked: true` when the booking is
+  // already linked to this member (idempotent re-link) so the UI
+  // can show a softer "already linked" message instead of a
+  // success toast that looks like a new action.
+  const linkBookingToMember = async (
+    memberUid: string,
+    bookingId: string,
+    reason: string
+  ): Promise<{ success: boolean; error?: string; alreadyLinked?: boolean; bookingRef?: string }> => {
+    if (!currentUser) {
+      return { success: false, error: "Sign in before linking a booking to a member." };
+    }
+    if (!memberUid?.trim() || !bookingId?.trim()) {
+      return { success: false, error: "Both a member and a booking are required." };
+    }
+    if (!reason.trim()) {
+      return { success: false, error: "A reason is required for booking links." };
+    }
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/members/link-booking`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({ memberUid, bookingId, reason })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        return { success: false, error: data?.error || "Failed to link booking to member." };
+      }
+      return {
+        success: true,
+        alreadyLinked: Boolean(data?.data?.alreadyLinked),
+        bookingRef: data?.data?.bookingRef
+      };
+    } catch (err: any) {
+      console.error("Error linking booking to member:", err);
+      return { success: false, error: err?.message || "Failed to link booking to member." };
     }
   };
 
@@ -4725,6 +4774,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         members,
         updateMemberPoints,
         toggleMemberActive,
+        linkBookingToMember,
         intercoms,
         intercomThreads,
         sendIntercomMessage,

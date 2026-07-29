@@ -228501,6 +228501,97 @@ async function handleManualAdjustPoints(req, res) {
     return res.status(status).json({ success: false, error: message });
   }
 }
+var linkBookingToMemberSchema = external_exports.object({
+  memberUid: external_exports.string().trim().min(1).max(160),
+  bookingId: external_exports.string().trim().min(1).max(160),
+  reason: external_exports.string().trim().min(1).max(500)
+}).strict();
+async function handleLinkBookingToMember(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff2(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
+  }
+  const parsed = linkBookingToMemberSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a member UID, a booking ID, and a reason (max 500 characters)."
+    });
+  }
+  const { memberUid, bookingId, reason } = parsed.data;
+  const trimmedReason = reason.trim();
+  try {
+    let responseData = {};
+    await adminDb.runTransaction(async (transaction) => {
+      const memberRef = adminDb.collection("members").doc(memberUid);
+      const memberDoc = await transaction.get(memberRef);
+      if (!memberDoc.exists) {
+        throw new Error("Member account was not found.");
+      }
+      const bookingRef = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) {
+        throw new Error("Booking was not found.");
+      }
+      const bookingData2 = bookingDoc.data() || {};
+      const bookingStatus = String(bookingData2.status || "");
+      const bookingTestRunId = bookingData2.testRunId || null;
+      const existingMemberId = bookingData2.memberId || null;
+      if (bookingStatus === "cancelled") {
+        throw new Error("Cancelled bookings cannot be linked to a member.");
+      }
+      if (bookingTestRunId) {
+        throw new Error("Test-run bookings cannot be linked to a member.");
+      }
+      if (existingMemberId && existingMemberId !== memberUid) {
+        throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
+      }
+      const alreadyLinked = existingMemberId === memberUid;
+      const now = /* @__PURE__ */ new Date();
+      if (!alreadyLinked) {
+        transaction.update(bookingRef, {
+          memberId: memberUid,
+          linkedByStaff: staff.uid,
+          linkedAt: now,
+          linkedReason: trimmedReason,
+          updatedAt: now
+        });
+      }
+      const auditRef = adminDb.collection("bookings").doc("audit").collection("records").doc(`${bookingId}-link-${now.getTime()}`);
+      transaction.set(auditRef, {
+        bookingId,
+        bookingRef: bookingData2.bookingRef || "",
+        action: "manual-link-member",
+        fromMemberId: existingMemberId,
+        toMemberId: memberUid,
+        memberEmail: memberDoc.data()?.email || "",
+        bookingEmail: bookingData2.guestEmail || "",
+        reason: trimmedReason,
+        staffUid: staff.uid,
+        staffRole: staff.role,
+        at: now
+      });
+      responseData = {
+        memberUid,
+        bookingId,
+        bookingRef: bookingData2.bookingRef || "",
+        alreadyLinked,
+        auditId: auditRef.id
+      };
+    });
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (error) {
+    const message = error?.message || "We could not link this booking to the member.";
+    const status = message.includes("already linked to a different member") ? 409 : message.includes("was not found") || message.includes("cannot be linked") || message.includes("Cancelled bookings") || message.includes("Test-run bookings") ? 400 : 500;
+    return res.status(status).json({ success: false, error: message });
+  }
+}
 async function handleEraseMemberAccount(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -230583,6 +230674,20 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleManualAdjustPoints(req, res);
+  }
+  if (domain === "members" && action === "link-booking" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-link-booking:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many booking-link requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
+    }
+    req.staff = authResult;
+    return await handleLinkBookingToMember(req, res);
   }
   if (domain === "members" && action === "delete-account" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-delete-account:${ip}`, 5, 6e4)) {
